@@ -1,0 +1,117 @@
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Build / packaging artifacts
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ---------------------------------------------------------------------------
+# Environments
+# ---------------------------------------------------------------------------
+.venv/
+venv/
+ENV/
+env/
+.python-version
+
+# uv — lockfile IS committed for reproducible builds (Principle VIII).
+# Do not add uv.lock here.
+
+# ---------------------------------------------------------------------------
+# Testing / coverage / type checking
+# ---------------------------------------------------------------------------
+.pytest_cache/
+.hypothesis/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.cover
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+.ruff_cache/
+
+# ---------------------------------------------------------------------------
+# Secrets and local configuration
+# ---------------------------------------------------------------------------
+# Provider credentials (Azure DI, LLM keys). MUST never be committed —
+# see Constitution "Security" under MVP Scope Constraints.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+secrets.toml
+
+# ---------------------------------------------------------------------------
+# docdoc runtime state
+# ---------------------------------------------------------------------------
+# Local content-addressed artifact store (ADR-0003). Artifacts are immutable
+# and reproducible from the pipeline; they are regenerated, never versioned.
+artifacts/
+.docdoc/
+*.docdoc-cache
+
+# Blob storage / MinIO data written by docker compose
+.minio-data/
+.postgres-data/
+
+# Evaluation: keep dataset definitions and expected values, ignore generated output.
+eval/predictions/
+eval/reports/
+eval/**/*.actual.json
+
+# Private golden documents. Real customer documents MUST NOT enter this repo —
+# see TODO(GOLDEN_DATASET_LICENSING) in the constitution.
+eval/datasets/private/
+eval/datasets/**/private/
+
+# Scratch output from the CLI
+out/
+tmp/
+*.tmp
+
+# ---------------------------------------------------------------------------
+# Editors / OS
+# ---------------------------------------------------------------------------
+.idea/
+.vscode/
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ---------------------------------------------------------------------------
+# Notebooks / docs build
+# ---------------------------------------------------------------------------
+.ipynb_checkpoints/
+docs/_build/
+site/
