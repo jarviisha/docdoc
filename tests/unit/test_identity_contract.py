@@ -38,22 +38,17 @@ def parse_as(text: str, *, parser_id: str, parser_version: str = "1.0.0") -> Doc
         text=text,
         pages=(Page(index=0, span=Span(0, len(text)), width=612.0, height=792.0),),
         tokens=tuple(
-            Token(span=Span(start, start + len(word)))
-            for word, start in _word_offsets(text)
+            Token(span=Span(start, start + len(word))) for word, start in _word_offsets(text)
         ),
         provenance=IngestProvenance(
             parser_id=parser_id,
             parser_version=parser_version,
             options=options,
             options_hash=options_hash_for(options),
-            capabilities=Capabilities(
-                text=True, geometry=False, tables=False, handwriting=False
-            ),
+            capabilities=Capabilities(text=True, geometry=False, tables=False, handwriting=False),
             text_layer_used=True,
         ),
-        source=BlobRef(
-            blob_id=blob_id_for(RAW), mime_type="application/pdf", size_bytes=len(RAW)
-        ),
+        source=BlobRef(blob_id=blob_id_for(RAW), mime_type="application/pdf", size_bytes=len(RAW)),
     )
 
 
@@ -137,10 +132,11 @@ class TestSpansAreRelativeToTheParse:
         collapsed = parse_as("Invoice INV-001", parser_id="pdf_text")
         preserved = parse_as("Invoice  INV-001", parser_id="cloud_di")
 
+        # The check a caller must make before trusting a span: compare document
+        # ids, not blob ids. Blob ids match here precisely because it is the
+        # same file.
         assert collapsed.source.blob_id == preserved.source.blob_id
         assert collapsed.id != preserved.id
-        # The check a caller must make: compare document ids, not blob ids.
-        assert (collapsed.id == preserved.id) is False
 
     def test_identity_is_derivable_from_source_and_provenance_alone(self) -> None:
         """A stored result can be matched back to its parse without the document."""
