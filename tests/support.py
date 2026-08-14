@@ -1,0 +1,148 @@
+"""Builders shared across the test suite.
+
+Constructing a valid Document by hand takes a fair amount of boilerplate, which
+is itself evidence for spec.md SC-010. These helpers keep individual tests
+focused on the behaviour under test rather than on setup.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from itertools import pairwise
+
+from docdoc.kernel import (
+    BBox,
+    BlobRef,
+    Capabilities,
+    Document,
+    Geometry,
+    IngestProvenance,
+    Page,
+    Span,
+    Token,
+    blob_id_for,
+    options_hash_for,
+)
+
+DEFAULT_PARSER_ID = "test_parser"
+DEFAULT_PARSER_VERSION = "1.0.0"
+
+
+def make_blob(data: bytes = b"%PDF-1.7 test", mime_type: str = "application/pdf") -> BlobRef:
+    return BlobRef(
+        blob_id=blob_id_for(data),
+        mime_type=mime_type,
+        size_bytes=len(data),
+        filename="test.pdf",
+    )
+
+
+def make_provenance(
+    *,
+    geometry: bool = True,
+    tables: bool = False,
+    parser_id: str = DEFAULT_PARSER_ID,
+    parser_version: str = DEFAULT_PARSER_VERSION,
+    options: dict[str, object] | None = None,
+) -> IngestProvenance:
+    opts = options if options is not None else {}
+    return IngestProvenance(
+        parser_id=parser_id,
+        parser_version=parser_version,
+        options=opts,
+        options_hash=options_hash_for(opts),
+        capabilities=Capabilities(text=True, geometry=geometry, tables=tables, handwriting=False),
+        text_layer_used=True,
+    )
+
+
+def make_pages(text: str, breaks: Sequence[int] = ()) -> tuple[Page, ...]:
+    """Split ``text`` into contiguous pages at the given offsets.
+
+    Page spans must tile the text exactly (DOC-5), so this always covers
+    ``[0, len(text))`` with no gaps.
+    """
+    bounds = [0, *sorted(breaks), len(text)]
+    pages: list[Page] = []
+    for index, (start, end) in enumerate(pairwise(bounds)):
+        pages.append(
+            Page(index=index, span=Span(start, end), width=612.0, height=792.0, rotation=0)
+        )
+    return tuple(pages)
+
+
+def tokenize_words(
+    text: str, pages: Sequence[Page], *, with_geometry: bool = True
+) -> tuple[Token, ...]:
+    """Produce one token per whitespace-delimited word, with synthetic geometry.
+
+    Geometry is laid out deterministically: tokens are distributed left to right
+    across a notional line per page. The exact boxes do not matter to any test;
+    what matters is that they are stable and that each token maps to the page
+    whose span contains it.
+    """
+    tokens: list[Token] = []
+    position = 0
+    for page in pages:
+        page_text = text[page.span.start : page.span.end]
+        page_token_count = max(len(page_text.split()), 1)
+        seen_on_page = 0
+        position = page.span.start
+        while position < page.span.end:
+            if text[position].isspace():
+                position += 1
+                continue
+            end = position
+            while end < page.span.end and not text[end].isspace():
+                end += 1
+            geometry = None
+            if with_geometry:
+                slot = seen_on_page / page_token_count
+                width = 0.8 / page_token_count
+                geometry = Geometry(
+                    page_index=page.index,
+                    bbox=BBox(
+                        round(0.1 + slot * 0.8, 6),
+                        0.1,
+                        round(min(0.1 + slot * 0.8 + width, 1.0), 6),
+                        0.14,
+                    ),
+                )
+            tokens.append(
+                Token(span=Span(position, end), geometry=geometry, source_confidence=0.99)
+            )
+            seen_on_page += 1
+            position = end
+    return tuple(tokens)
+
+
+def make_document(
+    text: str = "Invoice No: INV-001\nTotal: 125000",
+    *,
+    page_breaks: Sequence[int] = (),
+    with_geometry: bool = True,
+    tables: tuple = (),
+    blocks: tuple = (),
+    parser_id: str = DEFAULT_PARSER_ID,
+    parser_version: str = DEFAULT_PARSER_VERSION,
+    options: dict[str, object] | None = None,
+    data: bytes = b"%PDF-1.7 test",
+) -> Document:
+    """Build a valid Document with sensible defaults."""
+    pages = make_pages(text, page_breaks)
+    tokens = tokenize_words(text, pages, with_geometry=with_geometry)
+    return Document.create(
+        text=text,
+        pages=pages,
+        tokens=tokens,
+        blocks=blocks,
+        tables=tables,
+        provenance=make_provenance(
+            geometry=with_geometry,
+            tables=bool(tables),
+            parser_id=parser_id,
+            parser_version=parser_version,
+            options=options,
+        ),
+        source=make_blob(data),
+    )

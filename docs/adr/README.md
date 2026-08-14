@@ -12,6 +12,7 @@ it would be decided explicitly rather than settled by whichever code landed firs
 | [0004](0004-confidence-semantics.md) | Confidence is never a single blended number | Accepted | `CONFIDENCE_SEMANTICS` |
 | [0005](0005-fuzzy-grounding-specification.md) | Fuzzy grounding lives outside the kernel and is fully pinned | Accepted | `FUZZY_GROUNDING_SPEC` |
 | [0006](0006-comparison-time-match-view.md) | Normalization happens in a comparison-time match view | Accepted | `NORMALIZATION_VS_GROUNDING` |
+| [0007](0007-apache-2-license.md) | Apache License 2.0 | Accepted | `LICENSE` |
 
 ## Conventions
 

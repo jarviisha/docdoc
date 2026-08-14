@@ -115,3 +115,6 @@ Thumbs.db
 .ipynb_checkpoints/
 docs/_build/
 site/
+
+# Build output from `uv build`
+dist/

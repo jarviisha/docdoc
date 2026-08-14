@@ -1,0 +1,135 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "docdoc"
+version = "0.1.0"
+description = "Provider-agnostic Intelligent Document Processing engine with source-grounded extraction"
+requires-python = ">=3.11"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Text Processing",
+    "Typing :: Typed",
+]
+
+# The kernel's only permitted runtime dependency (Constitution Principle I).
+dependencies = ["pydantic>=2.0"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "hypothesis>=6.100",
+    "mypy>=1.10",
+    "ruff>=0.5",
+    "import-linter>=2.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/docdoc"]
+
+# ---------------------------------------------------------------------------
+# Ruff
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+# Markdown is prose and design history, not source. Formatting Python snippets
+# inside it rewrites documents that are meant to be quoted verbatim.
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4", "PT", "RET", "SIM", "TCH", "RUF"]
+ignore = [
+    "A003", # attribute shadowing a builtin: Document.slice / Document.find are the spec'd names
+]
+
+[tool.ruff.lint.flake8-type-checking]
+# Pydantic resolves field annotations at runtime when building a model, so these
+# imports must NOT be moved into a TYPE_CHECKING block. Same for NamedTuple.
+runtime-evaluated-base-classes = ["pydantic.BaseModel", "typing.NamedTuple"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = [
+    "S101",   # asserts are the point of a test
+    "TC001",  # test helpers use these types at runtime via fixtures
+    "TC002",
+    "TC003",
+]
+
+# ---------------------------------------------------------------------------
+# mypy — strict for the kernel, whose types are its contract
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+strict = false
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers --strict-config"
+markers = [
+    "perf: performance benchmarks (deselect with -m 'not perf')",
+]
+
+# ---------------------------------------------------------------------------
+# Coverage — SC-006 requires 100% statement coverage of the four core operations
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+source = ["src/docdoc"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:", "raise NotImplementedError"]
+
+# ---------------------------------------------------------------------------
+# import-linter — Constitution Principle X, machine-checked layer direction
+# ---------------------------------------------------------------------------
+[tool.importlinter]
+root_package = "docdoc"
+# Required because the forbidden contract below names third-party packages.
+include_external_packages = true
+
+# The constitution's full order is:
+#   api > pipeline > extraction > transform > ingest > kernel
+# Only `kernel` exists at Milestone 1. import-linter errors on layers that name
+# non-existent modules, so higher layers are added to this list as their
+# milestones land. The kernel's own dependency allowlist is enforced
+# independently and exhaustively by tests/unit/test_kernel_purity.py.
+[[tool.importlinter.contracts]]
+name = "docdoc layers (Constitution Principle X)"
+type = "layers"
+layers = ["docdoc.kernel"]
+
+[[tool.importlinter.contracts]]
+name = "kernel is independent of provider SDKs and frameworks"
+type = "forbidden"
+source_modules = ["docdoc.kernel"]
+forbidden_modules = [
+    "httpx",
+    "requests",
+    "openai",
+    "anthropic",
+    "boto3",
+    "fastapi",
+    "sqlalchemy",
+    "pymupdf",
+    "fitz",
+    "rapidfuzz",
+]
