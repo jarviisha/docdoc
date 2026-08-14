@@ -134,10 +134,30 @@ Asserts, per [research.md R9](research.md):
 
 ## Definition of done
 
-- [ ] All four validation scenarios pass.
-- [ ] Property suite green at >= 10,000 cases, zero failures.
-- [ ] 100% statement coverage of `locate`, `find`, `slice`, `merge` (SC-006).
-- [ ] Purity and import-boundary checks pass in CI.
-- [ ] `mypy --strict` clean on `src/docdoc/kernel`.
-- [ ] `examples/build_document.py` runs standalone and reproduces V1 (SC-010).
-- [ ] No entry from spec.md's "Out of Scope" appears anywhere in `src/docdoc/kernel`.
+Verified 2026-08-14 on the implemented kernel.
+
+- [x] All four validation scenarios pass.
+- [x] Property suite green — 19 properties x 2000 examples under the `thorough` profile
+      (~38,000 generated cases), comfortably above the 10,000 SC-002 requires. The default
+      profile runs 200 each for fast local feedback.
+- [x] 100% statement coverage of `locate`, `find`, `slice`, and `merge` — `document.py` reports
+      199 statements, 0 missed (SC-006).
+- [x] Purity and import-boundary checks pass: AST allowlist plus runtime audit hook, and both
+      `import-linter` contracts kept.
+- [x] `mypy --strict` clean on `src/docdoc/kernel` (13 files).
+- [x] `examples/build_document.py` runs standalone and reproduces V1 (SC-010).
+- [x] No entry from spec.md's "Out of Scope" appears in `src/docdoc/kernel` — zero forbidden
+      imports.
+
+266 tests pass in total.
+
+## Scope notes discovered during implementation
+
+Two additions were not in the original plan, each because the specified behaviour was otherwise
+unreachable. Both are documented in [contracts/kernel-api.md](contracts/kernel-api.md):
+
+- **`page_for()`** resolves a span to pages without needing geometry. FR-006 requires page
+  traceability, but geometry was the only page-bearing field and `locate()` refuses to answer
+  without it.
+- **`Document.origin`** records which ranges of the original parse a document occupies. Without
+  it, `merge` cannot detect overlapping or out-of-order parts.

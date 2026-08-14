@@ -154,7 +154,12 @@ confirm all occurrences are returned in document order.
 - A page with zero tokens, for example a blank scanned page.
 - Reassembling zero parts, or exactly one part.
 - Cutting a range that covers the entire document: the result is equivalent to the original.
-- A source that supplies text but no geometry, or geometry for only some tokens.
+- A source that supplies text but no geometry: every location request raises an explicit
+  capability error, while page resolution still works from text position alone.
+- A source that supplies geometry for only *some* tokens: rejected at construction. Partial
+  geometry is not supported, because it would make a location request's empty result ambiguous —
+  a caller could not tell "no token there" from "geometry unavailable here". Such a source must
+  declare geometry unavailable and supply none.
 - A source failure partway through construction: no partially built document is returned.
 
 ## Requirements *(mandatory)*
@@ -197,6 +202,9 @@ confirm all occurrences are returned in document order.
 - **FR-014**: The system MUST return all non-overlapping exact occurrences of a search string, in
   document order, deterministically. Approximate or fuzzy search MUST NOT be provided at this
   layer.
+- **FR-025**: The system MUST resolve any valid text range to the pages it falls on, **without
+  requiring geometry**. Page resolution is a separate capability from location resolution, so that
+  FR-006's page-traceability guarantee still holds for a source that supplies no geometry.
 
 **Identity**
 
@@ -238,7 +246,12 @@ confirm all occurrences are returned in document order.
 - **Table**: Structured rows and cells, retained when the producing source provides them, with
   cells traceable to text ranges.
 - **Document**: The canonical root: text, pages, tokens, blocks, tables, provenance, source
-  reference, and identity. Immutable.
+  reference, identity, and origin. Immutable.
+- **Origin**: Which ranges of the originally parsed text a document occupies. A freshly parsed
+  document covers everything; cutting narrows it and reassembling concatenates. This is what lets
+  reassembly detect parts that overlap or arrive out of order, and what distinguishes two views of
+  the same parse — since cutting changes neither the source nor the producing configuration, it
+  does not change the document's identity.
 - **BlobRef**: A reference to the original file, carrying source identity without carrying bytes.
 - **IngestProvenance**: The record of what produced this document — which source, which version,
   which options, and whether a native text layer was used.

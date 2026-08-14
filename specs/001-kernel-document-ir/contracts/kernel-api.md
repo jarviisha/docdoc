@@ -27,6 +27,7 @@ from docdoc.kernel import (
     IngestProvenance,
     Capabilities,  # provenance
     blob_id_for,
+    canonical_json,
     document_id_for,
     options_hash_for,  # identity
     DocdocError,
@@ -78,6 +79,32 @@ geoms = doc.locate(Span(128, 135))
 
 ---
 
+## `Document.page_for`
+
+```python
+def page_for(self, span: Span) -> tuple[int, ...]:
+```
+
+Resolve a text range to the page indices it falls on, ascending.
+
+**Postconditions**:
+
+- Returns every page whose span intersects `span`, by `index` value.
+- Returns `()` for a zero-length span, which occupies no positions and therefore no pages.
+- **Works when the parser supplied no geometry.** Pages tile the text exactly (DOC-5), so a span's
+  pages are determined by text position alone.
+- Pure and deterministic.
+
+**Errors**: `SpanError` when the span does not fit this document's text. Unlike `locate`, this
+never raises `CapabilityError` — page resolution needs no geometry capability.
+
+> **Why this exists.** FR-006 requires every token be traceable to a page, but `Geometry` is the
+> only page-bearing field and `locate()` refuses to answer without it. A text-only document could
+> therefore answer no page question at all. `page_for` closes that hole and is the correct call
+> whenever you want the page but not the box.
+
+---
+
 ## `Document.find`
 
 ```python
@@ -118,14 +145,26 @@ Produce a new document covering `span`.
   corresponds to the geometry it carries.
 - Retained tokens keep their original `Geometry` unchanged — geometry is page-absolute and
   unaffected by text rebasing. This is what makes the round-trip invariant hold.
-- Pages intersecting `span` are retained with spans clipped and rebased; `index` values are
-  renumbered contiguously from 0, and every `page_index` reference is remapped.
+- Pages intersecting `span` are retained with spans clipped and rebased. **`index` values are
+  preserved, not renumbered** — a slice of page 7 still reports page 7. Page indices are therefore
+  strictly ascending rather than contiguous from 0 (DOC-4), and `page_index` references on tokens,
+  blocks, and tables continue to resolve unchanged.
 - Blocks and tables fully contained in `span` are retained and rebased; partial ones are dropped.
 - `result.source` and `result.provenance` are carried over unchanged.
-- `result.id` is **recomputed**; a slice is a distinct document with a distinct identity.
+- `result.origin` records which ranges of the *original* parse the slice covers, composing across
+  nested slices: `d.slice(a).slice(b).origin` refers back to `d`'s coordinates.
 - An empty span yields an empty document that still carries `source` and `provenance` (US2-5).
 
 **Errors**: out-of-range span raises `SpanError`.
+
+> **Page numbers are preserved deliberately.** Renumbering would make a slice of page 7 report
+> "page 0", destroying exactly the provenance this project exists to protect. The cost is that
+> page indices are no longer an index into `pages` — look pages up by their `index` value.
+
+> **`result.id` is unchanged.** Identity derives from blob, parser, version, and options
+> (ADR-0002), none of which slicing touches, so a slice carries the same `document_id` as its
+> parent. `document_id` identifies **the parse**, not one particular view of it. What distinguishes
+> views is `origin`. Callers needing to tell two views apart must compare `origin`, not `id`.
 
 > **Dropping partial tokens is deliberate.** Retaining a token whose span is clipped would leave
 > its geometry describing glyphs no longer present in the sliced text — a silently wrong box.
@@ -145,29 +184,43 @@ Reassemble parts into one document, rebasing positions.
 
 **Preconditions**:
 
+- `parts` is non-empty.
 - All parts share the same `source.blob_id`, `provenance.parser_id`, and
   `provenance.parser_version` (FR-013).
-- Parts' original ranges do not overlap ([research.md R6](../research.md)).
+- Parts' `origin` ranges do not overlap, and are supplied in ascending original order
+  ([research.md R6](../research.md)).
 
 **Postconditions**:
 
 - `result.text` is the parts' texts concatenated in the given order, with no separator.
 - Token spans are shifted by the running offset of their part; **geometry is unchanged**, so every
   token still resolves to its true original page and box.
-- Pages are concatenated and renumbered contiguously; duplicate pages appearing in more than one
-  part are coalesced.
-- `merge(())` returns an empty document — an error, since there is no `source` or `provenance` to
-  carry: raises `MergeError`.
+- Pages are **coalesced by `index`**, preserving original page numbers. A page appearing in more
+  than one part becomes a single page spanning its combined contributions. Because parts arrive in
+  ascending original order and the merged text is a direct concatenation, those contributions are
+  contiguous in the result even when the parts themselves were not adjacent in the source.
+- `result.origin` is the concatenation of the parts' `origin` ranges.
 - `merge((d,))` returns a document equal to `d` in text, tokens, and geometry.
-- `result.id` is recomputed.
+- `result.id` equals the parts' shared `document_id` — merging does not change blob, parser,
+  version, or options. See the note under `slice`.
 
 **Errors**:
 
 | Condition | Error |
 |---|---|
+| `parts` is empty | `MergeError(reason="no_parts")` |
 | Parts differ in `blob_id`, `parser_id`, or `parser_version` | `MergeError(reason="mismatched_source")` |
 | Parts' original ranges overlap | `MergeError(reason="overlapping_parts")` |
-| `parts` is empty | `MergeError(reason="no_parts")` |
+| Parts are supplied out of original order | `MergeError(reason="unordered_parts")` |
+
+> **`merge(())` raises rather than returning an empty document.** With no parts there is no
+> `source` and no `provenance` to carry, and a document without provenance is exactly what the
+> constitution forbids.
+
+> **Non-adjacent parts are permitted.** The merged *text* is then a working buffer that never
+> existed contiguously in the source, while the *geometry* stays true to the original. That trade
+> is what keeps windowed extraction possible (research.md R6). Overlapping parts are rejected,
+> because they would duplicate tokens and break the non-overlap invariant `SpanIndex` relies on.
 
 ---
 
@@ -175,16 +228,24 @@ Reassemble parts into one document, rebasing positions.
 
 The property all other guarantees rest on (FR-012, SC-002):
 
-> For any document `d` partitioned into disjoint, ordered slices `p₁…pₙ`, and any span `s` in `d`:
+> For any document `d` partitioned into disjoint, ordered slices `p₁…pₙ` whose cut points do not
+> fall strictly inside a token, and any span `s` in `d`:
 >
 > ```text
-> d.locate(s) == Document.merge((p₁, …, pₙ)).locate(remap(s))
+> d.locate(s) == Document.merge((p₁, …, pₙ)).locate(s)
 > ```
->
-> where `remap` carries `s` through the partition into the merged document's coordinate space.
 
-Guaranteed for **partitions** — disjoint slices in original order. Non-adjacent merges preserve
-per-token geometry but not contiguous-text equivalence (research.md R6).
+Two conditions make this precise:
+
+- **The partition must be complete and in order**, so the merged text equals the original exactly.
+  Spans therefore need no remapping — the coordinate spaces coincide, and `remap` is the identity.
+- **Cuts must be token-safe** — on a token boundary or in a gap between tokens. `slice` drops
+  tokens a cut would truncate, so a cut through the middle of a token loses it, and the merged
+  document legitimately resolves fewer boxes than the original. `tests/property/strategies.py`
+  generates only token-safe partitions for this reason.
+
+Non-adjacent merges preserve per-token geometry and page numbers, but not contiguous-text
+equivalence with the source (research.md R6).
 
 ---
 

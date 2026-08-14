@@ -91,7 +91,7 @@ The smallest addressable unit. **Token carries no `text` field** — its text is
 
 ```python
 class Page(BaseModel, frozen=True):
-    index: int  # 0-based, contiguous from 0
+    index: int  # 0-based; ascending and unique, not necessarily contiguous
     span: Span  # range of Document.text belonging to this page
     width: float  # source units (points/pixels), for reference only
     height: float
@@ -213,7 +213,20 @@ class Document(BaseModel, frozen=True):
     tables: tuple[Table, ...] = ()
     provenance: IngestProvenance
     source: BlobRef
+    origin: tuple[Span, ...] = ()  # ranges of the original parse this document occupies
 ```
+
+`origin` records which ranges of the *originally parsed* text this document covers, in order. A
+freshly parsed document holds a single span covering everything; `slice` narrows it; `merge`
+concatenates the parts' ranges.
+
+It exists because `merge` cannot otherwise tell whether two parts overlap or which order they
+belong in — both of which it must know to avoid duplicating tokens and to keep pages in reading
+order. Without it, the rejection rules in contracts/kernel-api.md are not implementable.
+
+`origin` is also what distinguishes two views of the same parse. Slicing changes neither blob nor
+parser nor options, so a slice carries the **same** `document_id` as its parent: `document_id`
+identifies the parse, not one particular view of it.
 
 **Construction-time invariants** (FR-007, FR-024 — all checked in one validator; a document that
 violates any of them cannot exist):
@@ -223,21 +236,24 @@ violates any of them cannot exist):
 | DOC-1 | Every token span satisfies `0 <= start <= end <= len(text)` | `DocumentInvariantError` |
 | DOC-2 | Token spans are strictly ascending by `start` | `DocumentInvariantError` |
 | DOC-3 | Token spans do not overlap (`t[i].end <= t[i+1].start`) | `DocumentInvariantError` |
-| DOC-4 | Page indices are contiguous from 0 | `DocumentInvariantError` |
+| DOC-4 | Page indices are strictly ascending and unique | `DocumentInvariantError` |
 | DOC-5 | Page spans are ordered, non-overlapping, and cover `[0, len(text))` exactly | `DocumentInvariantError` |
 | DOC-6 | Every `page_index` on a token, block, or table references an existing page | `DocumentInvariantError` |
 | DOC-7 | Block and table spans lie within `text` | `DocumentInvariantError` |
 | DOC-8 | If `capabilities.geometry` is True, every token has geometry; if False, none do | `DocumentInvariantError` |
 | DOC-9 | `id` matches the ADR-0002 derivation from `source.blob_id` and `provenance` | `IdentityError` |
+| DOC-10 | `origin` ranges are ordered, disjoint, and their lengths sum to `len(text)` | `DocumentInvariantError` |
+
+DOC-4 requires ascending unique indices rather than contiguity from zero, because `slice`
+preserves original page numbers: a slice of page 7 must still report page 7. Renumbering would
+destroy exactly the provenance this project exists to protect. A freshly parsed document is
+contiguous anyway, because parsers number pages from 0.
 
 DOC-8 is deliberately all-or-nothing. Partial geometry would make `locate()` silently lossy — some
 tokens resolving and others not, with no way for a caller to tell whether an empty result means
 "not found" or "not available". A parser with partial geometry must declare
-`capabilities.geometry = False` and supply none.
-
-> **Gap flagged for `/speckit-tasks`**: the spec's edge-case list admits "geometry for only some
-> tokens" as a case to handle. DOC-8 resolves it by rejection rather than partial support. This is
-> the stricter reading of FR-022 and is recorded here as the decision.
+`capabilities.geometry = False` and supply none. This is the stricter reading of FR-022, and
+spec.md's edge-case list was reconciled to match.
 
 ### `SpanIndex` (`kernel/span_index.py`)
 
@@ -306,7 +322,7 @@ translate without parsing strings.
 ```text
 BlobRef ──1:N── Document          (one file, many parses — ADR-0002)
 Document ──1:1── IngestProvenance
-Document ──1:N── Page             (contiguous, covering, non-overlapping)
+Document ──1:N── Page             (ascending indices, covering, non-overlapping)
 Document ──1:1── SpanIndex ──1:N── Token   (ordered, non-overlapping)
 Document ──1:N── Block            (flat, may overlap)
 Document ──1:N── Table ──1:N── TableCell
