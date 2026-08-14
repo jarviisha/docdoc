@@ -64,6 +64,20 @@ normalization); Open Constitutional Decisions (six items moved to Resolved).
 
 Templates: no further changes required — the plan-template gate table already
 references these principles by number and remains accurate.
+
+---
+AMENDMENT 1.1.0 → 1.1.1 (2026-08-14)
+Bump rationale: PATCH — resolves one deferred decision and records it. No
+principle is added, removed, or redefined, and no previously compliant work
+becomes non-compliant.
+
+  - TODO(LICENSE) resolved: Apache-2.0, chosen for its explicit patent grant
+    (ADR-0007). LICENSE added at the repository root; pyproject declares the
+    SPDX expression and ships the file in built distributions.
+
+Sections amended: Open Constitutional Decisions (LICENSE moved to Resolved).
+Three non-blocking decisions remain open: SCHEMA_EVOLUTION_POLICY,
+GOLDEN_DATASET_LICENSING, PRE_1_0_VERSIONING.
 -->
 
 # docdoc Constitution
@@ -415,6 +429,7 @@ implicitly by an implementation choice.
 | `CONFIDENCE_SEMANTICS` | Separate trusted/untrusted fields; no blended confidence in MVP | [0004](../../docs/adr/0004-confidence-semantics.md) |
 | `FUZZY_GROUNDING_SPEC` | Kernel `find()` exact-only; fuzzy in extraction via `rapidfuzz`, pinned as `grounding_version` | [0005](../../docs/adr/0005-fuzzy-grounding-specification.md) |
 | `NORMALIZATION_VS_GROUNDING` | Comparison-time match view with offset map; `Document.text` stays byte-faithful | [0006](../../docs/adr/0006-comparison-time-match-view.md) |
+| `LICENSE` | Apache-2.0, chosen for its explicit patent grant | [0007](../../docs/adr/0007-apache-2-license.md) |
 
 **Still open:**
 
@@ -424,8 +439,6 @@ implicitly by an implementation choice.
 - **TODO(GOLDEN_DATASET_LICENSING)** — Milestone 6. A public repository cannot ship real
   customer invoices. Decide the sourcing strategy — synthetic, public-domain, or a private
   dataset referenced by hash — and how contributors run evaluation without it.
-- **TODO(LICENSE)** — before first public release. Choose the OSS license (Apache-2.0
-  recommended for patent grant in an enterprise-adjacent project).
 - **TODO(PRE_1_0_VERSIONING)** — before first public release. Principle XII mandates semantic
   versioning while the kernel API is expected to churn. Confirm the `0.x` policy and what
   stability, if any, is promised before `1.0.0`.
@@ -457,4 +470,4 @@ insufficient. Unjustified violations are rejected regardless of the code's quali
 **Precedence for unresolved items.** Where an "Open Constitutional Decision" is unresolved,
 implementers MUST NOT resolve it silently in code. Raise it, decide it, record it.
 
-**Version**: 1.1.0 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-08-14
+**Version**: 1.1.1 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-08-14
