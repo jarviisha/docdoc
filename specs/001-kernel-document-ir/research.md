@@ -152,6 +152,21 @@ actually protects; the merged *text* is a working buffer, while the *geometry* r
 Overlapping parts are rejected because they would duplicate tokens and break the non-overlap
 invariant that R2's index depends on.
 
+**Amended during implementation.** Two things this decision assumed turned out to be missing:
+
+- **Detecting overlap needs recorded origins.** A `Document` carried no memory of where it came
+  from, so `merge` had no way to tell whether two parts described the same region — making the
+  rejection rule above unimplementable as written. `Document.origin` (DOC-10) records the ranges of
+  the original parse a document occupies. It also lets `merge` require ascending original order,
+  without which pages could not be coalesced in reading order.
+- **Page numbers are preserved, not renumbered.** Renumbering pages contiguously would make a slice
+  of page 7 report "page 0". DOC-4 was relaxed to ascending-and-unique so that original page
+  numbers survive both `slice` and `merge`.
+
+A consequence: because merged text is a direct concatenation, a page's contributions from several
+parts are contiguous in the result even when those parts were not adjacent in the source. That is
+what keeps page spans tiling correctly after a non-adjacent merge.
+
 **Alternatives considered**: *Require adjacency* — simplest and safest, but forecloses windowed
 extraction, which is a concrete near-term need rather than a speculative one. *Insert a separator
 between non-adjacent parts* — corrupts positions relative to the source and invents characters;
@@ -188,6 +203,12 @@ where a heuristic is appropriate.
 **Consequence**: `locate()` output can be large for long ranges. Acceptable — callers ground short
 field values, not whole pages.
 
+**Amended during implementation.** This decision left a caller with no way to ask *which page* a
+span is on without also asking for boxes — and `locate()` refuses to answer at all when the parser
+supplied no geometry. `page_for()` was added as a separate operation: it derives pages from text
+position via the DOC-5 tiling guarantee, so it works with or without geometry, and never raises
+`CapabilityError`.
+
 ---
 
 ## R9. Mechanically proving "no I/O, no clock, no randomness" (FR-020, SC-005)
@@ -196,6 +217,7 @@ field values, not whole pages.
 
 1. **Static import check** — a test walks the AST of every module under `kernel/` and asserts that
    every `import` resolves to either the standard-library allowlist (`bisect`, `hashlib`, `json`,
+   `math`, `collections`,
    `typing`, `dataclasses`, `enum`, `re`, `unicodedata`) or `pydantic`. Catches forbidden imports
    including those inside functions.
 2. **Runtime audit hook** — a pytest fixture installs `sys.addaudithook` for the kernel suite and
@@ -270,3 +292,13 @@ for no gain.
 | Identity input encoding | Concatenated fields | Canonical JSON object of named fields | Concatenation is ambiguous and admits collisions (R4) |
 | `find(text, fuzzy=False)` | Fuzzy flag on the kernel operation | Exact only; no `fuzzy` parameter | ADR-0005 — the kernel cannot host fuzzy matching without breaking its dependency rule |
 | Kernel dependency | `pydantic` | `pydantic` for aggregates only; hot primitives use the standard library | Same dependency set, better constant factors (R1) |
+
+Four further deviations emerged during implementation rather than planning, when the design as
+written proved not to be implementable:
+
+| Topic | Planned | Implemented | Why |
+|---|---|---|---|
+| Page numbering under `slice`/`merge` | Renumbered contiguously from 0 | Original page numbers preserved; DOC-4 relaxed to ascending-and-unique | A slice of page 7 reporting "page 0" destroys the provenance the project exists to protect |
+| Slice/merge identity | `result.id` recomputed as a distinct identity | `result.id` is unchanged; `origin` distinguishes views | Identity derives from blob, parser, version, and options — none of which slicing or merging touches. `document_id` identifies the parse, not one view of it |
+| Overlap detection in `merge` | Assumed possible from the parts alone | Requires `Document.origin` (DOC-10) | A document carried no memory of where it came from, so overlap was undetectable (R6) |
+| Page lookup | Only via `Geometry` | `page_for()` added | FR-006 requires page traceability, but `locate()` raises without geometry, leaving text-only documents unable to answer (R8) |

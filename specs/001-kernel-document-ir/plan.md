@@ -24,8 +24,9 @@ testing of the cut-and-reassemble invariant before any higher layer exists to de
 `typing_extensions` in the kernel — see [research.md R12](research.md))
 
 **Primary Dependencies**: `pydantic` v2 (the kernel's only permitted runtime dependency).
-Standard-library allowlist: `bisect`, `hashlib`, `json`, `typing`, `dataclasses`, `enum`, `re`,
-`unicodedata`
+Standard-library allowlist: `bisect`, `hashlib`, `json`, `math`, `typing`, `dataclasses`, `enum`,
+`re`, `unicodedata`, `collections`. Enforced verbatim by `tests/unit/test_kernel_purity.py`, which
+is the authoritative list — this table follows it.
 
 **Storage**: N/A — the kernel performs no I/O by constitutional rule
 
@@ -86,16 +87,35 @@ Evaluated against constitution v1.1.0. **Initial: PASS. Post-design re-check: PA
 
 ### Design decisions that refine the spec
 
-Recorded so `/speckit-tasks` and reviewers see them rather than discovering them in code. Neither
-is a constitution violation; both are stricter than the spec.
+Recorded so reviewers see them rather than discovering them in code. None is a constitution
+violation. Items 1–2 were identified during planning; items 3–5 emerged during implementation,
+when the design as written turned out not to be implementable, and are recorded here after the
+fact.
 
 1. **Partial geometry is rejected, not supported** (data-model DOC-8). spec.md's edge-case list
-   admits "geometry for only some tokens". Allowing it would make `locate()` silently lossy — a
+   admitted "geometry for only some tokens". Allowing it would make `locate()` silently lossy — a
    caller could not distinguish "no token there" from "geometry unavailable here". A parser with
-   partial geometry must declare `capabilities.geometry = False`.
+   partial geometry must declare `capabilities.geometry = False`. spec.md has been reconciled.
 2. **`slice()` drops partially covered tokens** (contracts/kernel-api.md). Keeping a clipped token
    would leave its geometry describing glyphs no longer in the sliced text. Dropping loses a token;
    keeping would produce a wrong box, and a wrong box is worse than a missing one.
+3. **`page_for()` was added** (FR-025, task T057). FR-006 requires every token be traceable to a
+   page, but `Geometry` is the only page-bearing field and `locate()` raises `CapabilityError`
+   without it — so a text-only document could answer no page question at all. FR-006 was
+   unreachable until this existed.
+4. **`Document.origin` was added** (DOC-10, task T059). It records which ranges of the original
+   parse a document occupies. Without it `merge` cannot tell whether two parts overlap or which
+   order they belong in, and the rejection rules in contracts/kernel-api.md are not implementable.
+5. **DOC-4 relaxed to ascending-and-unique** rather than contiguous from zero. This follows from
+   `slice()` preserving original page numbers: a slice of page 7 must still report page 7, so a
+   sliced document legitimately holds a sparse index set. Renumbering would destroy exactly the
+   provenance this project exists to protect. A consequence worth knowing: `page_index` is no
+   longer an index into `pages` — look pages up by their `index` value.
+
+A sixth item is identity, which turned out to behave differently from the plan rather than being
+a deliberate refinement: `slice` and `merge` do **not** change `document_id`, because identity
+derives from blob, parser, version, and options, none of which they touch. `document_id`
+identifies the parse; `origin` identifies the view.
 
 ## Project Structure
 

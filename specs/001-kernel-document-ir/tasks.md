@@ -23,6 +23,9 @@ independently.
 - **[P]**: Can run in parallel (different files, no dependency on an incomplete task)
 - **[Story]**: US1–US4, mapping to the user stories in spec.md
 - Every task names its exact file path
+- **T057–T058 were added after implementation**, when `/speckit-analyze` found requirements
+  with no task covering them. Their IDs continue the sequence rather than renumbering the
+  list, so existing references stay valid; they sit in the phase they logically belong to.
 
 ## Path Conventions
 
@@ -35,7 +38,7 @@ relative.
 
 **Purpose**: Project skeleton and toolchain. Nothing here is docdoc-specific logic.
 
-- [X] T001 Create `pyproject.toml` at repository root: project metadata (name `docdoc`, `requires-python = ">=3.11"`), runtime dependency `pydantic>=2.0`, dev dependency group (`pytest`, `pytest-cov`, `hypothesis`, `mypy`, `ruff`, `import-linter`), plus `[tool.ruff]`, `[tool.mypy]` (strict for `docdoc.kernel`), `[tool.pytest.ini_options]`, `[tool.coverage]`, and `[tool.importlinter]` layer contracts declaring `api > pipeline > extraction > transform > ingest > kernel` per research.md R10
+- [X] T001 Create `pyproject.toml` at repository root: project metadata (name `docdoc`, `requires-python = ">=3.11"`), runtime dependency `pydantic>=2.0`, dev dependency group (`pytest`, `pytest-cov`, `hypothesis`, `mypy`, `ruff`, `import-linter`), plus `[tool.ruff]`, `[tool.mypy]` (strict for `docdoc.kernel`), `[tool.pytest.ini_options]`, `[tool.coverage]`, and `[tool.importlinter]` contracts per research.md R10: a `layers` contract listing only `docdoc.kernel` (import-linter errors on layers naming modules that do not exist yet, so higher layers join as their milestones land) plus a `forbidden` contract barring provider SDKs from the kernel
 - [X] T002 [P] Create package skeleton `src/docdoc/__init__.py` and `src/docdoc/kernel/__init__.py` (empty placeholders; the public surface is populated in T025)
 - [X] T003 [P] Create test tree `tests/unit/`, `tests/property/`, `tests/fixtures/` with `tests/conftest.py` holding shared fixtures
 - [X] T004 Generate and commit `uv.lock` via `uv sync --all-extras` — the lockfile is versioned per Principle VIII and is excluded from `.gitignore`
@@ -54,13 +57,13 @@ until a `Document` can be constructed and an invalid one rejected.
 
 > Write these first and confirm they fail before implementing T013–T025.
 
-- [X] T006 [P] Create `tests/unit/test_kernel_purity.py`: AST-walk every module under `src/docdoc/kernel/` asserting imports resolve only to the stdlib allowlist (`bisect`, `hashlib`, `json`, `typing`, `dataclasses`, `enum`, `re`, `unicodedata`) or `pydantic`; plus a `sys.addaudithook` fixture failing on `open`, `socket.*`, `subprocess.*`, `urllib.*`, `os.system` (research.md R9, FR-020, SC-005)
+- [X] T006 [P] Create `tests/unit/test_kernel_purity.py`: AST-walk every module under `src/docdoc/kernel/` asserting imports resolve only to the stdlib allowlist (`bisect`, `hashlib`, `json`, `math`, `typing`, `dataclasses`, `enum`, `re`, `unicodedata`, `collections`) or `pydantic`; plus a `sys.addaudithook` fixture failing on `open`, `socket.*`, `subprocess.*`, `urllib.*`, `os.system` (research.md R9, FR-020, SC-005)
 - [X] T007 [P] Create `tests/unit/test_errors.py`: assert the `DocdocError → KernelError → {SpanError, GeometryError, DocumentInvariantError, MergeError, CapabilityError, IdentityError}` hierarchy and that each carries its structured attributes, not just a message (FR-023)
 - [X] T008 [P] Create `tests/unit/test_span.py`: invariants SP-1..SP-3, `shift`, `intersects`, `contains`, zero-length spans, and `SpanError` on `start > end` (FR-004)
 - [X] T009 [P] Create `tests/unit/test_geometry.py`: invariants BB-1..BB-4 and GE-1, rejection of non-finite and out-of-range coordinates, `union`/`intersects`, zero-area boxes (FR-005)
 - [X] T010 [P] Create `tests/unit/test_identity.py`: `canonical_json` key-order independence, `blob_id_for` stability on identical bytes, `document_id_for` sensitivity to each input, and `IdentityError` on `NaN`/`Infinity`/non-string keys (FR-015..FR-018, research.md R3/R4)
 - [X] T011 [P] Create `tests/unit/test_span_index.py`: `tokens_in`/`token_at` results equal a brute-force linear scan over randomized token layouts, including empty index and boundary positions
-- [X] T012 [P] Create `tests/unit/test_document_construction.py`: every invariant DOC-1 through DOC-9 raises `DocumentInvariantError` (or `IdentityError` for DOC-9), covering out-of-range, unordered, and overlapping tokens, non-contiguous or non-covering pages, dangling `page_index`, and partial geometry under DOC-8 (FR-007, FR-024, SC-009)
+- [X] T012 [P] Create `tests/unit/test_document_construction.py`: every invariant DOC-1 through DOC-10 raises `DocumentInvariantError` (or `IdentityError` for DOC-9), covering out-of-range, unordered, and overlapping tokens, non-contiguous or non-covering pages, dangling `page_index`, and partial geometry under DOC-8 (FR-007, FR-024, SC-009)
 
 ### Implementation for Foundational Layer
 
@@ -75,7 +78,7 @@ until a `Document` can be constructed and an invalid one rejected.
 - [X] T021 [P] Implement `src/docdoc/kernel/table.py`: frozen `Table` and `TableCell` with TB-1..TB-3 validation
 - [X] T022 [P] Implement `src/docdoc/kernel/provenance.py`: frozen `Capabilities` and `IngestProvenance` with `text_layer_used`, and no timestamp field (the kernel cannot read the clock)
 - [X] T023 Implement `src/docdoc/kernel/span_index.py`: immutable `SpanIndex` over parallel sorted arrays with `bisect`-based `tokens_in` (O(log n + k)) and `token_at` (research.md R2); depends on T018
-- [X] T024 Implement `src/docdoc/kernel/document.py`: frozen `Document` model fields and the single construction validator enforcing DOC-1 through DOC-9, so an invalid document cannot exist; depends on T013–T023
+- [X] T024 Implement `src/docdoc/kernel/document.py`: frozen `Document` model fields and the single construction validator enforcing DOC-1 through DOC-10, so an invalid document cannot exist; depends on T013–T023
 - [X] T025 Populate `src/docdoc/kernel/__init__.py` with exactly the public surface listed in contracts/kernel-api.md — nothing more
 - [X] T026 Run `uv run lint-imports` and `uv run pytest tests/unit/test_kernel_purity.py` and confirm both pass against the real `src/docdoc/kernel/` tree
 
@@ -97,6 +100,8 @@ location of a known text range, and confirm the page and box match the token tha
 ### Implementation for User Story 1
 
 - [X] T028 [US1] Implement `Document.locate` in `src/docdoc/kernel/document.py`: intersecting-token lookup via `SpanIndex`, full token boxes with no sub-token interpolation (research.md R7), results ordered by page then token start
+- [X] T057 [US1] Implement `Document.page_for` in `src/docdoc/kernel/document.py`: resolve a span to the page indices it falls on, working **without geometry** by using the DOC-5 guarantee that pages tile the text exactly; empty span yields `()`; out-of-range span raises `SpanError` and never `CapabilityError` (FR-025, FR-006)
+- [X] T058 [P] [US1] Add `TestPageResolution` to `tests/unit/test_locate.py`: single-page and multi-page spans, resolution on a document whose parser supplied no geometry, empty span, and out-of-range rejection (FR-025)
 - [X] T029 [US1] Add the `CapabilityError` guard to `Document.locate` in `src/docdoc/kernel/document.py`, raising when `provenance.capabilities.geometry` is False rather than returning an empty tuple (FR-022, no silent fallback)
 - [X] T030 [P] [US1] Create `examples/build_document.py`: a standalone, runnable script constructing a document and locating a value with no infrastructure (SC-007, SC-010)
 - [X] T031 [P] [US1] Create `docs/concepts/document.md` explaining the IR, code-point positions, and the token/geometry relationship
@@ -124,7 +129,8 @@ resolves to identical geometry before and after.
 - [X] T036 [US2] Implement `Document.slice` in `src/docdoc/kernel/document.py`: retain fully contained tokens rebased by `-span.start`, drop partially covered tokens, keep `Geometry` untouched, clip and renumber pages, remap every `page_index`, carry `source` and `provenance` through
 - [X] T037 [US2] Implement `Document.merge` in `src/docdoc/kernel/document.py`: validate shared `blob_id`/`parser_id`/`parser_version` and non-overlapping original ranges, concatenate in order with a running offset, shift token spans while leaving geometry unchanged, coalesce duplicate pages
 - [X] T038 [US2] Implement the span remap helper in `src/docdoc/kernel/document.py` that carries a span from an original document into a merged document's coordinate space, used by both `merge` and the property tests
-- [X] T039 [US2] Wire `document_id` recomputation into `slice` and `merge` in `src/docdoc/kernel/document.py` — a derived document is a distinct document with a distinct identity (contracts/kernel-api.md)
+- [X] T059 [US2] Add the `origin` field and invariant DOC-10 to `src/docdoc/kernel/document.py`: record which ranges of the original parse a document occupies, so `merge` can reject overlapping and out-of-order parts. Without it the rejection rules in contracts/kernel-api.md are not implementable (FR-013)
+- [X] T039 [US2] Confirm identity behaviour of `slice` and `merge` in `src/docdoc/kernel/document.py`: both re-derive `document_id` from source and provenance, which they do not change, so a derived document carries the **same** id as its parent. `document_id` identifies the parse; `origin` identifies the view (contracts/kernel-api.md)
 
 **Checkpoint**: The foundational invariant holds under property testing. US1 and US2 both work independently.
 
@@ -142,7 +148,7 @@ confirm the source identity matches while the document identities differ.
 
 ### Tests for User Story 3
 
-- [X] T040 [P] [US3] Create `tests/unit/test_identity_contract.py`: same bytes yield the same `blob_id`; two parser ids over one blob yield different `document_id`s while sharing `blob_id`; identical parser, version, and options yield identical `document_id`; options differing only in key order yield identical identity; a `parser_version` bump changes `document_id` (US3 scenarios 1–5, SC-003, SC-004)
+- [X] T040 [P] [US3] Create `tests/unit/test_identity_contract.py`: same bytes yield the same `blob_id`; two parser ids over one blob yield different `document_id`s while sharing `blob_id`; identical parser, version, and options yield identical `document_id`; options differing only in key order yield identical identity; a `parser_version` bump changes `document_id`. Also assert **FR-017**: a span taken from one parse names different text in another parse of the same bytes, so spans are only meaningful relative to `document_id` (US3 scenarios 1–5, FR-017, SC-003, SC-004)
 - [X] T041 [P] [US3] Add adversarial cases to `tests/unit/test_identity.py`: confirm the named-field encoding resists the concatenation collision class — `(parser_id="pdf", version="1.0")` and `(parser_id="pdf1", version=".0")` must produce different `document_id`s (research.md R4)
 
 ### Implementation for User Story 3

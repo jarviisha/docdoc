@@ -47,6 +47,9 @@ token that produced it.
    geometry is unavailable, rather than returning empty geometry.
 5. **Given** any document, **When** the caller attempts to modify it in place, **Then** the
    attempt fails; operations that change a document return a new document.
+6. **Given** a document produced by a source that supplied no geometry, **When** the caller asks
+   which pages a text range falls on, **Then** the system returns those pages — page traceability
+   does not depend on geometry, even though physical location does.
 
 ---
 
@@ -285,6 +288,10 @@ confirm all occurrences are returned in document order.
   rejected at construction.
 - **SC-010**: A new contributor can build a document and resolve a location by following a single
   documented example, without reading the implementation.
+- **SC-011**: For 100% of text ranges, a caller can obtain the pages they fall on **regardless of
+  whether the producing source supplied geometry**. SC-001 measures page *and* box together and so
+  only applies where geometry exists; this criterion covers the text-only case, which would
+  otherwise go unmeasured.
 
 ## Assumptions
 
