@@ -146,6 +146,7 @@ def _field(
     if field.cardinality is Cardinality.SCALAR:
         return _scalar(payload, field, path=path, context=context)
     if field.cardinality is Cardinality.GROUP:
+        _reject_scalar_answer_to_a_group(payload, field, path=path, context=context)
         return _object(payload, field.fields, path=f"{path}.", context=context)
 
     if not isinstance(payload, list):
@@ -159,6 +160,37 @@ def _field(
         _object(entry, field.fields, path=f"{path}[{index}].", context=context)
         for index, entry in enumerate(payload)
     )
+
+
+def _reject_scalar_answer_to_a_group(
+    payload: Any,
+    field: FieldSpec,
+    *,
+    path: str,
+    context: _Context,
+) -> None:
+    """Diagnose a scalar triple sent where a group was asked for.
+
+    Without this the payload still *is* an object, so the walk would go on to
+    report the group's first declared child as missing -- true, but it hides what
+    actually happened and points the reader at the wrong field. A model that
+    answered a group with a single value should be told that.
+
+    A group whose own children are named ``value`` and ``claimed_text`` is
+    legitimate and must not be caught here, which is what the second condition
+    guards.
+    """
+    if not isinstance(payload, dict):
+        return
+    looks_scalar = {VALUE_KEY, CLAIMED_TEXT_KEY} <= set(payload)
+    children = {child.name for child in field.fields}
+    if looks_scalar and not ({VALUE_KEY, CLAIMED_TEXT_KEY} & children):
+        raise context.fail(
+            f"expected a group at {path!r} with fields {sorted(children)}, but the response "
+            f"answered it as a single value",
+            reason="shape",
+            path=path,
+        )
 
 
 def _scalar(
