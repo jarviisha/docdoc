@@ -30,13 +30,13 @@ Single Python project: `src/docdoc/`, `schemas/`, `tests/`, `examples/` at repos
 
 **Purpose**: Make the new layer and its one optional extra installable and enforceable.
 
-- [ ] T001 Create the extraction package skeleton — `src/docdoc/extraction/__init__.py` and `src/docdoc/extraction/adapters/__init__.py` (empty public surfaces, filled by later tasks)
-- [ ] T002 Add the `anthropic` optional extra to `pyproject.toml`, leaving base dependencies as `pydantic` alone (R1, SC-013)
-- [ ] T003 Extend the `import-linter` layers contract in `pyproject.toml` to `["docdoc.extraction", "docdoc.ingest", "docdoc.kernel"]` (Principle X, FR-023)
-- [ ] T004 Add an `import-linter` forbidden contract in `pyproject.toml` barring `anthropic`/`httpx`/`openai` from every `docdoc.extraction` module except `docdoc.extraction.adapters.*`, with `ignore_imports` naming `docdoc.extraction.adapters.anthropic_messages -> anthropic` and `unmatched_ignore_imports_alerting = "none"` so an ignore for a module that does not exist yet is not a misconfiguration (R1, FR-023)
-- [ ] T005 Regenerate and commit `uv.lock` with the new extra (Principle VIII — reproducibility)
-- [ ] T006 [P] Write the committed schema fixtures — `schemas/invoice@1.json`, `schemas/invoice@2.json` (a second major differing by one added optional field, so ADR-0008's no-bump-needed case is also exercised), `schemas/receipt@1.json` (the second document type of SC-014) — and their prompts under `schemas/prompts/`. `invoice@1` must include a scalar, a nested group, a repeating group, an `enum`, a `date`, a `decimal`, and at least one numeric constraint that the wire projection will drop (R3)
-- [ ] T007 [P] Write the rejection fixtures under `tests/fixtures/schemas/` — `malformed.json` (not parseable), `unknown_type.json`, `duplicate_field.json`, `over_nested.json` (a repeating group inside a repeating group), and `no_prompt@1.json` — one per FR-050 / EXT-3 rejection path
+- [X] T001 Create the extraction package skeleton — `src/docdoc/extraction/__init__.py` and `src/docdoc/extraction/adapters/__init__.py` (empty public surfaces, filled by later tasks)
+- [X] T002 Add the `anthropic` optional extra to `pyproject.toml`, leaving base dependencies as `pydantic` alone (R1, SC-013)
+- [X] T003 Extend the `import-linter` layers contract in `pyproject.toml` to `["docdoc.extraction", "docdoc.ingest", "docdoc.kernel"]` (Principle X, FR-023)
+- [X] T004 Add an `import-linter` forbidden contract in `pyproject.toml` barring `anthropic`/`httpx`/`openai` from every `docdoc.extraction` module except `docdoc.extraction.adapters.*`, with `ignore_imports` naming `docdoc.extraction.adapters.anthropic_messages -> anthropic` and `unmatched_ignore_imports_alerting = "none"` so an ignore for a module that does not exist yet is not a misconfiguration (R1, FR-023)
+- [X] T005 Regenerate and commit `uv.lock` with the new extra (Principle VIII — reproducibility)
+- [X] T006 [P] Write the committed schema fixtures — `schemas/invoice@1.json`, `schemas/invoice@2.json` (a second major differing by one added optional field, so ADR-0008's no-bump-needed case is also exercised), `schemas/receipt@1.json` (the second document type of SC-014) — and their prompts under `schemas/prompts/`. `invoice@1` must include a scalar, a nested group, a repeating group, an `enum`, a `date`, a `decimal`, and at least one numeric constraint that the wire projection will drop (R3)
+- [X] T007 [P] Write the rejection fixtures under `tests/fixtures/schemas/` — `malformed.json` (not parseable), `unknown_type.json`, `duplicate_field.json`, `over_nested.json` (a repeating group inside a repeating group), and `no_prompt@1.json` — one per FR-050 / EXT-3 rejection path
 
 **Checkpoint**: `uv sync --all-extras` succeeds, `lint-imports` runs, and the fixtures exist.
 
@@ -51,48 +51,48 @@ projection, the conformance check, the prompt, the budget guard, and both ends o
 
 ### The layer boundary (constitution mandate, do this first)
 
-- [ ] T008 Write `tests/unit/test_extraction_boundaries.py` asserting the dependency direction and that no provider SDK name appears in any `docdoc.extraction` module outside `adapters/` — the automated boundary test the constitution requires for every new layer. It must fail informatively while the layer is still empty rather than pass vacuously
-- [ ] T009 [P] Implement `src/docdoc/extraction/errors.py` — `ExtractionError` and `SchemaError` rooted at the existing `DocdocError`, and a re-export of `ProviderError` from `docdoc.ingest` (R9, data-model §9). No new class named `ProviderError`
+- [X] T008 Write `tests/unit/test_extraction_boundaries.py` asserting the dependency direction and that no provider SDK name appears in any `docdoc.extraction` module outside `adapters/` — the automated boundary test the constitution requires for every new layer. It must fail informatively while the layer is still empty rather than pass vacuously
+- [X] T009 [P] Implement `src/docdoc/extraction/errors.py` — `ExtractionError` and `SchemaError` rooted at the existing `DocdocError`, and a re-export of `ProviderError` from `docdoc.ingest` (R9, data-model §9). No new class named `ProviderError`
 
 ### Schema, loading, and the bound
 
-- [ ] T010 Implement `src/docdoc/extraction/schema.py` — `FieldType`, `Cardinality`, `FieldSpec`, `Schema`, and `Effort` (data-model §1, §2)
-- [ ] T011 Implement the structural checks in `src/docdoc/extraction/schema.py` — EXT-1 (sibling name uniqueness), EXT-2 (children iff group or repeating group), EXT-3 (**the one-level repetition bound**, error naming the limit and the offending field path), EXT-4 (constraint keys recognised, never applied) (FR-004, FR-048, FR-006)
-- [ ] T012 Implement `src/docdoc/extraction/loader.py` — JSON → `Schema`, every defect rejected at load time with the file and the defect named, no partial construction (FR-050, R6)
-- [ ] T013 [P] Write `tests/unit/test_schema_loader.py` covering EXT-1…EXT-4 and every fixture from T007, including that `over_nested.json` is refused at load rather than at first use
+- [X] T010 Implement `src/docdoc/extraction/schema.py` — `FieldType`, `Cardinality`, `FieldSpec`, `Schema`, and `Effort` (data-model §1, §2)
+- [X] T011 Implement the structural checks in `src/docdoc/extraction/schema.py` — EXT-1 (sibling name uniqueness), EXT-2 (children iff group or repeating group), EXT-3 (**the one-level repetition bound**, error naming the limit and the offending field path), EXT-4 (constraint keys recognised, never applied) (FR-004, FR-048, FR-006)
+- [X] T012 Implement `src/docdoc/extraction/loader.py` — JSON → `Schema`, every defect rejected at load time with the file and the defect named, no partial construction (FR-050, R6)
+- [X] T013 [P] Write `tests/unit/test_schema_loader.py` covering EXT-1…EXT-4 and every fixture from T007, including that `over_nested.json` is refused at load rather than at first use
 
 ### Identity
 
-- [ ] T014 Implement `src/docdoc/extraction/identity.py` — `schema_hash` and `prompt_hash` as `sha256` over `docdoc.kernel.identity.canonical_json`, reusing the kernel's rule rather than a second convention (FR-013, R6, EXT-6)
-- [ ] T015 Implement `options_hash` and `extraction_artifact_id` in `src/docdoc/extraction/identity.py` per ADR-0003 and data-model §8. The folded set is `schema_identity`, `schema_hash`, `prompt_hash`, `projection_id`, `model_id`, `model_version`, `max_tokens`, `effort`, `thinking`, `input_budget_tokens` — and **no** `temperature`, `top_p`, or `seed`, which the chosen provider's models reject and never had (R4, FR-034)
-- [ ] T016 [P] Write `tests/unit/test_schema_identity.py` covering EXT-6…EXT-9. EXT-9 is the subtle one and must be pinned explicitly: a pure `@1` → `@2` bump with no other edit leaves `schema_hash` unchanged, and the two artifacts still differ because the identity is folded separately
+- [X] T014 Implement `src/docdoc/extraction/identity.py` — `schema_hash` and `prompt_hash` as `sha256` over `docdoc.kernel.identity.canonical_json`, reusing the kernel's rule rather than a second convention (FR-013, R6, EXT-6)
+- [X] T015 Implement `options_hash` and `extraction_artifact_id` in `src/docdoc/extraction/identity.py` per ADR-0003 and data-model §8. The folded set is `schema_identity`, `schema_hash`, `prompt_hash`, `projection_id`, `model_id`, `model_version`, `max_tokens`, `effort`, `thinking`, `input_budget_tokens` — and **no** `temperature`, `top_p`, or `seed`, which the chosen provider's models reject and never had (R4, FR-034)
+- [X] T016 [P] Write `tests/unit/test_schema_identity.py` covering EXT-6…EXT-9. EXT-9 is the subtle one and must be pinned explicitly: a pure `@1` → `@2` bump with no other edit leaves `schema_hash` unchanged, and the two artifacts still differ because the identity is folded separately
 - [ ] T017 [P] Write `tests/property/test_schema_hash.py` (Hypothesis) — over randomly generated schemas, reordering fields never moves `schema_hash`, and any change to a field, type, cardinality, `required` flag, constraint, or description always moves it (SC-005)
 
 ### Registry
 
-- [ ] T018 Implement `src/docdoc/extraction/registry.py` — `SchemaRegistry.from_paths`, `register`, `resolve`, `identities`, `describe`, and the `default_registry()` helper of [contracts/extraction-api.md](contracts/extraction-api.md) §2, which reads the paths configuration names and nothing more. `resolve` accepts a concrete `name@version` only; there is no `latest` and no partial match (FR-014, FR-018, EXT-10, EXT-13)
+- [X] T018 Implement `src/docdoc/extraction/registry.py` — `SchemaRegistry.from_paths`, `register`, `resolve`, `identities`, `describe`, and the `default_registry()` helper of [contracts/extraction-api.md](contracts/extraction-api.md) §2, which reads the paths configuration names and nothing more. `resolve` accepts a concrete `name@version` only; there is no `latest` and no partial match (FR-014, FR-018, EXT-10, EXT-13)
 - [ ] T019 [P] Write `tests/unit/test_registry.py` covering EXT-10…EXT-13, including that a schema failing any check leaves the registry byte-identical to what it was
 
 ### The wire projection and the conformance check
 
-- [ ] T020 Implement `src/docdoc/extraction/shape.py` — the `Schema` → `ResponseShape` projection, identified as `response-shape@1`. It carries types, cardinality, `enum`, `const`, and string formats, sets `additionalProperties: false` at every object, asks for each field as a `value`/`claimed_text` pair, and **drops** numeric bounds, string-length bounds, and complex array constraints (R3, R7, EXT-14, FR-011)
+- [X] T020 Implement `src/docdoc/extraction/shape.py` — the `Schema` → `ResponseShape` projection, identified as `response-shape@1`. It carries types, cardinality, `enum`, `const`, and string formats, sets `additionalProperties: false` at every object, asks for each field as a `value`/`claimed_text` pair, and **drops** numeric bounds, string-length bounds, and complex array constraints (R3, R7, EXT-14, FR-011)
 - [ ] T021 [P] Write `tests/unit/test_shape_projection.py` asserting the enforceable subset is carried and the unenforceable one is dropped — and that what is dropped is still present in the `Schema` and still inside `schema_hash`, because that is the property Milestone 5 depends on (R3)
-- [ ] T022 Implement `src/docdoc/extraction/conform.py` — compile each schema to a `pydantic` model once at registration, cache it under the schema identity, and validate responses against it. A failure raises `ExtractionError` naming the field path (R10, EXT-15, FR-007)
-- [ ] T023 Implement absence handling in `src/docdoc/extraction/conform.py` — every declared field present in the result, an omitted field recorded as an explicit absence distinguishable from a returned-empty value, and an undeclared field discarded with the occurrence recorded (EXT-16, EXT-17, FR-002, FR-005, FR-008)
-- [ ] T024 Implement byte-faithful `claimed_text` handling in `src/docdoc/extraction/conform.py` — no trimming, no case folding, no Unicode normalisation (EXT-18, FR-003)
+- [X] T022 Implement `src/docdoc/extraction/conform.py` — compile each schema to a `pydantic` model once at registration, cache it under the schema identity, and validate responses against it. A failure raises `ExtractionError` naming the field path (R10, EXT-15, FR-007)
+- [X] T023 Implement absence handling in `src/docdoc/extraction/conform.py` — every declared field present in the result, an omitted field recorded as an explicit absence distinguishable from a returned-empty value, and an undeclared field discarded with the occurrence recorded (EXT-16, EXT-17, FR-002, FR-005, FR-008)
+- [X] T024 Implement byte-faithful `claimed_text` handling in `src/docdoc/extraction/conform.py` — no trimming, no case folding, no Unicode normalisation (EXT-18, FR-003)
 - [ ] T025 [P] Write `tests/unit/test_conform.py` covering EXT-15…EXT-18, with cases for a model that returns a scalar where a repeating group was asked for and vice versa, a value with no claimed text, claimed text with no value, and a field returned twice
 
 ### Prompt, budget, and the adapter contract
 
-- [ ] T026 Implement `src/docdoc/extraction/prompt.py` — `PromptTemplate`, and request assembly ordered stable-to-volatile with the cache breakpoint at the end of the per-schema prefix (R8, R15, EXT-19, FR-020)
+- [X] T026 Implement `src/docdoc/extraction/prompt.py` — `PromptTemplate`, and request assembly ordered stable-to-volatile with the cache breakpoint at the end of the per-schema prefix (R8, R15, EXT-19, FR-020)
 - [ ] T027 [P] Write `tests/unit/test_prompt_assembly.py` asserting EXT-19: the per-schema prefix is byte-identical across two different documents, and nothing per-request — no timestamp, no document id, no request id — appears before the breakpoint. This test exists because the failure is silent: results stay correct and the bill multiplies (R15)
-- [ ] T028 Implement `src/docdoc/extraction/budget.py` — the local, network-free input-budget guard, deliberately over-estimating, raising `ExtractionError` naming the document, the bound, the estimate, and narrowing with `Document.slice` as the way forward. Include a documented default `input_budget_tokens`, provisional until T079 measures it (proposed starting value: 200,000 tokens — comfortably under the default model's 1M context window while leaving room for output and reasoning) (R5, EXT-20, FR-030, FR-046)
-- [ ] T029 Implement the character-to-token ratio in `src/docdoc/extraction/budget.py` with a deliberately pessimistic starting value and a named safety margin, both in one module-level constant with a comment saying they are provisional until T079 measures them. The guard must be wrong in the refusing direction, never in the transmitting one (R5)
+- [X] T028 Implement `src/docdoc/extraction/budget.py` — the local, network-free input-budget guard, deliberately over-estimating, raising `ExtractionError` naming the document, the bound, the estimate, and narrowing with `Document.slice` as the way forward. Include a documented default `input_budget_tokens`, provisional until T079 measures it (proposed starting value: 200,000 tokens — comfortably under the default model's 1M context window while leaving room for output and reasoning) (R5, EXT-20, FR-030, FR-046)
+- [X] T029 Implement the character-to-token ratio in `src/docdoc/extraction/budget.py` with a deliberately pessimistic starting value and a named safety margin, both in one module-level constant with a comment saying they are provisional until T079 measures them. The guard must be wrong in the refusing direction, never in the transmitting one (R5)
 - [ ] T030 [P] Write `tests/unit/test_budget_guard.py` asserting EXT-20 and, specifically, that the guard over-estimates rather than under-estimates on every committed fixture, and that it runs before any transport call
-- [ ] T031 Implement `src/docdoc/extraction/adapter.py` — the `ModelAdapter` protocol, `ModelUsage`, `ExtractionOptions`, and `Availability`. There is one options type, not two: `ExtractionOptions` is what a caller passes and what provenance records. Transport settings are **not** on it: `TransportSettings` comes from `docdoc.ingest`, which is what makes FR-027 true by construction (R9, data-model §6, §7)
-- [ ] T032 Implement `src/docdoc/extraction/adapters/echo.py` — the deterministic in-repo adapter, with `from_fixtures(path)` reading responses keyed by `(document_id, schema identity)` plus the `malformed()` and `refusing()` constructors the failure tests need; and commit the response fixtures under `tests/fixtures/echo/` covering `invoice@1`, `invoice@2`, and `receipt@1`. This is a library deliverable, not a test double (R11, FR-044)
+- [X] T031 Implement `src/docdoc/extraction/adapter.py` — the `ModelAdapter` protocol, `ModelUsage`, `ExtractionOptions`, and `Availability`. There is one options type, not two: `ExtractionOptions` is what a caller passes and what provenance records. Transport settings are **not** on it: `TransportSettings` comes from `docdoc.ingest`, which is what makes FR-027 true by construction (R9, data-model §6, §7)
+- [X] T032 Implement `src/docdoc/extraction/adapters/echo.py` — the deterministic in-repo adapter, with `from_fixtures(path)` reading responses keyed by `(document_id, schema identity)` plus the `malformed()` and `refusing()` constructors the failure tests need; and commit the response fixtures under `tests/fixtures/echo/` covering `invoice@1`, `invoice@2`, and `receipt@1`. This is a library deliverable, not a test double (R11, FR-044)
 - [ ] T033 [P] Write `tests/contract/test_model_adapter_contract.py` — the contract every adapter must satisfy (EXT-15…EXT-18, exactly one response or a typed error, never partial), parameterised over every registered adapter so it is meaningful rather than tautological
-- [ ] T034 Implement `src/docdoc/extraction/observe.py` — the single `extraction.extract` structured event carrying identifiers, model and adapter identity and version, usage, duration, attempts, and outcome, and nothing else (FR-040)
+- [X] T034 Implement `src/docdoc/extraction/observe.py` — the single `extraction.extract` structured event carrying identifiers, model and adapter identity and version, usage, duration, attempts, and outcome, and nothing else (FR-040)
 
 **Checkpoint**: The layer exists, is boundary-enforced, and is testable end to end offline — the adapters
 can now be written and `extract()` can be composed.
@@ -109,16 +109,16 @@ credentials and no network, and confirm every declared field appears with its va
 
 ### Tests for User Story 1
 
-- [ ] T035 [P] [US1] Write `tests/unit/test_extract_echo.py` — the end-to-end offline path: one entry per declared field, a repeating group returned as its own set of fields per occurrence, an absent field explicitly marked absent, and claimed text preserved byte-for-byte (SC-001, SC-002, SC-003)
-- [ ] T036 [P] [US1] Extend `tests/unit/test_extract_echo.py` with the refusal-to-repair cases: a response that is not the requested shape, one that omits a declared field, and one carrying an undeclared field — each producing the outcome FR-007/FR-008 require rather than a coerced result
+- [X] T035 [P] [US1] Write `tests/unit/test_extract_echo.py` — the end-to-end offline path: one entry per declared field, a repeating group returned as its own set of fields per occurrence, an absent field explicitly marked absent, and claimed text preserved byte-for-byte (SC-001, SC-002, SC-003)
+- [X] T036 [P] [US1] Extend `tests/unit/test_extract_echo.py` with the refusal-to-repair cases: a response that is not the requested shape, one that omits a declared field, and one carrying an undeclared field — each producing the outcome FR-007/FR-008 require rather than a coerced result
 - [ ] T037 [P] [US1] Write `tests/unit/test_no_provider_names.py` asserting SC-014's two halves: zero document-type-specific code paths anywhere under `src/docdoc/extraction/`, and no provider or model name outside `adapters/`. The check must fail if a future change adds `if schema.name == "invoice"` anywhere
 
 ### Implementation for User Story 1
 
 - [ ] T038 [US1] Implement `extract()` in `src/docdoc/extraction/extract.py` — resolve the schema, guard the budget, build the request, call the adapter, check conformance, assemble the result. Exactly one result or an explicit error; never a partial result (FR-001)
-- [ ] T039 [US1] Assert non-mutation in `src/docdoc/extraction/extract.py` and pin it in `tests/unit/test_extract_echo.py`: the `Document`, its canonical text, and its provenance are unchanged by an extraction — on the success path **and** on every failure path (conformance failure, budget refusal, adapter error). The failure half is Principle XII's "provider failure never corrupts the canonical document", which that principle lists as MUST-be-tested (FR-009)
-- [ ] T040 [US1] Add the `receipt@1` case to `tests/unit/test_extract_echo.py` — a second document type extracted with zero engine changes, which is Principle VI read literally (SC-014)
-- [ ] T041 [US1] Fill the public surface in `src/docdoc/extraction/__init__.py` with the names in [contracts/extraction-api.md](contracts/extraction-api.md) §1–§3 and §8
+- [X] T039 [US1] Assert non-mutation in `src/docdoc/extraction/extract.py` and pin it in `tests/unit/test_extract_echo.py`: the `Document`, its canonical text, and its provenance are unchanged by an extraction — on the success path **and** on every failure path (conformance failure, budget refusal, adapter error). The failure half is Principle XII's "provider failure never corrupts the canonical document", which that principle lists as MUST-be-tested (FR-009)
+- [X] T040 [US1] Add the `receipt@1` case to `tests/unit/test_extract_echo.py` — a second document type extracted with zero engine changes, which is Principle VI read literally (SC-014)
+- [X] T041 [US1] Fill the public surface in `src/docdoc/extraction/__init__.py` with the names in [contracts/extraction-api.md](contracts/extraction-api.md) §1–§3 and §8
 
 **Checkpoint**: The feature works end to end with no credentials. This is the MVP.
 

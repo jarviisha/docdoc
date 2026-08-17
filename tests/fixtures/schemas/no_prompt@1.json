@@ -1,0 +1,2 @@
+{"name": "no_prompt", "version": 1,
+ "fields": [{"name": "anything", "type": "string", "description": "a schema with no prompt beside it"}]}

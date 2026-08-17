@@ -1,0 +1,40 @@
+{
+  "name": "receipt",
+  "version": 1,
+  "fields": [
+    {
+      "name": "merchant_name",
+      "type": "string",
+      "required": true,
+      "description": "The name of the shop or business that issued the receipt."
+    },
+    {
+      "name": "purchased_at",
+      "type": "datetime",
+      "required": true,
+      "description": "When the purchase happened, as an ISO-8601 date-time. Use the date alone at midnight if no time is printed."
+    },
+    {
+      "name": "total",
+      "type": "decimal",
+      "required": true,
+      "description": "The amount actually paid.",
+      "constraints": {
+        "minimum": 0
+      }
+    },
+    {
+      "name": "payment_method",
+      "type": "string",
+      "description": "How it was paid.",
+      "constraints": {
+        "enum": [
+          "cash",
+          "card",
+          "transfer",
+          "other"
+        ]
+      }
+    }
+  ]
+}
