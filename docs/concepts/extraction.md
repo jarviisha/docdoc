@@ -57,11 +57,12 @@ A schema is hashed whole. What goes to the model is a **projection** of it, vers
 
 | | Carries | Drops |
 |---|---|---|
-| Response shape (on the wire) | types, cardinality, `enum`, `const`, string formats, `additionalProperties: false` | numeric bounds, length bounds, `pattern` |
+| Response shape (on the wire) | types, cardinality, `enum`, string formats, `additionalProperties: false` | numeric bounds, array-length bounds, `minLength`/`maxLength`, `pattern` |
 | `schema_hash` | everything, constraints and descriptions included | nothing |
 
-The divergence is the provider's, not a design preference: its structured-output subset cannot
-express numeric bounds, length bounds, or recursion at all.
+Only `minLength`, `maxLength`, and `pattern` are genuinely unenforceable by the provider. Everything
+else in the "drops" column is dropped **by choice** — Gemini would enforce `minimum`, `maximum`, and
+array-length bounds if asked.
 
 **The consequence, stated plainly because it looks like a bug.** Editing `minimum` on a field moves
 `schema_hash`, which invalidates the extraction cache — while changing nothing the model reads. That
@@ -69,14 +70,16 @@ is correct: the constraint changes what the result *means* to the validation sta
 like a spurious cache miss the first time you hit it, so it is written down here rather than
 discovered.
 
-Two other things follow from the same subset, and both looked like judgment calls until the provider
-settled them:
+Two decisions here were briefly recorded as *forced* by the provider. They are not — research.md R3
+records the correction, because calling a chosen constraint "forced" retires it from review:
 
 - Field constraints are declared in the schema and enforced by Milestone 5. Extraction checks shape
-  and type parseability only. No other split was available — the provider could not enforce a numeric
-  range if asked.
-- Repetition is bounded to one level. Recursion is not expressible; ours is merely stricter, and
-  refused at registration rather than at first use.
+  and type parseability only. This is a decision under Principle VII, not a provider limit: pushing a
+  bound onto the wire would make violating it the provider's extraction failure rather than a located
+  validation failure, and would change behaviour when the provider changes.
+- Repetition is bounded to one level. That bound is ours too — the provider supports `$ref` recursion.
+  It is an MVP scope decision about how much of the schema → shape → conformance → result path to make
+  recursive, refused at registration rather than at first use.
 
 `decimal` travels as a string. A total that has been through a JSON float is not the total that was
 printed.
@@ -130,28 +133,27 @@ own schema description, and routes nothing.
 
 ```text
 options_hash = hash of {schema_identity, schema_hash, prompt_hash, projection_id,
-                        model_id, model_version, max_tokens, effort, thinking,
-                        input_budget_tokens}
+                        model_id, model_version, max_output_tokens, temperature,
+                        top_p, top_k, seed, thinking_budget, input_budget_tokens}
 artifact_id  = hash of {document_id, extractor_id, extractor_version, options_hash}
 ```
 
-`extractor_version` embeds the adapter — `1.0.0+echo-1.0.0` — the way ingest's `parser_version`
-embeds a library version, and for the same reason: the adapter builds the request and maps the
-response, so an adapter fix changes results. Recording a change makes it visible; only folding it
-makes it invalidating.
+`extractor_version` embeds the adapter and its SDK — `1.0.0+gemini-1.0.0+google-genai-2.18.1` — the
+way ingest's `parser_version` embeds a library version, and for the same reason: the adapter builds
+the request and maps the response, so an adapter fix changes results. Recording a change makes it
+visible; only folding it makes it invalidating.
 
-There is no `temperature`, no `top_p`, and no `seed`. The chosen provider's current models reject the
-first two outright and have never had the third, which refines ADR-0003's `Extract` row — it names
-parameters that cannot exist here. The knobs that *do* change a result are `max_tokens`, the effort
-level, and the thinking mode, and all three are folded.
+Every parameter ADR-0003's `Extract` row names exists here — `temperature`, `top_p`, `seed`, and the
+output cap — so the row is followed literally rather than refined. `top_k` and `thinking_budget` are
+folded as well, because the ADR's list is a minimum and both change the answer.
 
 Retry, timeout, and deadline live in `TransportSettings`, a separate type reused from the ingest
 layer. They cannot change the content of a successful result, so they are absent from identity **by
 construction** rather than by discipline.
 
-Extraction does not promise byte-identical results across repeated model calls. With no temperature
-and no seed there is not even a nominal determinism knob to misrepresent, so the honest position is
-the only one available. What it promises instead is that any single result is fully explainable.
+Extraction does not promise byte-identical results across repeated model calls. `temperature` defaults
+to `0.0` and a `seed` can be set — both are recorded — but the provider guarantees no bit-exactness, so
+the claim stays unavailable. What it promises instead is that any single result is fully explainable.
 
 ## Long documents
 
@@ -173,6 +175,12 @@ call that transmits the document in order to answer, which is the very thing the
 avoid. So a document that would actually have fitted can be refused. The ratio is configurable, and
 it is currently a *guessed* constant — T079 measures it against the real provider.
 
+**The per-schema prefix is not cached today.** The assembly order is right, but a Gemini cache hit
+needs the shared prefix to clear a per-model minimum of 2,048–4,096 tokens and the current prefix is a
+few hundred. So the ordering costs nothing and buys nothing yet; it buys something free the moment
+schemas or instructions grow. Padding the prefix to become cache-eligible is a cost decision and is
+deliberately not taken without measurement.
+
 ## Failure
 
 | Error | When | Retried |
@@ -181,10 +189,22 @@ it is currently a *guessed* constant — T079 measures it against the real provi
 | `ExtractionError` | Shape mismatch; unparseable value; missing declared field; over-budget input or output; truncated response | Never |
 | `ModelProviderError` | Transport, service, and credential failures, and a content refusal | Transient causes only |
 
-A **content refusal** is the one that does not look like a failure on the wire: the provider answers
-with a *successful* response whose stop reason says it declined. An adapter that reads the content
-without checking the stop reason reports a refusal as an answer. It is permanent — re-sending the same
-content gets the same decision.
+A **refusal** is the one that does not look like a failure on the wire: the provider answers with a
+*successful* response whose stop reason says it declined. An adapter that reads the content without
+checking the stop reason reports a refusal as an answer. Every refusal is permanent — re-sending the
+same content gets the same decision.
+
+There is more than one, and they do not mean the same thing:
+
+| Stop reason | What it means |
+|---|---|
+| `SAFETY`, `PROHIBITED_CONTENT`, `BLOCKLIST` | The output was blocked |
+| `RECITATION` | The output resembled copyrighted material. **Not misconduct** — an invoice quoting standard payment terms can trip it |
+| `SPII` | Sensitive personal information. For an engine whose job is documents full of names and account numbers, a reason to expect rather than an edge case |
+| `promptFeedback.blockReason` | The *prompt* was blocked before generation, so no candidate exists at all |
+
+Reporting `RECITATION` or `SPII` as a safety refusal sends the reader after a problem that is not
+there, which is why each keeps its own category in provenance.
 
 Nothing falls back. A failed call never switches model, provider, or schema version; `extract()`
 takes one adapter and has no argument a fallback could be threaded through.
