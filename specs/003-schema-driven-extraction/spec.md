@@ -356,7 +356,8 @@ every input that cannot change a result.
 - **FR-030**: When a document's text exceeds the configured input budget, or a response would exceed
   the configured output budget, the system MUST raise an explicit error naming the document, the
   bound, and the actual size. It MUST NOT truncate the document, drop pages, extract from a prefix,
-  or shorten a repeating group.
+  or shorten a repeating group. The default input budget MUST be a documented, configurable value
+  chosen with headroom below the configured model's context window, not left implicit.
 - **FR-046**: The error raised by FR-030 MUST name narrowing the document as the supported way
   forward, and the documentation MUST show it. A caller narrows a document with the kernel's existing
   `slice`, extracts from the result, and receives a result whose provenance names the narrowed
@@ -436,10 +437,9 @@ every input that cannot change a result.
 - **ModelAdapter**: Anything that answers a structured request about a document. Carries a stable
   identity and version, declares the model it reached and that model's version, and reports token
   usage. The remote provider and the deterministic in-repo adapter are two instances of one contract.
-- **DecodingOptions**: The model settings a call ran with — the ones that can change a result.
-  Part of extraction identity, unlike retry, timeout, and deadline settings.
-- **ExtractionRequest**: A document, a concrete schema identity, and the options a call runs with —
-  what a caller hands to the extraction layer.
+- **ExtractionOptions**: The model settings and budgets a call ran with — the ones that can change a
+  result. Part of extraction identity, unlike retry, timeout, and deadline settings, which are a
+  separate type.
 - **ExtractedValue**: One field's outcome — the typed value or an explicit absence, the verbatim
   claimed source text, the untrusted model-reported confidence, and the grounding fields this feature
   leaves unresolved.

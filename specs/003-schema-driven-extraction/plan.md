@@ -229,6 +229,7 @@ tests/
 │   └── test_extraction_perf.py        # marked `perf`, SC-021
 └── fixtures/
     ├── schemas/                       # incl. an over-nested schema and a malformed file
+    ├── echo/                          # canned responses for the in-repo adapter (FR-044)
     ├── anthropic/                     # 3 recorded, scrubbed responses: ok, refusal, truncated
     └── snapshots/schema_hashes.json   # the FR-017 change detector
 ```
@@ -243,6 +244,11 @@ in code and the offline path is not a special case.
 `schemas/` sits at the repository root rather than inside the package because it is data a *deployment*
 supplies, not data docdoc ships. The committed files are fixtures and examples; the registry loads from
 paths that configuration names (FR-049).
+
+Because `schemas/` is therefore **not in the wheel**, anything that must run for a `pip install docdoc`
+user supplies its own schema rather than reading this directory. That applies to the SC-020 example above
+all: it writes a minimal schema to a temporary directory and registers that, which also happens to be the
+clearest demonstration available that a schema is data.
 
 ## Complexity Tracking
 

@@ -70,7 +70,7 @@ projection, the conformance check, the prompt, the budget guard, and both ends o
 
 ### Registry
 
-- [ ] T018 Implement `src/docdoc/extraction/registry.py` — `SchemaRegistry.from_paths`, `register`, `resolve`, `identities`, `describe`. `resolve` accepts a concrete `name@version` only; there is no `latest` and no partial match (FR-014, FR-018, EXT-10, EXT-13)
+- [ ] T018 Implement `src/docdoc/extraction/registry.py` — `SchemaRegistry.from_paths`, `register`, `resolve`, `identities`, `describe`, and the `default_registry()` helper of [contracts/extraction-api.md](contracts/extraction-api.md) §2, which reads the paths configuration names and nothing more. `resolve` accepts a concrete `name@version` only; there is no `latest` and no partial match (FR-014, FR-018, EXT-10, EXT-13)
 - [ ] T019 [P] Write `tests/unit/test_registry.py` covering EXT-10…EXT-13, including that a schema failing any check leaves the registry byte-identical to what it was
 
 ### The wire projection and the conformance check
@@ -86,11 +86,11 @@ projection, the conformance check, the prompt, the budget guard, and both ends o
 
 - [ ] T026 Implement `src/docdoc/extraction/prompt.py` — `PromptTemplate`, and request assembly ordered stable-to-volatile with the cache breakpoint at the end of the per-schema prefix (R8, R15, EXT-19, FR-020)
 - [ ] T027 [P] Write `tests/unit/test_prompt_assembly.py` asserting EXT-19: the per-schema prefix is byte-identical across two different documents, and nothing per-request — no timestamp, no document id, no request id — appears before the breakpoint. This test exists because the failure is silent: results stay correct and the bill multiplies (R15)
-- [ ] T028 Implement `src/docdoc/extraction/budget.py` — the local, network-free input-budget guard, deliberately over-estimating, raising `ExtractionError` naming the document, the bound, the estimate, and narrowing with `Document.slice` as the way forward (R5, EXT-20, FR-030, FR-046)
-- [ ] T029 **Resolve the R5 assumption by measuring, not guessing**: calibrate the character-to-token ratio in `src/docdoc/extraction/budget.py` against the committed fixtures using the provider's own token count as ground truth, and record the measured ratio and the safety margin in a comment. If the ratio turns out to under-estimate for any fixture, raise the margin — the guard must be wrong in the refusing direction, never in the transmitting one
+- [ ] T028 Implement `src/docdoc/extraction/budget.py` — the local, network-free input-budget guard, deliberately over-estimating, raising `ExtractionError` naming the document, the bound, the estimate, and narrowing with `Document.slice` as the way forward. Include a documented default `input_budget_tokens`, provisional until T079 measures it (proposed starting value: 200,000 tokens — comfortably under the default model's 1M context window while leaving room for output and reasoning) (R5, EXT-20, FR-030, FR-046)
+- [ ] T029 Implement the character-to-token ratio in `src/docdoc/extraction/budget.py` with a deliberately pessimistic starting value and a named safety margin, both in one module-level constant with a comment saying they are provisional until T079 measures them. The guard must be wrong in the refusing direction, never in the transmitting one (R5)
 - [ ] T030 [P] Write `tests/unit/test_budget_guard.py` asserting EXT-20 and, specifically, that the guard over-estimates rather than under-estimates on every committed fixture, and that it runs before any transport call
-- [ ] T031 Implement `src/docdoc/extraction/adapter.py` — the `ModelAdapter` protocol, `ModelUsage`, `DecodingOptions`, `ExtractionOptions`, and `Availability`. Transport settings are **not** on this type: `TransportSettings` comes from `docdoc.ingest`, which is what makes FR-027 true by construction (R9, data-model §6, §7)
-- [ ] T032 Implement `src/docdoc/extraction/adapters/echo.py` — the deterministic in-repo adapter, returning fixed responses keyed by `(document_id, schema identity)`, plus the deliberately-malformed and refusal modes the failure tests need. This is a library deliverable, not a test double (R11, FR-044)
+- [ ] T031 Implement `src/docdoc/extraction/adapter.py` — the `ModelAdapter` protocol, `ModelUsage`, `ExtractionOptions`, and `Availability`. There is one options type, not two: `ExtractionOptions` is what a caller passes and what provenance records. Transport settings are **not** on it: `TransportSettings` comes from `docdoc.ingest`, which is what makes FR-027 true by construction (R9, data-model §6, §7)
+- [ ] T032 Implement `src/docdoc/extraction/adapters/echo.py` — the deterministic in-repo adapter, with `from_fixtures(path)` reading responses keyed by `(document_id, schema identity)` plus the `malformed()` and `refusing()` constructors the failure tests need; and commit the response fixtures under `tests/fixtures/echo/` covering `invoice@1`, `invoice@2`, and `receipt@1`. This is a library deliverable, not a test double (R11, FR-044)
 - [ ] T033 [P] Write `tests/contract/test_model_adapter_contract.py` — the contract every adapter must satisfy (EXT-15…EXT-18, exactly one response or a typed error, never partial), parameterised over every registered adapter so it is meaningful rather than tautological
 - [ ] T034 Implement `src/docdoc/extraction/observe.py` — the single `extraction.extract` structured event carrying identifiers, model and adapter identity and version, usage, duration, attempts, and outcome, and nothing else (FR-040)
 
@@ -116,7 +116,7 @@ credentials and no network, and confirm every declared field appears with its va
 ### Implementation for User Story 1
 
 - [ ] T038 [US1] Implement `extract()` in `src/docdoc/extraction/extract.py` — resolve the schema, guard the budget, build the request, call the adapter, check conformance, assemble the result. Exactly one result or an explicit error; never a partial result (FR-001)
-- [ ] T039 [US1] Assert non-mutation in `src/docdoc/extraction/extract.py` and pin it in `tests/unit/test_extract_echo.py`: the `Document`, its canonical text, and its provenance are unchanged by an extraction (FR-009)
+- [ ] T039 [US1] Assert non-mutation in `src/docdoc/extraction/extract.py` and pin it in `tests/unit/test_extract_echo.py`: the `Document`, its canonical text, and its provenance are unchanged by an extraction — on the success path **and** on every failure path (conformance failure, budget refusal, adapter error). The failure half is Principle XII's "provider failure never corrupts the canonical document", which that principle lists as MUST-be-tested (FR-009)
 - [ ] T040 [US1] Add the `receipt@1` case to `tests/unit/test_extract_echo.py` — a second document type extracted with zero engine changes, which is Principle VI read literally (SC-014)
 - [ ] T041 [US1] Fill the public surface in `src/docdoc/extraction/__init__.py` with the names in [contracts/extraction-api.md](contracts/extraction-api.md) §1–§3 and §8
 
@@ -160,7 +160,7 @@ different model and confirm the same application code runs with only provenance 
 ### Tests for User Story 3
 
 - [ ] T048 [P] [US3] Write `tests/unit/test_anthropic_mapping.py` against the recorded, scrubbed responses committed under `tests/fixtures/anthropic/` — a successful structured response, a content refusal, and a truncated response. These keep the mapping code that produces every real result under test in CI (R11)
-- [ ] T049 [P] [US3] Write `tests/unit/test_provider_errors.py` — transient failures (connection, timeout, rate limit, server error, overloaded) retried within the `TransportSettings` limit; rejected credential, malformed request, unknown model, request too large, and **content refusal** each failing on the first attempt with zero retries (FR-025, FR-026, R12)
+- [ ] T049 [P] [US3] Write `tests/unit/test_provider_errors.py` — transient failures (connection, timeout, rate limit, server error, overloaded) retried within the `TransportSettings` limit; rejected credential, malformed request, unknown model, request too large, and **content refusal** each failing on the first attempt with zero retries. Include the two bounds separately: a per-attempt timeout, and an overall deadline that expires mid-retry — including the case where the service asks for a wait longer than the remaining deadline, which must fail on the deadline rather than sleep past it (FR-025, FR-026, SC-017, R12)
 - [ ] T050 [P] [US3] Add the refusal-as-success case to `tests/unit/test_provider_errors.py` explicitly: the provider returns a *successful* HTTP response whose stop reason is a refusal, and the adapter must branch on the stop reason before reading content. An adapter that reads content unconditionally would report a refusal as an answer, which is the trap this test exists to catch (R12)
 - [ ] T051 [P] [US3] Write `tests/unit/test_no_transmission.py` against a transport that records every call attempt — zero bytes transmitted for a request that fails schema resolution, credential availability, or the budget guard (SC-016, FR-041)
 - [ ] T052 [P] [US3] Write `tests/integration/test_anthropic_live.py`, marked `provider` — one live extraction, skipped with a stated reason when credentials are absent (FR-045, SC-019)
@@ -214,7 +214,7 @@ a result.
 - [ ] T070 [P] Write `tests/perf/test_extraction_perf.py`, marked `perf` — the deterministic budget of SC-021 (schema resolution, request construction, conformance check, identity under 100 ms for a 20-page document against a 20-field schema, model call excluded), plus a guard that a schema is compiled once at registration and not once per extraction
 - [ ] T071 [P] Revise the performance table in [plan.md](plan.md) against the measurements, as Milestones 1 and 2 both did. Unmeasured estimates written before implementation are not a baseline
 - [ ] T072 [P] Write `docs/concepts/extraction.md` — the layer, the two identities, the schema/wire projection split, the stage boundary with grounding, and the budget guard's honest limitation
-- [ ] T073 [P] Write `examples/extract_invoice.py` — the SC-020 example, runnable with no credentials against the echo adapter, with a commented line showing the switch to a real adapter
+- [ ] T073 [P] Write `examples/extract_invoice.py` — the SC-020 example, runnable with no credentials against the echo adapter, with a commented line showing the switch to a real adapter. It must write its own minimal schema JSON to a temporary directory and register that, so it runs after `pip install docdoc` rather than only from a git checkout — `schemas/` is not packaged in the wheel. Writing the file is also the clearest possible demonstration that a schema is data
 - [ ] T074 [P] Update `README.md`: roadmap Milestone 3 → **Done**, Milestone 4 → Next; add an extraction example to "What it does today"; document the `docdoc[anthropic]` extra alongside the existing ones
 - [ ] T075 [P] Add the `schemas/` directory conventions to `CONTRIBUTING.md` — how to add a document type, and what obliges a major bump per ADR-0008
 - [ ] T076 Run `/speckit-analyze` and append what it finds as a convergence phase in `specs/003-schema-driven-extraction/tasks.md`, the way Milestone 2 did. That pass found ten gaps the first pass left; assume this one leaves some too
@@ -315,13 +315,37 @@ before either starts.
 
 ## Notes
 
-- **Three tasks exist to resolve an assumption by measurement rather than to implement a decision**: T029
-  (the budget guard's ratio), T059 (the effort default and `max_tokens`), and T060 (that the prompt cache
-  actually reads). Milestone 2 had two such tasks and *both* assumptions turned out to be wrong, which is
-  exactly why they were tasks. Do not close them by reasoning.
+- **Three tasks exist to resolve an assumption by measurement rather than to implement a decision**: T079
+  (the budget guard's ratio and the default budget), T059 (the effort default and `max_tokens`), and T060
+  (that the prompt cache actually reads). Milestone 2 had two such tasks and *both* assumptions turned out
+  to be wrong, which is exactly why they were tasks. Do not close them by reasoning.
+- **Until T079 lands, the budget guard runs on a guessed constant.** T028 and T029 ship a pessimistic
+  starting ratio and a 200,000-token default, and both are provisional. That is the honest consequence of
+  needing the provider to measure against: the MVP ships a number nobody has verified. It is safe in the
+  refusing direction and unsafe in no direction, but it is not measured.
 - **T037, T063, and T027 guard boundaries that erode silently.** A document-type conditional, a grounding
   status set one milestone early, and a volatile value in front of the cache breakpoint all leave the tests
   green and the design broken. They are cheap to keep and expensive to add back later.
 - **No kernel change at this milestone.** `tests/unit/test_kernel_purity.py` and the Milestone 1 property
   suite must keep passing untouched. If a task appears to need a kernel change, that is a finding for
   review, not a licence.
+- **The evaluation gate is advisory here and unreportable until Milestone 6.** Workflow gate 5 requires
+  changes to prompts, models, or schemas to report golden-set metrics, and this feature introduces all
+  three. There is no golden dataset yet — `TODO(GOLDEN_DATASET_LICENSING)` is open and gates Milestone 6 —
+  so the gate is advisory during the MVP, as the constitution says. What *is* measured here is conformance,
+  identity, provenance completeness, and boundary containment. Extraction accuracy is not claimed.
+
+---
+
+## Phase 8: Analysis remediation
+
+Findings from `/speckit-analyze` on 2026-08-17. Four are coverage the first pass left; T079 is a task
+that was in the wrong phase to be runnable at all, and was split out of T029 rather than left there.
+
+- [ ] T078 Extend `tests/unit/test_provider_errors.py` with Principle XII's canonical-document invariant against the real adapter's failure modes: after a content refusal, a per-attempt timeout, an exhausted retry chain, and a call interrupted mid-flight, the input `Document` is byte-identical to what was passed in and no partial result exists (Principle XII, FR-043)
+- [ ] T079 **Resolve the R5 assumption by measuring, not guessing**: calibrate the ratio, the safety margin, and the default `input_budget_tokens` in `src/docdoc/extraction/budget.py` against every committed fixture, using the provider's own token count as ground truth, and record the measured values in `research.md` under R5. If the ratio under-estimates for any fixture, raise the margin. Depends on T053 (R5, EXT-20, FR-030)
+- [ ] T080 [P] Write `tests/unit/test_no_fallback.py` — when the configured adapter fails permanently, fails transiently past its attempt limit, or is unavailable, the failure surfaces and the system tries no other adapter, no other model, and no other schema version. Assert against a registry holding two adapters and two schema majors, so a fallback would have somewhere to go if the code allowed one (FR-029, SC-012)
+- [ ] T081 [P] Write `tests/unit/test_reextraction.py` — extracting the same document twice, and extracting it under a newer schema major, each produces a new result with its own provenance and its own artifact id; the earlier result is unchanged in every field; and a failed extraction mutates no result that already exists (FR-038, FR-043)
+
+**Checkpoint**: the three highest-severity findings of the analysis pass are closed, and the one task that
+could not have run where it was written now sits after the adapter it depends on.

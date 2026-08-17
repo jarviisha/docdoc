@@ -128,7 +128,7 @@ runs against both (research.md R11).
   folding, no Unicode normalisation. Milestone 4 cannot resolve what this layer has already altered
   (FR-003).
 
-## 7. DecodingOptions and the budget
+## 7. ExtractionOptions and the budget
 
 | Field | Type | In identity? |
 |---|---|---|
@@ -172,7 +172,8 @@ first two and have never had the third (research.md R4).
 ### ExtractionProvenance
 
 Records document identity, `schema_identity`, `schema_hash`, `prompt_hash`, `projection_id`, adapter id
-and version, `model_id` and `model_version`, the `DecodingOptions`, `extractor_version`, and `ModelUsage`.
+and version, `model_id` and `model_version`, the `ExtractionOptions` as they actually ran,
+`extractor_version`, and `ModelUsage`.
 
 ### Artifact identity
 
