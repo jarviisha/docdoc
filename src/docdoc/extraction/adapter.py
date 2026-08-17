@@ -8,7 +8,6 @@ is a new module rather than a change here.
 
 from __future__ import annotations
 
-from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -20,41 +19,27 @@ if TYPE_CHECKING:
 
 __all__ = [
     "Availability",
-    "Effort",
     "ExtractionOptions",
     "ModelAdapter",
     "ModelResponse",
     "ModelUsage",
-    "Thinking",
 ]
-
-
-class Effort(StrEnum):
-    """How much reasoning the model spends.
-
-    A result-affecting input the reference design never contemplated, and
-    therefore folded into identity (research.md R4).
-    """
-
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    XHIGH = "xhigh"
-    MAX = "max"
-
-
-class Thinking(StrEnum):
-    ADAPTIVE = "adaptive"
-    DISABLED = "disabled"
 
 
 class ExtractionOptions(BaseModel):
     """The settings and budgets a call runs with -- the ones that change a result.
 
-    There is deliberately no ``temperature``, no ``top_p``, and no ``seed``: the
-    chosen provider's current models reject the first two outright and have never
-    had the third. Offering a knob that cannot be honoured would be worse than
-    not offering one (research.md R4).
+    These are the sampling parameters ADR-0003's ``Extract`` row names, and on the
+    chosen provider they all exist -- ``temperature``, ``top_p``, ``top_k``, and a
+    ``seed`` (research.md R4). ``max_output_tokens`` caps the model's whole output
+    including its reasoning, which is why ``thinking_budget`` is here too: a budget
+    sized for the expected JSON alone truncates mid-answer, and the truncation
+    arrives as a stop reason rather than as an error (R14).
+
+    ``temperature`` defaults to ``0.0`` rather than to the provider's own default,
+    because extraction wants the least variance available. That is not a
+    determinism guarantee -- ``seed`` is best-effort and Google promises no
+    bit-exactness -- and FR-037 still declines to claim byte-identical repeats.
 
     Retry, timeout, and deadline are **not** here. They live in
     ``TransportSettings``, which is what makes "transport cannot change identity"
@@ -63,9 +48,19 @@ class ExtractionOptions(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    max_tokens: int = Field(default=8192, ge=1)
-    effort: Effort = Effort.HIGH
-    thinking: Thinking = Thinking.ADAPTIVE
+    max_output_tokens: int = Field(default=8192, ge=1)
+    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    top_p: float | None = Field(default=None, ge=0.0, le=1.0)
+    top_k: int | None = Field(default=None, ge=1)
+
+    #: Best-effort reproducibility. Recorded either way, because a result produced
+    #: under an unrecorded seed is not explainable.
+    seed: int | None = None
+
+    #: ``None`` leaves the provider's automatic budget in place. Folded into
+    #: identity because it changes the answer.
+    thinking_budget: int | None = Field(default=None, ge=0)
+
     input_budget_tokens: int = Field(default=DEFAULT_INPUT_BUDGET_TOKENS, ge=1)
 
 

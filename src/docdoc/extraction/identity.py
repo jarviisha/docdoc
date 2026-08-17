@@ -101,20 +101,25 @@ def options_hash_for_extraction(
     projection_id: str,
     model_id: str,
     model_version: str,
-    max_tokens: int,
-    effort: str,
-    thinking: str,
+    max_output_tokens: int,
+    temperature: float,
+    top_p: float | None,
+    top_k: int | None,
+    seed: int | None,
+    thinking_budget: int | None,
     input_budget_tokens: int,
 ) -> str:
     """Every input that can change a successful extraction, and nothing else.
 
-    ADR-0003's ``Extract`` row names "temperature, top_p, seed, max_tokens".
-    Three of those do not exist on the chosen provider: ``temperature``,
-    ``top_p``, and ``top_k`` are rejected outright by its current models, and
-    there is no seed. Folding a parameter that cannot exist would be dead code;
-    omitting the ones that do -- the effort level above all -- would be the
-    stale-cache bug ADR-0003 exists to prevent. So this follows the ADR's rule
-    and refines its parenthetical (research.md R4).
+    ADR-0003's ``Extract`` row names "temperature, top_p, seed, max_tokens", and on
+    the chosen provider every one of them exists -- so the row is followed rather
+    than refined (research.md R4). ``top_k`` and ``thinking_budget`` are folded too:
+    the ADR's list is a minimum, and both change the answer.
+
+    A ``seed`` is folded even though the provider treats it as best-effort. Two runs
+    under one seed may still differ; two runs under *different* seeds are a different
+    request, and an input that can change the result must reach the identity whether
+    or not it fully determines it.
 
     Retry, timeout, and deadline are absent by construction: they live in
     ``TransportSettings``, a separate type, so FR-027 holds without discipline.
@@ -127,9 +132,12 @@ def options_hash_for_extraction(
             "projection_id": projection_id,
             "model_id": model_id,
             "model_version": model_version,
-            "max_tokens": max_tokens,
-            "effort": effort,
-            "thinking": thinking,
+            "max_output_tokens": max_output_tokens,
+            "temperature": temperature,
+            "top_p": top_p,
+            "top_k": top_k,
+            "seed": seed,
+            "thinking_budget": thinking_budget,
             "input_budget_tokens": input_budget_tokens,
         }
     )

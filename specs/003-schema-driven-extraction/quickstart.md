@@ -16,11 +16,11 @@ uv sync --all-extras
 ```
 
 The base install stays `pydantic` alone. `uv sync --all-extras` adds the provider SDK behind the
-`anthropic` extra, plus the Milestone 2 extras. To confirm the base install pulls no provider SDK:
+`google` extra, plus the Milestone 2 extras. To confirm the base install pulls no provider SDK:
 
 ```bash
 uv run --no-project --with . python -c "import docdoc.extraction, importlib.util as u; \
-  assert u.find_spec('anthropic') is None; print('base install: no provider SDK')"
+  assert u.find_spec('google') is None; print('base install: no provider SDK')"
 ```
 
 ## Run the suites
@@ -119,13 +119,13 @@ read literally.
 ### V4 — Reach a real model, without naming it in application code (US3, P3) — credentials required
 
 ```bash
-export ANTHROPIC_API_KEY=...          # or `ant auth login`
+export GEMINI_API_KEY=...             # or GOOGLE_API_KEY
 uv run pytest -m provider -q
 ```
 
 ```python
 result = extract(document, schema="invoice@1")   # no adapter argument: configuration decides
-result.provenance.adapter_id                     # 'anthropic-messages'
+result.provenance.adapter_id                     # 'gemini'
 result.provenance.model_id, result.provenance.model_version
 result.provenance.usage.input_tokens, result.provenance.usage.output_tokens
 ```
@@ -190,7 +190,7 @@ uv run lint-imports
 ```
 
 **Expected**: `docdoc.extraction` above `docdoc.ingest` above `docdoc.kernel`, and the provider SDK
-importable only from `docdoc/extraction/adapters/anthropic_messages.py`.
+importable only from `docdoc/extraction/adapters/gemini.py`.
 
 ## What "done" looks like
 

@@ -16,8 +16,9 @@ The layer is deliberately narrow. It owns the request, the conformance check, id
 translation; it owns no judgment about whether an extracted value is *good*. It does not verify that a
 value appears in the document — not even by exact search, which the kernel could already do — because
 ADR-0003 makes grounding its own stage with its own artifact. It does not enforce the schema's
-constraints, because Principle VII gives that to Milestone 5 and, as it turns out, because the provider
-could not enforce them anyway (research.md R3).
+constraints, because Principle VII gives that to Milestone 5 — a choice, not a provider limit: the
+chosen provider would enforce numeric bounds if asked, and they are deliberately not sent (research.md
+R3).
 
 What the layer does insist on is that the model's answer be *provably* the requested shape before it
 becomes a result: the shape is enforced by the provider, checked again locally against a compiled model,
@@ -30,7 +31,7 @@ There is **no kernel change** at this milestone.
 **Language/Version**: Python >= 3.11 (unchanged from Milestones 1 and 2)
 
 **Primary Dependencies**: Base install unchanged — `pydantic` only. One new optional extra:
-`docdoc[anthropic]` → the official `anthropic` SDK ([research.md R1](research.md)). Stdlib used by the
+`docdoc[google]` → the unified `google-genai` SDK ([research.md R1](research.md)). Stdlib used by the
 layer: `hashlib`, `json`, `logging`, `time` (monotonic deadlines), `dataclasses`, `typing`.
 
 **Storage**: N/A — `Document` + schema identity in, `ExtractionResult` out. No persistence, no artifact
@@ -70,7 +71,7 @@ text, prompt content, and credentials never reach logs (FR-039).
 
 **Scale/Scope**: Documents up to the configured input budget; schemas up to a few hundred fields.
 Roughly 11 new modules plus one adapter and the in-repo `echo` adapter, no kernel change, and a fixture
-set of 2 schemas, 2 prompts, and 3 recorded provider responses.
+set of 3 schemas, 3 prompts, and 4 recorded provider responses.
 
 ## Constitution Check
 
@@ -83,11 +84,11 @@ Evaluated against constitution v1.2.0. **Initial: PASS. Post-design re-check: PA
 | 1 | **Kernel purity (I)** | **PASS** — no kernel change at all at this milestone (research.md R9 rejects promoting `ProviderError` for want of a present-tense need). `Document` is read and never modified (FR-009). `tests/unit/test_kernel_purity.py` must keep passing untouched |
 | 2 | **Provenance preservation (I, VIII)** | **PASS** — every result records document identity, schema identity **and** `schema_hash`, `prompt_hash`, model id and version, decoding settings, adapter id and version, extractor version, token usage, and the derived artifact id (data-model §8). Re-extraction produces a new result; nothing is overwritten (FR-038) |
 | 3 | **Grounding integrity (II)** | **PASS by deliberate abstention** — every value carries the ADR-0004 grounding fields and this feature leaves all of them unresolved (FR-032, FR-047). What it *does* supply is the byte-faithful claimed source text (FR-003) that Milestone 4 will resolve. Nothing is self-certified as grounded, and `model_confidence` is stored untrusted and routes nothing |
-| 4 | **Determinism (III)** | **PASS** — the deterministic core (schema resolution, request assembly, conformance check, identity) has no clock, randomness, or network. The model is the probabilistic edge and is declared as such: FR-037 refuses to claim byte-identical repeats, which research.md R4 shows is the only honest position — the provider has no temperature and no seed to pin |
-| 5 | **Provider isolation (IV)** | **PASS** — SDK imports confined to one adapter module and enforced by a new forbidden-imports contract; provider exceptions translated with `__cause__` preserved; base install pulls no provider SDK (SC-013). A content refusal — which arrives as HTTP 200, not an exception — is translated at the same boundary (research.md R12) |
+| 4 | **Determinism (III)** | **PASS** — the deterministic core (schema resolution, request assembly, conformance check, identity) has no clock, randomness, or network. The model is the probabilistic edge and is declared as such: FR-037 refuses to claim byte-identical repeats. `temperature=0.0` and a recorded `seed` reduce variance, and the provider guarantees no bit-exactness, so the claim stays unavailable — research.md R4 |
+| 5 | **Provider isolation (IV)** | **PASS** — SDK imports confined to one adapter module and enforced by a new forbidden-imports contract; provider exceptions translated with `__cause__` preserved; base install pulls no provider SDK (SC-013). A refusal — a *successful* response carrying a stop reason, in four categories plus a prompt-level block — is translated at the same boundary (research.md R12) |
 | 6 | **Text-first (V)** | **N/A** — no parsing and no recognition at this milestone. This feature consumes whatever `Document` ingest produced and cannot re-route it |
 | 7 | **Schema-driven (VI)** | **PASS** — this gate is the feature. Schemas and prompts are data files (FR-049); a second document type is added in the test suite with zero engine changes (SC-014), asserted by a check that fails the build; every result names the exact `name@version` and its content hash |
-| 8 | **Validation separation (VII)** | **PASS** — extraction checks response shape and type parseability only (FR-006). Field constraints are *stored* in the schema and hashed into its identity, and deliberately not acted on; cross-field rules do not exist here. research.md R3 shows this split is forced by the provider's schema subset as well as required by the principle |
+| 8 | **Validation separation (VII)** | **PASS** — extraction checks response shape and type parseability only (FR-006). Field constraints are *stored* in the schema and hashed into its identity, and deliberately not acted on; cross-field rules do not exist here. research.md R3 records that this split is required by the principle and **not** forced by the provider, which would enforce numeric bounds if asked |
 | 9 | **No silent fallback (VIII)** | **PASS** — an unknown schema identity names the requested identity and the available versions (FR-016); a missing credential names the unavailable capability before any byte is transmitted (FR-041); a failed model call never switches model, provider, or schema version (FR-029); an over-budget document is refused rather than truncated (FR-030) |
 | 10 | **Measurability (IX)** | **PASS** — all 21 success criteria are countable. Extraction *accuracy* is Milestone 6's golden-set question and is not claimed here; what is measured here is conformance, identity, provenance completeness, and boundary containment |
 | 11 | **Layer direction (X)** | **PASS** — `docdoc.extraction` sits above `docdoc.ingest`, which is the constitution's own order, and is added to the `import-linter` layers contract in the same change. Only two names are imported from ingest and both are justified in research.md R9 |
@@ -100,45 +101,49 @@ Evaluated against constitution v1.2.0. **Initial: PASS. Post-design re-check: PA
 Recorded so reviewers see them here rather than discovering them in code. None is a constitution
 violation.
 
-1. **A provider is named, and the constitution names a different one as an example.** The plan chooses
-   Anthropic Claude (research.md R1). The constitution's packaging line reads "Provider integrations are
-   optional extras (for example `docdoc[openai]`, `docdoc[pdf]`)" — an illustration of *extras*, in a
-   sentence about packaging, while the sanctioned-stack line says only "one LLM adapter". The choice is
-   made on three concrete properties (generally available server-enforced structured output, a 1M-token
-   context window, documented prefix-match prompt caching), and it is a one-module change to revisit —
-   which is the point of Principle IV. If the project reads the constitution's example as binding, the
-   fix is a one-line constitution amendment naming the intended provider, **not** a quiet substitution
-   during implementation.
+1. **A provider is named, and the choice is close to arbitrary.** The plan chooses Google Gemini
+   (`docdoc[google]`, the unified `google-genai` SDK) because the project owner chose it. The
+   constitution's packaging line names `docdoc[openai]` as an illustration of *extras*, in a sentence
+   about packaging, while the sanctioned-stack line says only "one LLM adapter" — so it does not bind.
+   Every major provider offers server-enforced structured output, a large enough context window, and
+   prefix caching, and adding a second adapter is a new module of roughly 150 lines. research.md R1
+   records this honestly, including that an earlier revision chose Anthropic, justified it with three
+   properties that are not differentiators, and was written by an Anthropic model that did not disclose
+   the conflict.
 
-2. **ADR-0003's `Extract` row lists decoding parameters that do not exist on the chosen provider.** It
-   names "temperature, top_p, seed, max_tokens"; the current models of the chosen provider reject
-   `temperature`, `top_p`, and `top_k` outright and have no seed. The plan follows ADR-0003's *rule* —
-   fold every input that can change the result — and folds what actually exists: `model_id`,
-   `model_version`, `max_tokens`, the effort level, and the thinking mode (research.md R4). Whether the
-   ADR's parenthetical should be generalised is a decision for an ADR, not for this plan, so it is
-   surfaced here rather than settled. Two consequences worth naming: the honest no-determinism position
-   of FR-037 is now the *only* available position, and the effort level is a result-affecting input that
-   the reference design never contemplated.
+2. **A multi-provider aggregator was considered and rejected.** LiteLLM would let one adapter serve many
+   models, which is a real benefit. It is rejected because the enforcement level of the response shape
+   would depend on the model string with docdoc unable to tell which level it got — turning FR-011's
+   "the response could not have had another shape" back into "our parser coped" — and because it
+   normalises decoding parameters, so what provenance records as sent may not be what the provider
+   received. Both defeat the point of this layer. The `ModelAdapter` protocol already makes a second
+   provider a new module rather than an engine change (research.md R1).
 
-3. **The input-budget guard is a deliberate over-estimate.** FR-030 must refuse an over-budget document
+3. **The prompt prefix is currently too short to be cached at all.** The ordering is right — stable
+   before volatile — but a cache hit needs the shared prefix to clear a per-model minimum of 2,048–4,096
+   tokens, and the current per-schema prefix is a few hundred (research.md R15). So the ordering buys
+   nothing today. It is recorded rather than dressed up, and padding the prefix to become cache-eligible
+   is explicitly *not* chosen without measurement.
+
+4. **The input-budget guard is a deliberate over-estimate.** FR-030 must refuse an over-budget document
    *before* transmission (FR-041), and the only exact token count available is an API call that
    transmits the document to answer. The guard is therefore a local, conservative character-based bound,
    with the provider's own rejection mapped to the same typed error as a backstop (research.md R5). The
    consequence to accept: a document that would have fitted can be refused. The ratio is configurable
    and the limitation is documented rather than discovered.
 
-4. **`schema_hash` covers more than the wire does.** The hash is taken over the whole schema including
+5. **`schema_hash` covers more than the wire does.** The hash is taken over the whole schema including
    constraints and descriptions; the response shape sent to the model is a projection that drops what the
    provider cannot enforce (research.md R3). So editing a numeric bound invalidates the extraction cache
    while changing nothing the model sees. That is correct under ADR-0008 — the constraint changes what a
    result *means* to Milestone 5 — but it looks like a spurious cache miss and is documented as such.
 
-5. **The prompt assembly order is load-bearing, not stylistic.** The provider's cache is a prefix match,
+6. **The prompt assembly order is load-bearing, not stylistic.** The provider's cache is a prefix match,
    so the per-schema prefix must precede the document text and nothing per-request may appear ahead of
    the breakpoint (research.md R15). A test asserts it, because the failure mode is silent: the results
    stay correct and the bill multiplies.
 
-6. **Two names are imported from `docdoc.ingest`.** `ProviderError` and `TransportSettings`
+7. **Two names are imported from `docdoc.ingest`.** `ProviderError` and `TransportSettings`
    (research.md R9). Legal under Principle X's order and recorded in the layers contract. The
    alternative — promoting both to the kernel — was rejected because a transport knob has no place in an
    IR whose purity is Principle I, and because there is no second consumer yet to justify a shared home.
@@ -167,7 +172,7 @@ Single-project Python library. Only the paths below are created or touched by th
 packages (`transform/`, `pipeline/`, `api/`) arrive in later milestones.
 
 ```text
-pyproject.toml               # + [anthropic] extra, + import-linter layers/forbidden contracts
+pyproject.toml               # + [google] extra, + import-linter layers/forbidden contracts
 uv.lock                      # regenerated and committed
 
 src/docdoc/
@@ -218,19 +223,19 @@ tests/
 │   ├── test_no_provider_names.py      # SC-013's other half: no provider named outside adapters
 │   ├── test_observe.py                # event schema + content-leak assertion (SC-015)
 │   ├── test_no_transmission.py        # SC-016, against a recording transport
-│   └── test_anthropic_mapping.py      # recorded, scrubbed responses (R11)
+│   └── test_gemini_mapping.py         # recorded, scrubbed responses (R11)
 ├── contract/
 │   └── test_model_adapter_contract.py # every ModelAdapter must satisfy EXT-15…EXT-18
 ├── property/
 │   └── test_schema_hash.py            # reorder ⇒ same hash; any semantic edit ⇒ different hash
 ├── integration/
-│   └── test_anthropic_live.py         # marked `provider`
+│   └── test_gemini_live.py            # marked `provider`
 ├── perf/
 │   └── test_extraction_perf.py        # marked `perf`, SC-021
 └── fixtures/
     ├── schemas/                       # incl. an over-nested schema and a malformed file
     ├── echo/                          # canned responses for the in-repo adapter (FR-044)
-    ├── anthropic/                     # 3 recorded, scrubbed responses: ok, refusal, truncated
+    ├── gemini/                        # 4 recorded, scrubbed responses: ok, refusal, recitation, truncated
     └── snapshots/schema_hashes.json   # the FR-017 change detector
 ```
 

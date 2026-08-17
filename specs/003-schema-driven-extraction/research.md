@@ -1,35 +1,53 @@
 # Phase 0 Research: Schema-Driven Extraction
 
-Fifteen decisions the spec left to planning, each recorded as Decision / Rationale / Alternatives. Two
-of them (R4, R5) surface a tension the spec did not anticipate rather than settle it quietly.
+Fifteen decisions the spec left to planning, each recorded as Decision / Rationale / Alternatives. R5
+surfaces a tension the spec did not anticipate rather than settling it quietly.
+
+**R1, R3, R4, R12, R13, R14, and R15 were rewritten after the provider changed from Anthropic to Google
+Gemini.** Each records what the earlier revision claimed and why it was wrong, rather than being quietly
+corrected — two of those claims dressed a choice as a technical constraint, and that is the kind of error
+that retires a decision from review.
 
 Constitution v1.2.0; ADR-0002 (canonical form), ADR-0003 (artifact chain), ADR-0004 (confidence),
 ADR-0008 (schema evolution).
 
-## R1 — The one LLM adapter: Anthropic Claude, shipped as an opt-in extra
+## R1 — The one LLM adapter: Google Gemini, shipped as an opt-in extra
 
-**Decision.** `docdoc[anthropic]` → the official `anthropic` SDK, confined to
-`src/docdoc/extraction/adapters/anthropic_messages.py`. The base install stays `pydantic` alone.
+**Decision.** `docdoc[google]` → the unified `google-genai` SDK (not the legacy
+`google-generativeai`), confined to `src/docdoc/extraction/adapters/gemini.py`. The base install
+stays `pydantic` alone.
 
-**Rationale.** Three properties decide it for a grounding-first engine:
+**Rationale, stated honestly.** At this layer the choice is close to arbitrary, and that is not a
+weakness — it is exactly what Principle IV is designed to make true. Any of the major providers
+supports server-enforced structured output, a context window large enough for the one-window decision,
+and prefix-oriented caching. Adding a second adapter is a new module of roughly 150 lines; the engine
+does not change. So the decision was made on grounds that have nothing to do with model quality:
 
-1. **Server-enforced structured output is generally available** (R2), so response conformance is a
-   provider guarantee rather than a parsing exercise.
-2. **A 1M-token context window** on the current models, which is what makes the one-window decision of
-   the spec's clarification survive contact with real documents rather than failing on page 30.
-3. **Prompt caching with a documented prefix-match rule** (R15), which turns the per-schema prompt into
-   a cached prefix — the difference between paying for the instructions once per document and once per
-   schema.
+1. The project owner chose it.
+2. The `ModelAdapter` protocol and its contract suite already exist and run against two independent
+   implementations, so the first adapter is not a lock-in.
 
-**Alternatives.** The constitution's packaging line names `docdoc[openai]` — but as an illustrative
-example of *an extra*, in a sentence about packaging, not as a sanctioned provider choice; the stack
-section says only "one LLM adapter". Choosing another provider would be a configuration and one-module
-change under Principle IV, which is the entire point of the boundary. A local or self-hosted model is
-deferred by the same MVP discipline that deferred a local OCR engine in ADR-0001.
+**This entry previously said something weaker, and the correction matters.** An earlier revision chose
+Anthropic Claude and justified it with "three concrete properties": generally-available server-enforced
+structured output, a 1M-token context window, and documented prefix-match prompt caching. None of the
+three is a differentiator — OpenAI has had strict structured outputs since 2024, Gemini has had a
+1M-token window for longer, and every major provider caches prefixes. Dressing an arbitrary choice as a
+technical finding made it sound better founded than it was.
+
+That revision was also written by an Anthropic model recommending Anthropic, and it did not say so.
+A conflict of interest that is not disclosed at the point of decision is not disclosed at all.
+
+**Alternatives.** The constitution's packaging line names `docdoc[openai]` as an example of *an extra*,
+in a sentence about packaging; the stack section says only "one LLM adapter", so it does not bind.
+A multi-provider aggregator (LiteLLM) was considered and rejected: it would make the enforcement level
+of the response shape depend on the model string, with docdoc unable to tell which level it got —
+turning FR-011's "the response could not have had another shape" back into "our parser coped". It would
+also normalise decoding parameters across providers, so what provenance records as sent may not be what
+the provider received. A local or self-hosted model stays deferred by the same MVP discipline that
+deferred a local OCR engine in ADR-0001.
 
 **Consequence to accept.** Naming a provider in the plan is a commitment the spec deliberately avoided.
-It is recorded in plan.md as a design decision so a reviewer sees it here rather than discovering it in
-an import.
+It is recorded in plan.md as a design decision so a reviewer meets it there rather than in an import.
 
 ## R2 — Structured output via the provider's response-format constraint, not prose parsing
 
@@ -54,48 +72,80 @@ outright: it returns an error on every current model of the chosen provider.
 | Artifact | Contains | Purpose |
 |---|---|---|
 | `schema_hash` | The **whole** schema — fields, types, cardinality, **constraints**, descriptions | Identity and cache invalidation, per ADR-0008 |
-| The requested response shape | Only what the provider can enforce — types, cardinality, `enum`, `const`, string formats | Sent on the wire; folded into `options_hash` per ADR-0008 |
+| The requested response shape | Types, cardinality, `enum`, string formats, `additionalProperties: false` | Sent on the wire; folded into `options_hash` |
 
-**Rationale.** This is not a design preference; it is what the provider supports. Its structured-output
-schema subset **cannot express** numeric bounds (`minimum`, `maximum`, `multipleOf`), string length
-bounds (`minLength`, `maxLength`), complex array constraints, or **recursive schemas**.
+**What the provider can and cannot enforce.** Gemini's structured-output subset is wider than the one
+this entry was first written against:
 
-Three spec decisions turn out to be forced rather than chosen, which is worth recording because each
-looked like a judgment call at clarification time:
+| Keyword | Gemini |
+|---|---|
+| `minimum`, `maximum` | **Supported** |
+| `minItems`, `maxItems`, `prefixItems` | **Supported** |
+| `$ref` — including recursion | **Supported** |
+| `enum`, `format`, `anyOf`, `additionalProperties`, `title`, `description` | Supported |
+| `minLength`, `maxLength`, `pattern` | Not supported |
 
-- **FR-006** — extraction checks shape and type parseability, and Milestone 5 enforces constraints. The
-  provider cannot enforce a numeric range even if asked, so any other split would have been fiction.
-- **FR-048** — repetition bounded to one level. Recursive schemas are not expressible at all, so the
-  bound is the provider's, not ours; ours is merely stricter and checked at registration.
-- **FR-008** — undeclared fields discarded. The projection sets `additionalProperties: false`, so an
-  undeclared field should be impossible; FR-008 stays as a defence against the case where it happens
-  anyway.
+Only the last row is genuinely unenforceable. **Everything else the projection drops, it drops by
+choice.**
+
+**The choice, and why.** Numeric and array bounds are *not* sent, even though the provider would
+enforce them. Principle VII makes validation a separate stage with its own field-addressable output;
+pushing a bound onto the wire turns violating it into the provider's extraction failure rather than a
+located validation failure, and makes that behaviour change when the provider changes. Milestone 5
+enforces every constraint, uniformly, wherever the value came from.
+
+**An earlier revision of this entry got this backwards, and it is worth recording how.** It claimed
+three spec decisions were *forced* by the provider rather than chosen:
+
+- **FR-006** (constraints declared here, enforced by Milestone 5) — claimed forced because "the provider
+  cannot enforce a numeric range even if asked". **False.** Gemini enforces `minimum`/`maximum`. FR-006
+  is a principled choice under Principle VII, and the paragraph above is the reasoning it always needed.
+- **FR-048** (repetition bounded to one level) — claimed forced because "recursive schemas are not
+  expressible at all". **False.** Gemini supports `$ref` recursion. The bound is entirely ours: an MVP
+  scope decision about how much of the schema→shape→conformance→result path to make recursive, refused
+  at registration rather than at first use.
+- **FR-008** (undeclared fields discarded) — this one stands. The projection sets
+  `additionalProperties: false`, so an undeclared field should be impossible; FR-008 remains as a
+  defence against it happening anyway.
+
+Calling a chosen constraint "forced" is a specific kind of error: it retires a decision from review.
+Nobody re-examines a limit imposed from outside.
 
 **Consequence.** A schema author can write a constraint that changes `schema_hash` — and therefore
 invalidates the extraction cache — while changing nothing about what is sent to the model. That is
 correct under ADR-0008 (the constraint changes what a *result* means downstream) and must be documented,
 because it looks like a spurious cache miss.
 
-## R4 — Decoding parameters do not exist on the chosen provider, and ADR-0003 says they do
+## R4 — The decoding parameters ADR-0003 names all exist, so the row is followed literally
 
-**Decision.** The extract stage's `options_hash` folds `model_id`, `model_version`, `max_tokens`, the
-reasoning-effort level, and the thinking mode — **not** temperature, top-p, or a seed. This **refines
-ADR-0003's `Extract` row**, which lists "decoding params (temperature, top_p, seed, max_tokens)".
+**Decision.** The extract stage's `options_hash` folds `model_id`, `model_version`,
+`max_output_tokens`, `temperature`, `top_p`, `top_k`, `seed`, and `thinking_budget`.
 
-**Rationale.** On the chosen provider's current models, `temperature`, `top_p`, and `top_k` are removed
-from the API and a request carrying any of them is rejected outright. There is no seed parameter. The
-knobs that *do* affect a result are `max_tokens`, the effort level, and whether thinking is enabled.
-ADR-0003 was written against the reference design's assumptions; folding a parameter that cannot exist
-would be dead code, and omitting the ones that do exist would be the exact stale-cache bug ADR-0003
-exists to prevent.
+**Rationale.** ADR-0003's `Extract` row lists "decoding params (temperature, top_p, seed, max_tokens)",
+and on Gemini every one of them exists in `GenerateContentConfig`. The row is therefore *followed*, not
+refined. `top_k` and `thinking_budget` are folded in addition, because the ADR's list is a minimum and
+both change the answer.
 
-**Consequence, and it strengthens the spec.** FR-037 says the system must not claim byte-identical
-results across runs. With no temperature and no seed there is not even a nominal determinism knob to
-misrepresent, so the honest position the spec already took is the only available one.
+`temperature` defaults to `0.0` rather than the provider's own default: extraction wants the least
+variance on offer, and a default that differs from the provider's must be recorded — which folding it
+achieves.
 
-**Not resolved here.** Whether ADR-0003 should be superseded to generalise its Extract row is a
-decision for an ADR, not a plan. This plan follows ADR-0003's *rule* — fold every input that can change
-the result — and records that the row's parenthetical is provider-specific.
+A `seed` is folded even though the provider treats it as best-effort. Two runs under one seed may still
+differ; two runs under *different* seeds are a different request. An input that can change a result
+must reach the identity whether or not it fully determines it.
+
+**An earlier revision claimed the opposite, and presented it as the plan's headline finding.** It said
+the row "lists decoding parameters that do not exist on the chosen provider" and that folding them
+would be dead code — true of Anthropic's current models, which reject `temperature`/`top_p`/`top_k` and
+have no seed, and false of the provider actually chosen. The finding was provider-specific and was
+written as though it were about ADR-0003. `tests/unit/test_artifact_identity.py` encoded the inverted
+assertion and failed when the provider changed, which is what that test was for.
+
+**Consequence for FR-037.** The spec declines to claim byte-identical results across repeated model
+calls, and that still holds — but the reason is weaker than it was. There *is* a nominal determinism
+knob now. The honest statement is that `seed` plus `temperature=0.0` reduces variance while the provider
+guarantees no bit-exactness, so the claim is still unavailable; it is no longer unavailable for want of
+a parameter.
 
 ## R5 — The input-budget guard is a local over-estimate, because measuring it exactly means transmitting
 
@@ -206,67 +256,104 @@ returns fixed responses keyed by `(document_id, schema identity)`, so US1 throug
 demonstrable with no credentials. Recorded responses are what keep the mapping code — which produces
 every real result — under test in CI, exactly the argument Milestone 2's Complexity Tracking made.
 
-## R12 — Retry classification is a mapping table, and refusal is not an exception
+## R12 — Retry classification is a mapping table, and a refusal is a stop reason
 
 **Decision.** Transient (retried, up to the `TransportSettings` limit): connection failure, timeout,
-rate limit, server error, overloaded. Permanent (first attempt is final): rejected credential, malformed
-request, request too large, unknown model, **and a content refusal**.
+rate limit, server error, resource exhausted. Permanent (first attempt is final): rejected credential,
+malformed request, request too large, unknown model, **and every refusal category**.
 
-**Rationale.** FR-025. The trap is that a content refusal arrives as a **successful HTTP 200** whose
-`stop_reason` is `refusal` — not as an exception — so code that reads the response content
-unconditionally treats a refusal as an answer. The adapter therefore branches on `stop_reason` before
-touching content, and a refusal becomes a typed permanent failure carrying the provider's stated
-category.
+**Rationale.** FR-025. The trap is that a refusal arrives as a **successful HTTP response**, not as an
+exception, so code that reads the candidate's content unconditionally reports a refusal as an answer.
+The adapter therefore branches on the stop reason before touching content.
 
-`stop_reason: max_tokens` is the other stop-reason branch that matters: it means a structurally
-incomplete answer, which is the spec's "model stops mid-response" edge case, and it maps to the
-output-budget error of FR-030 rather than to a retry.
+Gemini has more refusal branches than one, and they mean different things:
+
+| Signal | Meaning | Handling |
+|---|---|---|
+| `finishReason: SAFETY` | Output blocked on safety grounds | Permanent refusal; `safetyRatings` carried through verbatim |
+| `finishReason: PROHIBITED_CONTENT` | Output blocked as prohibited | Permanent refusal |
+| `finishReason: BLOCKLIST` | Output contained a blocklisted term | Permanent refusal |
+| `finishReason: RECITATION` | Stopped because output resembled copyrighted material | Permanent, and **not a safety refusal** — a document that legitimately quotes a standard form can trip it |
+| `promptFeedback.blockReason` | The *prompt* was blocked before generation | Permanent; distinct from an output block, and the only one where no candidate exists at all |
+| `finishReason: MAX_TOKENS` | Structurally incomplete answer | Output-budget `ExtractionError` (FR-030), not a retry |
+
+`RECITATION` is the one worth naming separately. It is not misconduct and it is not transient: an
+invoice quoting standard terms can hit it, and retrying will hit it again. Reporting it as a safety
+refusal would send the caller looking for the wrong problem.
+
+**An earlier revision described a single `refusal` stop reason**, which is Anthropic's shape. Gemini
+splits it four ways plus a prompt-level block, and collapsing them would discard the distinction between
+"we will not answer this" and "the answer looked like a quotation".
 
 ## R13 — Model choice is configuration, with a recorded default
 
-**Decision.** Default `claude-opus-5`; the model id, its version, `max_tokens`, and the effort level are
-configuration, recorded in every result. Reference list prices at time of writing, per million tokens:
+**Decision.** The model id is configuration and is recorded, with its version, in every result
+(FR-033). The default is the current Gemini Pro-tier model; the exact id is fixed at T053 against the
+live API rather than written from memory here, because a model id guessed in a research note is a
+plausible-looking string that fails at the first call.
 
-| Model | Input | Output | Context |
-|---|---|---|---|
-| `claude-opus-5` (default) | $5 | $25 | 1M |
-| `claude-sonnet-5` | $3 | $15 | 1M |
-| `claude-haiku-4-5` | $1 | $5 | 200K |
+**Rationale.** Extraction accuracy is what Milestone 6 measures and what every grounding guarantee
+inherits, so the default is the most capable tier and cost reduction is an explicit, recorded choice
+rather than a silent one. Recording the model *and its version* is what makes a result explainable
+after a model update.
 
-**Rationale.** Extraction accuracy is what Milestone 6 will measure and what every grounding guarantee
-inherits, so the default is the most capable model and cost reduction is an explicit, recorded choice
-rather than a silent one. Recording the model *and its version* is FR-033; without the version a result
-is unexplainable after a model update.
+**Not resolved here.** Reference prices and the exact default model id are deliberately absent. An
+earlier revision listed a price table, which reads as authoritative and goes stale silently. T053
+records both against the live API, and T059 measures the accuracy/cost/latency trade-off across tiers on
+the committed fixture set — the same shape as Milestone 2's text-layer thresholds, and for the same
+reason: a number chosen before measurement is worse than a task that says to measure it.
 
-**Note on effort.** The reasoning-effort level materially changes both quality and spend and is folded
-into identity (R4). Its default is a tuning decision to be fixed against the sample set during
-implementation — the same shape as Milestone 2's text-layer thresholds, and for the same reason: a
-number guessed before measurement is worse than a task that says to measure it.
+## R14 — Reasoning shares the output budget, and the failure is documented
 
-## R14 — Thinking is on by default, and it shares the output budget
+**Decision.** `thinking_budget` is left at the provider's automatic setting by default and folded into
+`options_hash`. `max_output_tokens` is sized with headroom for reasoning.
 
-**Decision.** Thinking mode is left at the provider's default (on, adaptive) and is folded into
-`options_hash`. `max_tokens` is sized with headroom for it.
+**Rationale.** On Gemini 2.5+, thinking is on by default and, left unset, the model manages its own
+budget up to roughly 8,192 tokens — drawn from the same output allowance as the response text. A
+`max_output_tokens` sized for the expected JSON alone gets consumed by reasoning and the answer is
+truncated, surfacing as `finishReason: MAX_TOKENS` with **empty or partial text**. This is not a
+hypothetical: it is among the most reported failure modes on the provider's own forum.
 
-**Rationale.** On the chosen provider's current default model, `max_tokens` caps thinking **plus**
-response text together. A budget sized for the expected JSON alone truncates mid-answer, which surfaces
-as `stop_reason: max_tokens` — a real result silently lost to a configuration error. The reasoning
-content itself is never requested: it is not needed, and asking a model to reproduce its reasoning is
-itself a refusal trigger on the chosen provider.
+Reasoning content itself is never requested — `include_thoughts` stays off. It is not needed, and
+storing it would put model-generated prose into a result whose every other field is either a document
+value or an identifier.
 
-## R15 — Prompt order is chosen for the cache: instructions first, document last
+**Consequence.** The truncation branch of R12 is load-bearing rather than defensive, and T059's
+`max_output_tokens` measurement is what keeps it from firing in normal use.
+
+
+## R15 — Prompt order is chosen for the cache, and the prefix is currently too short to be cached
 
 **Decision.** The request is assembled stable-to-volatile — response shape, then the schema's
-instructions and field descriptions, then the document text last — with the cache breakpoint at the end
-of the per-schema prefix.
+instructions and field descriptions, then the document text last.
 
-**Rationale.** The provider's prompt cache is a **prefix match**: any byte change invalidates everything
-after it. Everything derived from `schema@version` is identical across every document extracted against
-that schema, and the document is the only volatile part. Putting the document last makes the per-schema
-prefix a cache hit for every document after the first, at roughly a tenth of the input price. Putting it
-first — the natural reading order — would make every extraction a full-price cold write.
+**Rationale.** Gemini 2.5+ caches implicitly, with no configuration, and the provider's own guidance is
+to "put large and common contents at the beginning of your prompt" and "send requests with similar
+prefix in a short amount of time". That is prefix behaviour, and it confirms the ordering: everything
+derived from `schema@version` is identical across every document extracted against that schema, and the
+document is the only volatile part. Putting the document first — the natural reading order — would make
+every extraction a cold read.
 
-**Consequence.** This is a correctness-adjacent constraint, not just a cost one: the assembly order is
-load-bearing and needs a test that fails if a future change interpolates anything volatile ahead of the
-prefix. Nothing per-request — no timestamp, no document id, no request id — may appear before the
-breakpoint.
+**The new finding, and it is not comfortable.** A cache hit requires the shared prefix to exceed a
+per-model minimum: **2,048 tokens on Gemini 2.5 Flash/Pro, 4,096 on newer tiers**. The current
+per-schema prefix — `invoice@1`'s prompt is about 1,200 characters, plus its response shape — is on the
+order of a few hundred tokens. **It is far below the threshold, so today it is not cached at all.**
+
+So the ordering is correct and the benefit is currently zero. That is worth stating plainly rather than
+leaving the earlier revision's implication that the ordering *buys* something today. Two honest options
+exist and neither is decided here:
+
+- Accept it. The prefix costs little to send, the ordering is already right, and a cache hit arrives free
+  once schemas or instructions grow past the minimum.
+- Pad the prefix deliberately to clear the threshold. Rejected as a default: paying for tokens whose only
+  purpose is to make caching eligible is a cost decision dressed as an optimisation, and it should be
+  measured before it is chosen.
+
+**Consequence.** The ordering still needs its test, because the failure it guards is silent in the other
+direction: once the prefix *is* large enough to cache, a volatile value interpolated ahead of the
+breakpoint would leave results correct and multiply the bill. `tests/unit/test_prompt_assembly.py`
+asserts it offline; T060 verifies a real cache read and, per the above, **is expected to report zero
+until the prefix grows** — so it must assert the threshold arithmetic rather than assert a hit.
+
+Cache hits are reported in the response's `usage.total_cached_tokens`. Nothing per-request — no
+timestamp, no document id, no request id — may appear before the breakpoint.

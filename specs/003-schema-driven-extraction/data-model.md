@@ -97,9 +97,12 @@ The projection of a `Schema` onto what the provider can enforce (research.md R3)
 | `projection_id` | `str` | `response-shape@1` — versioned, because the projection is code that changes results (research.md R7) |
 | `shape` | `Mapping[str, Any]` | The JSON Schema sent on the wire |
 
-- **EXT-14** — the projection carries types, cardinality, `enum`, `const`, and string formats, sets
-  `additionalProperties: false` at every object, and **drops** numeric bounds, string-length bounds, and
-  complex array constraints. Dropping is not a silent lossy step: what is dropped stays in the `Schema`,
+- **EXT-14** — the projection carries types, cardinality, `enum`, and string formats, and sets
+  `additionalProperties: false` at every object. It **drops** numeric bounds, array-length bounds,
+  `minLength`/`maxLength`, and `pattern`. Only the last two are unenforceable by the provider; the rest are
+  dropped **by choice**, because Principle VII puts constraint enforcement in Milestone 5 and a bound on
+  the wire would make violating it the provider's extraction failure rather than a located validation
+  failure (research.md R3). Dropping is not a silent lossy step: what is dropped stays in the `Schema`,
   stays in `schema_hash`, and is Milestone 5's input.
 
 Each field is asked for as a pair — the typed `value` and the `claimed_text` — so FR-003's byte-faithful
@@ -132,14 +135,16 @@ runs against both (research.md R11).
 
 | Field | Type | In identity? |
 |---|---|---|
-| `max_tokens` | `int` | **Yes** |
-| `effort` | `Effort` | **Yes** — a result-affecting input the reference design never contemplated (research.md R4) |
-| `thinking` | `ThinkingMode` | **Yes** |
+| `max_output_tokens` | `int` | **Yes** |
+| `temperature` | `float` | **Yes** — defaults to `0.0`, not the provider's default, so it must be recorded |
+| `top_p`, `top_k` | `float \| None`, `int \| None` | **Yes** |
+| `seed` | `int \| None` | **Yes** — best-effort on the provider, folded anyway (research.md R4) |
+| `thinking_budget` | `int \| None` | **Yes** — reasoning shares the output budget (R14) |
 | `input_budget_tokens` | `int` | **Yes** — it decides whether a result exists at all |
 | *(transport)* | `TransportSettings` | **No** — separate type, cannot change a successful result (FR-027) |
 
-There is no `temperature`, no `top_p`, and no `seed`: the chosen provider's current models reject the
-first two and have never had the third (research.md R4).
+Every parameter ADR-0003's `Extract` row names exists on the chosen provider, so the row is followed
+literally rather than refined (research.md R4).
 
 - **EXT-19** — the request is assembled stable-to-volatile: response shape, then schema instructions and
   field descriptions, then the document text last, with the cache breakpoint at the end of the per-schema
@@ -219,7 +224,7 @@ SchemaRegistry ─┤                                              ├─ Extrac
                                                                           ↑
 ModelAdapter ────────────────────────────────────────────────── document_id (M1) + options_hash
   ├─ echo (offline, deterministic)
-  └─ anthropic_messages (extra: anthropic)
+  └─ gemini (extra: google)
 ```
 
 Milestone 4 consumes `claimed_text` and resolves the grounding fields in its own stage, with its own

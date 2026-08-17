@@ -25,12 +25,10 @@ from __future__ import annotations
 
 from docdoc.extraction.adapter import (
     Availability,
-    Effort,
     ExtractionOptions,
     ModelAdapter,
     ModelResponse,
     ModelUsage,
-    Thinking,
 )
 from docdoc.extraction.errors import (
     ExtractionError,
@@ -62,7 +60,6 @@ __all__ = [
     "PROJECTION_ID",
     "Availability",
     "Cardinality",
-    "Effort",
     "ExtractedValue",
     "ExtractionError",
     "ExtractionOptions",
@@ -81,7 +78,6 @@ __all__ = [
     "SchemaDescription",
     "SchemaError",
     "SchemaRegistry",
-    "Thinking",
     "default_registry",
     "extract",
     "load_prompt",

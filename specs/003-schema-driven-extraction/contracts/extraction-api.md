@@ -109,15 +109,18 @@ Re-extraction produces a new result with its own provenance. It never mutates a 
 
 ```python
 ExtractionOptions(
-    max_tokens=...,             # caps the model's whole output, reasoning included
-    effort=...,                 # result-affecting, therefore in identity
-    thinking=...,               # result-affecting, therefore in identity
+    max_output_tokens=...,      # caps the model's whole output, reasoning included
+    temperature=...,            # defaults to 0.0, not the provider's default
+    top_p=..., top_k=...,       # optional; None leaves the provider's own default
+    seed=...,                   # best-effort reproducibility, recorded either way
+    thinking_budget=...,        # None leaves the provider's automatic budget
     input_budget_tokens=...,    # the guard of §6
 )
 ```
 
-There is no `temperature`, no `top_p`, and no `seed`. The chosen provider's current models reject the
-first two and have never had the third, so the layer offers no knob that cannot be honoured.
+Every one of these is folded into the extraction artifact's identity, because every one can change the
+answer. `temperature=0.0` plus a recorded `seed` reduces variance; neither makes repeated calls
+byte-identical, and §4 does not claim they do.
 
 Retry, timeout, and deadline are configured separately, with `TransportSettings` from `docdoc.ingest`:
 
@@ -180,7 +183,7 @@ from docdoc.extraction.adapters import EchoAdapter  # deterministic, offline, no
 call runnable with no credentials and no network, and the contract suite runs against it and the real
 adapter alike.
 
-The real adapter installs with `pip install docdoc[anthropic]`. Your application code does not import it
+The real adapter installs with `pip install docdoc[google]`. Your application code does not import it
 and does not name it — which adapter answers is configuration, and the only observable difference is in
 provenance.
 

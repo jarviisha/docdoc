@@ -92,7 +92,7 @@ def test_the_recorded_values_are_the_ones_actually_used(
     registry: SchemaRegistry, echo: EchoAdapter
 ) -> None:
     entry = registry.resolve("invoice@1")
-    options = ExtractionOptions(max_tokens=1234, effort="low")
+    options = ExtractionOptions(max_output_tokens=1234, temperature=0.3, seed=11)
     result = extract(
         make_document(DOCUMENT_TEXT),
         schema="invoice@1",

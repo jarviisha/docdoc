@@ -48,7 +48,10 @@
      is still ungrounded when this milestone ships.
   3. **Repeating groups in scope, bounded to one level** (FR-048), rejected at registration when
      exceeded. Keeps `invoice@1` expressible while bounding the recursion that would otherwise run
-     through schema, response shape, conformance check, and result type at once.
+     through schema, response shape, conformance check, and result type at once. **Note:** the plan
+     briefly recorded this bound and FR-006 as *forced* by the provider's schema subset. That was wrong
+     — the chosen provider supports both `$ref` recursion and numeric bounds — and research.md R3 now
+     records the correction. Both are our decisions, and remain open to review.
   4. **Schemas are declarative data files** (FR-049, FR-050), hashed with the canonical serialization
      ADR-0002 already defines rather than a second convention invented for schemas.
   5. **A performance criterion over the deterministic work only** (SC-021), measured with the model

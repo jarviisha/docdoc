@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from docdoc.extraction import Effort, ExtractionOptions, SchemaRegistry, Thinking, extract
+from docdoc.extraction import ExtractionOptions, SchemaRegistry, extract
 from docdoc.extraction.adapters.echo import EchoAdapter
 from docdoc.extraction.identity import (
     EXTRACTOR_ID,
@@ -30,9 +30,12 @@ _BASE = {
     "projection_id": "response-shape@1",
     "model_id": "a-model",
     "model_version": "1",
-    "max_tokens": 8192,
-    "effort": "high",
-    "thinking": "adaptive",
+    "max_output_tokens": 8192,
+    "temperature": 0.0,
+    "top_p": None,
+    "top_k": None,
+    "seed": None,
+    "thinking_budget": None,
     "input_budget_tokens": 200_000,
 }
 
@@ -63,9 +66,12 @@ def test_the_same_inputs_hash_identically() -> None:
         ("projection_id", "response-shape@2"),
         ("model_id", "another-model"),
         ("model_version", "2"),
-        ("max_tokens", 4096),
-        ("effort", "low"),
-        ("thinking", "disabled"),
+        ("max_output_tokens", 4096),
+        ("temperature", 0.7),
+        ("top_p", 0.9),
+        ("top_k", 40),
+        ("seed", 7),
+        ("thinking_budget", 1024),
         ("input_budget_tokens", 100_000),
     ],
 )
@@ -76,19 +82,26 @@ def test_every_folded_input_moves_the_options_hash(field: str, changed: Any) -> 
     )
 
 
-def test_the_folded_set_is_exactly_what_adr_0003_and_r4_name() -> None:
+def test_the_folded_set_is_exactly_what_adr_0003_names() -> None:
     """Pins the set, so adding or dropping one is a deliberate change.
 
-    Notably absent: ``temperature``, ``top_p``, and ``seed``. The chosen provider's
-    current models reject the first two outright and have never had the third, so
-    folding them would be dead code -- research.md R4 refines ADR-0003's Extract row
-    on exactly this point.
+    This assertion was originally written inverted -- it asserted that
+    ``temperature``, ``top_p``, and ``seed`` were *absent*, because the provider the
+    plan first chose rejects the first two and has no seed. The provider changed to
+    one where all four exist, and the test failed, which is what it was for. ADR-0003's
+    ``Extract`` row is now followed literally rather than refined.
     """
     import inspect
 
     parameters = set(inspect.signature(options_hash_for_extraction).parameters)
     assert parameters == set(_BASE)
-    assert not parameters & {"temperature", "top_p", "top_k", "seed"}
+    assert {"temperature", "top_p", "top_k", "seed"} <= parameters, (
+        "ADR-0003's Extract row names these; on this provider they all exist, so "
+        "omitting one would be the stale-cache bug the ADR exists to prevent"
+    )
+    assert "thinking_budget" in parameters, (
+        "reasoning shares the output budget, so it changes the answer (R14)"
+    )
 
 
 # -- the artifact chain ------------------------------------------------------
@@ -207,7 +220,7 @@ def test_only_the_schema_changing_reuses_the_parse(
 
 @pytest.mark.parametrize(
     ("field", "value"),
-    [("effort", Effort.LOW), ("thinking", Thinking.DISABLED), ("max_tokens", 4096)],
+    [("temperature", 0.7), ("seed", 7), ("max_output_tokens", 4096), ("thinking_budget", 512)],
 )
 def test_result_affecting_options_move_the_artifact_id(
     registry: SchemaRegistry, echo: EchoAdapter, field: str, value: Any

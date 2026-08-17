@@ -33,9 +33,10 @@ dependencies = ["pydantic>=2.0"]
 # user who installs `docdoc[pdf]`. See specs/002-ingest-parser-layer/research.md R1.
 pdf = ["pymupdf>=1.24"]
 azure = ["azure-ai-documentintelligence>=1.0"]
-# The one LLM adapter of the MVP (specs/003 research.md R1). Apache-2.0
-# compatible; no licence caveat like the pdf extra's.
-anthropic = ["anthropic>=0.40"]
+# The one LLM adapter of the MVP (specs/003 research.md R1). The unified
+# `google-genai` SDK, not the legacy `google-generativeai`. Apache-2.0, so no
+# licence caveat like the pdf extra's.
+google = ["google-genai>=1.0"]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
@@ -197,6 +198,7 @@ name = "provider SDKs stay inside model adapters (Constitution Principle IV)"
 type = "forbidden"
 source_modules = ["docdoc.extraction"]
 forbidden_modules = [
+    "google",
     "httpx",
     "requests",
     "openai",
@@ -209,6 +211,6 @@ forbidden_modules = [
     "azure",
 ]
 ignore_imports = [
-    "docdoc.extraction.adapters.anthropic_messages -> anthropic",
+    "docdoc.extraction.adapters.gemini -> google",
 ]
 unmatched_ignore_imports_alerting = "none"
