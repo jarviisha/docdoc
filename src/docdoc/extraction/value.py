@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import Any, TypeAlias
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = ["ExtractedValue", "ValueTree"]
 
@@ -51,7 +51,18 @@ class ExtractedValue(BaseModel):
     #: through. It routes nothing, gates nothing, and is not a quality metric
     #: (ADR-0004, FR-031). It is recorded so a later calibrator can be fitted
     #: against it.
-    model_confidence: float | None = None
+    #:
+    #: The label is in the field's own ``description`` rather than only in this
+    #: comment, because FR-031 requires it wherever the field is *exposed* -- and
+    #: the generated schema is one of those places. A comment does not travel.
+    model_confidence: float | None = Field(
+        default=None,
+        description=(
+            "UNTRUSTED: the model's own self-reported confidence, passed through "
+            "verbatim. It must not influence any routing or acceptance decision, and "
+            "it is not a quality metric. Use the grounding fields for that."
+        ),
+    )
 
     #: Trusted, deterministic, and **unresolved at this milestone** (EXT-24).
     grounding: str | None = None

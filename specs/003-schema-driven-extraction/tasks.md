@@ -135,15 +135,15 @@ content hash moves.
 
 ### Tests for User Story 2
 
-- [ ] T042 [P] [US2] Write `tests/unit/test_schema_versioning.py` — two majors registered at once resolve independently and neither shadows the other; each result names the exact identity and hash; the two artifact ids differ (SC-004, SC-008, EXT-11)
-- [ ] T043 [P] [US2] Extend `tests/unit/test_schema_versioning.py` with the resolution failures: a bare `invoice` with no version, an unregistered version, and an unregistered name — each naming the requested identity and what actually exists, with no neighbouring version substituted (SC-006, EXT-12)
-- [ ] T044 [P] [US2] Write `tests/unit/test_schema_snapshot.py` and commit `tests/fixtures/snapshots/schema_hashes.json` — the FR-017 change detector: the build fails when a registered version's hash moves. The test's own message must state the two ways to clear it (publish a new major, or refresh the snapshot with the classification in the commit message), because a failing check whose remedy is unclear gets bypassed (SC-007)
+- [X] T042 [P] [US2] Write `tests/unit/test_schema_versioning.py` — two majors registered at once resolve independently and neither shadows the other; each result names the exact identity and hash; the two artifact ids differ (SC-004, SC-008, EXT-11)
+- [X] T043 [P] [US2] Extend `tests/unit/test_schema_versioning.py` with the resolution failures: a bare `invoice` with no version, an unregistered version, and an unregistered name — each naming the requested identity and what actually exists, with no neighbouring version substituted (SC-006, EXT-12)
+- [X] T044 [P] [US2] Write `tests/unit/test_schema_snapshot.py` and commit `tests/fixtures/snapshots/schema_hashes.json` — the FR-017 change detector: the build fails when a registered version's hash moves. The test's own message must state the two ways to clear it (publish a new major, or refresh the snapshot with the classification in the commit message), because a failing check whose remedy is unclear gets bypassed (SC-007)
 
 ### Implementation for User Story 2
 
-- [ ] T045 [US2] Implement `describe()` and `identities()` fully in `src/docdoc/extraction/registry.py` — a caller lists every registered identity and reads fields, types, and descriptions without running an extraction (FR-018)
-- [ ] T046 [US2] Implement the concrete-version-only guard in `src/docdoc/extraction/extract.py` — an identity without a version, or any implicit resolution, raises `SchemaError` from the library core (FR-014)
-- [ ] T047 [US2] Document the bump rules in `docs/concepts/extraction.md` with ADR-0008's table, and state plainly the consequence R3 surfaces: editing a numeric constraint moves `schema_hash` and invalidates the extraction cache while changing nothing the model sees. That looks like a spurious cache miss and must be documented rather than discovered
+- [X] T045 [US2] Implement `describe()` and `identities()` fully in `src/docdoc/extraction/registry.py` — a caller lists every registered identity and reads fields, types, and descriptions without running an extraction (FR-018)
+- [X] T046 [US2] Implement the concrete-version-only guard in `src/docdoc/extraction/extract.py` — an identity without a version, or any implicit resolution, raises `SchemaError` from the library core (FR-014)
+- [X] T047 [US2] Document the bump rules in `docs/concepts/extraction.md` with ADR-0008's table, and state plainly the consequence R3 surfaces: editing a numeric constraint moves `schema_hash` and invalidates the extraction cache while changing nothing the model sees. That looks like a spurious cache miss and must be documented rather than discovered
 
 **Checkpoint**: The schema contract is real and enforced; US1 and US2 both work offline.
 
@@ -192,18 +192,18 @@ a result.
 
 ### Tests for User Story 4
 
-- [ ] T061 [P] [US4] Write `tests/unit/test_artifact_identity.py` covering EXT-21…EXT-23 — every folded input changes the id; retry, timeout, and deadline change it in zero cases; changing only the schema reuses the parse and triggers no re-parse (SC-009, SC-010)
-- [ ] T062 [P] [US4] Write `tests/unit/test_provenance_recording.py` — 100% of results record document identity, schema identity and hash, prompt hash, projection id, model identity and version, decoding settings, adapter identity and version, extractor version, and usage, all readable without re-running the extraction (SC-011)
-- [ ] T063 [P] [US4] Write `tests/unit/test_grounding_untouched.py` — every grounding field on every value of every result is unresolved, and no code path in the extraction layer sets one. This is SC-018 and it is the assertion that keeps Milestone 4's stage boundary from eroding (FR-032, FR-047, EXT-24)
-- [ ] T064 [P] [US4] Write `tests/unit/test_observe.py` — one structured event per extraction, success and failure alike, and zero occurrences of document text, extracted values, claimed source text, prompt content, or credentials anywhere in the log output while extracting the whole fixture set (SC-015, FR-039)
+- [X] T061 [P] [US4] Write `tests/unit/test_artifact_identity.py` covering EXT-21…EXT-23 — every folded input changes the id; retry, timeout, and deadline change it in zero cases; changing only the schema reuses the parse and triggers no re-parse (SC-009, SC-010)
+- [X] T062 [P] [US4] Write `tests/unit/test_provenance_recording.py` — 100% of results record document identity, schema identity and hash, prompt hash, projection id, model identity and version, decoding settings, adapter identity and version, extractor version, and usage, all readable without re-running the extraction (SC-011)
+- [X] T063 [P] [US4] Write `tests/unit/test_grounding_untouched.py` — every grounding field on every value of every result is unresolved, and no code path in the extraction layer sets one. This is SC-018 and it is the assertion that keeps Milestone 4's stage boundary from eroding (FR-032, FR-047, EXT-24)
+- [X] T064 [P] [US4] Write `tests/unit/test_observe.py` — one structured event per extraction, success and failure alike, and zero occurrences of document text, extracted values, claimed source text, prompt content, or credentials anywhere in the log output while extracting the whole fixture set (SC-015, FR-039)
 
 ### Implementation for User Story 4
 
-- [ ] T065 [US4] Implement `ExtractionProvenance` and `ExtractionResult` in `src/docdoc/extraction/extract.py` per data-model §8, including `artifact_id`
-- [ ] T066 [US4] Implement `model_confidence` pass-through in `src/docdoc/extraction/extract.py` — stored verbatim, documented as untrusted in the field's own docstring and in `contracts/extraction-api.md` §3, and influencing no routing or acceptance decision (FR-031, ADR-0004)
-- [ ] T067 [US4] Implement the reserved calibration fields as always-`None` in `src/docdoc/extraction/extract.py`, per ADR-0004's MVP row
-- [ ] T068 [US4] Wire `observe.py` into `src/docdoc/extraction/extract.py` so the event is emitted on every path including the failure paths, and assert the failure paths in `tests/unit/test_observe.py` (FR-040)
-- [ ] T069 [US4] Implement `extractor_version` in `src/docdoc/extraction/extract.py`, embedding the adapter and SDK version the way `parser_version` embeds the library version, so an upgrade that changes output is visible in identity (FR-036)
+- [X] T065 [US4] Implement `ExtractionProvenance` and `ExtractionResult` in `src/docdoc/extraction/extract.py` per data-model §8, including `artifact_id`
+- [X] T066 [US4] Implement `model_confidence` pass-through in `src/docdoc/extraction/extract.py` — stored verbatim, documented as untrusted in the field's own docstring and in `contracts/extraction-api.md` §3, and influencing no routing or acceptance decision (FR-031, ADR-0004)
+- [X] T067 [US4] Implement the reserved calibration fields as always-`None` in `src/docdoc/extraction/extract.py`, per ADR-0004's MVP row
+- [X] T068 [US4] Wire `observe.py` into `src/docdoc/extraction/extract.py` so the event is emitted on every path including the failure paths, and assert the failure paths in `tests/unit/test_observe.py` (FR-040)
+- [X] T069 [US4] Implement `extractor_version` in `src/docdoc/extraction/extract.py`, embedding the adapter and SDK version the way `parser_version` embeds the library version, so an upgrade that changes output is visible in identity (FR-036)
 
 **Checkpoint**: All four stories independently functional.
 
@@ -344,8 +344,8 @@ that was in the wrong phase to be runnable at all, and was split out of T029 rat
 
 - [ ] T078 Extend `tests/unit/test_provider_errors.py` with Principle XII's canonical-document invariant against the real adapter's failure modes: after a content refusal, a per-attempt timeout, an exhausted retry chain, and a call interrupted mid-flight, the input `Document` is byte-identical to what was passed in and no partial result exists (Principle XII, FR-043)
 - [ ] T079 **Resolve the R5 assumption by measuring, not guessing**: calibrate the ratio, the safety margin, and the default `input_budget_tokens` in `src/docdoc/extraction/budget.py` against every committed fixture, using the provider's own token count as ground truth, and record the measured values in `research.md` under R5. If the ratio under-estimates for any fixture, raise the margin. Depends on T053 (R5, EXT-20, FR-030)
-- [ ] T080 [P] Write `tests/unit/test_no_fallback.py` — when the configured adapter fails permanently, fails transiently past its attempt limit, or is unavailable, the failure surfaces and the system tries no other adapter, no other model, and no other schema version. Assert against a registry holding two adapters and two schema majors, so a fallback would have somewhere to go if the code allowed one (FR-029, SC-012)
-- [ ] T081 [P] Write `tests/unit/test_reextraction.py` — extracting the same document twice, and extracting it under a newer schema major, each produces a new result with its own provenance and its own artifact id; the earlier result is unchanged in every field; and a failed extraction mutates no result that already exists (FR-038, FR-043)
+- [X] T080 [P] Write `tests/unit/test_no_fallback.py` — when the configured adapter fails permanently, fails transiently past its attempt limit, or is unavailable, the failure surfaces and the system tries no other adapter, no other model, and no other schema version. Assert against a registry holding two adapters and two schema majors, so a fallback would have somewhere to go if the code allowed one (FR-029, SC-012)
+- [X] T081 [P] Write `tests/unit/test_reextraction.py` — extracting the same document twice, and extracting it under a newer schema major, each produces a new result with its own provenance and its own artifact id; the earlier result is unchanged in every field; and a failed extraction mutates no result that already exists (FR-038, FR-043)
 
 **Checkpoint**: the three highest-severity findings of the analysis pass are closed, and the one task that
 could not have run where it was written now sits after the adapter it depends on.

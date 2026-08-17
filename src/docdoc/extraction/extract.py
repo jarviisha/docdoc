@@ -35,12 +35,31 @@ if TYPE_CHECKING:
     from docdoc.extraction.registry import SchemaRegistry
     from docdoc.kernel import Document
 
-__all__ = ["EXTRACTOR_VERSION", "ExtractionProvenance", "ExtractionResult", "extract"]
+__all__ = [
+    "EXTRACTOR_VERSION",
+    "ExtractionProvenance",
+    "ExtractionResult",
+    "extract",
+    "extractor_version_for",
+]
 
-#: Bumped whenever this layer's output changes for unchanged inputs (FR-036).
-#: The adapter's own version is recorded separately, so a provider SDK upgrade is
-#: visible without this having to move.
+#: Bumped whenever this layer's own output changes for unchanged inputs (FR-036).
 EXTRACTOR_VERSION = "1.0.0"
+
+
+def extractor_version_for(adapter: ModelAdapter) -> str:
+    """The processor version ADR-0003 folds into the artifact id.
+
+    It **embeds the adapter's identity and version**, the way ingest's
+    ``parser_version`` embeds the underlying library version (``1.0.0+pymupdf-…``)
+    and for the same reason: the adapter builds the request and maps the response,
+    so an adapter fix changes results, and a result-affecting input that does not
+    reach the artifact id is the stale-cache bug ADR-0003 exists to prevent.
+
+    Recording the adapter separately in provenance -- which this layer also does --
+    makes the change *visible*. It does not make it *invalidating*. Only this does.
+    """
+    return f"{EXTRACTOR_VERSION}+{adapter.id}-{adapter.version}"
 
 
 class ExtractionProvenance(BaseModel):
@@ -138,6 +157,7 @@ def extract(
     document_id = document.id
 
     entry = registry.resolve(schema)
+    extractor_version = extractor_version_for(adapter)
 
     availability = adapter.available()
     if not availability.usable:
@@ -179,7 +199,7 @@ def extract(
             schema_hash=entry.schema_hash,
             adapter_id=adapter.id,
             adapter_version=adapter.version,
-            extractor_version=EXTRACTOR_VERSION,
+            extractor_version=extractor_version,
             effort=str(opts.effort),
             estimated_input_tokens=estimate,
             duration_ms=round((time.monotonic() - started) * 1000, 3),
@@ -218,13 +238,13 @@ def extract(
         model_id=response.model_id,
         model_version=response.model_version,
         decoding=opts,
-        extractor_version=EXTRACTOR_VERSION,
+        extractor_version=extractor_version,
         usage=response.usage,
     )
     artifact_id = extraction_artifact_id_for(
         document_id=document_id,
         extractor_id=EXTRACTOR_ID,
-        extractor_version=EXTRACTOR_VERSION,
+        extractor_version=extractor_version,
         options_hash=options_hash,
     )
 
@@ -239,7 +259,7 @@ def extract(
         adapter_version=adapter.version,
         model_id=response.model_id,
         model_version=response.model_version,
-        extractor_version=EXTRACTOR_VERSION,
+        extractor_version=extractor_version,
         effort=str(opts.effort),
         estimated_input_tokens=estimate,
         input_tokens=response.usage.input_tokens,
