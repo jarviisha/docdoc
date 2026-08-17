@@ -44,11 +44,15 @@ A schema is **data**, not code. Adding a document type is adding two files; ther
 `InvoiceService` and no `if schema.name == "invoice"` anywhere in the engine.
 
 ```python
-from docdoc.extraction import SchemaRegistry, extract
-from docdoc.extraction.adapters.gemini import GeminiAdapter
+from docdoc.extraction import SchemaRegistry, default_adapter, extract
 
 registry = SchemaRegistry.from_paths(["schemas/"])
-result = extract(document, schema="invoice@1", registry=registry, adapter=GeminiAdapter())
+result = extract(
+    document,
+    schema="invoice@1",
+    registry=registry,
+    adapter=default_adapter(),   # configuration picks it; this line names no provider
+)
 
 result.value_at("total").value          # Decimal('1240.00')  — not a float
 result.value_at("total").claimed_text   # '1,240.00'  — byte-faithful, as the model returned it

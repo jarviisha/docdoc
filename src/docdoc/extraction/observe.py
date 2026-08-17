@@ -8,6 +8,24 @@ counts, timings, and token counts only (FR-039).
 Emitted on every path, success and failure alike. An event only on success would
 make "why did this document fail?" answerable only by re-running the extraction,
 which for a paid model call is the wrong answer.
+
+**On the three ids the constitution names and this event omits.** The
+Observability section requires "request id, processing id, step id, latency,
+provider, model, and token usage". Latency, provider, model, and usage are here.
+The three ids are not, and the omission is deliberate rather than overlooked:
+
+- ``request_id`` and ``step_id`` belong to a request that spans several stages.
+  No such request exists yet -- ``extract()`` is synchronous, in-process, and one
+  stage. Inventing an id here would produce a value that correlates nothing.
+- ``processing_id`` is defined by ADR-0003 as the *terminal* artifact id of a
+  pipeline, and extraction is not terminal. What this event carries instead is
+  ``artifact_id``, this stage's own link in that chain, which the pipeline will
+  compose into a ``processing_id`` when there is a pipeline to do it.
+
+So the correlation this event supports today is by ``document_id`` and
+``artifact_id``. When Milestone 7 introduces a pipeline, the three ids become
+meaningful and belong here; adding them before then would be recording nulls and
+calling it observability (T086).
 """
 
 from __future__ import annotations

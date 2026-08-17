@@ -180,7 +180,7 @@ def extract(
         )
 
     shape = response_shape_for(entry.schema)
-    request = build_request(entry, document.text, response_shape=shape)
+    request = build_request(entry, document.text, response_shape=shape, document_id=document_id)
 
     estimate = guard_input_budget(
         request.rendered(),

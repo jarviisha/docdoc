@@ -125,9 +125,11 @@ uv run pytest -m provider -q
 ```
 
 ```python
-# Configuration decides which adapter you construct. `extract()` never picks one
-# for you and has no argument a fallback could be threaded through (FR-029).
-adapter = GeminiAdapter()
+# `default_adapter()` selects from whatever is installed and configured. Nothing
+# here names a provider, which is FR-021. It raises with every candidate's reason
+# if none is usable, and it never selects the echo adapter -- a fixture adapter
+# answering a real request would fabricate confidently (FR-028, FR-029).
+adapter = default_adapter()
 result = extract(document, schema="invoice@1", registry=registry, adapter=adapter)
 result.provenance.adapter_id                     # 'gemini'
 result.provenance.model_id, result.provenance.model_version

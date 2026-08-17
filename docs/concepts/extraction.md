@@ -3,11 +3,10 @@
 A `Document` plus a versioned schema, in; structured values, out.
 
 ```python
-from docdoc.extraction import SchemaRegistry, extract
-from docdoc.extraction.adapters import EchoAdapter
+from docdoc.extraction import SchemaRegistry, default_adapter, extract
 
 registry = SchemaRegistry.from_paths(["schemas"])
-result = extract(document, schema="invoice@1", registry=registry, adapter=EchoAdapter(...))
+result = extract(document, schema="invoice@1", registry=registry, adapter=default_adapter())
 
 result.value_at("total").value          # Decimal('1240.00')
 result.value_at("total").claimed_text   # '1,240.00'  — byte-faithful, as returned

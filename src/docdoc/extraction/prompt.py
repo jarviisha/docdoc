@@ -34,12 +34,13 @@ class ModelRequest:
     them in that order and marks the boundary.
     """
 
-    __slots__ = ("document_text", "prefix", "response_shape", "schema_identity")
+    __slots__ = ("document_id", "document_text", "prefix", "response_shape", "schema_identity")
 
     def __init__(
         self,
         *,
         schema_identity: str,
+        document_id: str | None = None,
         prefix: str,
         document_text: str,
         response_shape: dict[str, object],
@@ -48,6 +49,11 @@ class ModelRequest:
         #: adapter needs it for its own logging and error messages, and reading
         #: it back out of the rendered prompt would be parsing our own output.
         self.schema_identity = schema_identity
+        #: Carried so that an error raised *inside* an adapter can name the
+        #: document. Without it every adapter-raised failure reported
+        #: ``document_id=None``, and SC-012 requires all three of document,
+        #: schema, and adapter on 100% of failures.
+        self.document_id = document_id
         self.prefix = prefix
         self.document_text = document_text
         self.response_shape = response_shape
@@ -65,6 +71,7 @@ def build_request(
     document_text: str,
     *,
     response_shape: dict[str, object],
+    document_id: str | None = None,
 ) -> ModelRequest:
     """Assemble stable-to-volatile.
 
@@ -75,6 +82,7 @@ def build_request(
     prefix = entry.prompt.text.rstrip("\n")
     return ModelRequest(
         schema_identity=entry.identity,
+        document_id=document_id,
         prefix=prefix,
         document_text=f"{_DOCUMENT_HEADER}{document_text}",
         response_shape=response_shape,

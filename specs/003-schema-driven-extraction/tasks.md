@@ -360,12 +360,34 @@ reported 82/82 done. Two of these are requirements that were tested against the 
 quietly fail against the real one; one is a record of work that a silent string replacement never
 wrote.
 
-- [ ] T082 Add configuration-driven adapter selection so application code never constructs a provider adapter, per FR-021 and US3/AC2 (missing). Today `README.md` and the quickstart both write `adapter=GeminiAdapter()`, which is literally "naming a provider in application code", and `contracts/extraction-api.md` §8 claims the opposite. The ingest layer's shape is the precedent: a registry plus a request that names what is needed rather than who supplies it. US3/AC2 — "when the configured model or provider changes, no application code changes" — cannot pass until this exists
-- [ ] T083 Carry `document_id` on `ModelRequest` and thread it into every error the adapter raises, per SC-012 and FR-042 (partial). `src/docdoc/extraction/adapters/gemini.py` builds `ExtractionError` and `ModelProviderError` without it because the request does not carry it, so every adapter-raised failure reports `document_id=None`. SC-012 requires 100% of failures to name the document, the schema, and the adapter; only two of the three are named today
-- [ ] T084 Name the bound and the actual size in the truncation error in `src/docdoc/extraction/adapters/gemini.py`, per FR-030 (partial). The message explains *why* truncation happens but reports neither the configured `max_output_tokens` nor the output actually produced, which `usage.candidates_token_count` carries. FR-030 requires "the document, the bound, and the actual size"
-- [ ] T085 Restore the Phase 8 analysis-remediation record that commit `03106a0` describes and never wrote (missing). The seven fixes it lists were applied and verified; only the record is absent, because a `.replace()` matched nothing and was not asserted. Re-record them under new IDs rather than renumbering anything
-- [ ] T086 [P] Decide and record whether `request id`, `processing id`, and `step id` belong in the `extraction.extract` event, per Constitution §Observability (partial). All three are pipeline concepts that arrive at Milestone 7, and the spec's FR-040 does not list them — but the constitution states them without that qualification, so the deferral should be explicit rather than implied by omission
+- [X] T082 Add configuration-driven adapter selection so application code never constructs a provider adapter, per FR-021 and US3/AC2 (missing). Today `README.md` and the quickstart both write `adapter=GeminiAdapter()`, which is literally "naming a provider in application code", and `contracts/extraction-api.md` §8 claims the opposite. The ingest layer's shape is the precedent: a registry plus a request that names what is needed rather than who supplies it. US3/AC2 — "when the configured model or provider changes, no application code changes" — cannot pass until this exists
+- [X] T083 Carry `document_id` on `ModelRequest` and thread it into every error the adapter raises, per SC-012 and FR-042 (partial). `src/docdoc/extraction/adapters/gemini.py` builds `ExtractionError` and `ModelProviderError` without it because the request does not carry it, so every adapter-raised failure reports `document_id=None`. SC-012 requires 100% of failures to name the document, the schema, and the adapter; only two of the three are named today
+- [X] T084 Name the bound and the actual size in the truncation error in `src/docdoc/extraction/adapters/gemini.py`, per FR-030 (partial). The message explains *why* truncation happens but reports neither the configured `max_output_tokens` nor the output actually produced, which `usage.candidates_token_count` carries. FR-030 requires "the document, the bound, and the actual size"
+- [X] T085 Restore the Phase 8 analysis-remediation record that commit `03106a0` describes and never wrote (missing). The seven fixes it lists were applied and verified; only the record is absent, because a `.replace()` matched nothing and was not asserted. Re-record them under new IDs rather than renumbering anything
+- [X] T086 [P] Decide and record whether `request id`, `processing id`, and `step id` belong in the `extraction.extract` event, per Constitution §Observability (partial). All three are pipeline concepts that arrive at Milestone 7, and the spec's FR-040 does not list them — but the constitution states them without that qualification, so the deferral should be explicit rather than implied by omission
 
 **Checkpoint**: the two HIGH findings are the ones that matter. Both are requirements that pass against
 the in-repo adapter and fail against the real one, which is the failure mode a fixture-only suite is
 structurally unable to see.
+
+---
+
+## Phase 10: The record Phase 8 never wrote (T085)
+
+Commit `03106a0` describes seven analysis-remediation fixes and a phase recording them. The fixes
+landed and were each verified by grep; the phase did not, because the `.replace()` that would have
+written it matched nothing, was not asserted, and a `grep -c` returning 82 was read as confirmation
+when the number should have been 89. Recorded here under new ids rather than renumbering anything.
+
+Second silent replacement failure of this milestone. `assert old in s` is now the default in every
+patch script, not a flourish.
+
+- [X] T087 Create `src/docdoc/extraction/adapters/__init__.py`, which T001 claimed and never did. Python treated the directory as a namespace package, so imports kept working and nothing failed loudly — except the documented `from docdoc.extraction.adapters import EchoAdapter`, which three files taught and which failed with "unknown location". `EchoAdapter` is exported; `GeminiAdapter` deliberately is not
+- [X] T088 Correct the `extract()` signature in `contracts/extraction-api.md` §1 and §6 and in every `quickstart.md` example: `registry=` and `adapter=` are required and were absent, so copying any of them raised `TypeError`
+- [X] T089 Split the grounding-boundary assertions into `tests/unit/test_grounding_untouched.py`, the file T063 named and never created
+- [X] T090 [P] Correct `tasks.md` T010, T015, T020, and T059, which still named `Effort`, `const`, `max_tokens`, and a folded set explicitly excluding `temperature`/`top_p`/`seed`
+- [X] T091 [P] Correct the `plan.md` project tree: it still named `anthropic_messages.py` and omitted `retry.py` and `value.py`
+- [X] T092 [P] Document `ModelProviderError` and its refusal branches, `RegisteredSchema`, `SchemaDescription`, `ValueTree`, `ModelUsage.reasoning_tokens`, and the retry loop in `data-model.md`
+- [X] T093 [P] Point `quickstart.md` at `tests/unit/test_schema_snapshot.py`, and change its base-install check to `find_spec('google.genai')` — `google` is a namespace package many libraries provide
+
+**Checkpoint**: the record matches the work.

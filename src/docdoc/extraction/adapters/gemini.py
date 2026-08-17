@@ -191,7 +191,7 @@ class GeminiAdapter:
         except genai_errors.APIError as exc:
             raise self._translate(exc, request) from exc
 
-        return self._read(response, request)
+        return self._read(response, request, options)
 
     # -- request construction -----------------------------------------------
 
@@ -226,7 +226,9 @@ class GeminiAdapter:
 
     # -- response reading ---------------------------------------------------
 
-    def _read(self, response: Any, request: ModelRequest) -> ModelResponse:
+    def _read(
+        self, response: Any, request: ModelRequest, options: ExtractionOptions
+    ) -> ModelResponse:
         """Branch on the outcome *before* reading any content."""
         blocked = getattr(getattr(response, "prompt_feedback", None), "block_reason", None)
         if blocked is not None:
@@ -237,6 +239,7 @@ class GeminiAdapter:
                 reason="refusal",
                 adapter_id=ADAPTER_ID,
                 schema_identity=request.schema_identity,
+                document_id=request.document_id,
                 refusal_category=f"prompt_blocked:{_name(blocked).lower()}",
                 attempts=1,
             )
@@ -248,6 +251,7 @@ class GeminiAdapter:
                 reason="service",
                 adapter_id=ADAPTER_ID,
                 schema_identity=request.schema_identity,
+                document_id=request.document_id,
                 attempts=1,
             )
 
@@ -260,17 +264,22 @@ class GeminiAdapter:
                 reason="refusal",
                 adapter_id=ADAPTER_ID,
                 schema_identity=request.schema_identity,
+                document_id=request.document_id,
                 refusal_category=_REFUSALS[finish],
                 attempts=1,
             )
 
         if finish == "MAX_TOKENS":
+            produced = (usage.output_tokens or 0) + (usage.reasoning_tokens or 0)
             raise ExtractionError(
-                "the response was truncated at max_output_tokens, so it cannot be the "
-                "requested shape. Reasoning is billed from the same allowance, so raise "
-                "max_output_tokens or lower thinking_budget",
+                f"the response was truncated at the {options.max_output_tokens:,}-token output "
+                f"budget, having produced {produced:,} tokens "
+                f"({usage.output_tokens or 0:,} of answer and {usage.reasoning_tokens or 0:,} of "
+                "reasoning), so it cannot be the requested shape. Reasoning is billed from the "
+                "same allowance, so raise max_output_tokens or lower thinking_budget",
                 reason="truncated",
                 schema_identity=request.schema_identity,
+                document_id=request.document_id,
                 adapter_id=ADAPTER_ID,
             )
 
@@ -280,6 +289,7 @@ class GeminiAdapter:
                 reason="service",
                 adapter_id=ADAPTER_ID,
                 schema_identity=request.schema_identity,
+                document_id=request.document_id,
                 attempts=1,
             )
 
@@ -300,6 +310,7 @@ class GeminiAdapter:
                 "the provider returned an empty body for a successful stop reason",
                 reason="shape",
                 schema_identity=request.schema_identity,
+                document_id=request.document_id,
                 adapter_id=ADAPTER_ID,
             )
         try:
@@ -313,6 +324,7 @@ class GeminiAdapter:
                 f"response format: {exc.msg}",
                 reason="shape",
                 schema_identity=request.schema_identity,
+                document_id=request.document_id,
                 adapter_id=ADAPTER_ID,
             ) from exc
         if not isinstance(payload, dict):
@@ -320,6 +332,7 @@ class GeminiAdapter:
                 f"expected a JSON object at the response root, got {type(payload).__name__}",
                 reason="shape",
                 schema_identity=request.schema_identity,
+                document_id=request.document_id,
                 adapter_id=ADAPTER_ID,
             )
         return payload
@@ -348,6 +361,7 @@ class GeminiAdapter:
             reason=reason,
             adapter_id=ADAPTER_ID,
             schema_identity=request.schema_identity,
+            document_id=request.document_id,
             attempts=1,
         )
 
@@ -368,6 +382,7 @@ class GeminiAdapter:
                 reason="unavailable",
                 adapter_id=ADAPTER_ID,
                 schema_identity=request.schema_identity,
+                document_id=request.document_id,
             )
         from google import genai
 

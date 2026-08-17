@@ -17,8 +17,9 @@ for want of effort:
   shape and type parseability only (Principle VII) -- and the provider could not
   enforce those constraints if asked, so no other split was available.
 
-Nothing here names a provider. Which model answers is configuration, and the only
-observable difference between two of them is in provenance.
+Nothing here names a provider. Which model answers is configuration -- ``default_adapter()``
+selects one from what is installed and configured -- and the only observable
+difference between two of them is in provenance.
 """
 
 from __future__ import annotations
@@ -29,6 +30,12 @@ from docdoc.extraction.adapter import (
     ModelAdapter,
     ModelResponse,
     ModelUsage,
+)
+from docdoc.extraction.adapter_registry import (
+    AdapterCandidate,
+    AdapterRegistry,
+    default_adapter,
+    default_adapter_registry,
 )
 from docdoc.extraction.errors import (
     ExtractionError,
@@ -58,6 +65,8 @@ from docdoc.extraction.value import ExtractedValue
 
 __all__ = [
     "PROJECTION_ID",
+    "AdapterCandidate",
+    "AdapterRegistry",
     "Availability",
     "Cardinality",
     "ExtractedValue",
@@ -78,6 +87,8 @@ __all__ = [
     "SchemaDescription",
     "SchemaError",
     "SchemaRegistry",
+    "default_adapter",
+    "default_adapter_registry",
     "default_registry",
     "extract",
     "load_prompt",

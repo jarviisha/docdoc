@@ -184,9 +184,20 @@ There is no fallback: a failed call never switches model, provider, or schema ve
 ## 8. Adapters
 
 ```python
-from docdoc.extraction import ModelAdapter          # the protocol
-from docdoc.extraction.adapters import EchoAdapter  # deterministic, offline, no credentials
+from docdoc.extraction import ModelAdapter, default_adapter   # the protocol, and selection
+from docdoc.extraction.adapters import EchoAdapter            # deterministic, offline, no credentials
+
+adapter = default_adapter()   # configuration decides; this line names no provider
 ```
+
+`default_adapter()` picks the first usable adapter in the configured priority order and raises with
+**every candidate's reason** when none is usable — so "why not?" does not require reading docdoc's
+source. `default_adapter_registry()` returns the registry itself if you want to inspect or extend it.
+
+It **never selects `EchoAdapter`**, even when explicitly registered and even when nothing else is
+usable. Echo answers from fixtures, so auto-selecting it would turn a missing credential into
+confident, fabricated extractions carrying full provenance — silently wrong data rather than an
+error. Passing it explicitly is fine; that is a decision taken knowingly.
 
 `EchoAdapter` is part of the library, not a test fixture: it is what makes the whole path except the model
 call runnable with no credentials and no network, and the contract suite runs against it and the real
