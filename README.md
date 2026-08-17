@@ -8,25 +8,56 @@ LLM — everyone can do that. It is that every extracted value can answer:
 
 > **Where did this come from?**
 
-**Status:** Milestone 1 (kernel) implemented. Parsers, extraction, grounding, and validation are
-not built yet — see [Roadmap](#roadmap).
+**Status:** Milestones 1 (kernel) and 2 (parsers) implemented. Extraction, grounding, and
+validation are not built yet — see [Roadmap](#roadmap).
 
 ## What it does today
 
+Hand it a PDF and ask where a value physically sits:
+
 ```python
-from docdoc.kernel import Document
+from docdoc.ingest import CapabilityRequest, parse
+
+document = parse(
+    pdf_bytes,
+    require=CapabilityRequest(media_type="application/pdf", geometry=True),
+)
 
 (span,) = document.find("INV-001")
 document.page_for(span)  # (0,)  -> page 1
 document.locate(span)  # (Geometry(page_index=0, bbox=BBox(0.45, 0.1, 0.63, 0.13)),)
 ```
 
-Run the full example, which needs no infrastructure at all:
+Note that no provider is named. You ask for the capabilities you need; which parser supplies them
+is configuration. And the routing decision is on the result, per page:
+
+```python
+document.provenance.text_layer.rule_id          # 'text-layer@1'
+document.provenance.text_layer.text_layer_usable  # True
+document.provenance.text_layer.pages            # per-page verdicts and character counts
+```
+
+Run the examples, which need no infrastructure at all:
 
 ```bash
 uv sync --all-extras
-uv run python examples/build_document.py
+uv run python examples/build_document.py                       # kernel only
+uv run python examples/parse_pdf.py tests/fixtures/pdf/digital_invoice.pdf
 ```
+
+### Installing
+
+```bash
+pip install docdoc          # kernel + ingest contracts; pydantic is the only dependency
+pip install docdoc[pdf]     # native PDF text path
+pip install docdoc[azure]   # geometry-capable cloud path, for scans and images
+```
+
+> **Licence note.** `docdoc[pdf]` installs [PyMuPDF](https://pymupdf.readthedocs.io/), which is
+> **AGPL-3.0** (or a paid commercial licence). docdoc itself is Apache-2.0 and the extra is opt-in,
+> so docdoc's own distribution is unaffected — but if you embed `docdoc[pdf]` in a closed-source
+> pipeline, the AGPL applies to you. Know this before you install it, not after.
+> See [ADR-0001](docs/adr/0001-parser-and-ocr-strategy-in-mvp.md).
 
 ## Three principles that shape everything
 
@@ -101,8 +132,8 @@ higher-layer work merges while that property is failing or absent.
 | Milestone | Scope | Status |
 |---|---|---|
 | 1 | Kernel: Document IR, `locate` / `find` / `slice` / `merge`, identity | **Done** |
-| 2 | Parsers: native PDF text path, one geometry-capable cloud provider | Next |
-| 3 | Schema-driven extraction, one LLM adapter | Planned |
+| 2 | Parsers: native PDF text path, one geometry-capable cloud provider | **Done** |
+| 3 | Schema-driven extraction, one LLM adapter | Next |
 | 4 | Deterministic grounding: exact → fuzzy → ungrounded | Planned |
 | 5 | Validation: schema, field, and cross-field rules | Planned |
 | 6 | Evaluation: golden dataset, field accuracy, grounding rate | Planned |
@@ -115,6 +146,8 @@ higher-layer work merges while that property is failing or absent.
 - [Document concepts](docs/concepts/document.md)
 - [Identity model](docs/concepts/identity.md)
 - [Kernel API contract](specs/001-kernel-document-ir/contracts/kernel-api.md)
+- [Ingest API contract](specs/002-ingest-parser-layer/contracts/ingest-api.md)
+- [How ingest works](docs/concepts/ingest.md) — the two paths and the text-layer decision
 - [Contributing](CONTRIBUTING.md)
 
 ## License

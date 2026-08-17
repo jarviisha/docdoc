@@ -9,6 +9,55 @@ API may change in any release. `document_id` derivation is versioned separately 
 
 ## [Unreleased]
 
+Milestone 2: the ingest parser layer. docdoc can now turn a real file into a `Document`.
+
+### Added
+
+- **`docdoc.ingest`** — bytes in, canonical `Document` out. `parse()` detects the media type from
+  the byte signature, enforces size and page limits, decides which path the document takes, selects
+  a parser by capability, and validates what comes back.
+- **Two parsers behind one contract.** `pdf-text` (native, offline, `docdoc[pdf]`) and `azure-di`
+  (geometry-capable cloud service, `docdoc[azure]`). A third-party parser satisfying the `Parser`
+  protocol is a first-class citizen and is held to the same shared contract test.
+- **`text-layer@1`** — the versioned rule deciding whether a native text layer is usable. Recorded
+  per page as well as per document, so a page contributing no tokens is an explicit fact rather
+  than a silent gap. Overridable with `force=`, which preserves the verdict it overrode.
+- **Capability-based selection** — `CapabilityRequest`, `ParserRegistry`, `default_registry()`.
+  An explicit priority list decides, defaulting to offline before service-backed, with the parser
+  id as the final tie-break. A parser that is installed but unusable stays visible with its reason.
+- **Ingest error model** — `IngestError` with `UnsupportedDocumentError`, `ParserCapabilityError`,
+  `ParserError`, and `ProviderError`, each carrying a structured `reason`. No provider SDK
+  exception escapes an adapter.
+- **Bounded transport** — at most three attempts, exponential backoff with jitter, honouring a
+  service-supplied wait, bounded by a per-attempt timeout and an overall deadline. Kept in a
+  separate type from parse options so it cannot influence document identity.
+- **One structured `ingest.parse` event** per parse, carrying identifiers, counts, and timings —
+  never document content or credentials.
+- **Optional extras** `docdoc[pdf]` and `docdoc[azure]`. The base install remains `pydantic` alone.
+
+### Changed
+
+- **`IngestProvenance` gained two optional fields**, `text_layer` and `reading_order`. Additive and
+  defaulting to `None`, so every document Milestone 1 could construct stays valid, and
+  `document_id` — which reads only the blob, parser, version, and options hash — is unaffected.
+- `import-linter` now enforces `docdoc.ingest` above `docdoc.kernel`, and bars provider SDKs from
+  every module except the two adapters.
+
+### Notes
+
+- **PyMuPDF is AGPL-3.0** while docdoc is Apache-2.0. Keeping it behind the opt-in `docdoc[pdf]`
+  extra leaves docdoc's own distribution unaffected, but embedding that extra in a closed-source
+  pipeline incurs the AGPL obligation. See [ADR-0001](docs/adr/0001-parser-and-ocr-strategy-in-mvp.md).
+- Two assumptions in the plan turned out to be wrong and were corrected by measurement rather than
+  worked around. PyMuPDF's sorted extraction sorts by vertical position across the page and so
+  *interleaves* columns — the adapter therefore uses content-stream order and declares
+  `pymupdf-stream@1` rather than claiming a layout reconstruction it does not perform. And word
+  coordinates arrive in unrotated page space while the page size is the displayed one, so the
+  adapter maps every box through the page rotation matrix first.
+- `image/tiff` is detected but not accepted. Multi-page TIFF is common and would need page-splitting
+  semantics this milestone puts out of scope; a deployment can opt in and accept that only the
+  first page is read.
+
 ## [0.1.0] — 2026-08-14
 
 First release. Milestone 1: the kernel and the canonical Document IR.
