@@ -39,7 +39,7 @@ jobs:
       - name: Unit, property, and contract tests
         env:
           HYPOTHESIS_PROFILE: ci
-        run: uv run pytest tests/unit tests/property tests/contract -m "not perf"
+        run: uv run pytest tests/unit tests/property tests/contract tests/integration -m "not perf"
 
       - name: Type check (strict)
         run: uv run mypy src/docdoc
@@ -74,8 +74,8 @@ jobs:
           uv venv .venv-base
           uv pip install --python .venv-base .
 
-      - name: The kernel imports with pydantic alone
-        run: .venv-base/bin/python -c "import docdoc.kernel, docdoc.ingest"
+      - name: The kernel, ingest, and extraction import with pydantic alone
+        run: .venv-base/bin/python -c "import docdoc.kernel, docdoc.ingest, docdoc.extraction"
 
       - name: No provider SDK came with it
         run: |
@@ -85,6 +85,10 @@ jobs:
           fi
           if .venv-base/bin/python -c "import azure.ai.documentintelligence" 2>/dev/null; then
             echo "the azure SDK is installed by the base package; it must be an extra" >&2
+            exit 1
+          fi
+          if .venv-base/bin/python -c "import google.genai" 2>/dev/null; then
+            echo "the google-genai SDK is installed by the base package; it must be an extra" >&2
             exit 1
           fi
 

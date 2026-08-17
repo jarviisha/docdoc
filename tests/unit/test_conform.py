@@ -192,7 +192,7 @@ def test_a_repeating_group_with_zero_occurrences_is_legal() -> None:
 
 
 def test_a_repeating_group_indexes_its_error_paths() -> None:
-    """"Somewhere in the line items" is not an actionable message."""
+    """ "Somewhere in the line items" is not an actionable message."""
     with pytest.raises(ExtractionError) as caught:
         conform({"items": [{"amount": sc("1.00")}, {"amount": sc(2.0)}]}, _repeating())
     assert caught.value.field_path == "items[1].amount"

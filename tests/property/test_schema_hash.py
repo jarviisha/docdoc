@@ -70,9 +70,7 @@ def _fields(draw: Any) -> tuple[FieldSpec, ...]:
         fields.append(
             FieldSpec(
                 name=group_name,
-                cardinality=draw(
-                    st.sampled_from([Cardinality.GROUP, Cardinality.REPEATING_GROUP])
-                ),
+                cardinality=draw(st.sampled_from([Cardinality.GROUP, Cardinality.REPEATING_GROUP])),
                 description=draw(_DESCRIPTIONS),
                 fields=draw(_scalars(inner)),
             )

@@ -60,9 +60,7 @@ def test_a_real_extraction_produces_the_same_shape_as_the_offline_one(
     registry: SchemaRegistry, adapter: GeminiAdapter
 ) -> None:
     """US3 — nothing downstream can tell which adapter produced a result."""
-    result = extract(
-        make_document(INVOICE), schema="invoice@1", registry=registry, adapter=adapter
-    )
+    result = extract(make_document(INVOICE), schema="invoice@1", registry=registry, adapter=adapter)
 
     assert set(result.values) == {f.name for f in registry.resolve("invoice@1").schema.fields}
     assert result.provenance.adapter_id == "gemini"
@@ -125,9 +123,7 @@ def test_the_cache_threshold_arithmetic_rather_than_a_hit(
     request = build_request(entry, INVOICE, response_shape=response_shape_for(entry.schema))
     prefix_estimate = estimate_tokens(request.prefix)
 
-    first = extract(
-        make_document(INVOICE), schema="invoice@1", registry=registry, adapter=adapter
-    )
+    first = extract(make_document(INVOICE), schema="invoice@1", registry=registry, adapter=adapter)
     second = extract(
         make_document(INVOICE + "\n(second document)"),
         schema="invoice@1",

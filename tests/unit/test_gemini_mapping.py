@@ -409,3 +409,109 @@ def test_no_provider_exception_type_escapes(registry: SchemaRegistry, monkeypatc
     adapter, _ = _adapter(_StubAPIError(500))
     with pytest.raises(ModelProviderError):
         adapter.complete(_request(registry), ExtractionOptions())
+
+
+# -- T078: Principle XII's canonical-document invariant ----------------------
+
+
+def _snapshot(document: Any) -> tuple[Any, ...]:
+    return (document.id, document.text, document.provenance, len(document.tokens), document.origin)
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        "refusal_safety",
+        "refusal_recitation",
+        "refusal_spii",
+        "refusal_blocklist",
+        "prompt_blocked",
+        "truncated",
+        "empty_body",
+        "not_json",
+    ],
+)
+def test_no_failure_mode_corrupts_the_canonical_document(
+    registry: SchemaRegistry, fixture: str
+) -> None:
+    """T078 — the invariant Principle XII lists as MUST-be-tested.
+
+    "Provider failure never corrupts the canonical document." The offline half of
+    this lives in ``test_extract_echo.py`` against the echo adapter; this is the
+    half that runs the *real* adapter's failure paths, which is where a
+    partially-built result would be tempted to write back into its input.
+
+    Every recorded failure shape is covered, because it is the unusual branch that
+    gets a mutation added to it.
+    """
+    from docdoc.extraction import ExtractionOptions, extract
+    from tests.support import make_document
+
+    document = make_document("ACME LTD\nINV-001\nTotal 1,240.00\n")
+    before = _snapshot(document)
+
+    adapter, _ = _adapter(fixture)
+    with pytest.raises((ExtractionError, ModelProviderError)):
+        extract(
+            document,
+            schema="invoice@1",
+            registry=registry,
+            adapter=adapter,
+            options=ExtractionOptions(),
+        )
+
+    assert _snapshot(document) == before, f"{fixture} mutated the input document"
+
+
+def test_an_exhausted_retry_chain_does_not_corrupt_the_document(
+    registry: SchemaRegistry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The multi-attempt path, which the single-shot fixtures above do not reach."""
+    from google.genai import errors as genai_errors
+
+    from docdoc.extraction import ExtractionOptions, extract
+    from docdoc.ingest.options import TransportSettings
+    from tests.support import make_document
+
+    monkeypatch.setattr(genai_errors, "APIError", _StubAPIError, raising=False)
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+
+    document = make_document("ACME LTD\nINV-001\nTotal 1,240.00\n")
+    before = _snapshot(document)
+
+    adapter, client = _adapter(_StubAPIError(503))
+    with pytest.raises(ModelProviderError) as caught:
+        extract(
+            document,
+            schema="invoice@1",
+            registry=registry,
+            adapter=adapter,
+            options=ExtractionOptions(),
+            transport=TransportSettings(max_attempts=3, initial_backoff_s=0.001),
+        )
+    assert caught.value.attempts == 3
+    assert len(client.models.calls) == 3
+    assert _snapshot(document) == before
+
+
+def test_no_partial_result_survives_a_failure(registry: SchemaRegistry) -> None:
+    """FR-043 — the truncated fixture carries *valid partial JSON*.
+
+    `{"invoice_number": {"value": "INV` is the tempting case: a lenient reader
+    could salvage one field from it. Salvaging would produce a result that looks
+    like an extraction and is missing most of the document.
+    """
+    from docdoc.extraction import ExtractionOptions, extract
+    from tests.support import make_document
+
+    adapter, _ = _adapter("truncated")
+    with pytest.raises(ExtractionError) as caught:
+        extract(
+            make_document("ACME LTD\nINV-001\n"),
+            schema="invoice@1",
+            registry=registry,
+            adapter=adapter,
+            options=ExtractionOptions(),
+        )
+    assert caught.value.reason == "truncated"
+    assert not hasattr(caught.value, "partial_values")

@@ -341,9 +341,7 @@ class GeminiAdapter:
     def _resolved_key(self) -> str | None:
         import os
 
-        return self._api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get(
-            "GOOGLE_API_KEY"
-        )
+        return self._api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
 
     def _ensure_client(self, request: ModelRequest) -> Any:
         if self._client is not None:

@@ -8,8 +8,9 @@ LLM — everyone can do that. It is that every extracted value can answer:
 
 > **Where did this come from?**
 
-**Status:** Milestones 1 (kernel) and 2 (parsers) implemented. Extraction, grounding, and
-validation are not built yet — see [Roadmap](#roadmap).
+**Status:** Milestones 1 (kernel), 2 (parsers), and 3 (extraction) implemented. Grounding and
+validation are not built yet, so **every extracted value is currently ungrounded** — see
+[Roadmap](#roadmap).
 
 ## What it does today
 
@@ -37,20 +38,57 @@ document.provenance.text_layer.text_layer_usable  # True
 document.provenance.text_layer.pages            # per-page verdicts and character counts
 ```
 
-Run the examples, which need no infrastructure at all:
+### Extract structured values against a versioned schema
+
+A schema is **data**, not code. Adding a document type is adding two files; there is no
+`InvoiceService` and no `if schema.name == "invoice"` anywhere in the engine.
+
+```python
+from docdoc.extraction import SchemaRegistry, extract
+from docdoc.extraction.adapters.gemini import GeminiAdapter
+
+registry = SchemaRegistry.from_paths(["schemas/"])
+result = extract(document, schema="invoice@1", registry=registry, adapter=GeminiAdapter())
+
+result.value_at("total").value          # Decimal('1240.00')  — not a float
+result.value_at("total").claimed_text   # '1,240.00'  — byte-faithful, as the model returned it
+result.value_at("due_date").present     # False — an explicit absence, not an error
+```
+
+Note the identity pair. `invoice@1` is the contract a consumer pins to; `schema_hash` answers a
+different question, and both are recorded:
+
+```python
+result.provenance.schema_identity   # 'invoice@1'      — did the contract change?
+result.provenance.schema_hash       # 'sha256:37a9f6…' — did anything result-affecting change?
+result.artifact_id                  # the extraction's own content-addressed identity
+```
+
+Rewording a field description moves the hash and not the version, which invalidates the extraction
+and **reuses the parse**. [ADR-0008](docs/adr/0008-schema-evolution-policy.md) has the bump rules.
+
+**What extraction deliberately does not do.** It resolves no grounding — every value's `grounding` is
+`None` — because that is Milestone 4's stage with its own artifact under
+[ADR-0003](docs/adr/0003-content-addressed-artifact-chain.md). What it supplies is the byte-faithful
+`claimed_text` that grounding will resolve. And `model_confidence` is stored verbatim, labelled
+UNTRUSTED, and routes nothing ([ADR-0004](docs/adr/0004-confidence-semantics.md)).
+
+Run the examples, which need no infrastructure and no credentials at all:
 
 ```bash
 uv sync --all-extras
 uv run python examples/build_document.py                       # kernel only
 uv run python examples/parse_pdf.py tests/fixtures/pdf/digital_invoice.pdf
+uv run python examples/extract_invoice.py                      # extraction, offline
 ```
 
 ### Installing
 
 ```bash
-pip install docdoc          # kernel + ingest contracts; pydantic is the only dependency
+pip install docdoc          # kernel + ingest + extraction contracts; pydantic is the only dependency
 pip install docdoc[pdf]     # native PDF text path
 pip install docdoc[azure]   # geometry-capable cloud path, for scans and images
+pip install docdoc[google]  # the LLM adapter for extraction
 ```
 
 > **Licence note.** `docdoc[pdf]` installs [PyMuPDF](https://pymupdf.readthedocs.io/), which is
@@ -133,8 +171,8 @@ higher-layer work merges while that property is failing or absent.
 |---|---|---|
 | 1 | Kernel: Document IR, `locate` / `find` / `slice` / `merge`, identity | **Done** |
 | 2 | Parsers: native PDF text path, one geometry-capable cloud provider | **Done** |
-| 3 | Schema-driven extraction, one LLM adapter | Next |
-| 4 | Deterministic grounding: exact → fuzzy → ungrounded | Planned |
+| 3 | Schema-driven extraction, one LLM adapter | **Done** |
+| 4 | Deterministic grounding: exact → fuzzy → ungrounded | Next |
 | 5 | Validation: schema, field, and cross-field rules | Planned |
 | 6 | Evaluation: golden dataset, field accuracy, grounding rate | Planned |
 | 7 | API and CLI | Planned |
@@ -148,6 +186,8 @@ higher-layer work merges while that property is failing or absent.
 - [Kernel API contract](specs/001-kernel-document-ir/contracts/kernel-api.md)
 - [Ingest API contract](specs/002-ingest-parser-layer/contracts/ingest-api.md)
 - [How ingest works](docs/concepts/ingest.md) — the two paths and the text-layer decision
+- [How extraction works](docs/concepts/extraction.md) — the two identities, and the stage boundary with grounding
+- [Extraction API contract](specs/003-schema-driven-extraction/contracts/extraction-api.md)
 - [Contributing](CONTRIBUTING.md)
 
 ## License

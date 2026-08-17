@@ -88,9 +88,7 @@ def test_enum_is_carried_because_the_provider_can_enforce_it(invoice_shape: dict
 
 
 @pytest.mark.parametrize("dropped", ["minimum", "maximum", "multiple_of", "max_length", "pattern"])
-def test_unenforceable_constraints_never_reach_the_wire(
-    invoice_shape: dict, dropped: str
-) -> None:
+def test_unenforceable_constraints_never_reach_the_wire(invoice_shape: dict, dropped: str) -> None:
     """R3 -- the provider could not enforce these if asked."""
     assert dropped not in json.dumps(invoice_shape)
 

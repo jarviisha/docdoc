@@ -41,9 +41,7 @@ ADR-0008 has the full bump table. Do not clear this by editing the assertion.
 
 def _current() -> dict[str, str]:
     registry = SchemaRegistry.from_paths(["schemas"])
-    return {
-        identity: registry.resolve(identity).schema_hash for identity in registry.identities()
-    }
+    return {identity: registry.resolve(identity).schema_hash for identity in registry.identities()}
 
 
 def test_the_snapshot_exists_and_is_not_empty() -> None:

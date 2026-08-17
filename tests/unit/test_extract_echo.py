@@ -38,9 +38,7 @@ def echo() -> EchoAdapter:
 
 
 def _extract(registry: SchemaRegistry, echo: EchoAdapter, identity: str = "invoice@1") -> Any:
-    return extract(
-        make_document(DOCUMENT_TEXT), schema=identity, registry=registry, adapter=echo
-    )
+    return extract(make_document(DOCUMENT_TEXT), schema=identity, registry=registry, adapter=echo)
 
 
 def test_every_declared_field_appears(registry: SchemaRegistry, echo: EchoAdapter) -> None:
@@ -201,9 +199,7 @@ def _snapshot(document: Any) -> tuple[Any, ...]:
     ],
     ids=["malformed", "refusal", "provider-error", "timeout"],
 )
-def test_the_document_is_never_corrupted(
-    registry: SchemaRegistry, adapter_factory: Any
-) -> None:
+def test_the_document_is_never_corrupted(registry: SchemaRegistry, adapter_factory: Any) -> None:
     """T039 and Principle XII.
 
     "Provider failure never corrupts the canonical document" is one of the

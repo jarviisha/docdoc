@@ -35,9 +35,7 @@ def echo() -> EchoAdapter:
 
 
 def _extract(registry: SchemaRegistry, echo: EchoAdapter, identity: str):
-    return extract(
-        make_document(DOCUMENT_TEXT), schema=identity, registry=registry, adapter=echo
-    )
+    return extract(make_document(DOCUMENT_TEXT), schema=identity, registry=registry, adapter=echo)
 
 
 # -- concurrent majors -------------------------------------------------------

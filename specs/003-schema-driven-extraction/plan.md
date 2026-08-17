@@ -50,17 +50,25 @@ the model call itself must behave identically on all three.
 property of the provider and is *recorded* per extraction rather than bounded here. Enforced by
 `tests/perf/test_extraction_perf.py` (marked `perf`).
 
-| Operation | Target | Basis |
-|---|---|---|
-| Schema load + compile, per schema | < 200 ms | Once per schema at registration, not per extraction |
-| Resolve + build request + conformance check + identity, 20-page doc / 20-field schema | < 100 ms | SC-021 |
-| `schema_hash` over a 100-field schema | < 10 ms | Canonical JSON + one `sha256` |
-| Input-budget guard | negligible | A character count (research.md R5) |
-| Model call | recorded, not targeted | Dominated by the provider; governed by `deadline_s` |
+| Operation | Target | Measured | Basis |
+|---|---|---|---|
+| Schema load + compile, per schema | < 200 ms | ~0.9 ms (3 schemas + prompts) | Once per schema at registration, not per extraction |
+| Resolve + build request + conformance check + identity, 20-page doc / `invoice@1` | < 100 ms | **~0.19 ms** | SC-021 |
+| Per-call cost inside a batch of 50 | — | ~0.18 ms | Equal to a single call, so no per-schema work leaked into `extract()` |
+| `schema_hash` over a 100-field schema | < 10 ms | ~0.8 ms | Canonical JSON + one `sha256` |
+| Projection, 25 → 200 fields | linear | 0.22 → 1.86 ms | 8× the fields for 8.5× the time |
+| Conformance, 50 → 500 repeating-group entries | linear | 0.44 → 4.73 ms | 10× the entries for 10.7× the time |
+| Input-budget guard, 166k characters | negligible | ~0.0004 ms | A character count (research.md R5) |
+| Model call | recorded, not targeted | — | Dominated by the provider; governed by `deadline_s` |
 
-The targets sit far above the expected measurements on purpose, for the reason Milestone 2 recorded: a
-perf test that trips on machine noise gets disabled, and a disabled test protects nothing. What these
-catch is an accidental per-extraction schema recompile, not constant-factor drift.
+Measured on a contributor laptop with `uv run pytest -m perf`, best-of-5. The deterministic path has
+roughly **500× headroom** against SC-021, which is the honest reading: the criterion was never going
+to be tight, because everything expensive in an extraction is on the other side of the network.
+
+The targets sit far above the measurements on purpose, for the reason Milestone 2 recorded: a perf test
+that trips on machine noise gets disabled, and a disabled test protects nothing. What these catch is an
+accidental per-extraction schema recompile — the batch row is the one that would move — or a quadratic
+in the projection or the conformance walk, not constant-factor drift.
 
 **Constraints**: The whole layer except the model call must run with no credentials and no network
 (FR-044). Provider SDK types confined to `docdoc/extraction/adapters/` and enforced by `import-linter`
