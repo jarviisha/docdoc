@@ -101,3 +101,36 @@ def test_extraction_imports_exactly_two_names_from_ingest() -> None:
         f"extraction imports {sorted(imported)} from ingest; research.md R9 bounds this to "
         "ProviderError and TransportSettings"
     )
+
+
+def test_ingest_is_imported_from_submodules_never_the_package_facade() -> None:
+    """The mistake this file failed to catch, twice.
+
+    ``from docdoc.ingest import X`` executes ``docdoc/ingest/__init__.py``, which
+    reaches ``parse -> registry -> parsers.pdf_text -> pymupdf`` and
+    ``parsers.azure_di -> azure``. Both then sit in this layer's transitive import
+    graph, and PyMuPDF is AGPL-3.0 -- so it is a licence question as well as a
+    layering one.
+
+    ``lint-imports`` catches it because it walks the transitive graph. The
+    name-based assertion above does not, because the names being imported are the
+    permitted ones either way. That gap is why this test exists: it makes the
+    *form* of the import the thing being checked.
+    """
+    offenders: list[str] = []
+    for path in _modules():
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module == "docdoc.ingest":
+                offenders.append(f"{path.name}:{node.lineno}")
+            if isinstance(node, ast.Import):
+                offenders += [
+                    f"{path.name}:{node.lineno}"
+                    for alias in node.names
+                    if alias.name == "docdoc.ingest"
+                ]
+    assert not offenders, (
+        f"import from the ingest package facade at {offenders}. Use the submodule -- "
+        "`docdoc.ingest.errors`, `docdoc.ingest.options` -- so pymupdf and azure stay out "
+        "of this layer's transitive graph"
+    )

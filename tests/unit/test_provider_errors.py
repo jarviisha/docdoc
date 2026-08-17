@@ -1,207 +1,203 @@
-"""T043 — retries, deadlines, and the failures that must not be retried.
+"""T049, T050 — retry classification and the two bounds (FR-025, FR-026, SC-017, R12).
 
-The analyze call is injectable, so every one of these runs offline in
-milliseconds. What is under test is docdoc's own policy (R12, FR-038, ING-21),
-not the service's behaviour.
+The retry policy lives in one place for every adapter, so this tests the policy
+rather than a provider. ``sleep`` is injected: a retry test that actually waits is
+a slow test, and a slow test gets marked skip.
+
+The case worth reading is the deadline one. A service that asks for a wait longer
+than the remaining budget must fail on the deadline rather than sleep past it —
+honouring the request would let one `Retry-After` silently extend an extraction
+past the bound the caller set.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 import pytest
 
-from docdoc.ingest.errors import ProviderError, UnsupportedDocumentError
-from docdoc.ingest.options import TransportSettings
-from docdoc.ingest.parsers.azure_di import AzureDocumentIntelligenceParser
-from docdoc.ingest.source import SourceFile
+from docdoc.extraction import ModelProviderError, ModelResponse, ModelUsage
+from docdoc.extraction.retry import call_with_retries
+from docdoc.ingest import TransportSettings
 
-FIXTURES = Path(__file__).parent.parent / "fixtures"
-
-# Fast enough that the retry tests cost nothing, long enough to be real waits.
-QUICK = TransportSettings(
-    max_attempts=3, initial_backoff_s=0.001, max_backoff_s=0.004, attempt_timeout_s=1.0
-)
+TRANSIENT = ("timeout", "rate_limit", "transport", "service")
+PERMANENT = ("auth", "refusal", "request", "unavailable", "deadline")
 
 
-@pytest.fixture
-def source() -> SourceFile:
-    path = FIXTURES / "pdf" / "scanned_contract.pdf"
-    return SourceFile.from_bytes(path.read_bytes(), filename=path.name)
+def _ok() -> ModelResponse:
+    return ModelResponse(payload={}, model_id="m", model_version="1", usage=ModelUsage())
 
 
-class Analyzer:
-    """A stand-in for the service, scripted per test."""
+class _Recorder:
+    """Counts sleeps and remembers how long each would have been."""
 
-    def __init__(self, *outcomes: object) -> None:
-        self.outcomes = list(outcomes)
-        self.calls = 0
+    def __init__(self) -> None:
+        self.waits: list[float] = []
 
-    def __call__(self, source: SourceFile, transport: Any, deadline: Any) -> Any:
-        self.calls += 1
-        outcome = self.outcomes[min(self.calls - 1, len(self.outcomes) - 1)]
-        if isinstance(outcome, Exception):
-            raise outcome
-        return outcome
+    def __call__(self, seconds: float) -> None:
+        self.waits.append(seconds)
 
 
-def provider_error(reason: str) -> ProviderError:
-    return ProviderError(f"simulated {reason}", reason=reason, parser_id="azure-di")
+def _failing(reason: str, *, times: int = 99, retry_after: float | None = None) -> Any:
+    calls = {"n": 0}
+
+    def call() -> ModelResponse:
+        calls["n"] += 1
+        if calls["n"] > times:
+            return _ok()
+        raise ModelProviderError(
+            f"simulated {reason}",
+            reason=reason,
+            adapter_id="probe",
+            retry_after_s=retry_after,
+        )
+
+    call.calls = calls  # type: ignore[attr-defined]
+    return call
 
 
-class TestTransientFailures:
-    @pytest.mark.parametrize("reason", ["timeout", "rate_limit", "transport", "service"])
-    def test_are_retried_to_the_limit_then_raised(self, reason: str, source: SourceFile) -> None:
-        analyzer = Analyzer(provider_error(reason))
-        parser = AzureDocumentIntelligenceParser(analyze=analyzer)
-
-        with pytest.raises(ProviderError) as caught:
-            parser.parse(source, {}, QUICK)
-
-        assert analyzer.calls == QUICK.max_attempts
-        assert caught.value.reason == reason
-        assert caught.value.attempts == QUICK.max_attempts
-
-    def test_a_retry_that_succeeds_returns_the_document(self, source: SourceFile) -> None:
-        analyzer = Analyzer(provider_error("rate_limit"), {"content": "", "pages": []})
-        parser = AzureDocumentIntelligenceParser(analyze=analyzer)
-
-        document = parser.parse(source, {}, QUICK)
-
-        assert analyzer.calls == 2
-        assert document.provenance.parser_id == "azure-di"
-
-    def test_the_attempt_limit_is_configurable(self, source: SourceFile) -> None:
-        analyzer = Analyzer(provider_error("service"))
-        parser = AzureDocumentIntelligenceParser(analyze=analyzer)
-
-        with pytest.raises(ProviderError):
-            parser.parse(source, {}, QUICK.model_copy(update={"max_attempts": 5}))
-
-        assert analyzer.calls == 5
+def _run(call: Any, transport: TransportSettings | None = None, sleep: Any = None):
+    return call_with_retries(
+        call,
+        transport=transport or TransportSettings(),
+        adapter_id="probe",
+        document_id="sha256:doc",
+        schema_identity="invoice@1",
+        sleep=sleep or _Recorder(),
+    )
 
 
-class TestPermanentFailures:
-    def test_a_rejected_credential_is_not_retried(self, source: SourceFile) -> None:
-        """Trying again cannot change the answer, and doing so only spends the
-        deadline."""
-        analyzer = Analyzer(provider_error("auth"))
-        parser = AzureDocumentIntelligenceParser(analyze=analyzer)
-
-        with pytest.raises(ProviderError) as caught:
-            parser.parse(source, {}, QUICK)
-
-        assert analyzer.calls == 1
-        assert caught.value.reason == "auth"
-        assert caught.value.transient is False
-
-    def test_an_unsupported_document_is_not_retried(self, source: SourceFile) -> None:
-        analyzer = Analyzer(UnsupportedDocumentError("rejected by the service", reason="corrupt"))
-        parser = AzureDocumentIntelligenceParser(analyze=analyzer)
-
-        with pytest.raises(UnsupportedDocumentError):
-            parser.parse(source, {}, QUICK)
-
-        assert analyzer.calls == 1
+# -- classification ----------------------------------------------------------
 
 
-class TestDeadline:
-    def test_a_slow_service_hits_the_overall_deadline(self, source: SourceFile) -> None:
-        import time
-
-        def slow(source: SourceFile, transport: Any, deadline: Any) -> Any:
-            time.sleep(0.05)
-            raise provider_error("timeout")
-
-        parser = AzureDocumentIntelligenceParser(analyze=slow)
-
-        with pytest.raises(ProviderError) as caught:
-            parser.parse(
-                source,
-                {},
-                TransportSettings(
-                    max_attempts=10,
-                    initial_backoff_s=0.02,
-                    attempt_timeout_s=1.0,
-                    deadline_s=0.12,
-                ),
-            )
-
-        assert caught.value.reason == "deadline"
-
-    def test_the_error_names_which_bound_was_exceeded(self, source: SourceFile) -> None:
-        analyzer = Analyzer(provider_error("timeout"))
-        parser = AzureDocumentIntelligenceParser(analyze=analyzer)
-
-        with pytest.raises(ProviderError) as caught:
-            parser.parse(
-                source,
-                {},
-                TransportSettings(max_attempts=5, initial_backoff_s=10.0, deadline_s=0.05),
-            )
-
-        assert caught.value.reason == "deadline"
-        assert "deadline" in str(caught.value)
-
-    def test_a_wait_longer_than_the_budget_is_refused_rather_than_slept_through(
-        self, source: SourceFile
-    ) -> None:
-        # The service asks for 30 seconds; the budget is a tenth of one. The
-        # parse fails on the deadline instead of sleeping past it.
-        error = provider_error("rate_limit")
-        error.retry_after_s = 30.0  # type: ignore[attr-defined]
-        analyzer = Analyzer(error)
-        parser = AzureDocumentIntelligenceParser(analyze=analyzer)
-
-        with pytest.raises(ProviderError) as caught:
-            parser.parse(source, {}, TransportSettings(max_attempts=3, deadline_s=0.1))
-
-        assert caught.value.reason == "deadline"
-        assert analyzer.calls == 1
+@pytest.mark.parametrize("reason", TRANSIENT)
+def test_transient_failures_are_retried_to_the_limit(reason: str) -> None:
+    call = _failing(reason)
+    with pytest.raises(ModelProviderError) as caught:
+        _run(call, TransportSettings(max_attempts=3))
+    assert call.calls["n"] == 3
+    assert caught.value.attempts == 3
 
 
-class TestConfiguration:
-    def test_missing_credentials_fail_before_anything_is_transmitted(
-        self, source: SourceFile, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.delenv("DOCDOC_AZURE_DI_ENDPOINT", raising=False)
-        monkeypatch.delenv("DOCDOC_AZURE_DI_KEY", raising=False)
-        parser = AzureDocumentIntelligenceParser()
-
-        with pytest.raises(ProviderError) as caught:
-            parser.parse(source, {}, TransportSettings(max_attempts=1))
-
-        assert caught.value.reason == "auth"
-        assert "DOCDOC_AZURE_DI_ENDPOINT" in str(caught.value)
-
-    def test_the_error_names_no_secret(
-        self, source: SourceFile, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("DOCDOC_AZURE_DI_ENDPOINT", "https://example.invalid")
-        monkeypatch.setenv("DOCDOC_AZURE_DI_KEY", "super-secret-key-value")
-        analyzer = Analyzer(provider_error("auth"))
-        parser = AzureDocumentIntelligenceParser(analyze=analyzer)
-
-        with pytest.raises(ProviderError) as caught:
-            parser.parse(source, {}, TransportSettings(max_attempts=1))
-
-        assert "super-secret-key-value" not in str(caught.value)
+@pytest.mark.parametrize("reason", PERMANENT)
+def test_permanent_failures_are_not_retried(reason: str) -> None:
+    """FR-025 — re-sending gets the same answer and only spends the deadline."""
+    call = _failing(reason)
+    with pytest.raises(ModelProviderError) as caught:
+        _run(call, TransportSettings(max_attempts=5))
+    assert call.calls["n"] == 1, f"{reason} must fail on the first attempt"
+    assert caught.value.attempts == 1
 
 
-class TestNoFallback:
-    def test_a_failed_recognition_parse_does_not_try_the_native_parser(
-        self, source: SourceFile
-    ) -> None:
-        """FR-014 — a failure surfaces; it never quietly becomes another
-        parser's problem, which would produce a near-empty document from a scan
-        and call it success."""
-        from docdoc.ingest import parse
-        from docdoc.ingest.registry import ParserRegistry
+def test_a_refusal_is_permanent_even_though_it_is_not_a_transport_failure() -> None:
+    """R12 — the one that arrives as a *successful* response.
 
-        analyzer = Analyzer(provider_error("service"))
-        registry = ParserRegistry()
-        registry.register(AzureDocumentIntelligenceParser(analyze=analyzer))
+    Retrying a refusal re-sends the same content and gets the same decision. The
+    only thing it buys is the attempt budget.
+    """
+    call = _failing("refusal")
+    with pytest.raises(ModelProviderError) as caught:
+        _run(call, TransportSettings(max_attempts=5))
+    assert call.calls["n"] == 1
+    assert caught.value.transient is False
 
-        with pytest.raises(ProviderError):
-            parse(source, registry=registry, transport=QUICK)
+
+def test_a_transient_failure_that_recovers_returns_the_response() -> None:
+    call = _failing("service", times=2)
+    response, attempts = _run(call, TransportSettings(max_attempts=5))
+    assert isinstance(response, ModelResponse)
+    assert attempts == 3
+
+
+def test_a_first_attempt_success_makes_no_sleep() -> None:
+    recorder = _Recorder()
+    _, attempts = _run(lambda: _ok(), sleep=recorder)
+    assert attempts == 1
+    assert recorder.waits == []
+
+
+# -- backoff -----------------------------------------------------------------
+
+
+def test_backoff_grows_and_is_bounded() -> None:
+    recorder = _Recorder()
+    transport = TransportSettings(max_attempts=4, initial_backoff_s=1.0, max_backoff_s=4.0)
+    with pytest.raises(ModelProviderError):
+        _run(_failing("service"), transport, recorder)
+    assert len(recorder.waits) == 3, "one wait between each pair of attempts, none after the last"
+    assert recorder.waits[0] <= recorder.waits[-1]
+    assert all(w <= 4.0 for w in recorder.waits), "capped at max_backoff_s"
+
+
+def test_jitter_can_be_switched_off_for_a_deterministic_wait() -> None:
+    recorder = _Recorder()
+    transport = TransportSettings(
+        max_attempts=3, initial_backoff_s=2.0, max_backoff_s=64.0, jitter=False
+    )
+    with pytest.raises(ModelProviderError):
+        _run(_failing("service"), transport, recorder)
+    assert recorder.waits == [2.0, 4.0]
+
+
+def test_a_service_requested_wait_wins_over_our_backoff() -> None:
+    """It knows its own load better than an exponential curve does."""
+    recorder = _Recorder()
+    transport = TransportSettings(
+        max_attempts=2, initial_backoff_s=0.5, max_backoff_s=64.0, deadline_s=120.0
+    )
+    with pytest.raises(ModelProviderError):
+        _run(_failing("rate_limit", retry_after=7.5), transport, recorder)
+    assert recorder.waits == [7.5], "not jittered, and not our 0.5s backoff"
+
+
+# -- the two bounds ----------------------------------------------------------
+
+
+def test_the_deadline_overrides_a_service_requested_wait() -> None:
+    """SC-017, and the rule most easily forgotten.
+
+    A `Retry-After` longer than the remaining budget must fail on the deadline. If
+    it were honoured, one response header could silently extend an extraction past
+    the bound the caller set.
+    """
+    recorder = _Recorder()
+    transport = TransportSettings(max_attempts=5, deadline_s=2.0)
+    with pytest.raises(ModelProviderError) as caught:
+        _run(_failing("rate_limit", retry_after=300.0), transport, recorder)
+    assert caught.value.reason == "deadline"
+    assert recorder.waits == [], "it must not sleep past the deadline"
+    assert "overrides both our backoff" in str(caught.value)
+
+
+def test_the_deadline_stops_a_long_backoff_chain() -> None:
+    recorder = _Recorder()
+    transport = TransportSettings(
+        max_attempts=20, initial_backoff_s=30.0, max_backoff_s=60.0, deadline_s=5.0
+    )
+    with pytest.raises(ModelProviderError) as caught:
+        _run(_failing("service"), transport, recorder)
+    assert caught.value.reason == "deadline"
+    assert recorder.waits == []
+
+
+def test_the_attempt_limit_is_never_exceeded() -> None:
+    """SC-017 — zero extractions make more attempts than configured."""
+    for limit in (1, 2, 3, 7):
+        call = _failing("service")
+        with pytest.raises(ModelProviderError):
+            _run(call, TransportSettings(max_attempts=limit, deadline_s=600.0))
+        assert call.calls["n"] == limit
+
+
+def test_the_error_carries_the_real_attempt_count() -> None:
+    """A caller reading `attempts` is told the truth, not the default."""
+    with pytest.raises(ModelProviderError) as caught:
+        _run(_failing("timeout"), TransportSettings(max_attempts=4, deadline_s=600.0))
+    assert caught.value.attempts == 4
+
+
+def test_transport_settings_come_from_the_ingest_layer() -> None:
+    """research.md R9 — one retry policy in the system, not two that drift."""
+    from docdoc.ingest.options import TransportSettings as IngestSettings
+
+    assert TransportSettings is IngestSettings

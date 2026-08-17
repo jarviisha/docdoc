@@ -1,0 +1,10 @@
+{
+  "finish_reason": "STOP",
+  "text": "{\"invoice_number\": {\"value\": \"INV-2026-0042\", \"claimed_text\": \"INV-2026-0042\", \"confidence\": 0.97}, \"issue_date\": {\"value\": \"2026-03-01\", \"claimed_text\": \"01/03/2026\", \"confidence\": null}, \"due_date\": {\"value\": \"2026-03-31\", \"claimed_text\": \"31/03/2026\", \"confidence\": null}, \"currency\": {\"value\": \"EUR\", \"claimed_text\": \"\\u20ac\", \"confidence\": null}, \"total\": {\"value\": \"2480.50\", \"claimed_text\": \"2.480,50\", \"confidence\": null}, \"supplier\": {\"legal_name\": {\"value\": \"Beispiel GmbH\", \"claimed_text\": \"Beispiel GmbH\", \"confidence\": null}, \"tax_id\": {\"value\": \"DE123456789\", \"claimed_text\": \"DE123456789\", \"confidence\": null}}, \"line_items\": [{\"description\": {\"value\": \"Consulting, March\", \"claimed_text\": \"Consulting, March\", \"confidence\": null}, \"quantity\": {\"value\": 10, \"claimed_text\": \"10\", \"confidence\": null}, \"unit_price\": {\"value\": \"200.00\", \"claimed_text\": \"200,00\", \"confidence\": null}, \"amount\": {\"value\": \"2000.00\", \"claimed_text\": \"2.000,00\", \"confidence\": null}}, {\"description\": {\"value\": \"VAT 24%\", \"claimed_text\": \"VAT 24%\", \"confidence\": null}, \"quantity\": {\"value\": null, \"claimed_text\": null, \"confidence\": null}, \"unit_price\": {\"value\": null, \"claimed_text\": null, \"confidence\": null}, \"amount\": {\"value\": \"480.50\", \"claimed_text\": \"480,50\", \"confidence\": null}}]}",
+  "usage": {
+    "prompt_token_count": 4210,
+    "candidates_token_count": 612,
+    "cached_content_token_count": 0,
+    "thoughts_token_count": 1840
+  }
+}

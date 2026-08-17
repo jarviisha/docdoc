@@ -1,0 +1,9 @@
+{
+  "finish_reason": "MAX_TOKENS",
+  "text": "{\"invoice_number\": {\"value\": \"INV",
+  "usage": {
+    "prompt_token_count": 4210,
+    "candidates_token_count": 8192,
+    "thoughts_token_count": 8100
+  }
+}

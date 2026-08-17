@@ -1,0 +1,8 @@
+{
+  "block_reason": "PROHIBITED_CONTENT",
+  "finish_reason": null,
+  "text": null,
+  "usage": {
+    "prompt_token_count": 4210
+  }
+}

@@ -44,6 +44,7 @@ _ALLOWED_KEYS = frozenset(
         "cache_read_input_tokens",
         "prompt_hash",
         "reason",
+        "reasoning_tokens",
         "schema_hash",
         "schema_identity",
         "values_absent",

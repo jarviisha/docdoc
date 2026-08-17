@@ -28,8 +28,16 @@ from docdoc.extraction.identity import (
 )
 from docdoc.extraction.observe import emit_extraction_event
 from docdoc.extraction.prompt import build_request
+from docdoc.extraction.retry import call_with_retries
 from docdoc.extraction.shape import PROJECTION_ID, response_shape_for
 from docdoc.extraction.value import ExtractedValue, ValueTree
+
+# From the submodule, never the package facade: `docdoc.ingest` reaches
+# parse -> registry -> parsers -> pymupdf and azure, which would put two provider
+# SDKs in this layer's transitive graph. This is the second time that mistake was
+# made here; `test_extraction_boundaries.py` now asserts the submodule form so
+# there is no third.
+from docdoc.ingest.options import TransportSettings
 
 if TYPE_CHECKING:
     from docdoc.extraction.registry import SchemaRegistry
@@ -139,6 +147,7 @@ def extract(
     registry: SchemaRegistry,
     adapter: ModelAdapter,
     options: ExtractionOptions | None = None,
+    transport: TransportSettings | None = None,
 ) -> ExtractionResult:
     """Turn a document plus a schema identity into structured values.
 
@@ -151,6 +160,7 @@ def extract(
     one: nothing in this function writes to ``document`` at all.
     """
     opts = options or ExtractionOptions()
+    settings = transport or TransportSettings()
     started = time.monotonic()
     # The kernel calls it `id`; everything downstream of ADR-0002 calls it a
     # document id, and the provenance field keeps that name.
@@ -195,8 +205,9 @@ def extract(
         input_budget_tokens=opts.input_budget_tokens,
     )
 
-    def _fail(reason: str) -> None:
+    def _fail(reason: str, *, attempts: int = 1) -> None:
         emit_extraction_event(
+            attempts=attempts,
             document_id=document_id,
             schema_identity=entry.identity,
             schema_hash=entry.schema_hash,
@@ -211,10 +222,17 @@ def extract(
             reason=reason,
         )
 
+    attempts = 0
     try:
-        response = adapter.complete(request, opts)
+        response, attempts = call_with_retries(
+            lambda: adapter.complete(request, opts),
+            transport=settings,
+            adapter_id=adapter.id,
+            document_id=document_id,
+            schema_identity=entry.identity,
+        )
     except ModelProviderError as exc:
-        _fail(exc.reason)
+        _fail(exc.reason, attempts=exc.attempts)
         raise
     except ExtractionError as exc:
         _fail(exc.reason)
@@ -272,6 +290,8 @@ def extract(
         cache_read_input_tokens=response.usage.cache_read_input_tokens,
         values_present=present,
         values_absent=absent,
+        attempts=attempts,
+        reasoning_tokens=response.usage.reasoning_tokens,
         duration_ms=round((time.monotonic() - started) * 1000, 3),
         outcome="success",
     )

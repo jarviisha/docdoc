@@ -1,0 +1,8 @@
+{
+  "finish_reason": "STOP",
+  "text": "I could not read the document.",
+  "usage": {
+    "prompt_token_count": 4210,
+    "candidates_token_count": 9
+  }
+}

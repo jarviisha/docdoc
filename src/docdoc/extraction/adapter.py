@@ -79,6 +79,13 @@ class ModelUsage(BaseModel):
     cache_read_input_tokens: int | None = None
     cache_creation_input_tokens: int | None = None
 
+    #: Reasoning tokens, where the provider reports them. Worth its own field
+    #: rather than folded into ``output_tokens``: reasoning is billed from the same
+    #: output allowance as the answer (R14), so "the response was truncated" and
+    #: "the reasoning ate the budget" are different diagnoses and the numbers are
+    #: what tell them apart.
+    reasoning_tokens: int | None = None
+
 
 class ModelResponse(BaseModel):
     """One structured answer, plus what it cost and who produced it."""
