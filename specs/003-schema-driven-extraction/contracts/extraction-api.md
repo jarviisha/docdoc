@@ -13,7 +13,10 @@ from docdoc.extraction import ExtractionOptions, extract
 result = extract(
     document,                       # docdoc.kernel.Document — read, never modified
     schema="invoice@1",             # a concrete name@version. No "latest" (FR-014)
-    options=ExtractionOptions(),    # decoding + budget; transport is separate
+    registry=registry,              # required — where schemas come from
+    adapter=adapter,                # required — which model answers
+    options=ExtractionOptions(),    # optional — decoding and budgets
+    transport=TransportSettings(),  # optional — attempts, backoff, timeout, deadline
 )
 ```
 
@@ -127,7 +130,13 @@ Retry, timeout, and deadline are configured separately, with `TransportSettings`
 ```python
 from docdoc.ingest import TransportSettings
 
-extract(document, schema="invoice@1", transport=TransportSettings(attempts=3, deadline_s=120))
+extract(
+    document,
+    schema="invoice@1",
+    registry=registry,
+    adapter=adapter,
+    transport=TransportSettings(max_attempts=3, deadline_s=120),
+)
 ```
 
 ## 6. Budgets

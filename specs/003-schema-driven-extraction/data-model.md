@@ -75,6 +75,11 @@ The set of schemas a running system knows, loaded from paths configuration names
 - **EXT-13** — registration is all-or-nothing. A schema that fails any check leaves the registry exactly
   as it was; there is no partially registered schema (FR-050).
 
+`resolve` returns a **RegisteredSchema** — the schema, its prompt, and both hashes, computed once at
+registration rather than per extraction. `describe` returns a **SchemaDescription**: identity, content
+hash, and one row per declared field path. Neither carries a document or a result, so inspecting a
+schema costs nothing and reveals nothing about what has been extracted with it.
+
 ## 4. PromptTemplate
 
 Instruction data keyed to one schema identity.
@@ -174,6 +179,11 @@ literally rather than refined (research.md R4).
   grounding status it did not compute, and it computes none — not even the exact tier the kernel's search
   could satisfy cheaply (FR-032, FR-047, SC-018).
 
+**ValueTree** is the recursive shape a result's `values` takes: a field name maps to an
+`ExtractedValue`, a nested group, or a tuple of repeating-group entries. Recursive by declaration and
+bounded to one level of *repetition* by EXT-3, which is checked when the schema is constructed rather
+than when a result is walked.
+
 ### ExtractionProvenance
 
 Records document identity, `schema_identity`, `schema_hash`, `prompt_hash`, `projection_id`, adapter id
@@ -204,7 +214,23 @@ Rooted at the existing `DocdocError`. Two new types; one reused (research.md R9)
 |---|---|---|
 | `SchemaError` | Unknown identity; malformed schema file; unrecognised type or constraint; duplicate field; repetition bound exceeded; missing prompt | **Never** |
 | `ExtractionError` | Response shape mismatch; unparseable value; missing declared field; over-budget input or output; truncated response | **Never** |
-| `ProviderError` *(from ingest)* | Transport, service, and credential failures, and a content refusal | Transient causes only |
+| `ModelProviderError` *(subclasses ingest's `ProviderError`)* | Transport, service, and credential failures, and every refusal | Transient causes only |
+
+`ModelProviderError` exists because `ProviderError` requires `parser_id` — parser vocabulary — and this
+layer has an *adapter*. The subclass takes `adapter_id` and exposes it under that name, so
+`except ProviderError` still catches every provider failure in the system while the attribute a caller
+reads says what it means. It also carries `refusal_category`, passed through verbatim and never
+interpreted.
+
+A refusal is **not** one condition. The provider splits it, and the categories do not mean the same
+thing:
+
+| Signal | Category | Why it is its own branch |
+|---|---|---|
+| `SAFETY`, `PROHIBITED_CONTENT`, `BLOCKLIST` | `safety`, `prohibited_content`, `blocklist` | The output was blocked |
+| `RECITATION` | `recitation` | Output resembled copyrighted material. **Not misconduct** — an invoice quoting standard payment terms can trip it |
+| `SPII` | `sensitive_personal_information` | For an engine whose job is documents full of names and account numbers, a reason to expect rather than an edge case |
+| `promptFeedback.blockReason` | `prompt_blocked:<reason>` | The *prompt* was blocked before generation, so no candidate exists at all |
 
 - Transient, retried within the `TransportSettings` limit: connection failure, timeout, rate limit,
   server error, overloaded.
@@ -213,7 +239,28 @@ Rooted at the existing `DocdocError`. Two new types; one reused (research.md R9)
   refusal, so the adapter branches on the stop reason before touching content (research.md R12).
 - No provider exception crosses the adapter boundary; each is translated with `__cause__` preserved.
 
-## 10. Relationships
+## 10. The retry loop
+
+`call_with_retries` wraps one adapter call. It lives in the layer rather than in each adapter, because
+if every adapter implemented its own policy then "at most N attempts bounded by a deadline" would be a
+claim about whichever adapter you happened to be using.
+
+Three rules, and the third is the one that gets forgotten:
+
+1. Only transient failures are retried. A rejected credential, a malformed request, and **every
+   refusal** fail on the first attempt (FR-025).
+2. A service-requested wait is honoured in preference to our own backoff — it knows its own load better
+   than an exponential curve does — and is not jittered, because jittering a wait the service asked for
+   defeats the point of asking.
+3. **The deadline overrides both.** A service asking for a wait longer than the remaining budget fails
+   on the deadline rather than sleeping past it. Otherwise one response header could silently extend an
+   extraction past the bound the caller set.
+
+`sleep` is injectable, so the tests assert the policy — including how long it *would* have waited —
+without spending that time. A retry test that actually sleeps is a slow test, and a slow test gets
+marked skip.
+
+## 11. Relationships
 
 ```text
 Document (M1) ──┐

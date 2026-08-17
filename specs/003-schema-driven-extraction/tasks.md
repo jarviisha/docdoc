@@ -56,7 +56,7 @@ projection, the conformance check, the prompt, the budget guard, and both ends o
 
 ### Schema, loading, and the bound
 
-- [X] T010 Implement `src/docdoc/extraction/schema.py` — `FieldType`, `Cardinality`, `FieldSpec`, `Schema`, and `Effort` (data-model §1, §2)
+- [X] T010 Implement `src/docdoc/extraction/schema.py` — `FieldType`, `Cardinality`, `FieldSpec`, and `Schema` (data-model §1, §2). Sampling settings live in `adapter.py`, not here
 - [X] T011 Implement the structural checks in `src/docdoc/extraction/schema.py` — EXT-1 (sibling name uniqueness), EXT-2 (children iff group or repeating group), EXT-3 (**the one-level repetition bound**, error naming the limit and the offending field path), EXT-4 (constraint keys recognised, never applied) (FR-004, FR-048, FR-006)
 - [X] T012 Implement `src/docdoc/extraction/loader.py` — JSON → `Schema`, every defect rejected at load time with the file and the defect named, no partial construction (FR-050, R6)
 - [X] T013 [P] Write `tests/unit/test_schema_loader.py` covering EXT-1…EXT-4 and every fixture from T007, including that `over_nested.json` is refused at load rather than at first use
@@ -64,7 +64,7 @@ projection, the conformance check, the prompt, the budget guard, and both ends o
 ### Identity
 
 - [X] T014 Implement `src/docdoc/extraction/identity.py` — `schema_hash` and `prompt_hash` as `sha256` over `docdoc.kernel.identity.canonical_json`, reusing the kernel's rule rather than a second convention (FR-013, R6, EXT-6)
-- [X] T015 Implement `options_hash` and `extraction_artifact_id` in `src/docdoc/extraction/identity.py` per ADR-0003 and data-model §8. The folded set is `schema_identity`, `schema_hash`, `prompt_hash`, `projection_id`, `model_id`, `model_version`, `max_tokens`, `effort`, `thinking`, `input_budget_tokens` — and **no** `temperature`, `top_p`, or `seed`, which the chosen provider's models reject and never had (R4, FR-034)
+- [X] T015 Implement `options_hash` and `extraction_artifact_id` in `src/docdoc/extraction/identity.py` per ADR-0003 and data-model §8. The folded set is `schema_identity`, `schema_hash`, `prompt_hash`, `projection_id`, `model_id`, `model_version`, `max_output_tokens`, `temperature`, `top_p`, `top_k`, `seed`, `thinking_budget`, `input_budget_tokens`. Every parameter ADR-0003's Extract row names exists on this provider, so the row is followed literally rather than refined (R4, FR-034)
 - [X] T016 [P] Write `tests/unit/test_schema_identity.py` covering EXT-6…EXT-9. EXT-9 is the subtle one and must be pinned explicitly: a pure `@1` → `@2` bump with no other edit leaves `schema_hash` unchanged, and the two artifacts still differ because the identity is folded separately
 - [X] T017 [P] Write `tests/property/test_schema_hash.py` (Hypothesis) — over randomly generated schemas, reordering fields never moves `schema_hash`, and any change to a field, type, cardinality, `required` flag, constraint, or description always moves it (SC-005)
 
@@ -75,7 +75,7 @@ projection, the conformance check, the prompt, the budget guard, and both ends o
 
 ### The wire projection and the conformance check
 
-- [X] T020 Implement `src/docdoc/extraction/shape.py` — the `Schema` → `ResponseShape` projection, identified as `response-shape@1`. It carries types, cardinality, `enum`, `const`, and string formats, sets `additionalProperties: false` at every object, asks for each field as a `value`/`claimed_text` pair, and **drops** numeric bounds, string-length bounds, and complex array constraints (R3, R7, EXT-14, FR-011)
+- [X] T020 Implement `src/docdoc/extraction/shape.py` — the `Schema` → `ResponseShape` projection, identified as `response-shape@1`. It carries types, cardinality, `enum`, and string formats, sets `additionalProperties: false` at every object, asks for each field as a `value`/`claimed_text` pair, and **drops** numeric bounds, array-length bounds, `minLength`/`maxLength`, and `pattern`. Only the last two are unenforceable by the provider; the rest are dropped **by choice**, because Principle VII puts constraint enforcement in Milestone 5 (R3, R7, EXT-14, FR-011)
 - [X] T021 [P] Write `tests/unit/test_shape_projection.py` asserting the enforceable subset is carried and the unenforceable one is dropped — and that what is dropped is still present in the `Schema` and still inside `schema_hash`, because that is the property Milestone 5 depends on (R3)
 - [X] T022 Implement `src/docdoc/extraction/conform.py` — compile each schema to a `pydantic` model once at registration, cache it under the schema identity, and validate responses against it. A failure raises `ExtractionError` naming the field path (R10, EXT-15, FR-007)
 - [X] T023 Implement absence handling in `src/docdoc/extraction/conform.py` — every declared field present in the result, an omitted field recorded as an explicit absence distinguishable from a returned-empty value, and an undeclared field discarded with the occurrence recorded (EXT-16, EXT-17, FR-002, FR-005, FR-008)
@@ -173,7 +173,7 @@ different model and confirm the same application code runs with only provenance 
 - [X] T056 [US3] Wire `TransportSettings` from `docdoc.ingest` through `src/docdoc/extraction/extract.py` — attempt limit defaulting to three, exponential backoff with jitter, honouring a service-requested wait, bounded by a per-attempt timeout and an overall deadline (FR-026, R9)
 - [X] T057 [US3] Implement `available()` in `src/docdoc/extraction/adapters/gemini.py` — a missing SDK or a missing credential reports unavailable **with the reason**, and `extract()` raises before any byte is transmitted (FR-028, FR-041)
 - [X] T058 [US3] Assert in `tests/unit/test_gemini_mapping.py` that every folded decoding parameter actually reaches the request — `temperature`, `top_p`, `top_k`, `seed`, `max_output_tokens`, `thinking_budget`. All exist on this provider (R4), so the failure mode is the opposite of the one first written: a parameter folded into identity but never sent would make the artifact id claim something the call did not do
-- [ ] T059 [US3] **Resolve the R13 assumption by measuring, not guessing**: choose the default effort level and `max_tokens` by running the committed fixture set at each level and recording accuracy, token usage, and latency in `research.md` under R13. Size `max_tokens` with headroom for reasoning, which shares the output budget on the default model — a budget sized for the JSON alone truncates mid-answer (R13, R14)
+- [ ] T059 [US3] **Resolve the R13 assumption by measuring, not guessing**: choose the default model tier, `thinking_budget`, and `max_output_tokens` by running the committed fixture set at each setting and recording accuracy, token usage, and latency in `research.md` under R13. Confirm the default model id against the live API — `DEFAULT_MODEL` in `adapters/gemini.py` is currently unverified. Size `max_output_tokens` with headroom for reasoning, which is billed from the same allowance — a budget sized for the JSON alone truncates mid-answer (R13, R14)
 - [ ] T060 [US3] Measure the cache in `tests/integration/test_gemini_live.py` — two documents against one schema, reading `usage.total_cached_tokens`. **A zero is the expected result today**: a hit needs the shared prefix to clear 2,048–4,096 tokens and the current per-schema prefix is a few hundred (R15). So assert the threshold arithmetic and record the measured prefix size, rather than asserting a hit that cannot happen yet
 - [X] T060a [US3] Add the four refusal branches to `tests/unit/test_gemini_mapping.py` and its fixtures — `SAFETY`, `PROHIBITED_CONTENT`, `BLOCKLIST`, and `RECITATION` — plus a prompt-level `promptFeedback.blockReason`. `RECITATION` needs its own assertion: it is not a safety refusal, an invoice quoting standard terms can trip it, and reporting it as one sends the caller after the wrong problem (R12)
 
@@ -218,7 +218,7 @@ a result.
 - [X] T073 [P] Write `examples/extract_invoice.py` — the SC-020 example, runnable with no credentials against the echo adapter, with a commented line showing the switch to a real adapter. It must write its own minimal schema JSON to a temporary directory and register that, so it runs after `pip install docdoc` rather than only from a git checkout — `schemas/` is not packaged in the wheel. Writing the file is also the clearest possible demonstration that a schema is data
 - [X] T074 [P] Update `README.md`: roadmap Milestone 3 → **Done**, Milestone 4 → Next; add an extraction example to "What it does today"; document the `docdoc[google]` extra alongside the existing ones
 - [X] T075 [P] Add the `schemas/` directory conventions to `CONTRIBUTING.md` — how to add a document type, and what obliges a major bump per ADR-0008
-- [ ] T076 Run `/speckit-analyze` and append what it finds as a convergence phase in `specs/003-schema-driven-extraction/tasks.md`, the way Milestone 2 did. That pass found ten gaps the first pass left; assume this one leaves some too
+- [X] T076 Run `/speckit-analyze` and append what it finds as a convergence phase in `specs/003-schema-driven-extraction/tasks.md`, the way Milestone 2 did. That pass found ten gaps the first pass left; assume this one leaves some too
 - [X] T077 Confirm the gate in `.github/workflows/ci.yml` covers this layer — `pytest -m 'not provider and not perf'`, `mypy --strict`, `ruff`, `lint-imports` — and that it passes with no credentials configured, with every provider-marked skip stating its reason (SC-019)
 
 ---
@@ -317,7 +317,7 @@ before either starts.
 ## Notes
 
 - **Three tasks exist to resolve an assumption by measurement rather than to implement a decision**: T079
-  (the budget guard's ratio and the default budget), T059 (the effort default and `max_tokens`), and T060
+  (the budget guard's ratio and the default budget), T059 (the model tier, `thinking_budget`, and `max_output_tokens`), and T060
   (that the prompt cache actually reads). Milestone 2 had two such tasks and *both* assumptions turned out
   to be wrong, which is exactly why they were tasks. Do not close them by reasoning.
 - **Until T079 lands, the budget guard runs on a guessed constant.** T028 and T029 ship a pessimistic

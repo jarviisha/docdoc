@@ -78,7 +78,7 @@ they live in a separate type (research.md R9). No clock, randomness, or I/O may 
 text, prompt content, and credentials never reach logs (FR-039).
 
 **Scale/Scope**: Documents up to the configured input budget; schemas up to a few hundred fields.
-Roughly 11 new modules plus one adapter and the in-repo `echo` adapter, no kernel change, and a fixture
+Roughly 13 new modules plus one adapter and the in-repo `echo` adapter, no kernel change, and a fixture
 set of 3 schemas, 3 prompts, and 4 recorded provider responses.
 
 ## Constitution Check
@@ -197,13 +197,18 @@ src/docdoc/
     ├── conform.py           # compiled pydantic model per schema; field-addressable failures (R10)
     ├── prompt.py            # PromptTemplate, assembly order and cache breakpoint (R8, R15)
     ├── budget.py            # the local input/output budget guard (R5)
-    ├── adapter.py           # ModelAdapter protocol, ModelUsage, DecodingOptions
+    ├── adapter.py           # ModelAdapter protocol, ModelUsage, ExtractionOptions
+    ├── value.py             # ExtractedValue, ValueTree — the grounding fields, left unresolved
+    ├── retry.py             # the retry loop, once for every adapter (R9, FR-026). Transport
+    │                        #   policy belongs to the layer, not to each adapter: otherwise
+    │                        #   "at most N attempts bounded by a deadline" becomes a claim
+    │                        #   about whichever adapter you happened to use
     ├── observe.py           # the single `extraction.extract` structured event
     ├── extract.py           # extract() — the entry point that composes the above
     └── adapters/
         ├── __init__.py
         ├── echo.py          # deterministic in-repo adapter — a deliverable, not a fixture (R11)
-        └── anthropic_messages.py  # the one real adapter   (extra: anthropic)
+        └── gemini.py        # the one real adapter          (extra: google)
 
 schemas/                     # NEW — schemas are data, not code (FR-049)
 ├── invoice@1.json

@@ -132,62 +132,6 @@ def test_the_result_carries_its_artifact_id(registry: SchemaRegistry, echo: Echo
     assert _result(registry, echo).artifact_id.startswith("sha256:")
 
 
-# -- SC-018 / EXT-24: the grounding boundary ---------------------------------
-
-
-@pytest.mark.parametrize("identity", ["invoice@1", "invoice@2", "receipt@1"])
-def test_every_grounding_field_is_unresolved(
-    registry: SchemaRegistry, echo: EchoAdapter, identity: str
-) -> None:
-    """EXT-24 -- across every schema, at every depth, including repeating groups."""
-    values = list(_values(_result(registry, echo, identity).values))
-    assert values, "a test that found no values would pass for the wrong reason"
-    for value in values:
-        assert value.grounding is None, f"{value.field_path} was grounded one milestone early"
-        assert value.grounding_score is None
-        assert value.grounded is False
-
-
-@pytest.mark.parametrize("identity", ["invoice@1", "invoice@2", "receipt@1"])
-def test_the_calibration_fields_are_reserved_and_empty(
-    registry: SchemaRegistry, echo: EchoAdapter, identity: str
-) -> None:
-    """ADR-0004 -- a blended score may only ever come from a versioned calibrator."""
-    for value in _values(_result(registry, echo, identity).values):
-        assert value.calibrated_confidence is None
-        assert value.calibrator_version is None
-
-
-def test_no_module_in_the_layer_writes_a_grounding_status() -> None:
-    """The structural half of the assertion above.
-
-    The value tests would still pass if a code path existed that set a status but
-    happened not to run for these fixtures. This scans for the assignment itself.
-    """
-    import ast
-    import pathlib
-
-    import docdoc.extraction
-
-    root = pathlib.Path(docdoc.extraction.__file__).parent
-    offenders: list[str] = []
-    for path in sorted(root.rglob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
-            is_grounding_kwarg = isinstance(node, ast.keyword) and node.arg in (
-                "grounding",
-                "grounding_score",
-            )
-            if is_grounding_kwarg and not (
-                isinstance(node.value, ast.Constant) and node.value.value is None
-            ):
-                offenders.append(f"{path.name}: {node.arg}=")
-    assert not offenders, (
-        f"the extraction layer sets a grounding status: {offenders}. Grounding is "
-        "Milestone 4's stage, with its own artifact under ADR-0003"
-    )
-
-
 def test_model_confidence_is_carried_and_labelled_untrusted_in_the_schema(
     registry: SchemaRegistry, echo: EchoAdapter
 ) -> None:

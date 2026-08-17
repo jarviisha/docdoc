@@ -20,7 +20,7 @@ The base install stays `pydantic` alone. `uv sync --all-extras` adds the provide
 
 ```bash
 uv run --no-project --with . python -c "import docdoc.extraction, importlib.util as u; \
-  assert u.find_spec('google') is None; print('base install: no provider SDK')"
+  assert u.find_spec('google.genai') is None; print('base install: no provider SDK')"
 ```
 
 ## Run the suites
@@ -46,7 +46,8 @@ from docdoc.extraction import SchemaRegistry, extract
 from docdoc.extraction.adapters import EchoAdapter
 
 registry = SchemaRegistry.from_paths(["schemas/"])
-result = extract(document, schema="invoice@1", adapter=EchoAdapter.from_fixtures("tests/fixtures/echo"))
+echo = EchoAdapter.from_fixtures("tests/fixtures/echo")
+result = extract(document, schema="invoice@1", registry=registry, adapter=echo)
 
 # Every declared field is present, including the ones the document does not contain
 assert set(result.values) == set(registry.describe("invoice@1").field_names)
@@ -67,7 +68,7 @@ zero undeclared fields.
 Then confirm the model cannot bully the result into a different shape:
 
 ```python
-extract(document, schema="invoice@1", adapter=EchoAdapter.malformed())
+extract(document, schema="invoice@1", registry=registry, adapter=EchoAdapter.malformed())
 # ExtractionError naming the offending field path — no coercion, no default
 ```
 
@@ -76,8 +77,8 @@ extract(document, schema="invoice@1", adapter=EchoAdapter.malformed())
 ```python
 registry.identities()                       # ('invoice@1', 'invoice@2', 'receipt@1')
 
-r1 = extract(document, schema="invoice@1", adapter=echo)
-r2 = extract(document, schema="invoice@2", adapter=echo)
+r1 = extract(document, schema="invoice@1", registry=registry, adapter=echo)
+r2 = extract(document, schema="invoice@2", registry=registry, adapter=echo)
 assert r1.provenance.schema_identity == "invoice@1"
 assert r1.artifact_id != r2.artifact_id     # two majors, two artifacts
 
@@ -96,7 +97,7 @@ description changes it. Then edit a field description in `schemas/invoice@1.json
 version and run:
 
 ```bash
-uv run pytest tests/unit/test_schema_identity.py::test_hash_snapshot -q
+uv run pytest tests/unit/test_schema_snapshot.py -q
 ```
 
 **Expected**: the build fails, naming the version whose hash moved. Clearing it means either publishing a
@@ -124,7 +125,10 @@ uv run pytest -m provider -q
 ```
 
 ```python
-result = extract(document, schema="invoice@1")   # no adapter argument: configuration decides
+# Configuration decides which adapter you construct. `extract()` never picks one
+# for you and has no argument a fallback could be threaded through (FR-029).
+adapter = GeminiAdapter()
+result = extract(document, schema="invoice@1", registry=registry, adapter=adapter)
 result.provenance.adapter_id                     # 'gemini'
 result.provenance.model_id, result.provenance.model_version
 result.provenance.usage.input_tokens, result.provenance.usage.output_tokens
@@ -138,24 +142,27 @@ Then confirm the prompt cache is actually working — this is the difference bet
 instructions once per document and once per schema:
 
 ```python
-first = extract(doc_a, schema="invoice@1")
-second = extract(doc_b, schema="invoice@1")
-assert second.provenance.usage.cache_read_input_tokens > 0
+first = extract(doc_a, schema="invoice@1", registry=registry, adapter=adapter)
+second = extract(doc_b, schema="invoice@1", registry=registry, adapter=adapter)
+second.provenance.usage.cache_read_input_tokens   # 0 today — see below
 ```
 
-**Expected**: the second extraction reads the per-schema prefix from cache. If it is zero, something
-volatile has been interpolated ahead of the cache breakpoint — see `tests/unit/test_prompt_assembly.py`,
-which fails on exactly that.
+**Expected today: zero.** A Gemini cache hit needs the shared prefix to clear a per-model minimum of
+2,048–4,096 tokens, and the current per-schema prefix is a few hundred (research.md R15). The ordering
+is still right and buys nothing yet. Once the prefix does clear the threshold, a zero would mean
+something volatile precedes the breakpoint — `tests/unit/test_prompt_assembly.py` guards that from the
+offline side, and `tests/integration/test_gemini_live.py` asserts the threshold arithmetic rather than
+a hit that cannot happen.
 
 ### V5 — Failure, safety, and the boundaries
 
 ```python
 # Over-budget input: refused before anything is transmitted
-extract(huge_document, schema="invoice@1")
+extract(huge_document, schema="invoice@1", registry=registry, adapter=adapter)
 # ExtractionError naming the document, the bound, the estimate, and Document.slice as the way forward
 
 part = huge_document.slice(span_over_pages_1_to_5)
-ok = extract(part, schema="invoice@1")
+ok = extract(part, schema="invoice@1", registry=registry, adapter=adapter)
 ok.provenance.document_id      # the narrowed document — the record says what was actually read
 ```
 
