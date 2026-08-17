@@ -78,6 +78,30 @@ becomes non-compliant.
 Sections amended: Open Constitutional Decisions (LICENSE moved to Resolved).
 Three non-blocking decisions remain open: SCHEMA_EVOLUTION_POLICY,
 GOLDEN_DATASET_LICENSING, PRE_1_0_VERSIONING.
+
+---
+AMENDMENT 1.1.1 → 1.2.0 (2026-08-17)
+Bump rationale: MINOR — resolves the decision gating Milestone 3 and materially
+expands Principle VI with binding schema-identity and version-resolution rules.
+No principle is removed or redefined; no previously compliant work becomes
+non-compliant, because no extraction code exists yet.
+
+  - TODO(SCHEMA_EVOLUTION_POLICY) resolved (ADR-0008). Schema identity is
+    two-level: an author-assigned major `schema_version` in `name@version` that
+    moves only on a consumer-contract break, and a derived `schema_hash` over
+    canonical JSON that moves on any result-affecting edit. Both are recorded in
+    every result and both are folded into the extract stage's `options_hash`,
+    refining ADR-0003's Extract row. Concurrent majors are allowed; the library
+    core takes concrete versions only, with `latest` permitted at an edge that
+    records what it resolved to.
+
+Sections amended: Principle VI (two rules added, rationale extended); Principle
+VIII (schema bump rules delegated to ADR-0008); Open Constitutional Decisions
+(SCHEMA_EVOLUTION_POLICY moved to Resolved). Two non-blocking decisions remain
+open: GOLDEN_DATASET_LICENSING, PRE_1_0_VERSIONING.
+
+Templates: no changes required — the plan-template gate table references
+principles by number and remains accurate.
 -->
 
 # docdoc Constitution
@@ -219,9 +243,18 @@ Rules:
 - Document-type-specific services (`InvoiceService`, `PurchaseOrderService`, and equivalents)
   MUST NOT exist. Document-type knowledge lives in schema and prompt data, not in code paths.
 - Every extraction result MUST reference the exact schema name and version used.
+- Schema identity is two-level per ADR-0008: an author-assigned major `schema_version` inside
+  `name@version`, which changes only when the consumer contract breaks, and a derived
+  `schema_hash` over the schema's canonical JSON. Both MUST be recorded in every result and both
+  MUST be folded into the extract stage's `options_hash`. The bump rules are fixed by ADR-0008 and
+  MUST NOT be reinterpreted per schema.
+- An extraction request MUST name a concrete `name@version`. `latest` resolution is permitted only
+  at an API or CLI edge, and only when the resolved version is recorded in the result. Multiple
+  majors of one schema MAY be served concurrently.
 
 Rationale: hard-coded per-document-type services are how IDP engines become unmaintainable
-enterprise services instead of reusable engines.
+enterprise services instead of reusable engines. A schema version that moves for reasons a consumer
+cannot predict is not a contract.
 
 ### VII. Validation Is Separate From Extraction
 
@@ -249,7 +282,8 @@ Rules:
 - Results MUST record: document identity, parser id and version, pipeline version, schema
   version, model, prompt hash, extractor version, processing options, and artifact identity.
 - Anything that can change a result MUST be versionable: schemas, parsers, pipelines, prompts,
-  models, calibrators, and relevant processing configuration.
+  models, calibrators, and relevant processing configuration. For schemas, which edits move the
+  version and which move only the content hash is fixed by ADR-0008.
 - Provenance MUST NOT be silently overwritten. Reprocessing produces a new result with new
   provenance; it does not mutate the prior one.
 - Artifacts MUST be immutable and content-addressed, using the per-stage chain in ADR-0003:
@@ -419,7 +453,8 @@ These are tensions in the founding principles. Each MUST be decided — via an A
 `docs/adr/` — before the work it gates begins. Items marked BLOCKING MUST NOT be resolved
 implicitly by an implementation choice.
 
-**Resolved 2026-08-14** (all six original BLOCKING items; see [`docs/adr/`](../../docs/adr/)):
+**Resolved** (see [`docs/adr/`](../../docs/adr/)). The six original BLOCKING items were all resolved
+on 2026-08-14:
 
 | Decision | Outcome | ADR |
 |----------|---------|-----|
@@ -430,12 +465,10 @@ implicitly by an implementation choice.
 | `FUZZY_GROUNDING_SPEC` | Kernel `find()` exact-only; fuzzy in extraction via `rapidfuzz`, pinned as `grounding_version` | [0005](../../docs/adr/0005-fuzzy-grounding-specification.md) |
 | `NORMALIZATION_VS_GROUNDING` | Comparison-time match view with offset map; `Document.text` stays byte-faithful | [0006](../../docs/adr/0006-comparison-time-match-view.md) |
 | `LICENSE` | Apache-2.0, chosen for its explicit patent grant | [0007](../../docs/adr/0007-apache-2-license.md) |
+| `SCHEMA_EVOLUTION_POLICY` | Major `schema_version` for contract breaks, derived `schema_hash` for cache invalidation; concurrent majors allowed; no `latest` in the core (2026-08-17) | [0008](../../docs/adr/0008-schema-evolution-policy.md) |
 
 **Still open:**
 
-- **TODO(SCHEMA_EVOLUTION_POLICY)** — Milestone 3. Define which schema changes require a version
-  bump (additive fields, constraint changes, renames) and whether multiple schema versions may
-  be served simultaneously.
 - **TODO(GOLDEN_DATASET_LICENSING)** — Milestone 6. A public repository cannot ship real
   customer invoices. Decide the sourcing strategy — synthetic, public-domain, or a private
   dataset referenced by hash — and how contributors run evaluation without it.
@@ -470,4 +503,4 @@ insufficient. Unjustified violations are rejected regardless of the code's quali
 **Precedence for unresolved items.** Where an "Open Constitutional Decision" is unresolved,
 implementers MUST NOT resolve it silently in code. Raise it, decide it, record it.
 
-**Version**: 1.1.1 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-08-14
+**Version**: 1.2.0 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-08-17
