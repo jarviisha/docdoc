@@ -136,6 +136,32 @@ runs against both (research.md R11).
   folding, no Unicode normalisation. Milestone 4 cannot resolve what this layer has already altered
   (FR-003).
 
+## 6b. AdapterRegistry
+
+The adapters a running system knows, and the rule that picks one. Exists because FR-021 forbids
+application code from naming a provider, and until it did there was no way to obey that.
+
+| Member | Notes |
+|---|---|
+| `register(adapter)` | Asks the adapter whether it is usable and records the answer |
+| `register_unavailable(id, reason)` | For an adapter whose extra is not installed, so the failure can name what to install |
+| `candidates()` | Every known adapter in selection order: configured priority, then the adapter id as a total tie-break |
+| `select()` | The first usable adapter, or `ModelProviderError` carrying **every** candidate's reason |
+
+- **EXT-25** — selection never depends on registration order or dictionary iteration. Priority decides;
+  the adapter id breaks ties.
+- **EXT-26** — an unusable adapter is recorded with its reason, never omitted. Silence would make "not
+  installed" indistinguishable from "no such thing" (FR-028), and the resulting error would name
+  nothing.
+- **EXT-27** — **the echo adapter is never selected automatically**, even when registered first and
+  even when nothing else is usable. It answers from fixtures, so auto-selecting it would turn a missing
+  credential into a stream of confident, fabricated extractions carrying full provenance — silently
+  wrong data rather than an error. It is excluded structurally, not by ordering, and it remains usable
+  when passed explicitly.
+
+`default_adapter()` is the call FR-021 asks application code to make. `AdapterCandidate` is the record
+`candidates()` returns: id, availability, reason, and the adapter itself when there is one.
+
 ## 7. ExtractionOptions and the budget
 
 | Field | Type | In identity? |

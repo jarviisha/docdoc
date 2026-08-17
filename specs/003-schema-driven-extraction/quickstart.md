@@ -110,9 +110,14 @@ commit message — the change detector of FR-017. Revert the edit afterwards.
 requires. Confirm nothing in the engine knows about it:
 
 ```bash
-uv run pytest tests/unit/test_no_provider_names.py -q   # also asserts no document-type code path
-rg -n 'invoice|receipt' src/docdoc/                      # expect: no matches
+uv run pytest tests/unit/test_extraction_has_no_document_type_code.py -q
+rg -n 'invoice|receipt' src/docdoc/extraction/           # expect: no matches in code
 ```
+
+That test is the automated check SC-014 requires, and it derives the forbidden document-type names
+from `schemas/` rather than a hardcoded list — so registering a new type extends the check by itself.
+(`test_no_provider_names.py` is the ingest layer's equivalent and scans only `src/docdoc/ingest`;
+running it here would prove nothing about extraction, which is what this line used to say.)
 
 **Expected**: zero matches under `src/`. Document-type knowledge lives in `schemas/`, which is Principle VI
 read literally.

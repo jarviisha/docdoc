@@ -407,3 +407,41 @@ until the prefix grows** — so it must assert the threshold arithmetic rather t
 
 Cache hits are reported in the response's `usage.total_cached_tokens`. Nothing per-request — no
 timestamp, no document id, no request id — may appear before the breakpoint.
+
+## R16 — An adapter is selected by configuration, and the fixture adapter never is
+
+**Decision.** `AdapterRegistry` holds the adapters an installation knows, `default_adapter()` returns
+the first usable one in configured priority order, and application code calls that instead of
+constructing a provider. The shape mirrors the ingest layer's parser registry so a reader who knows one
+knows the other: an adapter whose extra is missing or whose credentials are absent is **recorded with
+its reason** rather than omitted, priority decides, and the adapter id is a total tie-break so
+selection never depends on registration order or dictionary iteration.
+
+**Rationale.** FR-021 requires that a caller name no provider, model family, or model version anywhere
+in application code. This entry exists because that requirement went **unmet for the whole of the
+milestone's first implementation**: every documented example wrote `adapter=GeminiAdapter()`, which is
+precisely what the requirement forbids, while `contracts/extraction-api.md` §8 asserted the opposite.
+The gap was surfaced by a convergence pass reading the code against the spec, not by any of the tests —
+because the tests had been written to match the code.
+
+Worse, an earlier analysis pass had *touched* it: it found the quickstart claiming "no adapter argument:
+configuration decides", judged that wrong about the design, and edited the documentation to match the
+code rather than the code to match the spec. Treating an artifact as the thing to fix, when the artifact
+was the only place still telling the truth, is the failure mode this entry is really about.
+
+**The echo adapter is excluded from automatic selection, and that is a safety property.** It answers
+from committed fixtures. If it were selectable when no real adapter is usable, a forgotten API key would
+not produce an error — it would produce a stream of confident, fabricated extractions carrying full
+provenance, indistinguishable downstream from real ones. That is the worst outcome this layer can have:
+not a failure, but plausible wrong data with a content-addressed identity attesting to it.
+
+So the exclusion is structural rather than a matter of priority ordering — `select()` skips it even when
+it is ranked first and even when the alternative is raising. It stays fully usable when passed
+explicitly, which is a decision a caller takes knowingly. `tests/unit/test_adapter_registry.py` pins
+both halves.
+
+**Alternatives.** Reading the adapter from an environment variable inside `extract()`: rejected because
+it hides a result-affecting input inside a function that otherwise takes everything explicitly, and
+provenance would record a choice the call site never made. Making `adapter` optional and defaulting to
+`default_adapter()`: rejected for the MVP because a missing argument would then reach for a network
+service, and an accidental extraction is worse than a `TypeError`.

@@ -198,6 +198,10 @@ src/docdoc/
     ├── prompt.py            # PromptTemplate, assembly order and cache breakpoint (R8, R15)
     ├── budget.py            # the local input/output budget guard (R5)
     ├── adapter.py           # ModelAdapter protocol, ModelUsage, ExtractionOptions
+    ├── adapter_registry.py  # AdapterRegistry, default_adapter() — FR-021's mechanism.
+    │                        #   Application code calls default_adapter(); it never
+    │                        #   constructs a provider. The echo adapter is excluded
+    │                        #   from automatic selection structurally (research.md R16)
     ├── value.py             # ExtractedValue, ValueTree — the grounding fields, left unresolved
     ├── retry.py             # the retry loop, once for every adapter (R9, FR-026). Transport
     │                        #   policy belongs to the layer, not to each adapter: otherwise
