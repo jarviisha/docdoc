@@ -48,10 +48,21 @@ ADAPTER_ID = "gemini"
 #: in ``extractor_version`` and therefore reaches the artifact id (FR-036).
 ADAPTER_VERSION = "1.0.0"
 
-#: Provisional until T059 measures the accuracy/cost/latency trade-off across
-#: tiers on the committed fixture set. Recorded in every result either way, so a
-#: change of default is visible in provenance rather than inferred.
-DEFAULT_MODEL = "gemini-2.5-pro"
+#: Verified against the live API at T053/T059 rather than written from memory --
+#: the first value here was ``gemini-2.5-pro``, which `models.list()` still
+#: reports and which the API refuses to new accounts with a 404. Listing a model
+#: is not the same as being able to call it, and only a call tells you which.
+#:
+#: A deliberate non-choice: **not** an alias like ``gemini-pro-latest``. An alias
+#: makes results irreproducible, because the model moves underneath a recorded
+#: request -- the same objection FR-014 makes to resolving ``latest`` for schemas.
+#: Provenance records the concrete version the provider reports (see
+#: ``model_version`` below), so an alias would also record a name that means
+#: something different next month.
+#:
+#: The tier is still provisional: T059 measures accuracy, cost, and latency across
+#: tiers, and a pro tier was unreachable on the account used here (429).
+DEFAULT_MODEL = "gemini-3.5-flash"
 
 #: Finish reasons that mean "the model declined", mapped to the category recorded
 #: verbatim in the error. They are *not* interchangeable:
@@ -134,11 +145,12 @@ class GeminiAdapter:
 
     @property
     def model_version(self) -> str:
-        """Gemini has no separate version field; the model id carries it.
+        """The model *requested*, used only when a response has not been seen.
 
-        Returned as its own value rather than left blank, because provenance
-        requires the field and "the id is the version" is the honest answer
-        rather than a missing record.
+        The response carries its own ``model_version``, and that is what reaches
+        provenance -- FR-033 wants the model actually reached, not the one asked
+        for. The two differ whenever a request names an alias, and recording the
+        request would then record a name whose meaning moves.
         """
         return self._model
 
@@ -274,7 +286,10 @@ class GeminiAdapter:
         return ModelResponse(
             payload=self._payload(response, request),
             model_id=self._model,
-            model_version=self.model_version,
+            # What the provider says it used, falling back to what we asked for.
+            # These differ for an alias, and the resolved one is the answerable
+            # record (FR-033).
+            model_version=_name(getattr(response, "model_version", None)) or self._model,
             usage=usage,
         )
 

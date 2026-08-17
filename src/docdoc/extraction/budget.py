@@ -30,26 +30,41 @@ __all__ = [
 ]
 
 # ---------------------------------------------------------------------------
-# PROVISIONAL until T079 measures them (specs/003 research.md R5).
+# MEASURED at T079 against the provider's own `count_tokens`, over the committed
+# fixtures plus deliberately dense content. The first values here were guesses --
+# 2.5 chars per token with a 1.15 margin -- and the measurement showed them
+# **under-estimating by up to 1.72x** on exactly the content this engine reads:
 #
-# Both numbers below are guesses, and the task list says so out loud rather than
-# letting the MVP imply they were measured. T079 calibrates them against every
-# committed fixture using the provider's own token count as ground truth, after
-# the real adapter exists -- which is why it could not live in Phase 2, where it
-# was originally written.
+#     dense tabular invoice text   1.27 chars/token
+#     Vietnamese with diacritics   1.62
+#     CJK                          1.18
+#     numeric tables / emoji       1.10   <- the floor
+#     English prose                5.13
 #
-# The ratio is pessimistic on purpose. English prose runs about 4 characters per
-# token; dense tabular invoice text, punctuation, and non-Latin scripts run
-# lower. Assuming 2.5 over-counts ordinary text by roughly 40%, and the margin
-# adds headroom on top. Wrong in the refusing direction, never the transmitting
-# one.
-# ---------------------------------------------------------------------------
-CHARS_PER_TOKEN = 2.5
+# That is the wrong direction to be wrong in. The guard exists to refuse before
+# transmitting; one that under-counts lets a doomed request through, which is the
+# failure it was written to prevent.
+#
+# 1.10 is the measured floor, so 1.10 x 1.15 = 1.26 is the largest ratio that
+# still over-estimates it. 1.20 is used, leaving headroom for content denser than
+# anything measured.
+CHARS_PER_TOKEN = 1.20
 SAFETY_MARGIN = 1.15
 
-#: Comfortably under the default model's 1M-token context window, leaving room
-#: for the response and for reasoning, which share the output budget. Also
-#: provisional until T079.
+# The cost of being safe, stated rather than hidden: a single linear ratio cannot
+# serve both 1.10 and 5.13 chars per token. Tuned to the dense floor, ordinary
+# English prose is over-estimated roughly 5x, so a document of ~215k characters is
+# refused against a 200k-token budget when it would truly cost ~42k tokens.
+#
+# That is a real usability cost and the escape hatch is `Document.slice`, which is
+# friction. The alternative -- the provider's exact `count_tokens` -- transmits the
+# document to answer, which is the thing FR-041 forbids doing before validation.
+# So the trade is deliberate: refuse some documents that would have fitted, rather
+# than transmit any that will not. Revisit it with FR-041 open on the table, not
+# by loosening this constant.
+
+#: Comfortably under the 1M-token context window of the models measured, leaving
+#: room for the response and for reasoning, which share the output allowance.
 DEFAULT_INPUT_BUDGET_TOKENS = 200_000
 
 

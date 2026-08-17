@@ -24,16 +24,25 @@ from docdoc.extraction.budget import (
     guard_input_budget,
 )
 
-#: A conservative floor for how many characters one token can represent. No
-#: tokenizer of a natural language packs more than a handful of characters into a
-#: token; dense punctuation and non-Latin scripts pack far fewer. If the estimate
-#: ever assumed *more* than this, it would start under-counting real documents.
-MOST_CHARS_A_TOKEN_COULD_HOLD = 6.0
+#: The **measured** floor (T079), not a guess. Across the committed fixtures plus
+#: deliberately dense content, the densest real material ran 1.10 characters per
+#: token -- emoji and numeric tables -- with CJK at 1.18 and dense tabular invoice
+#: text at 1.27. This constant was 6.0 while it was a guess, which made the
+#: assertions below far weaker than they could be.
+MOST_CHARS_A_TOKEN_COULD_HOLD = 1.10
 
 
-def test_the_ratio_is_pessimistic_by_construction() -> None:
-    """The invariant that keeps the guard wrong in the safe direction."""
-    assert CHARS_PER_TOKEN <= MOST_CHARS_A_TOKEN_COULD_HOLD
+def test_the_ratio_over_estimates_even_the_densest_measured_content() -> None:
+    """The invariant that keeps the guard wrong in the safe direction.
+
+    The guessed ratio failed exactly this: 2.5 chars per token under-estimated
+    dense tabular invoice text by 1.72x, letting an over-budget document through
+    to be transmitted -- the failure the guard exists to prevent.
+    """
+    assert CHARS_PER_TOKEN <= MOST_CHARS_A_TOKEN_COULD_HOLD * SAFETY_MARGIN, (
+        f"CHARS_PER_TOKEN={CHARS_PER_TOKEN} would under-estimate content at "
+        f"{MOST_CHARS_A_TOKEN_COULD_HOLD} chars/token even with the margin applied"
+    )
     assert SAFETY_MARGIN >= 1.0
 
 

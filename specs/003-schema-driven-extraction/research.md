@@ -167,10 +167,33 @@ FR-041. A third-party tokenizer such as `tiktoken`: rejected twice over — it i
 tokenizer (it under-counts by 15–20% on ordinary text and much more on code), and it would put a
 dependency in the base install to produce a wrong answer.
 
-**Consequence to accept, stated plainly.** The guard is an over-estimate, so a document that would
-actually have fitted can be refused. That is the correct direction to be wrong in — refusing a document
-the caller can narrow with `slice` beats transmitting one that will be rejected — but it is a real
-limitation, the ratio is configurable, and it must be in the docs rather than discovered.
+**Measured at T079, and the guess was wrong in the dangerous direction.** The first values here —
+2.5 characters per token, 1.15 margin — were written before any call. Against the provider's own
+`count_tokens`:
+
+| Content | chars/token |
+|---|---|
+| English prose | 5.13 |
+| Arabic | 1.63 |
+| Vietnamese with diacritics | 1.62 |
+| base64-like | 1.50 |
+| Dense tabular invoice text | 1.27 |
+| CJK | 1.18 |
+| Numeric tables, emoji | **1.10** (the floor) |
+
+At 2.5 the guard **under-estimated dense tabular invoice text by 1.72×** — exactly the content this
+engine reads, and exactly the direction it must never be wrong in. It would have let an over-budget
+document through to be transmitted, which is the failure it exists to prevent. `CHARS_PER_TOKEN` is now
+**1.20**, below the 1.26 that the measured floor and the margin allow.
+
+**Consequence to accept, now quantified.** A single linear ratio cannot serve both 1.10 and 5.13. Tuned
+to the dense floor, English prose is over-estimated about 5×, so roughly 215k characters are refused
+against a 200k-token budget where the true cost is about 42k tokens. That is a real usability cost, and
+the escape hatch — `Document.slice` — is friction.
+
+The alternative remains the provider's exact `count_tokens`, which transmits the document to answer. So
+the trade is deliberate: refuse some documents that would have fitted rather than transmit any that will
+not. Revisiting it means reopening FR-041, not loosening the constant.
 
 ## R6 — Schema files are JSON, because the canonical form already exists in the kernel
 
@@ -297,11 +320,38 @@ inherits, so the default is the most capable tier and cost reduction is an expli
 rather than a silent one. Recording the model *and its version* is what makes a result explainable
 after a model update.
 
-**Not resolved here.** Reference prices and the exact default model id are deliberately absent. An
-earlier revision listed a price table, which reads as authoritative and goes stale silently. T053
-records both against the live API, and T059 measures the accuracy/cost/latency trade-off across tiers on
-the committed fixture set — the same shape as Milestone 2's text-layer thresholds, and for the same
-reason: a number chosen before measurement is worse than a task that says to measure it.
+**Measured at T059. The first default did not exist for new accounts.** `DEFAULT_MODEL` was written as
+`gemini-2.5-pro` without a call. The API returns **404: no longer available to new users** — while
+`models.list()` still reports it. Listing a model and being able to call it are different facts, and
+only a call distinguishes them. The default is now **`gemini-3.5-flash`**, verified by calling it.
+
+One committed invoice fixture, one call per row:
+
+| Model | `thinking_budget` | in | out | reasoning | latency |
+|---|---|---|---|---|---|
+| `gemini-3.5-flash` | default | 633 | 578 | 1,288 | 7.7 s |
+| `gemini-3.5-flash` | `0` | 633 | 362 | 0 | **2.7 s** |
+| `gemini-3.5-flash-lite` | default | 633 | 568 | 0 | 2.5 s |
+| `gemini-3.6-flash` | default | 633 | 440 | 911 | 15.9 s |
+
+Four things this settles, and one it does not:
+
+1. **Reasoning dominates the answer.** 1,288 reasoning tokens against 578 of output — 2.2×. R14's
+   concern that a `max_output_tokens` sized for the JSON gets eaten is not theoretical.
+2. **Reasoning bought nothing here.** Field accuracy was identical with and without it, at a third of
+   the latency. On *this* fixture; a harder document may differ, which is why the default stays at the
+   provider's automatic setting rather than being switched off globally.
+3. **`thinking_budget=0` is not portable.** Accepted by `gemini-3.5-flash`, rejected with a 400 by
+   `gemini-3.5-flash-lite` and `gemini-3.6-flash`. An adapter cannot assume the option exists.
+4. **No pro tier was reachable.** `gemini-3.1-pro-preview` and `gemini-pro-latest` both return 429 on
+   this account. So the tier comparison this task was meant to make is **incomplete**, and the flash
+   default is chosen from what could be called rather than from what is best.
+
+**Still open.** One expected field differed on every tier. The likeliest explanation is that the
+*expectation* was wrong rather than the model — the document prints `BEISPIEL GMBH` and the check wanted
+`Beispiel GmbH`, and returning the printed form is what the prompt asks for. Unconfirmed: the free-tier
+quota (20 requests/day) was exhausted by these measurements. Reference prices stay deliberately absent —
+a price table reads as authoritative and goes stale silently.
 
 ## R14 — Reasoning shares the output budget, and the failure is documented
 
@@ -334,10 +384,10 @@ derived from `schema@version` is identical across every document extracted again
 document is the only volatile part. Putting the document first — the natural reading order — would make
 every extraction a cold read.
 
-**The new finding, and it is not comfortable.** A cache hit requires the shared prefix to exceed a
-per-model minimum: **2,048 tokens on Gemini 2.5 Flash/Pro, 4,096 on newer tiers**. The current
-per-schema prefix — `invoice@1`'s prompt is about 1,200 characters, plus its response shape — is on the
-order of a few hundred tokens. **It is far below the threshold, so today it is not cached at all.**
+**Measured at T060, and confirmed.** A cache hit requires the shared prefix to exceed a per-model
+minimum of **2,048–4,096 tokens**. The per-schema prefix measures **817 tokens** — the `invoice@1`
+prompt is 489 tokens on its own, and only the prompt travels as the cached system instruction.
+**It is below the threshold, so it is not cached at all today**, exactly as predicted.
 
 So the ordering is correct and the benefit is currently zero. That is worth stating plainly rather than
 leaving the earlier revision's implication that the ordering *buys* something today. Two honest options

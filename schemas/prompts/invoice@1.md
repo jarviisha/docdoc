@@ -12,6 +12,17 @@ For every field, return two things:
 The claimed text is how a later stage locates the value on the page. Text you have altered cannot
 be located, so an altered claim is worse than an absent one.
 
+**Number formatting.** A `decimal` or `number` value must be machine-parseable: a `.` decimal
+separator, no thousands separators, no currency symbol. The document's own formatting belongs in
+`claimed_text` and only there.
+
+    printed 2.480,50  ->  value "2480.50",  claimed_text "2.480,50"
+    printed 1,240.00  ->  value "1240.00",  claimed_text "1,240.00"
+
+This applies **inside repeating groups too**, not only to top-level fields. Do not normalise the
+claimed text, and do not leave the value in the document's format -- they are two different fields
+answering two different questions.
+
 Rules:
 
 - Do not infer a field from another. A due date is not "issue date plus thirty days" unless the
