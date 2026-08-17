@@ -406,3 +406,19 @@ never checked — and the pattern is now clear enough to name: existence was ver
 
 **Checkpoint**: the engine's central claim — that document-type knowledge lives in data and not in code
 — has an automated check behind it rather than three artifacts asserting one exists.
+
+---
+
+## Phase 12: Convergence
+
+One finding that matters and three that tidy. The first is a promise the code made to itself and did
+not keep, which is a shape worth noticing: the contract suite's own docstring says the real adapter
+joins it at Phase 5, Phase 5 completed, and it never did.
+
+- [ ] T098 Add `GeminiAdapter` to `ADAPTERS` in `tests/contract/test_model_adapter_contract.py`, per FR-022 and T033 (missing). The suite exists to prove that *any* adapter satisfies EXT-15…EXT-18, and it currently runs against `EchoAdapter` and the test-local `MinimalAdapter` — not against the adapter that produces every real extraction. Its docstring already says "The Anthropic adapter joins this list at Phase 5"; Phase 5 built it, renamed it to Gemini, and left the list alone. It needs a fake client that answers per schema, because the suite asserts conformance for **every** registered schema and the single recorded `ok` fixture is `invoice@1`-shaped
+- [ ] T099 Import `default_adapter` in `specs/003-schema-driven-extraction/quickstart.md`, per SC-020 (partial). Scenario V4 calls it at line 137 and no import line mentions it, so the snippet a reader copies does not run. This is the third time a documented call has been unrunnable in this milestone; the pattern is that prose examples are the only code nobody executes
+- [ ] T100 [P] Add `test_adapter_registry.py` and `test_extraction_has_no_document_type_code.py` to the test tree in `plan.md`, per `plan: project structure` (missing)
+- [ ] T101 [P] Add a credentials-expire-mid-retry case to `tests/unit/test_provider_errors.py`, per spec Edge Cases (missing). A transient failure followed by an auth failure must stop on the second attempt rather than exhaust the budget. The retry loop already classifies it correctly, but that is currently an inference from the mapping table rather than an assertion, and the edge case is listed in the spec
+
+**Checkpoint**: the contract every adapter must satisfy is verified against the adapter that actually
+answers, and no documented snippet is unrunnable.
