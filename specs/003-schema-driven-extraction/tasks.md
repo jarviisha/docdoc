@@ -350,3 +350,22 @@ that was in the wrong phase to be runnable at all, and was split out of T029 rat
 
 **Checkpoint**: the three highest-severity findings of the analysis pass are closed, and the one task that
 could not have run where it was written now sits after the adapter it depends on.
+
+---
+
+## Phase 9: Convergence
+
+An assessment of the code against the spec, plan, and constitution — not against `tasks.md`, which
+reported 82/82 done. Two of these are requirements that were tested against the *echo* adapter and
+quietly fail against the real one; one is a record of work that a silent string replacement never
+wrote.
+
+- [ ] T082 Add configuration-driven adapter selection so application code never constructs a provider adapter, per FR-021 and US3/AC2 (missing). Today `README.md` and the quickstart both write `adapter=GeminiAdapter()`, which is literally "naming a provider in application code", and `contracts/extraction-api.md` §8 claims the opposite. The ingest layer's shape is the precedent: a registry plus a request that names what is needed rather than who supplies it. US3/AC2 — "when the configured model or provider changes, no application code changes" — cannot pass until this exists
+- [ ] T083 Carry `document_id` on `ModelRequest` and thread it into every error the adapter raises, per SC-012 and FR-042 (partial). `src/docdoc/extraction/adapters/gemini.py` builds `ExtractionError` and `ModelProviderError` without it because the request does not carry it, so every adapter-raised failure reports `document_id=None`. SC-012 requires 100% of failures to name the document, the schema, and the adapter; only two of the three are named today
+- [ ] T084 Name the bound and the actual size in the truncation error in `src/docdoc/extraction/adapters/gemini.py`, per FR-030 (partial). The message explains *why* truncation happens but reports neither the configured `max_output_tokens` nor the output actually produced, which `usage.candidates_token_count` carries. FR-030 requires "the document, the bound, and the actual size"
+- [ ] T085 Restore the Phase 8 analysis-remediation record that commit `03106a0` describes and never wrote (missing). The seven fixes it lists were applied and verified; only the record is absent, because a `.replace()` matched nothing and was not asserted. Re-record them under new IDs rather than renumbering anything
+- [ ] T086 [P] Decide and record whether `request id`, `processing id`, and `step id` belong in the `extraction.extract` event, per Constitution §Observability (partial). All three are pipeline concepts that arrive at Milestone 7, and the spec's FR-040 does not list them — but the constitution states them without that qualification, so the deferral should be explicit rather than implied by omission
+
+**Checkpoint**: the two HIGH findings are the ones that matter. Both are requirements that pass against
+the in-repo adapter and fail against the real one, which is the failure mode a fixture-only suite is
+structurally unable to see.
