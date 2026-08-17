@@ -32,7 +32,12 @@ from docdoc.kernel.identity import (
     options_hash_for,
 )
 from docdoc.kernel.page import Page
-from docdoc.kernel.provenance import Capabilities, IngestProvenance
+from docdoc.kernel.provenance import (
+    Capabilities,
+    IngestProvenance,
+    PageTextVerdict,
+    TextLayerRecord,
+)
 from docdoc.kernel.span import Span
 from docdoc.kernel.span_index import SpanIndex
 from docdoc.kernel.table import Table, TableCell
@@ -55,11 +60,13 @@ __all__ = [
     "KernelError",
     "MergeError",
     "Page",
+    "PageTextVerdict",
     "Span",
     "SpanError",
     "SpanIndex",
     "Table",
     "TableCell",
+    "TextLayerRecord",
     "Token",
     "blob_id_for",
     "canonical_json",

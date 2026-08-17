@@ -1,0 +1,554 @@
+{
+  "_comment": [
+    "A recorded document-intelligence response, scrubbed and reduced.",
+    "Synthetic throughout: it mirrors tests/fixtures/pdf/scanned_contract.pdf, which is",
+    "itself generated. No real document, no account identifier, no endpoint, no key.",
+    "",
+    "This fixture is what actually pins the response-to-IR mapping. The live test proves",
+    "the wire still works; this proves the adapter is correct, and it runs for a",
+    "contributor with no credentials at all (research.md R14).",
+    "",
+    "Offsets are unicode code points, which is what the adapter asks the service for so",
+    "that they index Python strings directly. Coordinates are inches, top-left origin."
+  ],
+  "apiVersion": "2024-11-30",
+  "modelId": "prebuilt-layout",
+  "stringIndexType": "unicodeCodePoint",
+  "content": "SERVICE AGREEMENT\nThis agreement is made between Acme Supplies\nSchedule A\nItem Qty\nWidgets 4\n",
+  "pages": [
+    {
+      "pageNumber": 1,
+      "angle": 0.0,
+      "width": 8.2639,
+      "height": 11.6944,
+      "unit": "inch",
+      "words": [
+        {
+          "content": "SERVICE",
+          "polygon": [
+            0.8333,
+            1.0,
+            1.6033,
+            1.0,
+            1.6033,
+            1.2083,
+            0.8333,
+            1.2083
+          ],
+          "confidence": 0.99,
+          "span": {
+            "offset": 0,
+            "length": 7
+          }
+        },
+        {
+          "content": "AGREEMENT",
+          "polygon": [
+            1.6733,
+            1.0,
+            2.6633,
+            1.0,
+            2.6633,
+            1.2083,
+            1.6733,
+            1.2083
+          ],
+          "confidence": 0.99,
+          "span": {
+            "offset": 8,
+            "length": 9
+          }
+        },
+        {
+          "content": "This",
+          "polygon": [
+            0.8333,
+            1.5,
+            1.2733,
+            1.5,
+            1.2733,
+            1.7083,
+            0.8333,
+            1.7083
+          ],
+          "confidence": 0.99,
+          "span": {
+            "offset": 18,
+            "length": 4
+          }
+        },
+        {
+          "content": "agreement",
+          "polygon": [
+            1.3433,
+            1.5,
+            2.3333,
+            1.5,
+            2.3333,
+            1.7083,
+            1.3433,
+            1.7083
+          ],
+          "confidence": 0.99,
+          "span": {
+            "offset": 23,
+            "length": 9
+          }
+        },
+        {
+          "content": "is",
+          "polygon": [
+            2.4033,
+            1.5,
+            2.6233,
+            1.5,
+            2.6233,
+            1.7083,
+            2.4033,
+            1.7083
+          ],
+          "confidence": 0.99,
+          "span": {
+            "offset": 33,
+            "length": 2
+          }
+        },
+        {
+          "content": "made",
+          "polygon": [
+            2.6933,
+            1.5,
+            3.1333,
+            1.5,
+            3.1333,
+            1.7083,
+            2.6933,
+            1.7083
+          ],
+          "confidence": 0.99,
+          "span": {
+            "offset": 36,
+            "length": 4
+          }
+        },
+        {
+          "content": "between",
+          "polygon": [
+            3.2033,
+            1.5,
+            3.9733,
+            1.5,
+            3.9733,
+            1.7083,
+            3.2033,
+            1.7083
+          ],
+          "confidence": 0.99,
+          "span": {
+            "offset": 41,
+            "length": 7
+          }
+        },
+        {
+          "content": "Acme",
+          "polygon": [
+            4.0433,
+            1.5,
+            4.4833,
+            1.5,
+            4.4833,
+            1.7083,
+            4.0433,
+            1.7083
+          ],
+          "confidence": 0.99,
+          "span": {
+            "offset": 49,
+            "length": 4
+          }
+        },
+        {
+          "content": "Supplies",
+          "polygon": [
+            4.5533,
+            1.5,
+            5.4333,
+            1.5,
+            5.4333,
+            1.7083,
+            4.5533,
+            1.7083
+          ],
+          "confidence": 0.99,
+          "span": {
+            "offset": 54,
+            "length": 8
+          }
+        }
+      ],
+      "lines": [
+        {
+          "content": "SERVICE AGREEMENT",
+          "polygon": [
+            0.8333,
+            1.0,
+            2.7333,
+            1.0,
+            2.7333,
+            1.2083,
+            0.8333,
+            1.2083
+          ],
+          "spans": [
+            {
+              "offset": 0,
+              "length": 17
+            }
+          ]
+        },
+        {
+          "content": "This agreement is made between Acme Supplies",
+          "polygon": [
+            0.8333,
+            1.5,
+            5.5033,
+            1.5,
+            5.5033,
+            1.7083,
+            0.8333,
+            1.7083
+          ],
+          "spans": [
+            {
+              "offset": 18,
+              "length": 44
+            }
+          ]
+        }
+      ],
+      "spans": [
+        {
+          "offset": 0,
+          "length": 63
+        }
+      ]
+    },
+    {
+      "pageNumber": 2,
+      "angle": 0.0,
+      "width": 8.2639,
+      "height": 11.6944,
+      "unit": "inch",
+      "words": [
+        {
+          "content": "Schedule",
+          "polygon": [
+            0.8333,
+            1.0,
+            1.7133,
+            1.0,
+            1.7133,
+            1.2083,
+            0.8333,
+            1.2083
+          ],
+          "confidence": 0.99,
+          "span": {
+            "offset": 63,
+            "length": 8
+          }
+        },
+        {
+          "content": "A",
+          "polygon": [
+            1.7833,
+            1.0,
+            1.8933,
+            1.0,
+            1.8933,
+            1.2083,
+            1.7833,
+            1.2083
+          ],
+          "confidence": 0.99,
+          "span": {
+            "offset": 72,
+            "length": 1
+          }
+        },
+        {
+          "content": "Item",
+          "polygon": [
+            0.8333,
+            2.0,
+            1.2733,
+            2.0,
+            1.2733,
+            2.2083,
+            0.8333,
+            2.2083
+          ],
+          "confidence": 0.99,
+          "span": {
+            "offset": 74,
+            "length": 4
+          }
+        },
+        {
+          "content": "Qty",
+          "polygon": [
+            1.3433,
+            2.0,
+            1.6733,
+            2.0,
+            1.6733,
+            2.2083,
+            1.3433,
+            2.2083
+          ],
+          "confidence": 0.99,
+          "span": {
+            "offset": 79,
+            "length": 3
+          }
+        },
+        {
+          "content": "Widgets",
+          "polygon": [
+            0.8333,
+            2.25,
+            1.6033,
+            2.25,
+            1.6033,
+            2.4583,
+            0.8333,
+            2.4583
+          ],
+          "confidence": 0.99,
+          "span": {
+            "offset": 83,
+            "length": 7
+          }
+        },
+        {
+          "content": "4",
+          "polygon": [
+            1.6733,
+            2.25,
+            1.7833,
+            2.25,
+            1.7833,
+            2.4583,
+            1.6733,
+            2.4583
+          ],
+          "confidence": 0.99,
+          "span": {
+            "offset": 91,
+            "length": 1
+          }
+        }
+      ],
+      "lines": [
+        {
+          "content": "Schedule A",
+          "polygon": [
+            0.8333,
+            1.0,
+            1.9633,
+            1.0,
+            1.9633,
+            1.2083,
+            0.8333,
+            1.2083
+          ],
+          "spans": [
+            {
+              "offset": 63,
+              "length": 10
+            }
+          ]
+        },
+        {
+          "content": "Item Qty",
+          "polygon": [
+            0.8333,
+            2.0,
+            1.7433,
+            2.0,
+            1.7433,
+            2.2083,
+            0.8333,
+            2.2083
+          ],
+          "spans": [
+            {
+              "offset": 74,
+              "length": 8
+            }
+          ]
+        },
+        {
+          "content": "Widgets 4",
+          "polygon": [
+            0.8333,
+            2.25,
+            1.8533,
+            2.25,
+            1.8533,
+            2.4583,
+            0.8333,
+            2.4583
+          ],
+          "spans": [
+            {
+              "offset": 83,
+              "length": 9
+            }
+          ]
+        }
+      ],
+      "spans": [
+        {
+          "offset": 63,
+          "length": 30
+        }
+      ]
+    }
+  ],
+  "tables": [
+    {
+      "rowCount": 2,
+      "columnCount": 2,
+      "boundingRegions": [
+        {
+          "pageNumber": 2,
+          "polygon": [
+            0.8333,
+            2.0,
+            3.75,
+            2.0,
+            3.75,
+            2.5,
+            0.8333,
+            2.5
+          ]
+        }
+      ],
+      "spans": [
+        {
+          "offset": 74,
+          "length": 8
+        }
+      ],
+      "cells": [
+        {
+          "rowIndex": 0,
+          "columnIndex": 0,
+          "content": "Item",
+          "kind": "columnHeader",
+          "spans": [
+            {
+              "offset": 74,
+              "length": 4
+            }
+          ],
+          "boundingRegions": [
+            {
+              "pageNumber": 2,
+              "polygon": [
+                0.8333,
+                2.0,
+                2.5,
+                2.0,
+                2.5,
+                2.25,
+                0.8333,
+                2.25
+              ]
+            }
+          ]
+        },
+        {
+          "rowIndex": 0,
+          "columnIndex": 1,
+          "content": "Qty",
+          "kind": "columnHeader",
+          "spans": [
+            {
+              "offset": 79,
+              "length": 3
+            }
+          ],
+          "boundingRegions": [
+            {
+              "pageNumber": 2,
+              "polygon": [
+                2.5,
+                2.0,
+                3.75,
+                2.0,
+                3.75,
+                2.25,
+                2.5,
+                2.25
+              ]
+            }
+          ]
+        },
+        {
+          "rowIndex": 1,
+          "columnIndex": 0,
+          "content": "Widgets",
+          "spans": [
+            {
+              "offset": 83,
+              "length": 7
+            }
+          ],
+          "boundingRegions": [
+            {
+              "pageNumber": 2,
+              "polygon": [
+                0.8333,
+                2.25,
+                2.5,
+                2.25,
+                2.5,
+                2.5,
+                0.8333,
+                2.5
+              ]
+            }
+          ]
+        },
+        {
+          "rowIndex": 1,
+          "columnIndex": 1,
+          "content": "4",
+          "spans": [
+            {
+              "offset": 91,
+              "length": 1
+            }
+          ],
+          "boundingRegions": [
+            {
+              "pageNumber": 2,
+              "polygon": [
+                2.5,
+                2.25,
+                3.75,
+                2.25,
+                3.75,
+                2.5,
+                2.5,
+                2.5
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
