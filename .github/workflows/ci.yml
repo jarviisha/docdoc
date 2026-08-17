@@ -66,19 +66,36 @@ jobs:
         with:
           enable-cache: true
 
+      # Into a fresh environment, not the runner's system Python: that one is
+      # externally managed (PEP 668) and refuses `--system`. A clean venv is also
+      # a truer reproduction of what a user gets, since it starts with nothing.
       - name: Install the base package only
-        run: uv pip install --system .
+        run: |
+          uv venv .venv-base
+          uv pip install --python .venv-base .
 
       - name: The kernel imports with pydantic alone
-        run: python -c "import docdoc.kernel, docdoc.ingest"
+        run: .venv-base/bin/python -c "import docdoc.kernel, docdoc.ingest"
 
       - name: No provider SDK came with it
         run: |
-          if python -c "import pymupdf" 2>/dev/null; then
+          if .venv-base/bin/python -c "import pymupdf" 2>/dev/null; then
             echo "pymupdf is installed by the base package; it must be an extra" >&2
             exit 1
           fi
-          if python -c "import azure.ai.documentintelligence" 2>/dev/null; then
+          if .venv-base/bin/python -c "import azure.ai.documentintelligence" 2>/dev/null; then
             echo "the azure SDK is installed by the base package; it must be an extra" >&2
+            exit 1
+          fi
+
+      # An absence check passes trivially if the import name is wrong, so prove
+      # the same commands do detect a provider SDK when one is present.
+      - name: The absence check can actually fail
+        run: |
+          uv pip install --python .venv-base pymupdf
+          if .venv-base/bin/python -c "import pymupdf" 2>/dev/null; then
+            echo "detection works"
+          else
+            echo "the check cannot see pymupdf even when installed; it proves nothing" >&2
             exit 1
           fi
