@@ -1,0 +1,143 @@
+{
+  "_comment": [
+    "A recorded response for an image input (tests/fixtures/image/sample_page.png).",
+    "Synthetic and scrubbed. Exists because US3/AC3 -- 'an image yields a single-page",
+    "document' -- was otherwise verified only by the live test, which is skipped without",
+    "credentials. An acceptance criterion that only runs in a credentialed environment is",
+    "not covered."
+  ],
+  "apiVersion": "2024-11-30",
+  "modelId": "prebuilt-layout",
+  "stringIndexType": "unicodeCodePoint",
+  "content": "Invoice INV-001\nTotal 228.00\n",
+  "pages": [
+    {
+      "pageNumber": 1,
+      "angle": 0.3,
+      "width": 8.5,
+      "height": 11.0,
+      "unit": "inch",
+      "words": [
+        {
+          "content": "Invoice",
+          "polygon": [
+            0.83,
+            1.0,
+            1.6,
+            1.0,
+            1.6,
+            1.2,
+            0.83,
+            1.2
+          ],
+          "confidence": 0.98,
+          "span": {
+            "offset": 0,
+            "length": 7
+          }
+        },
+        {
+          "content": "INV-001",
+          "polygon": [
+            1.67,
+            1.0,
+            2.44,
+            1.0,
+            2.44,
+            1.2,
+            1.67,
+            1.2
+          ],
+          "confidence": 0.98,
+          "span": {
+            "offset": 8,
+            "length": 7
+          }
+        },
+        {
+          "content": "Total",
+          "polygon": [
+            0.83,
+            1.4,
+            1.38,
+            1.4,
+            1.38,
+            1.6,
+            0.83,
+            1.6
+          ],
+          "confidence": 0.97,
+          "span": {
+            "offset": 16,
+            "length": 5
+          }
+        },
+        {
+          "content": "228.00",
+          "polygon": [
+            1.45,
+            1.4,
+            2.11,
+            1.4,
+            2.11,
+            1.6,
+            1.45,
+            1.6
+          ],
+          "confidence": 0.97,
+          "span": {
+            "offset": 22,
+            "length": 6
+          }
+        }
+      ],
+      "lines": [
+        {
+          "content": "Invoice INV-001",
+          "polygon": [
+            0.83,
+            1.0,
+            2.6,
+            1.0,
+            2.6,
+            1.2,
+            0.83,
+            1.2
+          ],
+          "spans": [
+            {
+              "offset": 0,
+              "length": 15
+            }
+          ]
+        },
+        {
+          "content": "Total 228.00",
+          "polygon": [
+            0.83,
+            1.4,
+            2.3,
+            1.4,
+            2.3,
+            1.6,
+            0.83,
+            1.6
+          ],
+          "spans": [
+            {
+              "offset": 16,
+              "length": 12
+            }
+          ]
+        }
+      ],
+      "spans": [
+        {
+          "offset": 0,
+          "length": 29
+        }
+      ]
+    }
+  ],
+  "tables": []
+}
