@@ -196,6 +196,33 @@ def test_the_error_carries_the_real_attempt_count() -> None:
     assert caught.value.attempts == 4
 
 
+def test_a_credential_that_expires_mid_retry_stops_on_that_attempt() -> None:
+    """The spec's edge case: credentials expiring between attempts of one extraction.
+
+    The retry loop's mapping table already gets this right, but "the table implies
+    it" and "the behaviour is asserted" are different claims — and this is the case
+    where a transient failure and a permanent one arrive in the same extraction, so
+    a loop that classified once at the start rather than per attempt would keep
+    retrying an expired credential until the budget ran out.
+    """
+    calls = {"n": 0}
+
+    def call() -> ModelResponse:
+        calls["n"] += 1
+        reason = "service" if calls["n"] == 1 else "auth"
+        raise ModelProviderError(
+            f"attempt {calls['n']}: {reason}", reason=reason, adapter_id="probe"
+        )
+
+    with pytest.raises(ModelProviderError) as caught:
+        _run(call, TransportSettings(max_attempts=5, deadline_s=600.0))
+
+    assert calls["n"] == 2, "the expired credential must stop the loop, not exhaust the budget"
+    assert caught.value.reason == "auth"
+    assert caught.value.transient is False
+    assert caught.value.attempts == 2, "and the count reports the attempt it actually stopped on"
+
+
 def test_transport_settings_come_from_the_ingest_layer() -> None:
     """research.md R9 — one retry policy in the system, not two that drift."""
     from docdoc.ingest.options import TransportSettings as IngestSettings

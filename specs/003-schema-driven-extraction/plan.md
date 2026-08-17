@@ -228,6 +228,10 @@ tests/
 │   ├── test_schema_loader.py          # EXT-1…EXT-5, one-level bound, load-time rejection
 │   ├── test_schema_identity.py        # EXT-6…EXT-9, hash stability and sensitivity
 │   ├── test_registry.py               # EXT-10…EXT-13, concrete versions, concurrent majors
+│   ├── test_adapter_registry.py       # FR-021: selection by configuration, and the
+│   │                                  #   structural refusal to auto-select the echo adapter
+│   ├── test_extraction_has_no_document_type_code.py  # SC-014's automated check —
+│   │                                  #   forbidden names derived from schemas/, not hardcoded
 │   ├── test_shape_projection.py       # EXT-14, the enforceable subset (R3)
 │   ├── test_conform.py                # EXT-15…EXT-18, absence vs empty, undeclared discard
 │   ├── test_prompt_assembly.py        # EXT-19, cache-prefix ordering (R15)

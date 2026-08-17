@@ -6,13 +6,22 @@ ships, and ``MinimalAdapter`` below, written from the protocol alone with none o
 Echo's fixture machinery. Where they agree, the contract is real; where only Echo
 passed, the assertion was about Echo.
 
-The Anthropic adapter joins this list at Phase 5. Until then the second
-implementation is what keeps this honest -- the analysis pass flagged that a
-single-adapter run would be tautological, and it was right.
+Three implementations run here: ``EchoAdapter``, which the library ships; the
+test-local ``MinimalAdapter``, written from the protocol alone; and
+``GeminiAdapter``, the one that answers in production.
+
+The third was missing until a convergence pass found it. This file's docstring
+had promised "the Anthropic adapter joins this list at Phase 5"; Phase 5 built
+the adapter, renamed it to Gemini, and left the list alone. So the contract every
+adapter must satisfy had never been run against the adapter that produces every
+real extraction. The recorded-response tests in ``test_gemini_mapping.py`` cover
+it, but those assert that *our code reads a recorded shape* -- a different claim
+from *the adapter honours the contract*.
 """
 
 from __future__ import annotations
 
+import json
 import pathlib
 from typing import Any
 
@@ -28,6 +37,7 @@ from docdoc.extraction import (
     response_shape_for,
 )
 from docdoc.extraction.adapters.echo import EchoAdapter
+from docdoc.extraction.adapters.gemini import GeminiAdapter
 from docdoc.extraction.conform import conform
 from docdoc.extraction.prompt import ModelRequest, build_request
 
@@ -76,9 +86,48 @@ def _absent_everywhere(shape: dict[str, Any]) -> Any:
     return {name: _absent_everywhere(sub) for name, sub in properties.items()}
 
 
+class _SchemaAwareClient:
+    """A stand-in transport that answers whatever schema it is asked for.
+
+    The suite asserts conformance for *every* registered schema, so a client
+    replaying one recorded fixture would satisfy only `invoice@1`. This builds a
+    minimal conforming payload from the response shape the adapter actually sent,
+    which is also the stronger test: the adapter must have put a usable schema on
+    the wire for this to work at all.
+    """
+
+    def __init__(self) -> None:
+        self.models = self
+
+    def generate_content(self, *, model: str, contents: Any, config: Any) -> Any:
+        payload = _absent_everywhere(config.response_json_schema)
+
+        class _Candidate:
+            finish_reason = "STOP"
+
+        class _Feedback:
+            block_reason = None
+
+        class _Usage:
+            prompt_token_count = 100
+            candidates_token_count = 20
+            cached_content_token_count = 0
+            thoughts_token_count = 0
+
+        class _Response:
+            text = json.dumps(payload)
+            candidates = (_Candidate(),)
+            prompt_feedback = _Feedback()
+            usage_metadata = _Usage()
+            model_version = model
+
+        return _Response()
+
+
 ADAPTERS: list[tuple[str, Any]] = [
     ("echo", lambda: EchoAdapter.from_fixtures("tests/fixtures/echo")),
     ("minimal", MinimalAdapter),
+    ("gemini", lambda: GeminiAdapter(client=_SchemaAwareClient())),
 ]
 
 
@@ -174,3 +223,23 @@ def test_completing_twice_does_not_mutate_the_request(
 def test_the_contract_runs_against_more_than_one_implementation() -> None:
     """Guards the guard: a single-adapter run proves nothing about the contract."""
     assert len(ADAPTERS) >= 2
+
+
+def test_every_shipped_adapter_is_in_the_suite() -> None:
+    """The assertion that would have caught what this file's docstring described.
+
+    A module under ``adapters/`` that the suite does not exercise is an adapter
+    nobody has held to the contract. Listing them by directory rather than by hand
+    means a fourth adapter fails this until someone adds it.
+    """
+    import docdoc.extraction.adapters
+
+    shipped = {
+        path.stem
+        for path in pathlib.Path(docdoc.extraction.adapters.__file__).parent.glob("*.py")
+        if path.stem != "__init__"
+    }
+    covered = {name for name, _ in ADAPTERS}
+    assert shipped <= covered, (
+        f"these adapters ship but are not held to the contract: {sorted(shipped - covered)}"
+    )

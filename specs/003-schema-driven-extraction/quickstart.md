@@ -42,7 +42,7 @@ provider test must state its reason.
 ### V1 — Extract the fields a schema declares, offline (US1, P1)
 
 ```python
-from docdoc.extraction import SchemaRegistry, extract
+from docdoc.extraction import SchemaRegistry, default_adapter, extract
 from docdoc.extraction.adapters import EchoAdapter
 
 registry = SchemaRegistry.from_paths(["schemas/"])
