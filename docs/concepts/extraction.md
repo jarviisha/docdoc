@@ -16,6 +16,34 @@ result.value_at("due_date").present     # False — an explicit absence, not an 
 No provider is named. Which model answers is configuration, and the only observable difference
 between two of them is in provenance.
 
+## Choosing an adapter without naming one
+
+`default_adapter()` is the call application code makes. It picks the first usable adapter in the
+configured priority order, and raises with **every candidate's reason** when none is usable — so
+"why not?" is answerable without reading docdoc's source.
+
+```python
+from docdoc.extraction import default_adapter, default_adapter_registry
+
+adapter = default_adapter()                    # configuration decides
+default_adapter_registry().candidates()        # inspect what is known, and why each is or is not usable
+```
+
+An adapter whose extra is missing or whose credentials are absent is **recorded with its reason**
+rather than omitted. Silence would make "not installed" indistinguishable from "no such thing", and
+the resulting error would name nothing. Priority decides between usable candidates, with the adapter
+id as a total tie-break, so selection never depends on registration order.
+
+**The echo adapter is never selected automatically**, even when it is registered first and even when
+nothing else is usable. This is a safety property rather than an ordering preference. Echo answers
+from committed fixtures, so if it were selectable, a forgotten API key would not produce an error —
+it would produce a stream of confident, fabricated extractions carrying full provenance,
+indistinguishable downstream from real ones. That is the worst outcome this layer can have: not a
+failure, but plausible wrong data with a content-addressed identity attesting to it.
+
+It stays fully usable when passed explicitly, which is a decision a caller takes knowingly, and that
+is how the offline path and the whole test suite work.
+
 ## Two identities, two questions
 
 ADR-0008 splits what one integer was being asked to answer.

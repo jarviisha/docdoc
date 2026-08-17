@@ -54,6 +54,49 @@ jobs:
       - name: Import boundaries
         run: uv run lint-imports
 
+  # SC-021 is a success criterion, and plan.md says it is "enforced by" the perf
+  # suite. It was not: the job above deselects `perf` and nothing else ran it, so
+  # the claim was enforcement by nobody.
+  #
+  # This job blocks, deliberately. Non-blocking would be "not enforced" with extra
+  # steps.
+  #
+  # The headroom is not uniform, and pretending it is would repeat the mistake this
+  # job exists to correct:
+  #
+  #   - The extraction budgets have ~500x headroom (0.19 ms measured against 100 ms)
+  #     and its two shape assertions are *ratios* — per-call cost inside a batch, and
+  #     linearity in field count and repeating-group length — so they do not move
+  #     with machine speed at all. These are safe to block on anywhere.
+  #   - The kernel budgets are wall-clock and tight. A whole-document slice measures
+  #     279 ms best-of-5 against a 300 ms budget: 1.07x. That may well be red on a
+  #     slower runner.
+  #
+  # If the kernel budgets go red here, the honest response is to re-measure them on
+  # a runner and raise them with the new figure recorded — they were Milestone 1
+  # estimates, and 300 ms was never validated against CI hardware. Raising a budget
+  # because a *number* moved is different from raising one because a *machine* is
+  # slower, and only the second is legitimate.
+  #
+  # What is not legitimate is adding continue-on-error, which would restore exactly
+  # the situation this job was added to fix. Running the suite at all already found
+  # three kernel tests that had been red or coin-flipping unnoticed.
+  perf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-extras --frozen
+
+      - name: Performance budgets
+        run: uv run pytest -m perf -q
+
   # The base install must stay usable with no provider SDK at all (SC-010).
   # Verified separately because the job above installs every extra.
   base-install:
