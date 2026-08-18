@@ -95,6 +95,23 @@ pip install docdoc[azure]   # geometry-capable cloud path, for scans and images
 pip install docdoc[google]  # the LLM adapter for extraction
 ```
 
+### Configuration
+
+Which schemas exist, which provider answers, and which model it uses are deployment decisions, so none
+of them appears in your code:
+
+```sh
+export DOCDOC_SCHEMA_PATHS=/etc/docdoc/schemas   # where default_registry() looks; os.pathsep-separated
+export DOCDOC_MODEL_ADAPTERS=gemini              # adapter preference order, comma-separated
+export DOCDOC_GEMINI_MODEL=gemini-3.5-flash      # which model answers
+export GEMINI_API_KEY=...                        # or GOOGLE_API_KEY
+```
+
+Every one has a sensible default and every one can be overridden by an explicit argument — configuration
+is the default, not a cage. `DOCDOC_SCHEMA_PATHS` is the exception worth knowing: with neither it nor an
+explicit path, the registry is **empty**, because docdoc ships no schema of its own. A schema is your
+data, not ours.
+
 > **Licence note.** `docdoc[pdf]` installs [PyMuPDF](https://pymupdf.readthedocs.io/), which is
 > **AGPL-3.0** (or a paid commercial licence). docdoc itself is Apache-2.0 and the extra is opt-in,
 > so docdoc's own distribution is unaffected — but if you embed `docdoc[pdf]` in a closed-source

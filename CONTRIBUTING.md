@@ -87,6 +87,11 @@ Schemas live in `schemas/` as JSON, with their prompt beside them under `schemas
 **data**: adding a document type is adding two files, and no engine change is permitted for it. A
 test fails the build if a document-type name appears anywhere under `src/`.
 
+`schemas/` in this repository is fixtures and examples, and is deliberately **not packaged in the
+wheel**. A deployment points `DOCDOC_SCHEMA_PATHS` at its own directory (`os.pathsep`-separated, the
+way `PATH` reads), or passes paths to `default_registry()` explicitly. With neither, the registry is
+empty — docdoc has no schema of its own to fall back to.
+
 ```text
 schemas/
 ├── invoice@1.json          # the schema

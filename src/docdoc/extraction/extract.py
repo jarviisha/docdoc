@@ -198,7 +198,13 @@ def extract(
     schema_hash: str | None = None
     estimate: int | None = None
 
-    def _fail(reason: str, *, attempts: int = 1) -> None:
+    def _fail(reason: str, *, attempts: int) -> None:
+        # `attempts` has no default on purpose. It counts calls the *model*
+        # received, so every failure path has to state its own: the ones that fail
+        # before transmission made zero, and a default of one would report an
+        # attempt against the very requests SC-016 guarantees sent nothing. Making
+        # it required turns that into a decision at each site rather than a
+        # number inherited by whoever adds the next early return (FR-040).
         emit_extraction_event(
             attempts=attempts,
             document_id=document_id,
@@ -253,10 +259,12 @@ def extract(
     except SchemaError:
         # `SchemaError` carries no `reason`; resolution is the only way to reach
         # it from here, and naming it as such beats inventing a taxonomy.
-        _fail("schema")
+        _fail("schema", attempts=0)
         raise
     except (ExtractionError, ModelProviderError) as exc:
-        _fail(exc.reason)
+        # Zero: nothing here has spoken to the model. That is the whole point of
+        # doing this work first (FR-041), and the event should say so.
+        _fail(exc.reason, attempts=0)
         raise
 
     attempts = 0
@@ -272,7 +280,10 @@ def extract(
         _fail(exc.reason, attempts=exc.attempts)
         raise
     except ExtractionError as exc:
-        _fail(exc.reason)
+        # Not a provider failure, so the retry loop never counted it: an adapter
+        # raised this while mapping a response it had already received. Exactly
+        # one call reached the model.
+        _fail(exc.reason, attempts=1)
         raise
 
     try:
@@ -283,7 +294,10 @@ def extract(
             adapter_id=adapter.id,
         )
     except ExtractionError as exc:
-        _fail(exc.reason)
+        # The call succeeded and the answer did not conform. `attempts` is the
+        # real count from the retry loop, which may be more than one if the
+        # model was reached only after transient failures.
+        _fail(exc.reason, attempts=attempts)
         raise
 
     # Folded from the model the provider *reported*, not the one requested -- the

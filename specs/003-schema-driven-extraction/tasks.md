@@ -498,3 +498,31 @@ T082 closed for providers and left open for models.
 **Checkpoint**: the artifact identity names the model that actually answered, no failure is invisible
 to the logs, and "which model answers is configuration" is true of the code rather than only of the
 documentation.
+
+---
+
+## Phase 17: Convergence
+
+Findings from `/speckit-converge`, the tenth review pass. Two HIGH, no CRITICAL. 50/50 FR and 21/21
+SC assessed, 12 constitution principles clean.
+
+Two things distinguish this pass from the nine before it. The first is that **one finding is a
+regression the previous pass introduced** — T114 added configuration and did not make the suite
+immune to it, so a developer's shell can now turn a green suite red. Catching the previous pass's
+work is what these passes are for, but it is worth naming that the loop closed on itself for the
+first time. The second is that F1 is the oldest defect this milestone has found: T009 in Phase 2
+specified a root class, was marked done, and three design artifacts have described the wrong
+hierarchy ever since. Existence was verified; the base class was not. That is the same
+signature defect, now traced back to the first phase that could have carried it.
+
+- [X] T118 Root `SchemaError` and `ExtractionError` at `DocdocError` in `src/docdoc/extraction/errors.py`, per Constitution §Error model, `data-model.md` §9 and T009 (contradicts). Both currently derive from bare `Exception`: `issubclass(SchemaError, DocdocError)` is `False`, and so is the same question for `ExtractionError`. Only `ModelProviderError` roots there, and only by inheriting ingest's `ProviderError` → `IngestError` → `DocdocError` chain. **That split is worse than a uniform absence**, because `except DocdocError` appears to work: it catches every provider failure and silently misses every schema and conformance failure, which are the two most common outcomes of a wrong call. Four artifacts state the opposite and are wrong today — `data-model.md:237` ("Rooted at the existing `DocdocError`"), `research.md:237`, `contracts/extraction-api.md:176` ("All are `DocdocError`"), and T009 itself, which named the base class and was marked `[X]`. The kernel and ingest layers both do this correctly (`KernelError(DocdocError)`, `IngestError(DocdocError)`), so this layer is the only one outside the taxonomy the constitution's error model describes as one list. Note that `tests/unit/test_errors.py:37` is called `test_a_single_root_catches_everything_docdoc_raises` and parameterises kernel errors only — the assertion whose name promises this property has never covered this layer. Extend it, or assert it where the extraction errors live; the fix is two base classes and the test that stops it recurring
+
+- [X] T119 Make the offline suite hermetic against ambient configuration, per SC-019 and `plan: three-tier testing` (contradicts). Verified: `DOCDOC_GEMINI_MODEL=some-other-model uv run pytest -m 'not provider and not perf'` fails `tests/unit/test_gemini_mapping.py:107`, which asserts `adapter.model_id == DEFAULT_MODEL`. **This is a regression from T114**, which introduced three configuration variables and guarded only the two files it happened to touch. SC-019 says a contributor runs 100% of the unit and property suites; a suite whose result depends on the developer's shell does not meet that, and it fails in the worst way — on a machine that is *correctly* configured for real use. Credentials are already handled: the suite passes with `GEMINI_API_KEY` set, because `test_adapter_registry.py` clears it in an autouse fixture. The durable fix is the same shape one level up: an autouse fixture in `tests/conftest.py` clearing `DOCDOC_*` and the provider credential names for every test, so hermeticity is structural rather than per-file discipline that the next variable added will miss again. Per-file `delenv` calls were the right local fix and are the wrong general one, which is exactly the reasoning T106 recorded about hand-maintained lists
+
+- [X] T120 [P] Record the configuration surface in the design artifacts, per `plan: project structure`, FR-021 and FR-049 (partial). `DOCDOC_SCHEMA_PATHS`, `DOCDOC_MODEL_ADAPTERS`, and `DOCDOC_GEMINI_MODEL` are the mechanism by which FR-021 ("which model answers is configuration") and FR-049 ("locations that configuration names") are satisfied, and they appear in exactly one place: a table in `docs/concepts/extraction.md`. Zero mentions in `contracts/extraction-api.md` — the *public API contract*, whose §2 still says only "configuration names the paths" with no way for a reader to discover what does the naming — and zero in `data-model.md`, `research.md`, `README.md`, and `CONTRIBUTING.md`. This is the same gap class as T096, T097, and T105: a surface that exists, is exported, is user-facing, and is described in no design artifact. `README.md` is the one that matters most to an outside reader, since it already documents the `docdoc[google]` extra and stops exactly where a user would ask "and how do I point it at a different model?"
+
+- [X] T121 [P] Report zero attempts when no attempt was made, in `src/docdoc/extraction/extract.py`, per FR-040 and SC-016 (partial). `_fail()` defaults to `attempts=1`, so the failures T112 just made visible — an unregistered schema, an unavailable adapter, an over-budget document — all report one attempt against a model that was never called. Verified: those three emit `attempts=1` while a genuine transient failure emits `attempts=3`, and nothing in the event distinguishes the two. FR-040 requires the event to carry "the attempt count", and an operator aggregating it currently counts attempts that never happened. It matters most on precisely these paths, because they are the ones where SC-016's guarantee is that **zero bytes were transmitted** — an event claiming an attempt is the one record that contradicts it
+
+**Checkpoint**: every extraction error answers to the root the documentation promises, the suite's
+result depends on the code rather than on the machine running it, and no event claims work that was
+never done.

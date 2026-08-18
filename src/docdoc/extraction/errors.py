@@ -11,6 +11,16 @@ requires ``parser_id`` -- parser vocabulary -- and the extraction layer has an
 ``adapter_id`` and exposes it under that name, so ``except ProviderError`` still
 catches every provider failure in the system while the attribute a caller reads
 says what it means.
+
+**Both new types root at ``DocdocError``, and that was wrong here for nine review
+passes.** They derived from bare ``Exception`` while ``ModelProviderError``
+inherited the root through ingest's chain, so ``except DocdocError`` caught every
+provider failure and silently missed every schema and conformance failure -- the
+two most common outcomes of a wrong call. A partial catch is worse than no catch,
+because it looks like it works. The kernel and ingest layers both root correctly
+(``KernelError(DocdocError)``, ``IngestError(DocdocError)``); this layer was the
+only one outside the taxonomy the constitution's error model describes as one
+list, while three design artifacts said otherwise.
 """
 
 from __future__ import annotations
@@ -23,6 +33,7 @@ from __future__ import annotations
 # only to the linter: PyMuPDF is AGPL-3.0, and `import docdoc.extraction` has no
 # business loading it.
 from docdoc.ingest.errors import ProviderError
+from docdoc.kernel import DocdocError
 
 __all__ = [
     "ExtractionError",
@@ -32,7 +43,7 @@ __all__ = [
 ]
 
 
-class SchemaError(Exception):
+class SchemaError(DocdocError):
     """A schema could not be loaded, registered, or resolved. Never retried.
 
     Covers an unknown identity, a malformed file, an unrecognised type or
@@ -62,7 +73,7 @@ class SchemaError(Exception):
         self.available = available
 
 
-class ExtractionError(Exception):
+class ExtractionError(DocdocError):
     """A model's answer could not become a result. Never retried.
 
     Covers a response that is not the requested shape, a value that does not

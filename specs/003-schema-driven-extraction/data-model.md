@@ -162,6 +162,29 @@ application code from naming a provider, and until it did there was no way to ob
 `default_adapter()` is the call FR-021 asks application code to make. `AdapterCandidate` is the record
 `candidates()` returns: id, availability, reason, and the adapter itself when there is one.
 
+## 6c. Configuration
+
+What "configuration decides" resolves to. Three environment variables, read where an object is
+constructed and never inside `extract()`, which still takes every result-affecting input explicitly
+(research.md R17).
+
+| Name | Read by | Decides | Default |
+|---|---|---|---|
+| `DOCDOC_SCHEMA_PATHS` | `default_registry()` | Schema data locations, `os.pathsep`-separated | none — an empty registry |
+| `DOCDOC_MODEL_ADAPTERS` | `AdapterRegistry.__init__` | Adapter preference order, comma-separated | `("gemini",)` |
+| `DOCDOC_GEMINI_MODEL` | `GeminiAdapter.__init__` | The model that answers | `DEFAULT_MODEL` |
+
+- **EXT-28** — an explicit argument always beats configuration, for all three. A caller who passed one
+  meant it.
+- **EXT-29** — blank and whitespace-only entries are dropped rather than treated as an id or a path, so
+  a trailing separator is a typo that costs nothing instead of a candidate matching nothing.
+- **EXT-30** — `default_registry()` with neither an argument nor the variable returns an **empty**
+  registry rather than falling back to a bundled schema, because docdoc ships none: a schema is a
+  deployment's data (FR-049).
+
+Credentials are separate and unchanged: `GEMINI_API_KEY` or `GOOGLE_API_KEY`, reported through
+`available()` as an unavailable adapter with a stated reason (FR-028).
+
 ## 7. ExtractionOptions and the budget
 
 | Field | Type | In identity? |

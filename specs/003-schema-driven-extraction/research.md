@@ -353,6 +353,9 @@ Four things this settles, and one it does not:
 quota (20 requests/day) was exhausted by these measurements. Reference prices stay deliberately absent —
 a price table reads as authoritative and goes stale silently.
 
+**The mechanism arrived late.** "The model id is configuration" was written here in
+Phase 0 and was not true of the code until T114 added `DOCDOC_GEMINI_MODEL`. See R17.
+
 ## R14 — Reasoning shares the output budget, and the failure is documented
 
 **Decision.** `thinking_budget` is left at the provider's automatic setting by default and folded into
@@ -445,3 +448,44 @@ it hides a result-affecting input inside a function that otherwise takes everyth
 provenance would record a choice the call site never made. Making `adapter` optional and defaulting to
 `default_adapter()`: rejected for the MVP because a missing argument would then reach for a network
 service, and an accidental extraction is worse than a `TypeError`.
+
+## R17 — Configuration is three environment variables, named after the ingest layer's
+
+**Decision.** `DOCDOC_SCHEMA_PATHS` (where schemas live, `os.pathsep`-separated),
+`DOCDOC_MODEL_ADAPTERS` (adapter preference order, comma-separated), and `DOCDOC_GEMINI_MODEL` (which
+model the Gemini adapter uses). Explicit arguments beat all three. Credentials stay where they were:
+`GEMINI_API_KEY` or `GOOGLE_API_KEY`.
+
+**Rationale.** R13 opens with "the model id is configuration" and R16 with "an adapter is selected by
+configuration", and **for most of this milestone neither was true**. R16 closed the provider half by
+adding `default_adapter()`; the model half stayed a constant in library source, so the only ways to move
+off it were editing docdoc or writing `GeminiAdapter(model=…)` at a call site — naming a provider *and*
+a model version in application code, which is exactly what FR-021 forbids. US3's independent test
+("repoint configuration at a different model and confirm the same application code runs") could not be
+performed at all. That is the same defect R16 records, one level in: a research note asserting a
+property, and nothing making it true.
+
+The names follow `DOCDOC_AZURE_DI_ENDPOINT` and `DOCDOC_AZURE_DI_KEY` from Milestone 2, so one
+convention covers both layers rather than each inventing its own.
+
+**Note what this does *not* contradict.** R16 rejected "reading the adapter from an environment variable
+inside `extract()`", and that rejection stands. The variables are read where an object is *constructed*
+— `default_registry()`, `AdapterRegistry.__init__`, `GeminiAdapter.__init__` — never inside `extract()`,
+which still takes every result-affecting input explicitly. So provenance keeps recording a choice the
+call site actually made: the configuration decides which adapter is handed to `extract()`, and the
+result records which one answered.
+
+**The cost, stated.** Configuration read from the ambient environment is a new way for a test suite to
+become machine-dependent, and it immediately was: `test_gemini_mapping.py` asserts
+`adapter.model_id == DEFAULT_MODEL` and went red for anyone with `DOCDOC_GEMINI_MODEL` set — that is,
+for anyone whose machine was configured to actually use the feature. An autouse fixture in
+`tests/conftest.py` now clears `DOCDOC_*` and the credential names for every non-provider test, and two
+assertions in `tests/unit/test_provider_tests_are_separable.py` fail if it stops doing so. Prefix
+matching rather than a list, because a list needs editing every time configuration grows and the
+editing is the step that gets skipped.
+
+**Alternatives.** A config file (TOML) read from the working directory: rejected for the MVP under
+Principle XI — it needs a search-path rule, a precedence rule against the environment, and a schema of
+its own, for three values. Environment variables have one rule and every deployment already has them.
+A `Settings` object threaded through the API: rejected because it would put a configuration type in the
+signature of every entry point to serve three values that already have somewhere to live.

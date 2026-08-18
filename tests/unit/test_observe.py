@@ -254,6 +254,64 @@ def test_every_failure_class_emits_exactly_one_event(
         assert payload["model_id"], f"{expected_reason} event names no model"
 
 
+def test_a_failure_before_transmission_reports_zero_attempts(
+    registry: SchemaRegistry, echo: EchoAdapter, caplog: pytest.LogCaptureFixture
+) -> None:
+    """T121, FR-040, SC-016 — the attempt count means calls the model received.
+
+    These are the failures where SC-016's guarantee is that **zero bytes were
+    transmitted**, so an event claiming an attempt is the one record that
+    contradicts it. Before this they all reported 1, indistinguishable from a
+    single genuine call.
+    """
+    caplog.set_level(logging.INFO, logger="docdoc.extraction")
+    document = make_document(DOCUMENT_TEXT)
+
+    caplog.clear()
+    with pytest.raises(SchemaError):
+        extract(document, schema="nope@1", registry=registry, adapter=echo)
+    assert _sole_event(caplog)["attempts"] == 0
+
+    caplog.clear()
+    with pytest.raises(ExtractionError):
+        extract(
+            document,
+            schema="invoice@1",
+            registry=registry,
+            adapter=echo,
+            options=ExtractionOptions(input_budget_tokens=1),
+        )
+    assert _sole_event(caplog)["attempts"] == 0
+
+
+def test_a_failure_after_transmission_reports_the_real_count(
+    registry: SchemaRegistry, caplog: pytest.LogCaptureFixture
+) -> None:
+    """T121 — the other half, so zero does not become the new blanket answer.
+
+    A transient failure retried to the limit made three real calls, and a
+    conformance failure made exactly one. Both are worth distinguishing from a
+    request that never left the process.
+    """
+    caplog.set_level(logging.INFO, logger="docdoc.extraction")
+    document = make_document(DOCUMENT_TEXT)
+
+    caplog.clear()
+    with pytest.raises(ModelProviderError):
+        extract(
+            document,
+            schema="invoice@1",
+            registry=registry,
+            adapter=EchoAdapter.failing(reason="service"),
+        )
+    assert _sole_event(caplog)["attempts"] == 3
+
+    caplog.clear()
+    with pytest.raises(ExtractionError):
+        extract(document, schema="invoice@1", registry=registry, adapter=EchoAdapter.malformed())
+    assert _sole_event(caplog)["attempts"] == 1
+
+
 def test_the_event_counts_values_without_carrying_them(
     registry: SchemaRegistry, echo: EchoAdapter, caplog: pytest.LogCaptureFixture
 ) -> None:

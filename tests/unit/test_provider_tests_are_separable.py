@@ -179,3 +179,49 @@ def test_the_default_suite_selects_no_provider_test() -> None:
         "the `provider` marker must be registered in pyproject.toml for --strict-markers "
         "to accept it"
     )
+
+
+# -- the other half of the offline guarantee (T119) ---------------------------
+#
+# The marker rule above stops a credential-needing test from running in the
+# offline suite. This stops the reverse: an offline test whose result depends on
+# credentials or configuration that happen to be set. Both are SC-019 — "a
+# contributor runs 100% of the unit and property suites" — and neither implies
+# the other.
+
+
+def test_no_docdoc_configuration_reaches_an_offline_test() -> None:
+    """T119, SC-019 — the suite's result must not depend on the developer's shell.
+
+    Asserted rather than trusted, because it was already broken once: Milestone 3
+    added three `DOCDOC_*` variables, guarded the two test files it was editing,
+    and left `test_gemini_mapping.py` red for anyone who had `DOCDOC_GEMINI_MODEL`
+    set — which is to say, for anyone whose machine was configured to actually use
+    the thing. The autouse fixture in `tests/conftest.py` clears them; this is what
+    notices if that fixture is removed, narrowed, or stops matching a new name.
+    """
+    import os
+
+    leaked = sorted(name for name in os.environ if name.startswith("DOCDOC_"))
+    assert not leaked, (
+        f"{leaked} reached an offline test. tests/conftest.py clears DOCDOC_* for every "
+        "non-provider test so a configured machine and a bare one agree (SC-019)"
+    )
+
+
+def test_no_credential_reaches_an_offline_test() -> None:
+    """T119, SC-019, FR-045 — and a contributor with keys gets the same result.
+
+    The complement of `test_every_test_reading_a_credential_is_marked_provider`.
+    That one asserts no offline test *reads* a credential; this one asserts none
+    is there to be read, so a test that starts reading one by accident cannot pass
+    on the maintainer's laptop and fail in CI.
+    """
+    import os
+
+    from tests.conftest import CREDENTIAL_ENV
+
+    present = sorted(name for name in CREDENTIAL_ENV if name in os.environ)
+    assert not present, (
+        f"{present} reached an offline test; tests/conftest.py should have cleared it"
+    )

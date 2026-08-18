@@ -134,3 +134,52 @@ def test_ingest_is_imported_from_submodules_never_the_package_facade() -> None:
         "`docdoc.ingest.errors`, `docdoc.ingest.options` -- so pymupdf and azure stay out "
         "of this layer's transitive graph"
     )
+
+
+# -- the error taxonomy crosses the boundary too ------------------------------
+
+
+def test_every_extraction_error_answers_to_the_one_docdoc_root() -> None:
+    """T118 — the constitution's error model is one list, so it needs one root.
+
+    This lived here rather than in `tests/unit/test_errors.py` because that file
+    is the kernel's and importing this layer into it would pull a Milestone 3
+    package into a Milestone 1 test. The property is a boundary property in any
+    case: it is precisely the claim that this layer's errors are catchable by
+    the same `except` as every other layer's.
+
+    It was false for nine review passes. `SchemaError` and `ExtractionError`
+    derived from bare `Exception`, while `ModelProviderError` reached the root
+    through ingest's chain — so `except DocdocError` caught provider failures and
+    silently missed schema and conformance failures. A partial catch is the worst
+    outcome available, because nothing about it looks broken.
+    """
+    from docdoc.extraction import ExtractionError, ModelProviderError, SchemaError
+    from docdoc.kernel import DocdocError
+
+    for error_type in (SchemaError, ExtractionError, ModelProviderError):
+        assert issubclass(error_type, DocdocError), (
+            f"{error_type.__name__} does not descend from DocdocError, so `except DocdocError` "
+            "misses it. contracts/extraction-api.md §7 says 'All are DocdocError'"
+        )
+
+
+def test_a_single_root_catches_every_extraction_failure() -> None:
+    """The property as a caller experiences it, not as a class diagram.
+
+    `issubclass` can be satisfied while a raise site constructs something else,
+    so this catches the real exceptions the layer raises.
+    """
+    from docdoc.extraction import ExtractionError, ModelProviderError, SchemaError
+    from docdoc.kernel import DocdocError
+
+    raises = (
+        lambda: (_ for _ in ()).throw(SchemaError("unknown identity", identity="nope@1")),
+        lambda: (_ for _ in ()).throw(ExtractionError("wrong shape", reason="shape")),
+        lambda: (_ for _ in ()).throw(
+            ModelProviderError("service said no", reason="service", adapter_id="gemini")
+        ),
+    )
+    for raise_it in raises:
+        with pytest.raises(DocdocError):
+            raise_it()

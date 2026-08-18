@@ -207,6 +207,29 @@ The real adapter installs with `pip install docdoc[google]`. Your application co
 and does not name it — which adapter answers is configuration, and the only observable difference is in
 provenance.
 
+## 8a. Configuration
+
+"Configuration decides" is three environment variables and nothing else. Together they are what makes
+FR-021 ("which model answers is configuration") and FR-049 ("locations that configuration names") true
+of the code rather than only of the prose above.
+
+| Variable | Decides | Default |
+|---|---|---|
+| `DOCDOC_SCHEMA_PATHS` | Where `default_registry()` loads schema data from, `os.pathsep`-separated | none — an empty registry |
+| `DOCDOC_MODEL_ADAPTERS` | Adapter preference order, comma-separated | `gemini` |
+| `DOCDOC_GEMINI_MODEL` | Which Gemini model answers | the adapter's shipped default |
+
+Credentials come from `GEMINI_API_KEY` or `GOOGLE_API_KEY`, and their absence is reported by
+`available()` as an unavailable adapter with a stated reason rather than as a silent omission.
+
+An explicit argument always wins — `default_registry(["schemas"])`, `default_adapter(("gemini",))`, or a
+`model=` passed to an adapter — because a caller who passed one meant it. Configuration is the default,
+not a cage.
+
+`default_registry()` with neither an argument nor `DOCDOC_SCHEMA_PATHS` returns an **empty** registry,
+and the next `resolve()` says so. docdoc ships no schema of its own: a schema is a deployment's data,
+and this repository's `schemas/` is fixtures and examples, deliberately not packaged in the wheel.
+
 ## 9. Observability
 
 One structured `extraction.extract` event per extraction, success or failure, carrying document identity,
