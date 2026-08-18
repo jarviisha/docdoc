@@ -79,12 +79,12 @@ def trace(document: Document, value: str) -> None:
     print(f"\n{value}")
     for span in document.find(value):
         for page_index in document.page_for(span):
-            print(f"    └── Page {page_index + 1}")
+            print(f"    `-- Page {page_index + 1}")
         for geometry in document.locate(span):
             box = geometry.bbox
             print(
-                f"        └── Bounding box on page {geometry.page_index + 1}: "
-                f"({box.x0:.2f}, {box.y0:.2f}) → ({box.x1:.2f}, {box.y1:.2f})"
+                f"        `-- Bounding box on page {geometry.page_index + 1}: "
+                f"({box.x0:.2f}, {box.y0:.2f}) -> ({box.x1:.2f}, {box.y1:.2f})"
             )
 
 
@@ -115,7 +115,7 @@ def main() -> None:
     (original,) = document.find("125000")
     (recovered,) = rebuilt.find("125000")
     assert document.locate(original) == rebuilt.locate(recovered)
-    print("\nSliced into 2 parts and reassembled: geometry unchanged. ✓")
+    print("\nSliced into 2 parts and reassembled: geometry unchanged. [ok]")
 
 
 if __name__ == "__main__":

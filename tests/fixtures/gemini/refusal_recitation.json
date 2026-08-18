@@ -1,0 +1,8 @@
+{
+  "finish_reason": "RECITATION",
+  "text": null,
+  "usage": {
+    "prompt_token_count": 4210,
+    "candidates_token_count": 31
+  }
+}

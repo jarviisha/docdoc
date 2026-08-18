@@ -1,0 +1,103 @@
+{
+  "name": "invoice",
+  "version": 2,
+  "fields": [
+    {
+      "name": "invoice_number",
+      "type": "string",
+      "required": true,
+      "description": "The invoice's own identifying number, exactly as printed. Not a purchase-order number and not a customer number.",
+      "constraints": {
+        "max_length": 64
+      }
+    },
+    {
+      "name": "issue_date",
+      "type": "date",
+      "required": true,
+      "description": "The date the invoice was issued, as an ISO-8601 date."
+    },
+    {
+      "name": "due_date",
+      "type": "date",
+      "description": "The date payment is due, as an ISO-8601 date. Absent on many invoices; leave it null rather than inferring one from payment terms."
+    },
+    {
+      "name": "currency",
+      "type": "string",
+      "required": true,
+      "description": "The ISO-4217 currency code of the amounts on this invoice.",
+      "constraints": {
+        "enum": [
+          "USD",
+          "EUR",
+          "GBP",
+          "VND",
+          "JPY"
+        ]
+      }
+    },
+    {
+      "name": "total",
+      "type": "decimal",
+      "required": true,
+      "description": "The final amount payable, including tax. If the document shows both a pre-tax and a post-tax total, this is the post-tax one.",
+      "constraints": {
+        "minimum": 0
+      }
+    },
+    {
+      "name": "supplier",
+      "cardinality": "group",
+      "required": true,
+      "description": "The party issuing the invoice and expecting payment.",
+      "fields": [
+        {
+          "name": "legal_name",
+          "type": "string",
+          "required": true,
+          "description": "The supplier's registered legal name."
+        },
+        {
+          "name": "tax_id",
+          "type": "string",
+          "description": "The supplier's tax registration number, if printed."
+        }
+      ]
+    },
+    {
+      "name": "line_items",
+      "cardinality": "repeating_group",
+      "description": "One entry per charged line on the invoice, in the order printed.",
+      "fields": [
+        {
+          "name": "description",
+          "type": "string",
+          "required": true,
+          "description": "What was supplied, as printed on the line."
+        },
+        {
+          "name": "quantity",
+          "type": "number",
+          "description": "How many units the line charges for."
+        },
+        {
+          "name": "unit_price",
+          "type": "decimal",
+          "description": "Price per unit, before tax."
+        },
+        {
+          "name": "amount",
+          "type": "decimal",
+          "required": true,
+          "description": "The line's total charge."
+        }
+      ]
+    },
+    {
+      "name": "purchase_order_number",
+      "type": "string",
+      "description": "The buyer's purchase-order number, when the invoice references one."
+    }
+  ]
+}

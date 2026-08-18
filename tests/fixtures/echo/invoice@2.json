@@ -1,0 +1,90 @@
+{
+  "invoice_number": {
+    "value": "INV-001",
+    "claimed_text": "INV-001",
+    "confidence": 0.98
+  },
+  "issue_date": {
+    "value": "2026-03-01",
+    "claimed_text": "1 March 2026",
+    "confidence": null
+  },
+  "due_date": {
+    "value": null,
+    "claimed_text": null,
+    "confidence": null
+  },
+  "currency": {
+    "value": "USD",
+    "claimed_text": "$",
+    "confidence": null
+  },
+  "total": {
+    "value": "1240.00",
+    "claimed_text": "1,240.00",
+    "confidence": 0.91
+  },
+  "supplier": {
+    "legal_name": {
+      "value": "Acme Ltd",
+      "claimed_text": "ACME LTD",
+      "confidence": null
+    },
+    "tax_id": {
+      "value": null,
+      "claimed_text": null,
+      "confidence": null
+    }
+  },
+  "line_items": [
+    {
+      "description": {
+        "value": "Widget, large",
+        "claimed_text": "Widget, large",
+        "confidence": null
+      },
+      "quantity": {
+        "value": 2,
+        "claimed_text": "2",
+        "confidence": null
+      },
+      "unit_price": {
+        "value": "500.00",
+        "claimed_text": "500.00",
+        "confidence": null
+      },
+      "amount": {
+        "value": "1000.00",
+        "claimed_text": "1,000.00",
+        "confidence": null
+      }
+    },
+    {
+      "description": {
+        "value": "Delivery",
+        "claimed_text": "Delivery",
+        "confidence": null
+      },
+      "quantity": {
+        "value": 1,
+        "claimed_text": "1",
+        "confidence": null
+      },
+      "unit_price": {
+        "value": "240.00",
+        "claimed_text": "240.00",
+        "confidence": null
+      },
+      "amount": {
+        "value": "240.00",
+        "claimed_text": "240.00",
+        "confidence": null
+      }
+    }
+  ],
+  "purchase_order_number": {
+    "value": "PO-77",
+    "claimed_text": "PO-77",
+    "confidence": null
+  }
+}

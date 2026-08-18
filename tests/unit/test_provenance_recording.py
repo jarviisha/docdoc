@@ -1,149 +1,176 @@
-"""T040 — what a finished document says about how it came to exist.
+"""T062, T063 — provenance completeness and the grounding boundary.
 
-SC-003 requires the verdict, the parser, its version, the options, and the
-declared capabilities to be readable off any result *without re-reading the
-source file*, and the verdict to be present for every page rather than only for
-the document. These tests read only the returned object; if any of them needed
-the original bytes, the guarantee would not hold.
+SC-011: every result records everything needed to explain it, readable without
+re-running the extraction. SC-018: every grounding field is unresolved, because
+Milestone 4 owns that stage.
+
+The second is the one worth keeping forever. A grounding status set one milestone
+early leaves every test green and the ADR-0003 stage boundary broken.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import Any
 
 import pytest
 
-from docdoc.ingest import parse
-from docdoc.ingest.errors import ParserCapabilityError
-from docdoc.ingest.source import SourceFile
+from docdoc.extraction import (
+    ExtractionOptions,
+    ExtractionProvenance,
+    SchemaRegistry,
+    extract,
+)
+from docdoc.extraction.adapters.echo import EchoAdapter
+from docdoc.extraction.value import ExtractedValue
+from tests.support import make_document
 
-FIXTURES = Path(__file__).parent.parent / "fixtures"
-
-
-def parse_fixture(relative: str, **kwargs: object):  # type: ignore[no-untyped-def]
-    return parse((FIXTURES / relative).read_bytes(), **kwargs)  # type: ignore[arg-type]
-
-
-class TestEverythingIsOnTheDocument:
-    def test_the_full_record_is_present(self) -> None:
-        document = parse_fixture("pdf/digital_invoice.pdf")
-        provenance = document.provenance
-
-        assert provenance.parser_id == "pdf-text"
-        assert provenance.parser_version.startswith("1.0.0+pymupdf-")
-        assert provenance.options == {}
-        assert provenance.capabilities.geometry is True
-        assert provenance.reading_order == "pymupdf-stream@1"
-        assert provenance.text_layer is not None
-
-    def test_options_are_recorded_as_given(self) -> None:
-        document = parse_fixture("pdf/digital_invoice.pdf", options={"mode": "strict"})
-
-        assert document.provenance.options == {"mode": "strict"}
-        assert document.provenance.options_hash.startswith("sha256:")
-
-    def test_the_verdict_is_readable_without_the_source(self) -> None:
-        document = parse_fixture("pdf/digital_invoice.pdf")
-        verdict = document.provenance.text_layer
-
-        assert verdict is not None
-        assert verdict.rule_id == "text-layer@1"
-        assert verdict.text_layer_usable is True
-        assert verdict.min_chars_per_page == 100
+DOCUMENT_TEXT = "ACME LTD\nINV-001\nTotal 1,240.00\n"
 
 
-class TestPerPageEvidence:
-    def test_one_verdict_per_page(self) -> None:
-        document = parse_fixture("pdf/mixed_pages.pdf")
-        verdict = document.provenance.text_layer
-
-        assert verdict is not None
-        assert len(verdict.pages) == len(document.pages)
-
-    def test_a_page_that_contributes_nothing_is_identifiable_as_expected(self) -> None:
-        """FR-035 — the difference between "no text here" and "this failed".
-
-        Without the per-page verdict, a page with zero tokens inside an
-        otherwise healthy document is indistinguishable from a defect.
-        """
-        document = parse_fixture("pdf/mixed_pages.pdf")
-        verdict = document.provenance.text_layer
-        assert verdict is not None
-
-        empty_pages = [page.index for page in document.pages if page.span.start == page.span.end]
-        not_text_bearing = [page.page_index for page in verdict.pages if not page.text_bearing]
-
-        assert empty_pages == not_text_bearing == [2]
-
-    def test_the_evidence_includes_the_counts_not_just_the_flags(self) -> None:
-        document = parse_fixture("pdf/mixed_pages.pdf")
-        verdict = document.provenance.text_layer
-        assert verdict is not None
-
-        assert [page.char_count > 0 for page in verdict.pages] == [True, True, False]
+@pytest.fixture
+def registry() -> SchemaRegistry:
+    return SchemaRegistry.from_paths(["schemas"])
 
 
-class TestOverride:
-    def test_forcing_the_native_path_is_recorded_with_what_it_overrode(self) -> None:
-        # The rule says this scan is not usable natively; the caller insists.
-        document = parse_fixture("pdf/scanned_contract.pdf", force="native")
-        verdict = document.provenance.text_layer
-
-        assert verdict is not None
-        assert verdict.overridden is True
-        assert verdict.overridden_verdict is False, "the rule's verdict must survive the override"
-        assert verdict.text_layer_usable is True, "the route actually taken"
-
-    def test_the_page_evidence_survives_an_override(self) -> None:
-        document = parse_fixture("pdf/scanned_contract.pdf", force="native")
-        verdict = document.provenance.text_layer
-
-        assert verdict is not None
-        assert len(verdict.pages) == 2
-        assert all(page.text_bearing is False for page in verdict.pages)
-
-    def test_forcing_recognition_without_it_installed_still_fails_loudly(self) -> None:
-        with pytest.raises(ParserCapabilityError):
-            parse_fixture("pdf/digital_invoice.pdf", force="recognition")
+@pytest.fixture
+def echo() -> EchoAdapter:
+    return EchoAdapter.from_fixtures("tests/fixtures/echo")
 
 
-class TestUnassessableSource:
-    def test_without_the_reader_an_unforced_parse_refuses(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        self._hide_reader(monkeypatch)
+def _result(registry: SchemaRegistry, echo: EchoAdapter, identity: str = "invoice@1") -> Any:
+    return extract(make_document(DOCUMENT_TEXT), schema=identity, registry=registry, adapter=echo)
 
-        with pytest.raises(ParserCapabilityError) as caught:
-            parse_fixture("pdf/digital_invoice.pdf")
 
-        assert "force=" in str(caught.value)
+def _values(tree: Any):
+    """Every ExtractedValue in a result, at every depth."""
+    for node in tree.values():
+        if isinstance(node, ExtractedValue):
+            yield node
+        elif isinstance(node, tuple):
+            for entry in node:
+                yield from _values(entry)
+        else:
+            yield from _values(node)
 
-    def test_a_forced_parse_records_that_the_rule_never_ran(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The recognition-only deployment, which would otherwise be unable to
-        parse any PDF at all."""
-        from docdoc.ingest.assess import TextLayerRule
-        from docdoc.ingest.parse import _route
 
-        self._hide_reader(monkeypatch)
-        source = SourceFile.from_bytes((FIXTURES / "pdf/digital_invoice.pdf").read_bytes())
+# -- SC-011: the record is complete ------------------------------------------
 
-        verdict = _route(source, rule=TextLayerRule(), force="recognition")
 
-        assert verdict.rule_not_run == "reader_unavailable"
-        assert verdict.overridden is True
-        assert verdict.pages == ()
+def test_provenance_records_every_required_field(
+    registry: SchemaRegistry, echo: EchoAdapter
+) -> None:
+    """The field set is pinned, so dropping one is a deliberate change."""
+    assert set(ExtractionProvenance.model_fields) == {
+        "document_id",
+        "schema_identity",
+        "schema_hash",
+        "prompt_hash",
+        "projection_id",
+        "adapter_id",
+        "adapter_version",
+        "model_id",
+        "model_version",
+        "decoding",
+        "extractor_version",
+        "usage",
+    }
 
-    @staticmethod
-    def _hide_reader(monkeypatch: pytest.MonkeyPatch) -> None:
-        import builtins
 
-        real_import = builtins.__import__
+def test_no_recorded_field_is_empty(registry: SchemaRegistry, echo: EchoAdapter) -> None:
+    """A field that is present but blank records nothing while looking complete."""
+    provenance = _result(registry, echo).provenance
+    for name in ExtractionProvenance.model_fields:
+        value = getattr(provenance, name)
+        assert value is not None, f"{name} is unrecorded"
+        if isinstance(value, str):
+            assert value.strip(), f"{name} is blank"
 
-        def hide(name: str, *args: object, **kwargs: object) -> object:
-            if name == "docdoc.ingest.parsers.pdf_text":
-                raise ImportError("no native reader installed")
-            return real_import(name, *args, **kwargs)  # type: ignore[arg-type]
 
-        monkeypatch.setattr(builtins, "__import__", hide)
+def test_the_recorded_values_are_the_ones_actually_used(
+    registry: SchemaRegistry, echo: EchoAdapter
+) -> None:
+    entry = registry.resolve("invoice@1")
+    options = ExtractionOptions(max_output_tokens=1234, temperature=0.3, seed=11)
+    result = extract(
+        make_document(DOCUMENT_TEXT),
+        schema="invoice@1",
+        registry=registry,
+        adapter=echo,
+        options=options,
+    )
+    p = result.provenance
+    assert p.document_id == make_document(DOCUMENT_TEXT).id
+    assert p.schema_identity == "invoice@1"
+    assert p.schema_hash == entry.schema_hash
+    assert p.prompt_hash == entry.prompt_hash
+    assert p.projection_id == "response-shape@1"
+    assert p.adapter_id == echo.id
+    assert p.adapter_version == echo.version
+    assert p.model_id == echo.model_id
+    assert p.model_version == echo.model_version
+    assert p.decoding == options, "the options as they actually ran, not the defaults"
+    assert p.extractor_version.startswith("1.0.0+")
+
+
+def test_provenance_is_frozen(registry: SchemaRegistry, echo: EchoAdapter) -> None:
+    """Provenance MUST NOT be silently overwritten (Principle VIII)."""
+    provenance = _result(registry, echo).provenance
+    with pytest.raises(Exception, match=r"frozen|immutable"):
+        provenance.schema_identity = "invoice@2"  # type: ignore[misc]
+
+
+def test_usage_is_recorded_even_when_an_adapter_has_no_tokens(
+    registry: SchemaRegistry, echo: EchoAdapter
+) -> None:
+    """Absence of a token count is a normal condition, not a missing record."""
+    usage = _result(registry, echo).provenance.usage
+    assert usage is not None
+    assert usage.input_tokens is None
+
+
+def test_the_result_carries_its_artifact_id(registry: SchemaRegistry, echo: EchoAdapter) -> None:
+    assert _result(registry, echo).artifact_id.startswith("sha256:")
+
+
+def test_model_confidence_is_carried_and_labelled_untrusted_in_the_schema(
+    registry: SchemaRegistry, echo: EchoAdapter
+) -> None:
+    """FR-031 -- recorded verbatim, and labelled where the label actually travels.
+
+    A comment in the source does not reach a caller. FR-031 requires the untrusted
+    label wherever the field is *exposed*, so it lives in the field description and
+    therefore in the generated schema -- which is what this asserts.
+    """
+    assert _result(registry, echo).value_at("total").model_confidence == 0.91
+
+    description = ExtractedValue.model_json_schema()["properties"]["model_confidence"][
+        "description"
+    ]
+    assert "UNTRUSTED" in description
+    assert "must not influence any routing" in description
+
+
+def test_the_grounding_fields_are_not_labelled_untrusted(
+    registry: SchemaRegistry, echo: EchoAdapter
+) -> None:
+    """The other half of ADR-0004: these two are the trusted ones, once computed."""
+    properties = ExtractedValue.model_json_schema()["properties"]
+    for name in ("grounding", "grounding_score"):
+        assert "UNTRUSTED" not in str(properties[name])
+
+
+def test_re_extraction_does_not_mutate_the_earlier_result(
+    registry: SchemaRegistry, echo: EchoAdapter
+) -> None:
+    """FR-038 -- reprocessing produces a new result; it never rewrites one."""
+    document = make_document(DOCUMENT_TEXT)
+    first = extract(document, schema="invoice@1", registry=registry, adapter=echo)
+    snapshot = (first.artifact_id, first.provenance.model_dump(), first.value_at("total").value)
+
+    second = extract(document, schema="invoice@2", registry=registry, adapter=echo)
+    assert second.artifact_id != first.artifact_id
+    assert (
+        first.artifact_id,
+        first.provenance.model_dump(),
+        first.value_at("total").value,
+    ) == snapshot

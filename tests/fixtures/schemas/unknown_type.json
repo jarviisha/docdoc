@@ -1,0 +1,2 @@
+{"name": "unknown_type", "version": 1,
+ "fields": [{"name": "amount", "type": "money", "description": "not a declared type"}]}

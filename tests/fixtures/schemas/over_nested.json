@@ -1,0 +1,6 @@
+{"name": "over_nested", "version": 1,
+ "fields": [{"name": "line_items", "cardinality": "repeating_group",
+             "description": "outer repetition",
+             "fields": [{"name": "taxes", "cardinality": "repeating_group",
+                         "description": "inner repetition - refused by EXT-3",
+                         "fields": [{"name": "rate", "type": "number", "description": "a rate"}]}]}]}

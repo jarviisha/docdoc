@@ -1,0 +1,2 @@
+{"name": "Uppercase", "version": 1,
+ "fields": [{"name": "anything", "type": "string", "description": "EXT-5: case is significant"}]}
