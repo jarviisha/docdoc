@@ -1,0 +1,10 @@
+{
+  "default_candidate_budget": 1500,
+  "default_threshold": 0.9,
+  "grounder_id": "deterministic-grounder",
+  "grounder_version": "1.0.0",
+  "grounding_version": "v1",
+  "match_view_version": "v1",
+  "max_alternatives": 5,
+  "options_hash_at_defaults": "sha256:b907b544e776d6c9501ff2fd4337d2d3d5175379c21f6f7c660aac0ba9141be2"
+}

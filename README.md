@@ -8,9 +8,9 @@ LLM — everyone can do that. It is that every extracted value can answer:
 
 > **Where did this come from?**
 
-**Status:** Milestones 1 (kernel), 2 (parsers), and 3 (extraction) implemented. Grounding and
-validation are not built yet, so **every extracted value is currently ungrounded** — see
-[Roadmap](#roadmap).
+**Status:** Milestones 1 (kernel), 2 (parsers), 3 (extraction), and 4 (grounding) implemented.
+Validation is not built yet, so an extracted value can be **located** but is not yet **checked** —
+see [Roadmap](#roadmap).
 
 ## What it does today
 
@@ -71,11 +71,26 @@ result.artifact_id                  # the extraction's own content-addressed ide
 Rewording a field description moves the hash and not the version, which invalidates the extraction
 and **reuses the parse**. [ADR-0008](docs/adr/0008-schema-evolution-policy.md) has the bump rules.
 
-**What extraction deliberately does not do.** It resolves no grounding — every value's `grounding` is
-`None` — because that is Milestone 4's stage with its own artifact under
-[ADR-0003](docs/adr/0003-content-addressed-artifact-chain.md). What it supplies is the byte-faithful
-`claimed_text` that grounding will resolve. And `model_confidence` is stored verbatim, labelled
-UNTRUSTED, and routes nothing ([ADR-0004](docs/adr/0004-confidence-semantics.md)).
+**Extraction resolves no grounding, and that is a stage boundary rather than a gap.** Every value
+leaves extraction with `grounding=None`, because grounding is its own stage with its own artifact
+under [ADR-0003](docs/adr/0003-content-addressed-artifact-chain.md). What extraction supplies is the
+byte-faithful `claimed_text`; `docdoc.grounding.ground()` resolves it:
+
+```python
+from docdoc.grounding import ground
+
+located = ground(document, result)
+total = located.outcomes["total"]
+total.status                                        # 'exact'
+document.text[total.span.start:total.span.end]      # 'TOTAL             1,240.00'
+total.pages, total.geometry                         # (0,), (Geometry(...),)
+located.counts.grounding_rate                       # 1.0
+```
+
+Grounding is deterministic and entirely offline — no network, no credentials, no model call, enforced
+by an import contract. It answers *where*, never *whether*: a value that disagrees with the text it
+resolved to is a **validation** finding, which is Milestone 5. And `model_confidence` is stored
+verbatim, labelled UNTRUSTED, and routes nothing ([ADR-0004](docs/adr/0004-confidence-semantics.md)).
 
 Run the examples, which need no infrastructure and no credentials at all:
 
@@ -84,6 +99,7 @@ uv sync --all-extras
 uv run python examples/build_document.py                       # kernel only
 uv run python examples/parse_pdf.py tests/fixtures/pdf/digital_invoice.pdf
 uv run python examples/extract_invoice.py                      # extraction, offline
+uv run python examples/ground_invoice.py                       # grounding, offline
 ```
 
 ### Installing
@@ -193,8 +209,8 @@ higher-layer work merges while that property is failing or absent.
 | 1 | Kernel: Document IR, `locate` / `find` / `slice` / `merge`, identity | **Done** |
 | 2 | Parsers: native PDF text path, one geometry-capable cloud provider | **Done** |
 | 3 | Schema-driven extraction, one LLM adapter | **Done** |
-| 4 | Deterministic grounding: exact → fuzzy → ungrounded | Next |
-| 5 | Validation: schema, field, and cross-field rules | Planned |
+| 4 | Deterministic grounding: exact → fuzzy → ungrounded | **Done** |
+| 5 | Validation: schema, field, and cross-field rules | Next |
 | 6 | Evaluation: golden dataset, field accuracy, grounding rate | Planned |
 | 7 | API and CLI | Planned |
 
@@ -208,6 +224,8 @@ higher-layer work merges while that property is failing or absent.
 - [Ingest API contract](specs/002-ingest-parser-layer/contracts/ingest-api.md)
 - [How ingest works](docs/concepts/ingest.md) — the two paths and the text-layer decision
 - [How extraction works](docs/concepts/extraction.md) — the two identities, and the stage boundary with grounding
+- [How grounding works](docs/concepts/grounding.md) — the three states, the match view, and why the two scores are not comparable
+- [Grounding API contract](specs/004-deterministic-grounding/contracts/grounding-api.md)
 - [Extraction API contract](specs/003-schema-driven-extraction/contracts/extraction-api.md)
 - [Contributing](CONTRIBUTING.md)
 

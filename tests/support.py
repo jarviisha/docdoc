@@ -10,6 +10,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 from itertools import pairwise
 
+from docdoc.extraction.adapter import ExtractionOptions, ModelUsage
+from docdoc.extraction.extract import ExtractionProvenance, ExtractionResult
+from docdoc.extraction.value import ExtractedValue
 from docdoc.kernel import (
     BBox,
     BlobRef,
@@ -145,4 +148,65 @@ def make_document(
             options=options,
         ),
         source=make_blob(data),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Extraction results, for the grounding suite (Milestone 4)
+# ---------------------------------------------------------------------------
+#
+# Grounding reads an ExtractionResult and never produces one, so its tests need a
+# way to state "a model claimed X for field Y" without running an extraction.
+# Building one by hand is more boilerplate than building a Document.
+
+
+def make_extracted(
+    field_path: str,
+    *,
+    value: object = None,
+    present: bool = True,
+    claimed_text: str | None = None,
+    model_confidence: float | None = None,
+) -> ExtractedValue:
+    """One extracted value, with the grounding fields left unresolved as Milestone 3 leaves them."""
+    return ExtractedValue(
+        field_path=field_path,
+        value=value,
+        present=present,
+        claimed_text=claimed_text,
+        model_confidence=model_confidence,
+    )
+
+
+def make_extraction(
+    values: dict[str, object],
+    *,
+    document: Document | None = None,
+    document_id: str | None = None,
+    artifact_id: str = "sha256:" + "e" * 64,
+) -> ExtractionResult:
+    """An ExtractionResult carrying `values`, provenanced to `document`.
+
+    `document_id` overrides the document's own id, which is how the wrong-document
+    tests build a result that plausibly belongs somewhere else.
+    """
+    fallback = document.id if document else "sha256:" + "d" * 64
+    doc_id = document_id if document_id is not None else fallback
+    return ExtractionResult(
+        values=values,
+        artifact_id=artifact_id,
+        provenance=ExtractionProvenance(
+            document_id=doc_id,
+            schema_identity="invoice@1",
+            schema_hash="sha256:" + "5" * 64,
+            prompt_hash="sha256:" + "7" * 64,
+            projection_id="response-shape@1",
+            adapter_id="echo",
+            adapter_version="1.0.0",
+            model_id="echo",
+            model_version="1.0.0",
+            decoding=ExtractionOptions(),
+            extractor_version="1.0.0+echo-1.0.0",
+            usage=ModelUsage(),
+        ),
     )

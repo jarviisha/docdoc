@@ -168,8 +168,10 @@ grounding input into this stage's identity. Even the exact tier needs the tie-br
 [ADR-0005](../adr/0005-fuzzy-grounding-specification.md) specifies for a claimed text appearing more
 than once, and a temporary rule would change results under an unchanged `grounding_version`.
 
-**So when this milestone ships, every extracted value is ungrounded.** The product's central claim is
-not demonstrable end to end until Milestone 4. That is the price of the stage boundary.
+**So an extraction result is always ungrounded when it leaves this layer.** That is the price of the
+stage boundary, and it is paid by the next stage rather than by the caller: `docdoc.grounding.ground()`
+(Milestone 4, shipped) resolves every `claimed_text` below to a range, a page, and a bounding box. See
+[grounding.md](grounding.md).
 
 What extraction *does* supply is the `claimed_text` Milestone 4 will resolve: the model's verbatim
 source text, preserved byte for byte. No trimming, no case folding, no Unicode normalisation — text

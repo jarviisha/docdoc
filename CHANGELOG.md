@@ -9,6 +9,58 @@ API may change in any release. `document_id` derivation is versioned separately 
 
 ## [Unreleased]
 
+Milestone 4: deterministic grounding. **docdoc's central claim is now demonstrable end to end** — an
+extracted value can be taken to the character range, page, and bounding box it came from.
+
+### Added
+
+- **`docdoc.grounding`** — a new layer, above `docdoc.extraction` in the `import-linter` layers
+  contract. `ground(document, extraction)` returns one outcome per value that carried a claim:
+  `exact`, `fuzzy`, or `ungrounded`, with a source-text range, pages, boxes, and up to five
+  alternatives.
+- **The match view** (`match_view_version = "v1"`) — a derived, versioned folding of the document's
+  text for comparison only. `Document.text` stays byte-faithful and the view is never exposed.
+  Measured worth: on the committed typesetting fixtures, plain substring matching resolves **0 of 7**
+  claims at the exact tier and the folded view resolves **6 of 7**.
+- **A candidate filter with a completeness proof** — pigeonhole partitioning, so `ungrounded` means
+  *not there* rather than *not looked for*. Verified against brute force in the test suite.
+- **`grounding_version = "v1"`**, a version-guard snapshot that fails the build if the candidate
+  generator, scorer, tie-break, slack derivation, or default threshold move without a bump, and a
+  grounding artifact id chained from the extraction artifact per ADR-0003.
+- **`GroundingError`** — the constitution named it; this is its first implementation. It carries no
+  `transient` flag, because a deterministic offline computation has no transient failures.
+- `docs/concepts/grounding.md` and `examples/ground_invoice.py`, both runnable with no credentials.
+
+### Changed
+
+- **`rapidfuzz>=3.0` joins the base install**, making it the second base dependency. Sanctioned by
+  ADR-0005 and the constitution's stack line. The *kernel* still imports `pydantic` alone, and
+  `tests/unit/test_kernel_purity.py` enforces that unchanged. The `pyproject.toml` comment that read
+  "the kernel's only permitted runtime dependency" now says what it actually means.
+- The plan-tree meta-test is parameterised over layers rather than hard-coded to extraction.
+
+### Notes on three decisions that depart from an ADR's literal text
+
+- **Grounding is its own package and layer**, not `extraction/grounding.py` as ADR-0005's text says.
+  That ADR's binding decision, per its title, is that fuzzy matching lives *outside the kernel*.
+  Inside one package the dependency direction is unenforceable. See the ADR's amendment note.
+- **The candidate slack is derived, not chosen**: `k = floor((1 - t) · m / t)`, verified for claim
+  lengths 1–59. An independent constant measured **1373 ms against 53 ms** for one value.
+- **The round-trip invariant is containment, not identity.** ADR-0006 states it as an identity, which
+  is unsatisfiable for a range whose boundary falls inside a character the view deletes.
+
+### Known gaps, recorded rather than hidden
+
+- **Dash folding is absent.** NFKC maps U+2011 to U+2010 but neither to ASCII `-`, so a document
+  typeset with U+2010 and a model quoting ASCII misses the exact tier. Adding it would be a seventh
+  transformation inside a version ADR-0006 pinned. A `v2` candidate for Milestone 6.
+- **A compound word broken at a line end scores exactly 0.900** — clearing the threshold by nothing.
+  Raising the default threshold above 0.90 breaks it. This constrains the Milestone 6 tuning.
+- **No golden-set metrics task.** The dataset does not exist (`TODO(GOLDEN_DATASET_LICENSING)` gates
+  Milestone 6). This milestone makes the grounding rate *computable*; it sets no target for it.
+
+---
+
 Milestone 2: the ingest parser layer. docdoc can now turn a real file into a `Document`.
 
 ### Added

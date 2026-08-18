@@ -133,6 +133,28 @@ def test_the_ingest_example_runs() -> None:
     _assert_ran(_run(str(EXAMPLES / "parse_pdf.py"), str(fixture)), "parse_pdf.py")
 
 
+def test_the_grounding_example_runs_with_no_credentials() -> None:
+    """Milestone 4's example. Grounding reaches no network at all, so unlike the
+    extraction example there is not even an adapter to stand in for one."""
+    _assert_ran(_run(str(EXAMPLES / "ground_invoice.py")), "ground_invoice.py")
+
+
+def test_the_grounding_example_demonstrates_what_it_claims_to() -> None:
+    """It claims a ligature still resolves at the exact tier and points at the source.
+
+    Asserting the output rather than the exit code, because an example that runs
+    and prints something else is worse than one that fails: it is documentation
+    that has quietly stopped being true.
+    """
+    result = _run(str(EXAMPLES / "ground_invoice.py"))
+    out = result.stdout
+    assert "exact" in out
+    # The located text read back out of the untouched source, ligature intact.
+    assert "Ofﬁce" in out, "the example should show the source's own ligature"
+    assert "grounding rate: 100%" in out
+    assert "not_applicable = 1" in out, "the reported absence should stay out of the rate"
+
+
 def test_every_committed_example_is_covered_here() -> None:
     """The assertion that keeps this file honest as examples are added.
 
@@ -141,7 +163,7 @@ def test_every_committed_example_is_covered_here() -> None:
     the contract suite, and for the same reason.
     """
     shipped = {path.name for path in EXAMPLES.glob("*.py")}
-    covered = {"extract_invoice.py", "build_document.py", "parse_pdf.py"}
+    covered = {"extract_invoice.py", "build_document.py", "parse_pdf.py", "ground_invoice.py"}
     assert shipped <= covered, (
         f"these examples ship but nothing executes them: {sorted(shipped - covered)}"
     )
