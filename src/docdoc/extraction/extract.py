@@ -20,7 +20,7 @@ from pydantic import BaseModel, ConfigDict
 from docdoc.extraction.adapter import ExtractionOptions, ModelAdapter, ModelUsage
 from docdoc.extraction.budget import guard_input_budget
 from docdoc.extraction.conform import conform
-from docdoc.extraction.errors import ExtractionError, ModelProviderError
+from docdoc.extraction.errors import ExtractionError, ModelProviderError, SchemaError
 from docdoc.extraction.identity import (
     EXTRACTOR_ID,
     extraction_artifact_id_for,
@@ -119,6 +119,27 @@ class ExtractionResult(BaseModel):
         return node
 
 
+def _requested_model(adapter: ModelAdapter) -> tuple[str, str]:
+    """The model an adapter says it *will* reach, before any response exists.
+
+    Used only for the failure event. A failed call has no response to read the
+    reached model from, and "which model were we even trying?" is still the
+    question a reader of the log has -- particularly for the failures that happen
+    before the call, where the answer is the whole diagnosis.
+
+    The success path deliberately does **not** use this: it reads the model the
+    provider reports, because the two differ whenever a request names an alias
+    and only one of them is the model that actually answered.
+
+    ``ModelAdapter`` does not require either property. An adapter may have no
+    notion of a model separate from itself, so its own identity is the fallback.
+    """
+    return (
+        getattr(adapter, "model_id", adapter.id),
+        getattr(adapter, "model_version", adapter.version),
+    )
+
+
 def _count(tree: ValueTree) -> tuple[int, int]:
     """(present, absent) across the whole tree -- counts only, never content."""
     present = absent = 0
@@ -166,53 +187,30 @@ def extract(
     # document id, and the provenance field keeps that name.
     document_id = document.id
 
-    entry = registry.resolve(schema)
     extractor_version = extractor_version_for(adapter)
+    requested_model_id, requested_model_version = _requested_model(adapter)
 
-    availability = adapter.available()
-    if not availability.usable:
-        raise ModelProviderError(
-            f"adapter {adapter.id!r} is unavailable: {availability.reason}",
-            reason="unavailable",
-            adapter_id=adapter.id,
-            document_id=document_id,
-            schema_identity=entry.identity,
-        )
-
-    shape = response_shape_for(entry.schema)
-    request = build_request(entry, document.text, response_shape=shape, document_id=document_id)
-
-    estimate = guard_input_budget(
-        request.rendered(),
-        budget_tokens=opts.input_budget_tokens,
-        document_id=document_id,
-        schema_identity=entry.identity,
-    )
-
-    options_hash = options_hash_for_extraction(
-        schema_identity=entry.identity,
-        schema_hash=entry.schema_hash,
-        prompt_hash=entry.prompt_hash,
-        projection_id=PROJECTION_ID,
-        model_id=getattr(adapter, "model_id", adapter.id),
-        model_version=getattr(adapter, "model_version", adapter.version),
-        max_output_tokens=opts.max_output_tokens,
-        temperature=opts.temperature,
-        top_p=opts.top_p,
-        top_k=opts.top_k,
-        seed=opts.seed,
-        thinking_budget=opts.thinking_budget,
-        input_budget_tokens=opts.input_budget_tokens,
-    )
+    # What the event can say so far. These fill in as the extraction gets further,
+    # and `_fail` reads them at call time, so a failure before the schema resolves
+    # emits an event that simply omits what was not known yet rather than no event
+    # at all. `emit_extraction_event` drops `None`, so absence stays absence.
+    schema_identity: str | None = None
+    schema_hash: str | None = None
+    estimate: int | None = None
 
     def _fail(reason: str, *, attempts: int = 1) -> None:
         emit_extraction_event(
             attempts=attempts,
             document_id=document_id,
-            schema_identity=entry.identity,
-            schema_hash=entry.schema_hash,
+            schema_identity=schema_identity,
+            schema_hash=schema_hash,
             adapter_id=adapter.id,
             adapter_version=adapter.version,
+            # The model *requested*. A failed call reached no model, so there is
+            # no reported one to record, and "which model was this aimed at?" is
+            # what a reader of a failure needs (FR-040).
+            model_id=requested_model_id,
+            model_version=requested_model_version,
             extractor_version=extractor_version,
             temperature=opts.temperature,
             seed=opts.seed,
@@ -221,6 +219,45 @@ def extract(
             outcome="failure",
             reason=reason,
         )
+
+    # Everything here is local, which is what makes FR-041 true -- a request that
+    # was always going to fail transmits nothing. It is wrapped as one block
+    # because FR-040 says *every* extraction emits an event, and these three
+    # failures -- an unregistered schema, a missing credential, an over-budget
+    # document -- are exactly the ones caused by the caller's own configuration
+    # and therefore the ones most worth seeing in aggregate.
+    try:
+        entry = registry.resolve(schema)
+        schema_identity = entry.identity
+        schema_hash = entry.schema_hash
+
+        availability = adapter.available()
+        if not availability.usable:
+            raise ModelProviderError(
+                f"adapter {adapter.id!r} is unavailable: {availability.reason}",
+                reason="unavailable",
+                adapter_id=adapter.id,
+                document_id=document_id,
+                schema_identity=entry.identity,
+            )
+
+        shape = response_shape_for(entry.schema)
+        request = build_request(entry, document.text, response_shape=shape, document_id=document_id)
+
+        estimate = guard_input_budget(
+            request.rendered(),
+            budget_tokens=opts.input_budget_tokens,
+            document_id=document_id,
+            schema_identity=entry.identity,
+        )
+    except SchemaError:
+        # `SchemaError` carries no `reason`; resolution is the only way to reach
+        # it from here, and naming it as such beats inventing a taxonomy.
+        _fail("schema")
+        raise
+    except (ExtractionError, ModelProviderError) as exc:
+        _fail(exc.reason)
+        raise
 
     attempts = 0
     try:
@@ -248,6 +285,32 @@ def extract(
     except ExtractionError as exc:
         _fail(exc.reason)
         raise
+
+    # Folded from the model the provider *reported*, not the one requested -- the
+    # same values provenance records below, and deliberately so. The two differ
+    # whenever a request names an alias or a provider rolls a point release under
+    # an unchanged name, and folding the requested one would let two genuinely
+    # different computations share a content address (FR-034, FR-035, SC-009).
+    #
+    # Reading it after the call is free: the artifact id is derived here, not used
+    # to look anything up beforehand. This feature stores and caches nothing (the
+    # spec's "the artifact identity is computed, not stored"), so there is no
+    # pre-call lookup that would need an identity before there is a response.
+    options_hash = options_hash_for_extraction(
+        schema_identity=entry.identity,
+        schema_hash=entry.schema_hash,
+        prompt_hash=entry.prompt_hash,
+        projection_id=PROJECTION_ID,
+        model_id=response.model_id,
+        model_version=response.model_version,
+        max_output_tokens=opts.max_output_tokens,
+        temperature=opts.temperature,
+        top_p=opts.top_p,
+        top_k=opts.top_k,
+        seed=opts.seed,
+        thinking_budget=opts.thinking_budget,
+        input_budget_tokens=opts.input_budget_tokens,
+    )
 
     provenance = ExtractionProvenance(
         document_id=document_id,

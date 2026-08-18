@@ -28,8 +28,9 @@ from docdoc.extraction import (
     default_adapter_registry,
     extract,
 )
-from docdoc.extraction.adapter_registry import AdapterRegistry
+from docdoc.extraction.adapter_registry import ADAPTERS_ENV, AdapterRegistry
 from docdoc.extraction.adapters.echo import EchoAdapter
+from docdoc.extraction.adapters.gemini import DEFAULT_MODEL, MODEL_ENV, GeminiAdapter
 from tests.support import make_document
 
 
@@ -58,9 +59,11 @@ class _Stub:
 
 @pytest.fixture(autouse=True)
 def _no_ambient_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A key in the developer's environment must not change what these assert."""
+    """A key or a model name in the developer's environment must not change these."""
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv(MODEL_ENV, raising=False)
+    monkeypatch.delenv(ADAPTERS_ENV, raising=False)
 
 
 # -- selection ---------------------------------------------------------------
@@ -219,6 +222,72 @@ adapter = default_adapter()
     namespace: dict[str, Any] = {}
     exec(compile(source, "<application code>", "exec"), namespace)
     assert namespace["adapter"].id == "gemini", "configuration chose it; the code above did not"
+
+
+# -- the other half of FR-021: which *model* answers -------------------------
+
+
+def test_the_model_defaults_to_the_shipped_one() -> None:
+    """T114 — with nothing configured, the behaviour is what it always was."""
+    assert GeminiAdapter().model_id == DEFAULT_MODEL
+
+
+def test_configuration_repoints_the_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """T114, FR-021, US3/AC2 — "when the configured model changes, no application
+    code changes".
+
+    T082 closed the *provider* half of this requirement and left the model half
+    open: until now the only ways off ``DEFAULT_MODEL`` were to edit docdoc's own
+    source or to write ``GeminiAdapter(model=…)`` at a call site — which names a
+    provider and a model version in application code, the exact thing FR-021
+    forbids.
+    """
+    monkeypatch.setenv(MODEL_ENV, "gemini-3.5-pro")
+    assert GeminiAdapter().model_id == "gemini-3.5-pro"
+
+
+def test_an_explicit_model_argument_beats_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A caller who passed one meant it. Configuration is the default, not a cage."""
+    monkeypatch.setenv(MODEL_ENV, "gemini-3.5-pro")
+    assert GeminiAdapter(model="gemini-3.5-flash").model_id == "gemini-3.5-flash"
+
+
+def test_the_selected_adapter_carries_the_configured_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """T114 — the wiring, not just the constructor.
+
+    ``default_adapter()`` builds the adapter itself, so a model read that the
+    constructor honours but the registry bypasses would leave the requirement
+    unmet along the only path application code actually takes.
+    """
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-used-for-a-call")
+    monkeypatch.setenv(MODEL_ENV, "gemini-3.5-pro")
+    assert default_adapter().model_id == "gemini-3.5-pro"  # type: ignore[attr-defined]
+
+
+def test_configuration_reorders_the_adapters(monkeypatch: pytest.MonkeyPatch) -> None:
+    """T114 — the provider half, now equally configurable.
+
+    Between this and ``MODEL_ENV``, "which provider and which model answer" is
+    configuration end to end, so US3's independent test can actually be performed.
+    """
+    monkeypatch.setenv(ADAPTERS_ENV, "second, first")
+    registry = AdapterRegistry()
+    registry.register(_Stub("first"))
+    registry.register(_Stub("second"))
+    assert registry.select().id == "second"
+    assert [c.id for c in registry.candidates()] == ["second", "first"]
+
+
+def test_a_blank_adapter_configuration_falls_back_to_the_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A trailing comma is a typo that costs nothing, not a candidate matching nothing."""
+    monkeypatch.setenv(ADAPTERS_ENV, "  ,  ")
+    assert AdapterRegistry()._priority == ("gemini",)
 
 
 def test_the_documented_examples_do_not_name_a_provider() -> None:

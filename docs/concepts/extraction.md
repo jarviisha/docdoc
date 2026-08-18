@@ -29,6 +29,28 @@ adapter = default_adapter()                    # configuration decides
 default_adapter_registry().candidates()        # inspect what is known, and why each is or is not usable
 ```
 
+### What "configuration" actually names
+
+Three environment variables, and nothing else. Between them, which schemas exist, which provider
+answers, and which model it uses are all deployment decisions rather than code:
+
+| Variable | Decides | Default |
+|---|---|---|
+| `DOCDOC_SCHEMA_PATHS` | Where `default_registry()` loads schema data from, `os.pathsep`-separated | none — the registry is empty |
+| `DOCDOC_MODEL_ADAPTERS` | Adapter preference order, comma-separated | `gemini` |
+| `DOCDOC_GEMINI_MODEL` | Which Gemini model answers | the adapter's shipped default |
+
+Credentials come from `GEMINI_API_KEY` or `GOOGLE_API_KEY`, as the adapter's `available()` reports.
+
+An explicit argument always beats configuration — `default_registry(["schemas"])`, or a `model=`
+passed straight to an adapter — because a caller who passed one meant it. Configuration is the
+default, not a cage; it exists so that the *application* code above never has to name any of these.
+
+`default_registry()` with neither an argument nor `DOCDOC_SCHEMA_PATHS` returns an **empty**
+registry, and the next `resolve()` says so. docdoc ships no schema of its own: a schema is a
+deployment's data, and `schemas/` in this repository is fixtures and examples, deliberately not
+packaged in the wheel.
+
 An adapter whose extra is missing or whose credentials are absent is **recorded with its reason**
 rather than omitted. Silence would make "not installed" indistinguishable from "no such thing", and
 the resulting error would name nothing. Priority decides between usable candidates, with the adapter

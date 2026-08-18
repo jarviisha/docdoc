@@ -171,6 +171,100 @@ def test_the_adapter_version_reaches_the_artifact_id(
     assert upgraded.artifact_id != original.artifact_id
 
 
+def test_the_model_version_that_answered_reaches_the_artifact_id(
+    registry: SchemaRegistry,
+) -> None:
+    """T113, FR-034/FR-035, SC-009 -- the *reached* model, not the requested one.
+
+    The two differ whenever a request names an alias, or a provider rolls a point
+    release under an unchanged name. ``GeminiAdapter.model_version`` says so in its
+    own docstring, and provenance already records the reached one -- so folding the
+    requested one let two genuinely different computations share a content address.
+
+    This cannot be caught with ``EchoAdapter`` alone: its declared and returned
+    versions are the same attribute, so they agree by construction. The adapter
+    below is the smallest thing that reproduces a real provider's behaviour, which
+    is why the gap survived eight review passes.
+    """
+    import json
+    import pathlib
+
+    from docdoc.extraction.adapter import ModelResponse
+    from docdoc.extraction.prompt import ModelRequest
+
+    payload = json.loads(pathlib.Path("tests/fixtures/echo/invoice@1.json").read_text())
+
+    class AliasedAdapter(EchoAdapter):
+        """Requests one model name; the service answers as a concrete version."""
+
+        def __init__(self, served: str) -> None:
+            super().__init__({"invoice@1": payload})
+            self._served = served
+
+        @property
+        def model_version(self) -> str:
+            return "a-model"  # what was asked for, and it never changes
+
+        def complete(self, request: ModelRequest, options: ExtractionOptions) -> ModelResponse:
+            answer = super().complete(request, options)
+            return ModelResponse(
+                payload=answer.payload,
+                model_id=answer.model_id,
+                model_version=self._served,
+                usage=answer.usage,
+            )
+
+    document = make_document(DOCUMENT_TEXT)
+    first = extract(
+        document, schema="invoice@1", registry=registry, adapter=AliasedAdapter("a-model-001")
+    )
+    second = extract(
+        document, schema="invoice@1", registry=registry, adapter=AliasedAdapter("a-model-002")
+    )
+
+    # Provenance told the truth before this fix; the identity did not.
+    assert first.provenance.model_version == "a-model-001"
+    assert second.provenance.model_version == "a-model-002"
+    assert first.artifact_id != second.artifact_id
+
+
+def test_the_folded_model_is_the_one_provenance_records(
+    registry: SchemaRegistry, echo: EchoAdapter
+) -> None:
+    """T113 -- the general invariant, rather than one instance of it.
+
+    Everything provenance names as result-affecting must reach the identity. Stating
+    it this way is what keeps the two from drifting apart again: the previous defect
+    was not a wrong value, it was two sources for one fact.
+    """
+    result = extract(
+        make_document(DOCUMENT_TEXT), schema="invoice@1", registry=registry, adapter=echo
+    )
+    recomputed = extraction_artifact_id_for(
+        document_id=result.provenance.document_id,
+        extractor_id=EXTRACTOR_ID,
+        extractor_version=result.provenance.extractor_version,
+        options_hash=options_hash_for_extraction(
+            schema_identity=result.provenance.schema_identity,
+            schema_hash=result.provenance.schema_hash,
+            prompt_hash=result.provenance.prompt_hash,
+            projection_id=result.provenance.projection_id,
+            model_id=result.provenance.model_id,
+            model_version=result.provenance.model_version,
+            max_output_tokens=result.provenance.decoding.max_output_tokens,
+            temperature=result.provenance.decoding.temperature,
+            top_p=result.provenance.decoding.top_p,
+            top_k=result.provenance.decoding.top_k,
+            seed=result.provenance.decoding.seed,
+            thinking_budget=result.provenance.decoding.thinking_budget,
+            input_budget_tokens=result.provenance.decoding.input_budget_tokens,
+        ),
+    )
+    assert recomputed == result.artifact_id, (
+        "the artifact id is not reproducible from the provenance the same result carries"
+    )
+
+
 def test_the_extractor_version_embeds_the_adapter(
     registry: SchemaRegistry, echo: EchoAdapter
 ) -> None:

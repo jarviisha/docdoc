@@ -264,3 +264,104 @@ def test_copies_of_the_result_do_not_share_mutable_state(
 ) -> None:
     result = _extract(registry, echo)
     assert copy.deepcopy(result.values)["total"].value == result.value_at("total").value
+
+
+# -- the spec's edge cases (T117) --------------------------------------------
+#
+# All three behave correctly and always have. They are pinned because a hand
+# verification does not repeat itself, and because each guards a case where the
+# tempting future shortcut -- "an empty result means the model failed", "an empty
+# document is not worth a call" -- turns a recorded outcome into an error.
+
+
+def _absent_everywhere(fields: Any) -> dict[str, Any]:
+    """The response a model gives when it read the document and found nothing."""
+    payload: dict[str, Any] = {}
+    for field in fields:
+        if field.cardinality == "repeating_group":
+            payload[field.name] = []
+        elif field.cardinality == "group":
+            payload[field.name] = _absent_everywhere(field.fields)
+        else:
+            payload[field.name] = {"value": None, "claimed_text": None}
+    return payload
+
+
+def test_a_response_with_every_field_absent_is_a_result_not_an_error(
+    registry: SchemaRegistry,
+) -> None:
+    """Spec §Edge Cases -- "an extraction that found nothing is a legitimate,
+    recorded result, not an error".
+
+    The document plainly contains the values and the model returned none of them.
+    That is a finding about the *model*, and it must arrive as a complete result
+    with full provenance so it can be measured -- not as an exception that throws
+    away the evidence of what happened.
+    """
+    schema = registry.resolve("invoice@1").schema
+    result = extract(
+        make_document(DOCUMENT_TEXT),
+        schema="invoice@1",
+        registry=registry,
+        adapter=EchoAdapter.returning("invoice@1", _absent_everywhere(schema.fields)),
+    )
+    assert result.artifact_id.startswith("sha256:")
+    assert result.provenance.schema_identity == "invoice@1"
+    assert result.value_at("total").present is False
+    assert result.value_at("supplier.legal_name").present is False
+    assert result.values["line_items"] == ()
+
+
+@pytest.mark.parametrize(
+    ("label", "text"),
+    [
+        ("empty", ""),
+        ("ascii whitespace", "   \n\t  "),
+        # Written as escapes rather than as literal characters: the whole point is
+        # that these are *not* ordinary spaces, and a reader cannot see that in a
+        # literal. A no-break space, an em space, and a zero-width space.
+        ("unicode whitespace", "\u00a0\u2003\u200b"),
+    ],
+)
+def test_a_document_with_no_usable_text_still_extracts(
+    registry: SchemaRegistry, echo: EchoAdapter, label: str, text: str
+) -> None:
+    """Spec §Edge Cases -- "a document with zero tokens, and a document whose text
+    is whitespace only".
+
+    Whether such a document is worth a model call is the caller's judgement, not
+    this layer's. Refusing it here would be the same uninstructed decision that
+    FR-030's clarification refuses to make about narrowing.
+    """
+    result = extract(make_document(text), schema="invoice@1", registry=registry, adapter=echo)
+    assert result.provenance.document_id
+    declared = {field.name for field in registry.resolve("invoice@1").schema.fields}
+    assert set(result.values) == declared, label
+
+
+def test_a_schema_declaring_zero_fields_registers_and_extracts(tmp_path: Any) -> None:
+    """Spec §Edge Cases -- "a schema declaring zero fields".
+
+    Degenerate, and legal: the one-level bound and the sibling-uniqueness check are
+    both vacuously satisfied, and the result is an empty value tree with real
+    provenance. Rejecting it would be a rule the spec does not state.
+    """
+    import json
+
+    declaration = {"name": "empty", "version": 1, "fields": []}
+    (tmp_path / "empty@1.json").write_text(json.dumps(declaration))
+    (tmp_path / "prompts").mkdir()
+    (tmp_path / "prompts" / "empty@1.md").write_text("This schema declares no fields.")
+
+    registry = SchemaRegistry.from_paths([tmp_path])
+    assert registry.identities() == ("empty@1",)
+    assert registry.describe("empty@1").field_names == ()
+
+    result = extract(
+        make_document(DOCUMENT_TEXT),
+        schema="empty@1",
+        registry=registry,
+        adapter=EchoAdapter.returning("empty@1", {}),
+    )
+    assert result.values == {}
+    assert result.artifact_id.startswith("sha256:")

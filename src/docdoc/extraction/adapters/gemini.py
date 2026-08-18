@@ -27,6 +27,7 @@ gets eaten by reasoning and the answer arrives truncated as
 from __future__ import annotations
 
 import json
+import os
 from typing import TYPE_CHECKING, Any
 
 from docdoc.extraction.adapter import (
@@ -40,7 +41,7 @@ from docdoc.extraction.errors import ExtractionError, ModelProviderError
 if TYPE_CHECKING:
     from docdoc.extraction.prompt import ModelRequest
 
-__all__ = ["ADAPTER_ID", "DEFAULT_MODEL", "GeminiAdapter"]
+__all__ = ["ADAPTER_ID", "DEFAULT_MODEL", "MODEL_ENV", "GeminiAdapter"]
 
 ADAPTER_ID = "gemini"
 
@@ -63,6 +64,19 @@ ADAPTER_VERSION = "1.0.0"
 #: The tier is still provisional: T059 measures accuracy, cost, and latency across
 #: tiers, and a pro tier was unreachable on the account used here (429).
 DEFAULT_MODEL = "gemini-3.5-flash"
+
+#: The configuration name that repoints this adapter at a different model.
+#:
+#: FR-021 says which model answers is *configuration*, and US3/AC2 requires that
+#: changing it changes no application code. Without this the only ways to move off
+#: ``DEFAULT_MODEL`` were to edit docdoc's own source or to write
+#: ``GeminiAdapter(model="…")`` at a call site -- which names a provider *and* a
+#: model version in application code, the exact thing FR-021 forbids.
+#:
+#: Named the way the ingest layer names its own (``DOCDOC_AZURE_DI_ENDPOINT``), so
+#: one convention covers both layers. An explicit ``model=`` argument still wins,
+#: because a caller who passed one meant it.
+MODEL_ENV = "DOCDOC_GEMINI_MODEL"
 
 #: Finish reasons that mean "the model declined", mapped to the category recorded
 #: verbatim in the error. They are *not* interchangeable:
@@ -116,11 +130,14 @@ class GeminiAdapter:
     def __init__(
         self,
         *,
-        model: str = DEFAULT_MODEL,
+        model: str | None = None,
         api_key: str | None = None,
         client: Any = None,
     ) -> None:
-        self._model = model
+        # Explicit argument, then configuration, then the shipped default. The
+        # middle step is what makes "which model answers is configuration" true of
+        # the code rather than only of the documentation (FR-021, US3/AC2).
+        self._model = model or os.environ.get(MODEL_ENV) or DEFAULT_MODEL
         self._api_key = api_key
         self._client = client
 
@@ -368,8 +385,6 @@ class GeminiAdapter:
     # -- client -------------------------------------------------------------
 
     def _resolved_key(self) -> str | None:
-        import os
-
         return self._api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
 
     def _ensure_client(self, request: ModelRequest) -> Any:

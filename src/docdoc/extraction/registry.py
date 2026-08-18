@@ -13,6 +13,7 @@ later.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -30,7 +31,18 @@ from docdoc.extraction.loader import (
 )
 from docdoc.extraction.schema import Cardinality, FieldSpec, Schema, parse_identity
 
-__all__ = ["RegisteredSchema", "SchemaDescription", "SchemaRegistry", "default_registry"]
+__all__ = [
+    "SCHEMA_PATHS_ENV",
+    "RegisteredSchema",
+    "SchemaDescription",
+    "SchemaRegistry",
+    "default_registry",
+]
+
+#: The configuration name that tells :func:`default_registry` where the schema
+#: data lives -- an ``os.pathsep``-separated list of directories, so it reads the
+#: way ``PATH`` does on whichever platform is running (FR-049).
+SCHEMA_PATHS_ENV = "DOCDOC_SCHEMA_PATHS"
 
 
 class RegisteredSchema:
@@ -179,7 +191,21 @@ def default_registry(paths: Sequence[Path | str] | None = None) -> SchemaRegistr
 
     Symmetric with the ingest layer's own default registry, so a reader who knows
     one knows the other. It reads the paths configuration names and nothing more
-    -- there is no bundled schema, because a schema is a deployment's data and
-    not docdoc's.
+    -- there is no bundled schema, because a schema is a deployment's data and not
+    docdoc's, and ``schemas/`` is deliberately not in the wheel.
+
+    "Configuration names them" is :data:`SCHEMA_PATHS_ENV`, an ``os.pathsep``-
+    separated list, in the same style as the ingest layer's own environment names
+    (FR-049). An explicit ``paths`` argument wins, because a caller who passed one
+    meant it.
+
+    With neither, the result is an **empty** registry and the next ``resolve()``
+    says so. That is the honest outcome -- docdoc ships no schema to fall back on
+    -- and it is stated here because a silently empty registry is otherwise
+    discovered one layer later, as a resolution failure that looks like a missing
+    file rather than a missing configuration.
     """
-    return SchemaRegistry.from_paths(paths or ())
+    if paths is None:
+        raw = os.environ.get(SCHEMA_PATHS_ENV, "")
+        paths = [part for part in raw.split(os.pathsep) if part.strip()]
+    return SchemaRegistry.from_paths(paths)

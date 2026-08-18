@@ -21,6 +21,7 @@ knowingly.
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, NamedTuple
 
 # Imported at runtime, not under TYPE_CHECKING: `AdapterCandidate` is a NamedTuple
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 __all__ = [
+    "ADAPTERS_ENV",
     "AdapterCandidate",
     "AdapterRegistry",
     "default_adapter",
@@ -45,9 +47,27 @@ __all__ = [
 #: registration order or dictionary iteration.
 DEFAULT_PRIORITY: tuple[str, ...] = ("gemini",)
 
+#: The configuration name that reorders adapter preference, comma-separated
+#: (``DOCDOC_MODEL_ADAPTERS=gemini``). The companion to
+#: ``gemini.MODEL_ENV``: between them, "which provider and which model answer"
+#: is configuration end to end, which is what US3/AC2 asks for. An explicit
+#: ``priority`` argument still wins.
+ADAPTERS_ENV = "DOCDOC_MODEL_ADAPTERS"
+
 #: Adapters that answer from fixtures rather than from a model. Registering one is
 #: allowed and useful; *selecting* one implicitly is not.
 _NEVER_AUTO_SELECT = frozenset({"echo"})
+
+
+def _configured_priority() -> tuple[str, ...]:
+    """The adapter order configuration names, or the shipped default.
+
+    Blank entries are dropped rather than treated as an adapter id, so a trailing
+    comma is a typo that costs nothing instead of a candidate that matches nothing.
+    """
+    raw = os.environ.get(ADAPTERS_ENV, "")
+    configured = tuple(part.strip() for part in raw.split(",") if part.strip())
+    return configured or DEFAULT_PRIORITY
 
 
 class AdapterCandidate(NamedTuple):
@@ -63,7 +83,7 @@ class AdapterRegistry:
     """The adapters a running system knows, and the rule that picks one."""
 
     def __init__(self, priority: Sequence[str] | None = None) -> None:
-        self._priority = tuple(priority) if priority is not None else DEFAULT_PRIORITY
+        self._priority = tuple(priority) if priority is not None else _configured_priority()
         self._entries: dict[str, AdapterCandidate] = {}
 
     def register(self, adapter: ModelAdapter) -> None:

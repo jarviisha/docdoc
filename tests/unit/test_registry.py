@@ -7,12 +7,14 @@ a half-registered schema for someone else to trip over.
 
 from __future__ import annotations
 
+import os
 import pathlib
 
 import pytest
 
 from docdoc.extraction import SchemaError, SchemaRegistry, default_registry, load_schema
 from docdoc.extraction.loader import PromptTemplate
+from docdoc.extraction.registry import SCHEMA_PATHS_ENV
 
 SCHEMAS = pathlib.Path("schemas")
 BAD = pathlib.Path("tests/fixtures/schemas")
@@ -124,11 +126,47 @@ def test_a_missing_directory_is_an_error_not_an_empty_registry() -> None:
         SchemaRegistry.from_paths(["schemas/does-not-exist"])
 
 
-def test_default_registry_with_no_paths_is_empty_not_bundled() -> None:
+def test_default_registry_with_no_paths_is_empty_not_bundled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A schema is a deployment's data, so docdoc ships none of its own."""
+    monkeypatch.delenv(SCHEMA_PATHS_ENV, raising=False)
     assert default_registry().identities() == ()
     assert default_registry(["schemas"]).identities() == (
         "invoice@1",
         "invoice@2",
         "receipt@1",
     )
+
+
+def test_configuration_names_where_the_schemas_live(monkeypatch: pytest.MonkeyPatch) -> None:
+    """T116, FR-049 — "the registry MUST load them from locations that configuration names".
+
+    Before this, ``default_registry``'s docstring described a read that did not
+    happen: with no argument it returned an empty registry, and the failure
+    surfaced one layer later as a resolution error that looks like a missing file
+    rather than a missing configuration.
+    """
+    monkeypatch.setenv(SCHEMA_PATHS_ENV, "schemas")
+    assert default_registry().identities() == ("invoice@1", "invoice@2", "receipt@1")
+
+
+def test_configured_paths_are_pathsep_separated(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``os.pathsep``, so the variable reads the way ``PATH`` does on this platform."""
+    monkeypatch.setenv(SCHEMA_PATHS_ENV, os.pathsep.join(["schemas", "schemas"]))
+    with pytest.raises(SchemaError, match="already registered"):
+        default_registry()
+
+
+def test_an_explicit_paths_argument_beats_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A caller who passed paths meant them."""
+    monkeypatch.setenv(SCHEMA_PATHS_ENV, "schemas")
+    assert default_registry([]).identities() == ()
+
+
+def test_blank_configured_entries_are_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A trailing separator is a typo, not a directory named ''."""
+    monkeypatch.setenv(SCHEMA_PATHS_ENV, f"schemas{os.pathsep}")
+    assert default_registry().identities() == ("invoice@1", "invoice@2", "receipt@1")

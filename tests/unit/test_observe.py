@@ -18,9 +18,11 @@ from typing import Any
 import pytest
 
 from docdoc.extraction import (
+    Availability,
     ExtractionError,
     ExtractionOptions,
     ModelProviderError,
+    SchemaError,
     SchemaRegistry,
     extract,
 )
@@ -119,6 +121,137 @@ def test_one_event_per_failed_extraction(
     payload = events[0].docdoc  # type: ignore[attr-defined]
     assert payload["outcome"] == "failure"
     assert payload["reason"] == expected_reason
+
+
+def test_a_failure_event_names_the_model_it_was_aimed_at(
+    registry: SchemaRegistry, caplog: pytest.LogCaptureFixture
+) -> None:
+    """T115, FR-040 -- "the model and adapter identities and versions", on every event.
+
+    A failed call reached no model, so there is no *reported* one to record. The
+    model the request was aimed at is known before the call is made, and it is
+    what makes a failure attributable to a model rather than only to an adapter.
+    """
+    caplog.set_level(logging.INFO, logger="docdoc.extraction")
+    with pytest.raises(ExtractionError):
+        extract(
+            make_document(DOCUMENT_TEXT),
+            schema="invoice@1",
+            registry=registry,
+            adapter=EchoAdapter.malformed(),
+        )
+    payload = _sole_event(caplog)
+    assert payload["outcome"] == "failure"
+    for key in ("model_id", "model_version", "adapter_id", "adapter_version"):
+        assert key in payload, f"{key} missing from a failure event"
+
+
+# -- the failures that happen before the model is ever called -----------------
+
+
+def _sole_event(caplog: pytest.LogCaptureFixture) -> dict[str, Any]:
+    events = [r for r in caplog.records if r.getMessage() == EVENT_NAME]
+    assert len(events) == 1, f"expected exactly one event, got {len(events)}"
+    return events[0].docdoc  # type: ignore[no-any-return,attr-defined]
+
+
+def test_an_unregistered_schema_still_emits_an_event(
+    registry: SchemaRegistry, echo: EchoAdapter, caplog: pytest.LogCaptureFixture
+) -> None:
+    """T112, FR-040, SC-012.
+
+    This failure happens before the schema resolves, so the event cannot name a
+    schema identity -- and that is the point: it omits what it does not know
+    rather than not existing. SC-012 counts "unregistered schema" as one of the
+    eight failures it requires to surface properly.
+    """
+    caplog.set_level(logging.INFO, logger="docdoc.extraction")
+    with pytest.raises(SchemaError):
+        extract(make_document(DOCUMENT_TEXT), schema="nope@1", registry=registry, adapter=echo)
+    payload = _sole_event(caplog)
+    assert payload["outcome"] == "failure"
+    assert payload["reason"] == "schema"
+    assert payload["document_id"]
+    assert "schema_identity" not in payload  # unknown, so absent rather than null
+
+
+def test_an_unavailable_adapter_still_emits_an_event(
+    registry: SchemaRegistry, caplog: pytest.LogCaptureFixture
+) -> None:
+    """T112, FR-028, FR-041 -- a missing credential is the most common failure of all.
+
+    It also transmits nothing, so without an event there is no record anywhere
+    that an extraction was attempted.
+    """
+
+    class Unavailable(EchoAdapter):
+        def available(self) -> Availability:
+            return Availability(usable=False, reason="no API key configured")
+
+    caplog.set_level(logging.INFO, logger="docdoc.extraction")
+    with pytest.raises(ModelProviderError):
+        extract(
+            make_document(DOCUMENT_TEXT),
+            schema="invoice@1",
+            registry=registry,
+            adapter=Unavailable(),
+        )
+    payload = _sole_event(caplog)
+    assert payload["reason"] == "unavailable"
+    assert payload["schema_identity"] == "invoice@1"
+
+
+def test_an_over_budget_document_still_emits_an_event(
+    registry: SchemaRegistry, echo: EchoAdapter, caplog: pytest.LogCaptureFixture
+) -> None:
+    """T112, FR-030, SC-012 -- refused locally, and therefore invisible without this."""
+    caplog.set_level(logging.INFO, logger="docdoc.extraction")
+    with pytest.raises(ExtractionError):
+        extract(
+            make_document(DOCUMENT_TEXT),
+            schema="invoice@1",
+            registry=registry,
+            adapter=echo,
+            options=ExtractionOptions(input_budget_tokens=1),
+        )
+    payload = _sole_event(caplog)
+    assert payload["reason"] == "input_budget"
+    assert payload["schema_identity"] == "invoice@1"
+
+
+def test_every_failure_class_emits_exactly_one_event(
+    registry: SchemaRegistry, echo: EchoAdapter, caplog: pytest.LogCaptureFixture
+) -> None:
+    """T112 -- the general form, so a new failure path cannot land unobserved.
+
+    Written as a sweep rather than as five separate cases because the requirement
+    is about *coverage of the paths*, and a sweep is what fails when someone adds
+    a sixth early return.
+    """
+    caplog.set_level(logging.INFO, logger="docdoc.extraction")
+    document = make_document(DOCUMENT_TEXT)
+    cases: tuple[tuple[str, dict[str, Any]], ...] = (
+        ("schema", {"schema": "nope@1", "adapter": echo}),
+        (
+            "input_budget",
+            {
+                "schema": "invoice@1",
+                "adapter": echo,
+                "options": ExtractionOptions(input_budget_tokens=1),
+            },
+        ),
+        ("missing_field", {"schema": "invoice@1", "adapter": EchoAdapter.malformed()}),
+        ("refusal", {"schema": "invoice@1", "adapter": EchoAdapter.refusing()}),
+        ("service", {"schema": "invoice@1", "adapter": EchoAdapter.failing(reason="service")}),
+    )
+    for expected_reason, kwargs in cases:
+        caplog.clear()
+        with pytest.raises((ExtractionError, ModelProviderError, SchemaError)):
+            extract(document, registry=registry, **kwargs)
+        payload = _sole_event(caplog)
+        assert payload["outcome"] == "failure"
+        assert payload["reason"] == expected_reason
+        assert payload["model_id"], f"{expected_reason} event names no model"
 
 
 def test_the_event_counts_values_without_carrying_them(
