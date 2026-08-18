@@ -24,6 +24,7 @@ claim SC-020 makes.
 
 from __future__ import annotations
 
+import os
 import pathlib
 import subprocess
 import sys
@@ -35,12 +36,32 @@ TIMEOUT_S = 120
 
 
 def _run(*args: str) -> subprocess.CompletedProcess[str]:
+    """Run an example under a **legacy stdout encoding**, deliberately.
+
+    An example that prints a character its console cannot encode dies with
+    ``UnicodeEncodeError`` before reaching the point it was written to make. That
+    is not hypothetical: `build_document.py` drew its provenance tree with box
+    characters and crashed on Windows, where Python defaults stdout to the ANSI
+    code page rather than UTF-8. Eleven review passes and a full local suite
+    missed it, because every one of them ran on Linux where the default is UTF-8.
+
+    Forcing ``ascii`` here reproduces that failure on **every** platform, so the
+    cheapest machine finds it rather than the slowest one. It is also stricter
+    than Windows itself -- cp1252 would accept an em dash -- and the strictness is
+    the point: a contributor's console encoding depends on their locale, and
+    "works on the runner's code page" is not a property worth relying on.
+
+    If an example ever genuinely needs to *demonstrate* non-ASCII text -- and for
+    a document engine that is a real possibility -- the fix is for that example to
+    reconfigure its own stdout, not to relax this.
+    """
     return subprocess.run(
         [sys.executable, *args],
         capture_output=True,
         text=True,
         timeout=TIMEOUT_S,
         check=False,
+        env={**os.environ, "PYTHONIOENCODING": "ascii"},
     )
 
 

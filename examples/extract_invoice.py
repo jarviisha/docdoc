@@ -164,7 +164,7 @@ def main() -> None:
         p = result.provenance
         print(f"\nartifact_id    : {result.artifact_id}")
         print(f"  document     : {p.document_id}")
-        print(f"  schema       : {p.schema_identity}  ({p.schema_hash[:23]}…)")
+        print(f"  schema       : {p.schema_identity}  ({p.schema_hash[:23]}...)")
         print(f"  adapter      : {p.adapter_id} {p.adapter_version}")
         print(f"  extractor    : {p.extractor_version}")
 
