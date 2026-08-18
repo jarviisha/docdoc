@@ -54,11 +54,28 @@ def _run(*args: str) -> subprocess.CompletedProcess[str]:
     If an example ever genuinely needs to *demonstrate* non-ASCII text -- and for
     a document engine that is a real possibility -- the fix is for that example to
     reconfigure its own stdout, not to relax this.
+
+    **That prescription needed a second half, and CI supplied it.** Milestone 4's
+    grounding example prints a ligature, because a ligature resolving at the exact
+    tier is the thing it exists to show, so it reconfigures its own stdout to
+    UTF-8 exactly as the paragraph above says. It then failed on Windows and only
+    on Windows: the child wrote correct UTF-8 and *this function* decoded it with
+    the parent's locale codec, cp1252, which cannot decode a continuation byte.
+    ``result.stdout`` came back ``None`` and the assertion died on that instead.
+
+    So the decoding is pinned to UTF-8 here. That does not weaken the rule the
+    ``ascii`` environment enforces: ``PYTHONIOENCODING`` governs the *child's*
+    default stdout encoding, so an example that prints non-ASCII without
+    reconfiguring still dies exactly as before. What changes is only that the
+    reader can read an example that did reconfigure -- previously the harness
+    could set the trap but not report what fell into it.
     """
     return subprocess.run(
         [sys.executable, *args],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=TIMEOUT_S,
         check=False,
         env={**os.environ, "PYTHONIOENCODING": "ascii"},
@@ -153,6 +170,57 @@ def test_the_grounding_example_demonstrates_what_it_claims_to() -> None:
     assert "Ofﬁce" in out, "the example should show the source's own ligature"
     assert "grounding rate: 100%" in out
     assert "not_applicable = 1" in out, "the reported absence should stay out of the rate"
+
+
+def test_the_harness_reads_utf8_whatever_the_parent_locale_is() -> None:
+    """The Windows failure of this file's own `_run`, reproduced on every platform.
+
+    `_run` sets the *child's* encoding and, until Milestone 4, left its own
+    decoding to the parent's locale. On Linux and macOS that is UTF-8, so a
+    ligature round-tripped and every local run and review pass was clean. On
+    Windows it is cp1252, which cannot decode a UTF-8 continuation byte, so
+    `stdout` came back `None` and the assertion died on that rather than on
+    anything the example did.
+
+    This is the same shape as the bug `_run` was built to catch, one level up:
+    the harness had a platform assumption it did not know it was making. So it
+    is checked the same way -- force the failing locale rather than wait for the
+    slowest machine. `PYTHONCOERCECLOCALE` and `PYTHONUTF8` are needed because
+    PEP 538 and PEP 540 would otherwise quietly rescue the C locale into UTF-8,
+    which is exactly the kind of rescue Windows does not perform.
+    """
+    ascii_locale = {
+        **os.environ,
+        "LC_ALL": "C",
+        "LANG": "C",
+        "PYTHONCOERCECLOCALE": "0",
+        "PYTHONUTF8": "0",
+    }
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            # The needle is written as an escape, not as the character. Under an
+            # ASCII locale Python decodes `-c` itself with that codec, so a
+            # literal ligature here would arrive mangled and the test would fail
+            # on its own comparison string rather than on the harness.
+            "import tests.integration.test_examples_run as m, pathlib;"
+            "r = m._run(str(pathlib.Path('examples') / 'ground_invoice.py'));"
+            "print('LIGATURE_READ' if 'Of\\ufb01ce' in (r.stdout or '') else 'LOST')",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=TIMEOUT_S,
+        check=False,
+        env=ascii_locale,
+    )
+    assert "LIGATURE_READ" in (result.stdout or ""), (
+        "_run could not read back an example's non-ASCII output under an ASCII "
+        f"locale. It is decoding with the parent's locale rather than explicitly.\n"
+        f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr[-1500:]}"
+    )
 
 
 def test_every_committed_example_is_covered_here() -> None:
