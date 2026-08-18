@@ -19,8 +19,19 @@ classifiers = [
     "Typing :: Typed",
 ]
 
-# The kernel's only permitted runtime dependency (Constitution Principle I).
-dependencies = ["pydantic>=2.0"]
+# Two base dependencies, and the distinction between them matters.
+#
+# The *kernel* imports `pydantic` alone — that is Constitution Principle I, and
+# `tests/unit/test_kernel_purity.py` enforces it exhaustively and mechanically.
+#
+# The *base install* additionally carries `rapidfuzz`, which the grounding layer
+# uses as a scorer for approximate matching. Sanctioned explicitly: the
+# constitution's stack line names "`rapidfuzz` in the extraction layer for
+# grounding", and ADR-0005 records that it "enters the base install for anyone
+# using extraction. It is not a provider SDK and does not violate Principle IV".
+# It is a small pure-wheel package with no transitive dependencies, and it is
+# already in the kernel's forbidden-imports contract below.
+dependencies = ["pydantic>=2.0", "rapidfuzz>=3.0"]
 
 [project.optional-dependencies]
 # Provider extras. The base install stays `pydantic` alone (Constitution
@@ -72,6 +83,16 @@ ignore = [
 runtime-evaluated-base-classes = ["pydantic.BaseModel", "typing.NamedTuple"]
 
 [tool.ruff.lint.per-file-ignores]
+# Grounding's whole job is telling a ligature from "fi", a NBSP from a space, and
+# U+2010 from a hyphen-minus. RUF001 flags exactly those characters as "ambiguous",
+# which is correct everywhere else and backwards here: the ambiguity is the subject
+# matter, and the fixtures would be meaningless written any other way.
+"src/docdoc/grounding/view.py" = ["RUF001"]
+"tests/fixtures/grounding/__init__.py" = ["RUF001"]
+"tests/unit/test_match_view.py" = ["RUF001"]
+"tests/unit/test_dehyphenation.py" = ["RUF001"]
+"tests/property/test_offset_map_properties.py" = ["RUF001", "RUF002"]
+"examples/ground_invoice.py" = ["RUF001"]
 "tests/*" = [
     "S101",   # asserts are the point of a test
     "TC001",  # test helpers use these types at runtime via fixtures
@@ -139,10 +160,41 @@ include_external_packages = true
 # higher layers are added to this list as their milestones land. The kernel's own
 # dependency allowlist is enforced independently and exhaustively by
 # tests/unit/test_kernel_purity.py.
+#
+# `grounding` (Milestone 4) sits ABOVE `extraction`: it consumes an
+# ExtractionResult, so the dependency runs one way and this contract is what
+# makes that mechanical rather than conventional. Principle X's chain does not
+# name grounding; ADR-0003's stage chain does, unambiguously
+# (parse -> extraction -> grounding -> validation), and is finer-grained and
+# consistent with it. See specs/004-deterministic-grounding/research.md R1.
 [[tool.importlinter.contracts]]
 name = "docdoc layers (Constitution Principle X)"
 type = "layers"
-layers = ["docdoc.extraction", "docdoc.ingest", "docdoc.kernel"]
+layers = ["docdoc.grounding", "docdoc.extraction", "docdoc.ingest", "docdoc.kernel"]
+
+# Grounding is deterministic all the way down: no network, no credentials, no
+# provider, and no model call under any circumstance (FR-048). That is this
+# milestone's headline property and the reason its entire test suite runs for
+# every contributor with nothing to skip. Asserted here so that adding an import
+# which would quietly break it fails the build instead of waiting for a reviewer.
+[[tool.importlinter.contracts]]
+name = "grounding reaches no network and no provider (FR-048)"
+type = "forbidden"
+source_modules = ["docdoc.grounding"]
+forbidden_modules = [
+    "socket",
+    "urllib",
+    "http",
+    "httpx",
+    "requests",
+    "openai",
+    "anthropic",
+    "google",
+    "boto3",
+    "azure",
+    "fastapi",
+    "sqlalchemy",
+]
 
 [[tool.importlinter.contracts]]
 name = "kernel is independent of provider SDKs and frameworks"

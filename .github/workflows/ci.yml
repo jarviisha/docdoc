@@ -41,6 +41,19 @@ jobs:
           HYPOTHESIS_PROFILE: ci
         run: uv run pytest tests/unit tests/property tests/contract tests/integration -m "not perf"
 
+      # Milestone 4 (FR-028, research.md R14). PYTHONHASHSEED randomises string
+      # hashing per process, so a set iterated directly yields a different order
+      # each run. Grounding's *winner* is immune by construction -- the tie-break
+      # is a total ordering -- but its `alternatives` list is not, and a
+      # single-seeded suite passes a non-deterministic alternatives list by luck.
+      # Running a second seed is what makes "identical on every run and every
+      # platform" a checked claim rather than a hopeful one.
+      - name: Grounding determinism under a second hash seed
+        env:
+          HYPOTHESIS_PROFILE: ci
+          PYTHONHASHSEED: "12345"
+        run: uv run pytest tests/unit tests/property -k "grounding or tiebreak or offset or candidates or match_view or fuzzy or exact_tier or repeating_group" -m "not perf"
+
       - name: Type check (strict)
         run: uv run mypy src/docdoc
 
