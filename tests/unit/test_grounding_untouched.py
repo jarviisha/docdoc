@@ -1,4 +1,13 @@
-"""T063 — the grounding boundary, in a file named after the thing it guards (SC-018, EXT-24).
+"""T063 — the grounding boundary, in a file named after the thing it guards.
+
+Covers SC-018, EXT-24, **FR-032**, and the first clause of **FR-047**. Those two FR
+ids are written here because a convergence pass found them cited by no test and no
+source file anywhere in the repository. The behaviour was covered all along -- this
+file is the coverage -- but a requirement traceable to nothing reads exactly like a
+requirement nobody implemented, and the only way to tell the two apart was to
+re-derive it by hand. FR-047's stronger clause, that no grounding input may enter
+the extract stage's options hash, is held elsewhere: see
+``test_the_folded_set_is_exactly_what_adr_0003_names``.
 
 Every grounding field on every value of every result is unresolved, because
 resolving them is Milestone 4's stage with its own artifact under ADR-0003.

@@ -199,14 +199,31 @@ later milestone can.
 
 **The budget guard is a deliberate over-estimate.** The only exact token count available is an API
 call that transmits the document in order to answer, which is the very thing the guard exists to
-avoid. So a document that would actually have fitted can be refused. The ratio is configurable, and
-it is currently a *guessed* constant — T079 measures it against the real provider.
+avoid. So the guard estimates locally, and a document that would actually have fitted can be refused.
+
+The ratio is **measured, not assumed**, against the provider's own `count_tokens` across every
+committed fixture plus deliberately dense content. It ranges from 5.13 characters per token for English
+prose down to a floor of **1.10** for numeric tables and emoji. `CHARS_PER_TOKEN` is **1.20** with a
+1.15 safety margin, which sits below the 1.26 that floor and margin together allow — so the estimate is
+high everywhere, and highest exactly where it is cheapest to be wrong.
+
+That calibration replaced a guess of 2.5, and the correction is worth knowing because it ran the wrong
+way: at 2.5 the guard **under-estimated dense tabular invoice text by 1.72×** — the precise content this
+engine reads — and would have passed an over-budget document through to be transmitted. An
+over-estimate refuses a document that would have fitted; an under-estimate defeats the guard. Only one
+of those is a bug.
+
+The cost is real and quantified rather than waved at: a single linear ratio cannot serve both 1.10 and
+5.13, so English prose is over-estimated roughly 5×, and about 215k characters get refused against a
+200k-token budget whose true cost is nearer 42k. `Document.slice` is the escape hatch, and it is
+friction. The alternative is transmitting the document to find out. See research.md R5 for the table.
 
 **The per-schema prefix is not cached today.** The assembly order is right, but a Gemini cache hit
-needs the shared prefix to clear a per-model minimum of 2,048–4,096 tokens and the current prefix is a
-few hundred. So the ordering costs nothing and buys nothing yet; it buys something free the moment
-schemas or instructions grow. Padding the prefix to become cache-eligible is a cost decision and is
-deliberately not taken without measurement.
+needs the shared prefix to clear a per-model minimum of 2,048–4,096 tokens, and the `invoice@1` prefix
+measures **817**. So the ordering costs nothing and buys nothing yet; it buys something free the moment
+schemas or instructions grow past roughly 2.5× their current size. Padding the prefix to become
+cache-eligible is a cost decision — paying for tokens whose only purpose is to qualify for a discount —
+and is deliberately not taken as a default.
 
 ## Failure
 

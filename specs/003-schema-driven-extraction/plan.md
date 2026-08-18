@@ -273,7 +273,9 @@ tests/
 │   ├── test_provenance_recording.py   # SC-011, every recorded field non-empty and real
 │   ├── test_no_fallback.py            # FR-029, against a registry with somewhere to fall back to
 │   ├── test_reextraction.py           # FR-038/FR-043, results independent and frozen
-│   └── test_plan_tree_is_current.py   # this tree — asserts it did not go stale a fourth time
+│   ├── test_plan_tree_is_current.py   # this tree — asserts it did not go stale a fourth time
+│   ├── test_provider_tests_are_separable.py  # FR-045 — a credential-reading test must be marked
+│   └── test_documented_api_references_resolve.py  # SC-020 — the docs' API is the real API
 ├── contract/
 │   └── test_model_adapter_contract.py # every ModelAdapter must satisfy EXT-15…EXT-18,
 │                                      #   run against all three including the real one
@@ -303,12 +305,18 @@ the same shape as the adapter-coverage and example-coverage assertions, both add
 a hand-maintained list goes stale exactly when someone is not looking at it.
 
 **The rule has a known blind spot, recorded rather than glossed.** Testing the new check against the
-suite showed two of this feature's own files escaping it: `test_examples_run.py` runs the examples as
-subprocesses and `test_plan_tree_is_current.py` reads files, so neither imports the package an
-import-based scan looks for. They are named explicitly in the check, and a further assertion keeps that
-exemption list from growing into the route around the rule. A check that quietly covers less than it
-appears to is the exact defect this milestone's review passes kept finding, so its bound is stated
-instead of assumed.
+suite showed files escaping it: `test_examples_run.py` runs the examples as subprocesses,
+`test_plan_tree_is_current.py` reads the plan, and the two added in Phase 15 read test sources and docs
+respectively. None imports the package an import-based scan looks for.
+
+These were first handled as a two-item exemption capped by an assertion reading "if test files routinely
+exercise this feature without importing it, the rule needs rethinking rather than extending". Phase 15
+added two more, so the assertion fired as designed and the rethink followed: they are a **category** —
+*meta-tests*, which check a property of the repository rather than the behaviour of the package, and
+therefore cannot import it — rather than a list of exceptions. The category carries its own invariant:
+no entry may import `docdoc.extraction`, so it cannot be used to park a real package test out of the
+derivable rule's view. A check that quietly covers less than it appears to is the exact defect this
+milestone's review passes kept finding, so its bound is named instead of assumed.
 
 **Structure Decision**: `src/` layout unchanged. `extraction/` is one flat package with one module per
 concept plus an `adapters/` sub-package — the only place a provider SDK may be imported, which is what

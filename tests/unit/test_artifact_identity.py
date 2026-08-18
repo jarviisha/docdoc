@@ -85,6 +85,14 @@ def test_every_folded_input_moves_the_options_hash(field: str, changed: Any) -> 
 def test_the_folded_set_is_exactly_what_adr_0003_names() -> None:
     """Pins the set, so adding or dropping one is a deliberate change.
 
+    This is also where **FR-047**'s second clause is enforced: no grounding input --
+    ``grounding_version``, ``match_view_version``, or a match threshold -- may appear
+    in the extract stage's options hash. Because the assertion below is an equality
+    against a closed set rather than a list of things to avoid, it needs no mention
+    of grounding to catch one. Milestone 4 is the grounding milestone and is the next
+    one to be built, so this is the assertion standing between two stages that are
+    about to be worked on in sequence.
+
     This assertion was originally written inverted -- it asserted that
     ``temperature``, ``top_p``, and ``seed`` were *absent*, because the provider the
     plan first chose rejects the first two and has no seed. The provider changed to

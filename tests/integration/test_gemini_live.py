@@ -5,9 +5,14 @@ call a real model, cost real money, and are the only place the request this laye
 builds is proved acceptable to the provider rather than merely well-formed.
 
 T060 is deliberately *not* an assertion that the prompt cache hits. Research R15
-found the per-schema prefix is a few hundred tokens against a 2,048-4,096 minimum,
-so a hit is impossible today. Asserting one would be a test written to fail, and a
+measured the per-schema prefix at **817 tokens** against a 2,048-4,096 minimum, so
+a hit is impossible today. Asserting one would be a test written to fail, and a
 test written to fail gets skipped. It measures and records instead.
+
+The number matters more than "a few hundred" would, which is what this said first.
+817 against 2,048 says the prefix must grow about 2.5x before the ordering starts
+paying, and that is the fact a reader needs to judge whether the decision to leave
+it uncached still holds. A rounded-away measurement cannot be re-judged.
 """
 
 from __future__ import annotations

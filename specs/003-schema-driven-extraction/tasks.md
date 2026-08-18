@@ -450,3 +450,20 @@ Two findings, no HIGH, and one of them is arguably about the artifact rather tha
 
 **Checkpoint**: no cross-milestone change and no known risk lives only in a commit message or a CI
 comment.
+
+---
+
+## Phase 15: Convergence
+
+Findings from `/speckit-converge`, the eighth review pass. No CRITICAL or HIGH: the code is sound,
+50/50 FR and 21/21 SC assessed, 12 constitution principles clean. What this pass found is the same
+class the previous seven did, one level further out — **verification that happened once, by hand, and
+cannot happen again.**
+
+- [X] T108 Correct `docs/concepts/extraction.md` where it contradicts completed work per `plan: R5 / T079` (contradicts). The line reads "The ratio is configurable, and it is currently a *guessed* constant — T079 measures it against the real provider." T079 is `[X]`: the ratio was measured against every committed fixture, the floor came out at 1.10, and `CHARS_PER_TOKEN` is 1.20 with a 1.15 safety margin, recorded in `research.md` R5 and in `budget.py`'s own comment. A user-facing document telling a reader the guard is guesswork, when it was calibrated, argues against trusting a number that earned trust. Replace it with the measured values and the direction of the over-estimate. Drop `T079` while doing so — an internal task id means nothing to a reader outside this repository, and this is the only such leak in `docs/` apart from one past-tense mention in ADR-0007.
+
+- [X] T109 Make the documented API references checkable per `SC-020` and `plan: the T102 rationale` (missing). T102 made `examples/` executable on the argument that prose examples are the only code nobody runs. The same argument covers the 27 python blocks in `README.md`, `docs/concepts/extraction.md`, `quickstart.md`, and `contracts/extraction-api.md`, which nothing executes. This convergence pass verified every one of them by hand — every `from docdoc… import`, `EchoAdapter.from_fixtures` and `.malformed`, `SchemaRegistry.describe().field_names`, `identities()` returning exactly the documented tuple, `ModelUsage.cache_read_input_tokens`, and the `sha256:37a9f6…` hash prefix in the README — and **all of them are correct today**. That is precisely why this is worth a task rather than a fix: there is nothing to repair, only a verification that will not repeat itself the next time a signature changes. Extract the imports and attribute references from the fenced blocks and assert they resolve against the real package. Full execution is not the goal — the blocks use undefined names like `document` deliberately — so check the references, and say in the test which of the two it does.
+
+- [X] T110 Use the measured prefix size where the docs say "a few hundred" per `plan: R15` (partial). R15 measured the per-schema prefix at **817 tokens** against a 2,048–4,096 minimum. Two places round that away: `docs/concepts/extraction.md` and the module docstring of `tests/integration/test_gemini_live.py`. 817 is not wrong as "a few hundred", but a measured number restated as a vague one loses the thing that makes the caching decision reviewable — how far short it falls, and therefore how much growth would change the answer.
+
+- [X] T111 Cite FR-032, FR-045, and FR-047 in the tests that already enforce them per `FR-032`/`FR-045`/`FR-047` (partial). These three are named by no test and no source file. Each is genuinely covered, and this pass confirmed the behaviour rather than assuming it: FR-032 and FR-047's grounding clauses by `test_grounding_untouched.py`; FR-047's stronger clause — that no grounding input may enter the extract stage's options hash — by `test_the_folded_set_is_exactly_what_adr_0003_names`, which asserts the folded parameter set is *closed* and would therefore fail if Milestone 4 added `grounding_version`; FR-045 by the `provider` marker under `--strict-markers`, with the suite loading no `.env`. So this is a traceability gap, not a coverage gap. It still matters here, because `plan.md` keeps a hand-maintained requirement-to-test map and this milestone just added a test to stop it going stale — three requirements a reviewer cannot trace are three holes in the map that test now guards.

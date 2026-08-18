@@ -16,11 +16,18 @@ imports `docdoc.extraction` belongs in this feature's plan.** Same shape as the
 adapter-coverage and example-coverage assertions, both added because a
 hand-maintained list goes stale exactly when nobody is looking at it.
 
-**The rule does not catch everything, and saying so is the point.** Two of this
-feature's own test files import nothing from the package: one runs the examples as
-subprocesses, and this one reads files. An import-based rule cannot see them, so
-they are listed explicitly below — and `test_the_allowlist_stays_small` keeps that
-list from becoming the place things go to escape the check. Claiming the rule was
+**The rule does not catch everything, and saying so is the point.** Some of this
+feature's test files import nothing from the package, because the package is not
+what they test: one runs the examples as subprocesses, one reads test sources to
+check marker discipline, one reads the docs, and this one reads the plan. An
+import-based scan cannot see any of them.
+
+They were first treated as a two-item escape hatch capped by an assertion that said
+growth meant "the rule needs rethinking rather than extending". It grew, and the
+rethink is in `META_TESTS` below: these are a *category* — tests of repository
+properties rather than package behaviour — not exceptions. The category carries its
+own invariant, that no entry may import `docdoc.extraction`, so it cannot be used to
+park a real package test out of the derivable rule's view. Claiming the rule was
 fully derivable would be the same species of overclaim this file exists to end.
 """
 
@@ -49,18 +56,33 @@ def _imports_extraction(path: pathlib.Path) -> bool:
     return False
 
 
-#: In scope for this feature but invisible to an import-based scan, because they
-#: exercise it without importing it. Each is here for a stated reason, not by
-#: default.
-NOT_DERIVABLE = {
-    "test_examples_run.py": "runs the examples as subprocesses; imports nothing",
-    "test_plan_tree_is_current.py": "reads files; this module",
+#: **Meta-tests**: files that check a property of the *repository* rather than the
+#: behaviour of the package, and therefore import nothing from it.
+#:
+#: This began as a two-entry escape hatch called NOT_DERIVABLE, capped at two, with
+#: an assertion saying that if the list ever grew "the rule needs rethinking rather
+#: than extending". The next convergence phase added two more files of exactly this
+#: kind, which is the assertion doing its job. The rethink is that these are not
+#: exceptions at all — they are a coherent category. A test that asserts the plan's
+#: tree is current, or that credential-reading tests carry a marker, or that the
+#: documented API resolves, cannot import the package, because the package is not
+#: what it is testing.
+#:
+#: Naming the category is what keeps it from becoming a dumping ground: the
+#: invariant below requires that every entry genuinely does *not* import
+#: `docdoc.extraction`, so a real package test cannot be parked here to dodge the
+#: derivable rule.
+META_TESTS = {
+    "test_examples_run.py": "runs the examples as subprocesses; asserts they execute",
+    "test_plan_tree_is_current.py": "reads the plan and the test tree; this module",
+    "test_provider_tests_are_separable.py": "reads test sources for credential reads (FR-045)",
+    "test_documented_api_references_resolve.py": "reads the docs; resolves names dynamically",
 }
 
 
 def _extraction_test_files() -> list[pathlib.Path]:
     derived = {path for path in TESTS.rglob("test_*.py") if _imports_extraction(path)}
-    named = {path for path in TESTS.rglob("test_*.py") if path.name in NOT_DERIVABLE}
+    named = {path for path in TESTS.rglob("test_*.py") if path.name in META_TESTS}
     return sorted(derived | named)
 
 
@@ -95,20 +117,31 @@ def test_the_plan_names_no_test_file_that_does_not_exist() -> None:
     )
 
 
-def test_the_allowlist_stays_small() -> None:
-    """Keeps the escape hatch from becoming the route.
+def test_every_meta_test_is_real_and_stays_a_meta_test() -> None:
+    """Keeps the category from becoming the route around the derivable rule.
 
-    Every entry carries its reason. If this grows, the import-based rule is
-    covering less than it looks like it covers, and that is worth noticing rather
-    than absorbing.
+    Two invariants, and the second is the one that matters. A file listed here must
+    genuinely *not* import ``docdoc.extraction`` — if it does, the import-based scan
+    already covers it, and listing it here would be a way to keep a real package
+    test out of view of the rule that governs real package tests.
     """
-    assert len(NOT_DERIVABLE) <= 2, (
-        f"the non-derivable list has grown to {sorted(NOT_DERIVABLE)}; if test files "
-        "routinely exercise this feature without importing it, the rule needs rethinking "
-        "rather than extending"
+    on_disk = {path.name for path in TESTS.rglob("test_*.py")}
+    for name, reason in META_TESTS.items():
+        assert reason, f"{name} is listed with no stated reason"
+        assert name in on_disk, (
+            f"{name} is listed as a meta-test but does not exist; it was renamed or removed"
+        )
+
+    misfiled = sorted(
+        path.name
+        for path in TESTS.rglob("test_*.py")
+        if path.name in META_TESTS and _imports_extraction(path)
     )
-    for name, reason in NOT_DERIVABLE.items():
-        assert reason, f"{name} is exempted with no stated reason"
+    assert not misfiled, (
+        f"{misfiled} import docdoc.extraction, so the derivable rule already covers them. "
+        "Listing a package test as a meta-test hides it from the check that governs "
+        "package tests"
+    )
 
 
 def test_the_check_can_actually_fail() -> None:
