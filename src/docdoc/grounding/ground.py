@@ -165,6 +165,7 @@ def ground(
         extraction_artifact_id=extraction.artifact_id,
         grounding_version=GROUNDING_VERSION,
         match_view_version=MATCH_VIEW_VERSION,
+        view_id=view.view_id,
         options=options,
         grounder_id=GROUNDER_ID,
         grounder_version=GROUNDER_VERSION,

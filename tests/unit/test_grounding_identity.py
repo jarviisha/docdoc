@@ -110,6 +110,36 @@ class TestProvenanceIsRecorded:
         assert provenance.grounder_id == GROUNDER_ID
         assert provenance.grounder_version == GROUNDER_VERSION
         assert provenance.options.threshold == DEFAULT_THRESHOLD
+        assert provenance.view_id.startswith("sha256:")
+
+    def test_the_view_identity_is_reachable_from_a_result(self) -> None:
+        """FR-020's purpose clause, not just its existence clause.
+
+        The identity was computed on every run and read by nobody: a consumer
+        could not answer "did these two runs compare against the same folded
+        text?" without re-deriving it from a formula they would first have to
+        read the source to learn. Recording it is what makes it usable.
+        """
+        from docdoc.grounding.view import _view_id_for
+
+        doc, extraction = build()
+        provenance = ground(doc, extraction).provenance
+        assert provenance.view_id == _view_id_for(
+            provenance.document_id, provenance.match_view_version
+        )
+
+    def test_two_runs_over_one_document_agree_on_the_view_identity(self) -> None:
+        doc, extraction = build()
+        assert ground(doc, extraction).provenance.view_id == (
+            ground(doc, extraction).provenance.view_id
+        )
+
+    def test_a_different_document_compared_against_a_different_view(self) -> None:
+        from docdoc.grounding.view import MatchView
+
+        a = MatchView.build(make_document(TEXT, data=b"%PDF-1.7 one"))
+        b = MatchView.build(make_document(TEXT, data=b"%PDF-1.7 two"))
+        assert a.view_id != b.view_id
 
 
 class TestRegroundingIsIndependent:

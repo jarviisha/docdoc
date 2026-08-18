@@ -89,3 +89,56 @@ class TestTheMatchingCaseStillWorks:
             {"f": make_extracted("f", value="x", claimed_text="INV-001")}, document=doc
         )
         assert ground(doc, extraction).outcomes["f"].span is not None
+
+
+class TestOffsetMapFailuresNameWhereTheyHappened:
+    """FR-043 — a typed error carrying enough detail to identify what failed.
+
+    These are defensive guards that should never fire, which is exactly why they
+    have to be legible when they do: a map failure is the one error meaning "the
+    highest-risk component in the grounding path broke". "offset map is not
+    contiguous" without saying which document is a bug report nobody can act on.
+    """
+
+    def test_a_malformed_map_names_its_document(self) -> None:
+        from docdoc.grounding.offsets import OffsetMap, Segment
+
+        with pytest.raises(GroundingError) as caught:
+            OffsetMap(
+                (Segment(0, 0, 5, 5, identity=True),),
+                view_len=99,
+                source_len=5,
+                document_id="sha256:" + "a" * 64,
+            )
+        assert caught.value.document_id == "sha256:" + "a" * 64
+
+    def test_a_map_built_for_a_document_carries_that_document(self) -> None:
+        from docdoc.grounding.view import MatchView
+
+        doc = make_document(TEXT)
+        assert MatchView.build(doc).offsets.document_id == doc.id
+
+    def test_a_map_built_for_a_claim_carries_no_document(self) -> None:
+        """A claim has no document, so the field is optional rather than a lie."""
+        from docdoc.grounding.view import _fold
+
+        assert _fold("just a claim")[1].document_id is None
+
+    def test_a_mapping_failure_names_the_value_it_was_resolving(self) -> None:
+        """The document comes from the map; the field path comes from this layer."""
+        from docdoc.grounding.match import Candidate, outcome_for
+        from docdoc.grounding.view import MatchView
+
+        doc = make_document(TEXT)
+        view = MatchView.build(doc)
+        with pytest.raises(GroundingError) as caught:
+            outcome_for(
+                field_path="line_items[3].amount",
+                document=doc,
+                view=view,
+                winner=Candidate(1.0, 0, len(view.text) + 50),
+                runners_up=[],
+            )
+        assert caught.value.field_path == "line_items[3].amount"
+        assert caught.value.document_id == doc.id
+        assert "line_items[3].amount" in str(caught.value)

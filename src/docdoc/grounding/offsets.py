@@ -69,9 +69,30 @@ class OffsetMap:
     would cost measurably and buy nothing.
     """
 
-    __slots__ = ("_segments", "_source_len", "_starts", "_tail_start", "_view_len")
+    __slots__ = (
+        "_document_id",
+        "_segments",
+        "_source_len",
+        "_starts",
+        "_tail_start",
+        "_view_len",
+    )
 
-    def __init__(self, segments: tuple[Segment, ...], view_len: int, source_len: int) -> None:
+    def __init__(
+        self,
+        segments: tuple[Segment, ...],
+        view_len: int,
+        source_len: int,
+        *,
+        document_id: str | None = None,
+    ) -> None:
+        # Which document this map belongs to, when it belongs to one. A map built
+        # over a *claim* has no document, which is why this is optional rather
+        # than required. It exists so the guards below can name the document they
+        # failed on: a map failure is the one error meaning "the highest-risk
+        # component broke", and "offset map is not contiguous" without saying
+        # where is a bug report nobody can act on (FR-043).
+        self._document_id = document_id
         self._segments = segments
         self._starts = tuple(s.view_start for s in segments)
         self._view_len = view_len
@@ -102,26 +123,37 @@ class OffsetMap:
             if seg.view_start != expected_view:
                 raise GroundingError(
                     "offset map is not contiguous in view space: "
-                    f"segment starts at {seg.view_start}, expected {expected_view}"
+                    f"segment starts at {seg.view_start}, expected {expected_view}",
+                    document_id=self._document_id,
                 )
             if seg.source_start != expected_source:
                 raise GroundingError(
                     "offset map is not contiguous in source space: "
-                    f"segment starts at {seg.source_start}, expected {expected_source}"
+                    f"segment starts at {seg.source_start}, expected {expected_source}",
+                    document_id=self._document_id,
                 )
             if seg.length < 0 or seg.source_length < 0:
-                raise GroundingError("offset map segment has negative length")
+                raise GroundingError(
+                    "offset map segment has negative length",
+                    document_id=self._document_id,
+                )
             expected_view += seg.length
             expected_source += seg.source_length
         if expected_view != self._view_len:
             raise GroundingError(
-                f"offset map covers {expected_view} view characters, view has {self._view_len}"
+                f"offset map covers {expected_view} view characters, view has {self._view_len}",
+                document_id=self._document_id,
             )
         if expected_source != self._source_len:
             raise GroundingError(
                 f"offset map covers {expected_source} source characters, "
-                f"source has {self._source_len}"
+                f"source has {self._source_len}",
+                document_id=self._document_id,
             )
+
+    @property
+    def document_id(self) -> str | None:
+        return self._document_id
 
     @property
     def segments(self) -> tuple[Segment, ...]:
@@ -167,14 +199,16 @@ class OffsetMap:
         if not 0 <= view_start <= view_end <= self._view_len:
             raise GroundingError(
                 f"view range [{view_start}, {view_end}) does not fit a view of "
-                f"length {self._view_len}"
+                f"length {self._view_len}",
+                document_id=self._document_id,
             )
         return Span(self.source_start_for(view_start), self.source_end_for(view_end))
 
     def _map(self, view_pos: int, *, at_end: bool) -> int:
         if not 0 <= view_pos <= self._view_len:
             raise GroundingError(
-                f"view position {view_pos} does not fit a view of length {self._view_len}"
+                f"view position {view_pos} does not fit a view of length {self._view_len}",
+                document_id=self._document_id,
             )
         if view_pos == self._view_len:
             # A range ending here ends at the end of the source. A range starting

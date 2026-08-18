@@ -264,6 +264,7 @@ tests/
 │   ├── test_fuzzy_tier.py             # GRD-13, GRD-14: threshold boundary, score semantics
 │   ├── test_tiebreak.py               # GRD-15: total order, incl. the all-three-tie case
 │   ├── test_absent_and_claimless.py   # GRD-16: FR-008 vs FR-009 — the two are not the same
+│   ├── test_grounding_edge_cases.py   # the spec's enumerated boundaries (Phase 8)
 │   ├── test_no_validation_judgment.py # FR-010: answers *where*, never *whether*
 │   ├── test_wrong_document.py         # GRD-17: FR-002, refusal naming both identities
 │   ├── test_grounding_identity.py     # GRD-18…GRD-20: what moves the artifact id and what must not
@@ -297,8 +298,16 @@ existing files are also touched and are deliberately not shown as tree entries, 
 would imply this milestone owns them: `README.md` and `docs/concepts/extraction.md` (text describing
 grounding as forthcoming), `docs/concepts/grounding.md` (new, but in an existing directory),
 `docs/adr/0005-fuzzy-grounding-specification.md` (the clarifying amendment of design decision 1),
-`CHANGELOG.md`, `.github/workflows/ci.yml` (the two-hash-seed run), and `tests/fixtures/make_fixtures.py`
-(extended for the grounding fixtures). Named here so T053's plan-tree check does not read them as drift.
+`CHANGELOG.md`, and `.github/workflows/ci.yml` (the two-hash-seed run). Named here so T053's plan-tree
+check does not read them as drift.
+
+**`tests/fixtures/make_fixtures.py` is deliberately not among them**, though an earlier revision of this
+list and T004 both said otherwise. That script exists to regenerate *binary* fixtures — PDFs and a PNG —
+so a reviewer can see what a committed blob contains without opening it. The grounding fixtures are
+Python string constants: a ligature, a soft hyphen, a line-break hyphen. There is nothing to regenerate
+and nothing hidden from review, so a builder for them would be ceremony. Recorded rather than quietly
+dropped, because a plan naming a file it never touched is the same defect as a test tree naming a file
+that does not exist.
 
 **On enumerating test files here.** Milestone 3's plan recorded that this list went stale three times and
 added `tests/unit/test_plan_tree_is_current.py` to check it mechanically. That check is *extended* rather

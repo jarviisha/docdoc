@@ -43,6 +43,7 @@ def log_grounding(result: GroundingResult, *, duration_ms: float) -> None:
         "artifact_id": result.artifact_id,
         "grounding_version": provenance.grounding_version,
         "match_view_version": provenance.match_view_version,
+        "view_id": provenance.view_id,
         "grounder_id": provenance.grounder_id,
         "grounder_version": provenance.grounder_version,
         "threshold": provenance.options.threshold,

@@ -115,3 +115,30 @@ class TestTheExactTierWins:
         _, outcome = ground_one("well-known", text="A well-\nknown supplier of parts")
         assert outcome.status is GroundingStatus.FUZZY
         assert outcome.score == pytest.approx(0.900, abs=1e-9)
+
+
+class TestScoreSemanticsAreDocumentedWhereverExposed:
+    """FR-031 — on *both* fields carrying a score, not just the obvious one.
+
+    The requirement says "wherever the score is exposed", and the generated JSON
+    schema is one of those places. `GroundingOutcome.score` got the note first;
+    `Alternative.score` was exposed in the same schema with nothing on it for a
+    while, which is how a requirement gets half-applied. Asserting the pair here
+    means neither can drift without the other.
+    """
+
+    def test_both_exposed_scores_carry_the_incomparability_warning(self) -> None:
+        from docdoc.grounding import Alternative, GroundingOutcome
+
+        for model in (GroundingOutcome, Alternative):
+            description = model.model_json_schema()["properties"]["score"].get("description")
+            assert description, f"{model.__name__}.score has no description"
+            assert "NOT COMPARABLE ACROSS TIERS" in description, model.__name__
+
+    def test_the_warning_reaches_a_serialised_result(self) -> None:
+        """A description a consumer cannot see is not documentation."""
+        from docdoc.grounding import GroundingResult
+
+        schema = GroundingResult.model_json_schema()
+        rendered = str(schema)
+        assert rendered.count("NOT COMPARABLE ACROSS TIERS") >= 2

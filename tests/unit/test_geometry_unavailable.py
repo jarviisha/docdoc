@@ -63,3 +63,50 @@ class TestParserSuppliedGeometry:
         assert with_geo.geometry is not None
         assert without.geometry is None
         assert with_geo.status is without.status is GroundingStatus.EXACT
+
+
+class TestGeometryExistsButCoversNoTokens:
+    """The third state, and the one the file asserted only in its docstring.
+
+    `Document.locate()` returns an empty tuple for a range that intersects no
+    token -- a run of whitespace between two words, which a parser tokenises
+    around. That is a different fact from "the parser supplied no geometry", and
+    the whole reason `geometry` is `tuple | None` rather than just `tuple`.
+
+    Untested, the distinction rested on one of its two halves: every assertion
+    above compares `None` against boxes, and neither exercises `()`.
+    """
+
+    def test_the_kernel_really_does_return_an_empty_tuple_there(self) -> None:
+        """The premise. If this stops holding, the state is unreachable and the
+        `tuple | None` split has one fewer reason to exist."""
+        from docdoc.kernel import Span
+
+        doc = make_document("ab   cd", with_geometry=True)
+        assert doc.locate(Span(2, 5)) == ()
+
+    def test_a_range_covering_no_tokens_reports_an_empty_tuple(self) -> None:
+        from docdoc.grounding.match import geometry_for
+        from docdoc.kernel import Span
+
+        doc = make_document("ab   cd", with_geometry=True)
+        assert geometry_for(doc, Span(2, 5)) == ()
+
+    def test_the_three_states_are_mutually_distinguishable(self) -> None:
+        """`None`, `()`, and boxes -- asserted together, because the bug this
+        prevents is a caller collapsing two of them."""
+        from docdoc.grounding.match import geometry_for
+        from docdoc.kernel import Span
+
+        with_geometry = make_document("ab   cd", with_geometry=True)
+        without = make_document("ab   cd", with_geometry=False)
+
+        unavailable = geometry_for(without, Span(0, 2))
+        nothing_there = geometry_for(with_geometry, Span(2, 5))
+        boxes = geometry_for(with_geometry, Span(0, 2))
+
+        assert unavailable is None
+        assert nothing_there == ()
+        assert boxes is not None
+        assert len(boxes) >= 1
+        assert unavailable != nothing_there

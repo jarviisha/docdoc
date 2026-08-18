@@ -56,7 +56,20 @@ class Alternative(BaseModel):
 
     #: A source-text range, like every range this layer returns.
     span: Span
-    score: float
+
+    #: The same quantity as ``GroundingOutcome.score``, and it carries the same
+    #: warning for the same reason. FR-031 requires the incomparability to be
+    #: documented *wherever the score is exposed*, and the generated schema is one
+    #: of those places -- which is the argument that put the description on the
+    #: outcome's field, applied to the surface it missed.
+    score: float = Field(
+        description=(
+            "Trusted and docdoc-computed. NOT COMPARABLE ACROSS TIERS: an exact "
+            "score is 1.0 by definition while a fuzzy score is a measured "
+            "similarity, so ranking alternatives against each other by this "
+            "number is meaningless and nothing in docdoc does it (ADR-0004)."
+        ),
+    )
 
     # Pages and boxes are deliberately absent. Resolve them on demand with
     # `document.page_for(alt.span)` and `document.locate(alt.span)`. Most
@@ -146,6 +159,17 @@ class GroundingProvenance(BaseModel):
     extraction_artifact_id: str
     grounding_version: str
     match_view_version: str
+
+    #: Identity of the folded text this run matched against, ``sha256`` over the
+    #: document id and the view version.
+    #:
+    #: Derivable from the two fields above, and recorded anyway. FR-020 asks for
+    #: the comparison form to have an identity "so that two runs can establish
+    #: they compared against the same thing", and an identity a consumer has to
+    #: re-derive from a formula they must first read the source to learn is not
+    #: one they can use. It was computed per run and reachable by nobody until
+    #: this became a field.
+    view_id: str
     options: GroundingOptions
     grounder_id: str
     grounder_version: str

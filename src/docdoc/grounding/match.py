@@ -14,11 +14,17 @@ from typing import TYPE_CHECKING, NamedTuple
 from rapidfuzz.distance import Levenshtein
 
 from docdoc.grounding.candidates import candidate_starts, window_lengths
+from docdoc.grounding.errors import GroundingError
 from docdoc.grounding.result import Alternative, GroundingOutcome, GroundingStatus
 from docdoc.grounding.view import MatchView, fold_claim
 from docdoc.kernel import CapabilityError, Document, Geometry, Span
 
-__all__ = ["MAX_ALTERNATIVES", "Candidate", "find_fuzzy", "resolve", "select"]
+# `find_exact`, `find_fuzzy`, `outcome_for`, and `geometry_for` are deliberately
+# absent: they are the tiers and the mapping step that `resolve` composes, and
+# nothing outside this module calls them except tests reaching in on purpose.
+# An `__all__` entry advertises a surface someone may depend on, so it lists
+# what this module is *for* rather than everything it happens to define.
+__all__ = ["MAX_ALTERNATIVES", "Candidate", "resolve", "select"]
 
 if TYPE_CHECKING:
     from docdoc.grounding.options import GroundingOptions
@@ -159,7 +165,19 @@ def outcome_for(
             truncated=truncated,
         )
 
-    span = view.offsets.source_span_for(winner.view_start, winner.view_end)
+    # The one place a view position crosses back to a source position, so the one
+    # place a map failure can be attributed to the value that triggered it. The
+    # map already names the document; `field_path` is what this layer knows and
+    # it does not (FR-043).
+    try:
+        span = view.offsets.source_span_for(winner.view_start, winner.view_end)
+    except GroundingError as failure:
+        raise GroundingError(
+            f"{failure} (resolving {field_path!r})",
+            document_id=failure.document_id,
+            field_path=field_path,
+        ) from failure
+
     status = GroundingStatus.EXACT if winner.score == 1.0 else GroundingStatus.FUZZY
     return GroundingOutcome(
         field_path=field_path,

@@ -73,7 +73,7 @@ class MatchView:
     @classmethod
     def build(cls, document: Document) -> MatchView:
         """Fold a document's canonical text, recording where every position came from."""
-        text, offsets = _fold(document.text)
+        text, offsets = _fold(document.text, document_id=document.id)
         return cls(text=text, offsets=offsets, document_id=document.id)
 
 
@@ -102,7 +102,7 @@ def fold_claim(claim: str) -> str:
     return _fold(claim)[0]
 
 
-def _fold(source: str) -> tuple[str, OffsetMap]:
+def _fold(source: str, *, document_id: str | None = None) -> tuple[str, OffsetMap]:
     """Fold text and build its offset map in one pass.
 
     Order matters and is pinned: NFKC, then soft-hyphen removal, then
@@ -238,4 +238,4 @@ def _fold(source: str) -> tuple[str, OffsetMap]:
         i = j
 
     flush_run()
-    return "".join(out), OffsetMap(tuple(segments), view_pos, n)
+    return "".join(out), OffsetMap(tuple(segments), view_pos, n, document_id=document_id)
