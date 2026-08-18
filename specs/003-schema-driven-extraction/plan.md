@@ -70,6 +70,28 @@ that trips on machine noise gets disabled, and a disabled test protects nothing.
 accidental per-extraction schema recompile — the batch row is the one that would move — or a quadratic
 in the projection or the conformance walk, not constant-factor drift.
 
+**The 500× headroom above is extraction's, and it is not the suite's.** Stating it without this
+qualifier — as an earlier revision of this section did — reads as though every perf test is comfortable.
+One is not, and it is the number a reader needs.
+
+**This milestone edited Milestone 1's perf tests, which is worth stating plainly.** Adding a blocking
+`perf:` job to CI was the first time `-m perf` had ever run under an enforcing gate, and it immediately
+found three kernel tests red or coin-flipping: document construction was sampling *once* at 247–369 ms
+against a 300 ms budget, so whether the suite passed depended on what else the machine was doing. The
+fix changed their measurement method to best-of-N and **did not touch the budgets** — moving a budget to
+match a measurement makes the test agree with whatever the code currently does, which is the failure mode
+a perf test exists to prevent. That the edit crosses a milestone boundary is the reason it is recorded
+here rather than left in a commit message: a Milestone 1 test now reads differently because of Milestone
+3 work, and nothing else says so.
+
+**A live risk ships with this milestone.** The kernel's whole-document slice measures **279 ms best-of-5
+against its 300 ms budget — 1.07× headroom**, against extraction's ~500×. CI runners are typically slower
+than the laptop that produced that number, so the new `perf:` job may well be red on its first real run.
+That is a known and accepted state, not an oversight: the correct response is to re-measure on the runner
+and decide whether the budget was always wrong or the slice genuinely regressed. The response that is
+*not* correct is `continue-on-error`, which would turn the gate this milestone just added back into
+decoration. `.github/workflows/ci.yml` carries the same warning at the point someone would edit it.
+
 **Constraints**: The whole layer except the model call must run with no credentials and no network
 (FR-044). Provider SDK types confined to `docdoc/extraction/adapters/` and enforced by `import-linter`
 (FR-023). Transport settings must not influence artifact identity (FR-027) — true by construction, since
@@ -244,13 +266,22 @@ tests/
 │   ├── test_no_provider_names.py      # SC-013's other half: no provider named outside adapters
 │   ├── test_observe.py                # event schema + content-leak assertion (SC-015)
 │   ├── test_no_transmission.py        # SC-016, against a recording transport
-│   └── test_gemini_mapping.py         # recorded, scrubbed responses (R11)
+│   ├── test_gemini_mapping.py         # recorded, scrubbed responses (R11)
+│   ├── test_schema_versioning.py      # US2 end to end: concurrent majors, no `latest`,
+│   │                                  #   a description edit moving the hash and not the version
+│   ├── test_schema_snapshot.py        # FR-017's change detector, and its own remedy text
+│   ├── test_provenance_recording.py   # SC-011, every recorded field non-empty and real
+│   ├── test_no_fallback.py            # FR-029, against a registry with somewhere to fall back to
+│   ├── test_reextraction.py           # FR-038/FR-043, results independent and frozen
+│   └── test_plan_tree_is_current.py   # this tree — asserts it did not go stale a fourth time
 ├── contract/
-│   └── test_model_adapter_contract.py # every ModelAdapter must satisfy EXT-15…EXT-18
+│   └── test_model_adapter_contract.py # every ModelAdapter must satisfy EXT-15…EXT-18,
+│                                      #   run against all three including the real one
 ├── property/
 │   └── test_schema_hash.py            # reorder ⇒ same hash; any semantic edit ⇒ different hash
 ├── integration/
-│   └── test_gemini_live.py            # marked `provider`
+│   ├── test_gemini_live.py            # marked `provider`
+│   └── test_examples_run.py           # SC-020 — the examples are executed, not read
 ├── perf/
 │   └── test_extraction_perf.py        # marked `perf`, SC-021
 └── fixtures/
@@ -259,6 +290,25 @@ tests/
     ├── gemini/                        # 4 recorded, scrubbed responses: ok, refusal, recitation, truncated
     └── snapshots/schema_hashes.json   # the FR-017 change detector
 ```
+
+**On enumerating test files here.** This list went stale three times: an analysis pass named three
+missing files, a convergence phase added the two *that finding named*, and the next pass found six more.
+The obvious reading is that the enumeration is the wrong shape and the tree should describe directories
+instead — but that would lose what makes it useful. Every line maps a requirement (an `EXT-`, `SC-`, or
+`FR-`) to the test that holds it, and no other artifact provides that map.
+
+So it is kept and checked instead. `tests/unit/test_plan_tree_is_current.py` asserts that every test
+file importing `docdoc.extraction` appears here, which is mechanically derivable and precise. That is
+the same shape as the adapter-coverage and example-coverage assertions, both added for the same reason:
+a hand-maintained list goes stale exactly when someone is not looking at it.
+
+**The rule has a known blind spot, recorded rather than glossed.** Testing the new check against the
+suite showed two of this feature's own files escaping it: `test_examples_run.py` runs the examples as
+subprocesses and `test_plan_tree_is_current.py` reads files, so neither imports the package an
+import-based scan looks for. They are named explicitly in the check, and a further assertion keeps that
+exemption list from growing into the route around the rule. A check that quietly covers less than it
+appears to is the exact defect this milestone's review passes kept finding, so its bound is stated
+instead of assumed.
 
 **Structure Decision**: `src/` layout unchanged. `extraction/` is one flat package with one module per
 concept plus an `adapters/` sub-package — the only place a provider SDK may be imported, which is what
