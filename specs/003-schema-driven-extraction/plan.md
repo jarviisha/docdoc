@@ -151,8 +151,8 @@ violation.
 
 3. **The prompt prefix is currently too short to be cached at all.** The ordering is right — stable
    before volatile — but a cache hit needs the shared prefix to clear a per-model minimum of 2,048–4,096
-   tokens, and the current per-schema prefix is a few hundred (research.md R15). So the ordering buys
-   nothing today. It is recorded rather than dressed up, and padding the prefix to become cache-eligible
+   tokens, and the current per-schema prefix measures **817** (research.md R15) — about 2.5× short. So
+   the ordering buys nothing today. It is recorded rather than dressed up, and padding the prefix to become cache-eligible
    is explicitly *not* chosen without measurement.
 
 4. **The input-budget guard is a deliberate over-estimate.** FR-030 must refuse an over-budget document

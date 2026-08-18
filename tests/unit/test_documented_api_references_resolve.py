@@ -170,3 +170,106 @@ def test_each_documented_attribute_appears_in_a_document(name: str) -> None:
         f"`{name}` is checked here but appears in none of the documents, so this entry "
         "asserts something no reader was ever promised"
     )
+
+
+# -- configuration names (T124) ----------------------------------------------
+#
+# The same argument as the imports above, applied to the other thing the docs
+# promise: environment variable names. They are string literals, so nothing here
+# resolved them — a renamed constant would leave seven documents confidently
+# wrong and every test green.
+#
+# This is the last hand-maintained duplication this milestone introduced. T120
+# closed a documentation gap by writing the same table into three artifacts, and
+# T105/T106 already established what happens to a hand-maintained list here: it
+# goes stale exactly when nobody is looking at it. So it is checked rather than
+# trusted, in both directions.
+
+#: Every module that defines a `DOCDOC_*` configuration name, and the constants it
+#: defines them as. Both docdoc layers, not just extraction: the convention is
+#: repo-wide and a check that covered one layer would go stale at the boundary.
+CONFIG_MODULES = {
+    "docdoc.extraction.registry": ("SCHEMA_PATHS_ENV",),
+    "docdoc.extraction.adapter_registry": ("ADAPTERS_ENV",),
+    "docdoc.extraction.adapters.gemini": ("MODEL_ENV",),
+    "docdoc.ingest.parsers.azure_di": ("ENDPOINT_ENV", "KEY_ENV"),
+}
+
+#: Wider than DOCUMENTS: configuration is described in places that carry no python
+#: block at all, and those are exactly the ones an import check cannot reach.
+CONFIG_DOCUMENTS = (
+    *DOCUMENTS,
+    "CONTRIBUTING.md",
+    "specs/003-schema-driven-extraction/data-model.md",
+    "specs/003-schema-driven-extraction/research.md",
+)
+
+#: Requires at least one character after the prefix, so the `DOCDOC_*` wildcard
+#: idiom the prose uses is not mistaken for a variable named `DOCDOC_`.
+_ENV_NAME = re.compile(r"\bDOCDOC_[A-Z0-9_]+\b")
+
+
+def _defined_env_names() -> dict[str, str]:
+    """{value: "module.CONSTANT"} for every configuration name the code defines."""
+    defined: dict[str, str] = {}
+    for module_name, constants in CONFIG_MODULES.items():
+        module = importlib.import_module(module_name)
+        for constant in constants:
+            assert hasattr(module, constant), (
+                f"{module_name}.{constant} is listed here but does not exist; it was "
+                "renamed or removed, and this map is now describing nothing"
+            )
+            defined[getattr(module, constant)] = f"{module_name}.{constant}"
+    return defined
+
+
+@pytest.mark.parametrize("document", CONFIG_DOCUMENTS)
+def test_every_documented_configuration_name_exists(document: str) -> None:
+    """A documented variable the code never reads is worse than an undocumented one.
+
+    The reader exports it, nothing happens, and there is no error to search for --
+    the failure is silence.
+    """
+    defined = _defined_env_names()
+    text = pathlib.Path(document).read_text(encoding="utf-8")
+    unknown = sorted({name for name in _ENV_NAME.findall(text) if name not in defined})
+    assert not unknown, (
+        f"{document} documents configuration names that no module defines: {unknown}. "
+        f"Defined: {sorted(defined)}"
+    )
+
+
+def test_every_configuration_name_is_documented() -> None:
+    """The other direction. A variable readers cannot discover configures nothing.
+
+    Extraction's three are documented in the contract and the concept doc; ingest's
+    two came with Milestone 2 and are named in this feature's research note as the
+    precedent the extraction names follow.
+    """
+    documented: set[str] = set()
+    for document in CONFIG_DOCUMENTS:
+        documented |= set(_ENV_NAME.findall(pathlib.Path(document).read_text(encoding="utf-8")))
+
+    undocumented = sorted(
+        f"{name} ({where})"
+        for name, where in _defined_env_names().items()
+        if name not in documented
+    )
+    assert not undocumented, (
+        f"these configuration names are read by the code and documented nowhere a reader looks: "
+        f"{undocumented}"
+    )
+
+
+def test_the_configuration_check_can_actually_fail() -> None:
+    """Guards the guard. The matcher is a regex over prose, which is the kind of
+    thing that quietly matches everything or nothing."""
+    assert _ENV_NAME.findall("set DOCDOC_SCHEMA_PATHS and DOCDOC_GEMINI_MODEL") == [
+        "DOCDOC_SCHEMA_PATHS",
+        "DOCDOC_GEMINI_MODEL",
+    ]
+    assert _ENV_NAME.findall("clears `DOCDOC_*` for every test") == [], (
+        "the wildcard idiom must not be read as a variable name"
+    )
+    assert "DOCDOC_SCHEMA_PATHS" in _defined_env_names(), "a known-real name must be found"
+    assert "DOCDOC_NOT_A_REAL_NAME" not in _defined_env_names()

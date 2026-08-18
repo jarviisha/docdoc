@@ -282,6 +282,21 @@ def test_configuration_reorders_the_adapters(monkeypatch: pytest.MonkeyPatch) ->
     assert [c.id for c in registry.candidates()] == ["second", "first"]
 
 
+def test_an_explicit_priority_beats_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
+    """T125, EXT-28 — an explicit argument wins, for the third of the three inputs.
+
+    EXT-28 says this holds for schema paths, the model, and adapter priority. The
+    first two were asserted and this one was not, which is the shape that reads as
+    covered and is not: the behaviour was correct, so nothing ever failed to reveal
+    the hole.
+    """
+    monkeypatch.setenv(ADAPTERS_ENV, "beta")
+    registry = AdapterRegistry(priority=("alpha", "beta"))
+    registry.register(_Stub("alpha"))
+    registry.register(_Stub("beta"))
+    assert registry.select().id == "alpha", "configuration overrode an explicit argument"
+
+
 def test_a_blank_adapter_configuration_falls_back_to_the_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

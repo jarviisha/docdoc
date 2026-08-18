@@ -526,3 +526,30 @@ signature defect, now traced back to the first phase that could have carried it.
 **Checkpoint**: every extraction error answers to the root the documentation promises, the suite's
 result depends on the code rather than on the machine running it, and no event claims work that was
 never done.
+
+---
+
+## Phase 18: Convergence
+
+Findings from `/speckit-converge`, the eleventh review pass — and **the first with no code-level
+finding**. 50/50 FR and 21/21 SC assessed, 12 constitution principles clean, no CRITICAL and no HIGH.
+Every item below is drift between the code and the documents that describe it.
+
+That is worth stating plainly, because it is the signal the previous ten passes were looking for: the
+extraction layer does what the spec says. What remains is that three of these four are the *same*
+recurrence — a fact fixed in the places one finding happened to name, and left everywhere else — and
+two of them were introduced by the phases that fixed the previous instance. T110 corrected "a few
+hundred" in two files and missed two more; T120 closed a documentation gap by creating three
+hand-maintained copies of one table. The pattern is not carelessness. It is that a finding names
+instances, a fix addresses instances, and nothing addresses the class.
+
+- [X] T122 [P] Use the measured prefix size in `quickstart.md` and `plan.md`, per `plan: R15` and T110 (partial). R15 measured the per-schema prefix at **817 tokens** against a 2,048–4,096 minimum. T110 replaced "a few hundred" with that number in the two places it listed — `docs/concepts/extraction.md` and `tests/integration/test_gemini_live.py` — and `quickstart.md:158` and `plan.md:154` still carry the vague form, in sentences otherwise identical to the corrected ones. **This is the fourth recurrence of this shape in this milestone** (the plan's test tree went stale three times for exactly the same reason), and T110's own rationale is the argument for fixing it: a measured number restated as a vague one loses what makes the caching decision reviewable — how far short it falls, and therefore how much growth would change the answer. Note `plan.md:102` says "a few hundred fields" about schema size; that one is unrelated and correct
+
+- [X] T123 [P] Name the configuration mechanism in `quickstart.md`'s V4 scenario, per US3/AC2 and SC-020 (partial). Line 145 instructs the reader to "Repoint configuration at a different model and confirm the same application code runs and only provenance changes" — which is US3's independent test verbatim — and the file contains **zero** occurrences of `DOCDOC_`. Until T114 that step was impossible; now it is possible and still undocumented, so a reader validating V4 has an instruction with no mechanism, which is the same defect as T095 (a quickstart step telling the reader a check passed that never ran) and T099 (a snippet that could not run). One line naming `DOCDOC_GEMINI_MODEL` closes it. The quickstart is the document SC-020 is measured against, so it is the one place this matters most
+
+- [X] T124 [P] Derive the documented configuration names from the code, per `plan: project structure` and T120 (partial). `DOCDOC_SCHEMA_PATHS`, `DOCDOC_MODEL_ADAPTERS`, and `DOCDOC_GEMINI_MODEL` now appear as string literals in seven documents — `README.md`, `CONTRIBUTING.md`, `docs/concepts/extraction.md`, `contracts/extraction-api.md` §8a, `data-model.md` §6c, `research.md` R17, and this file — and in three source modules that define them as constants. Nothing checks that the two agree: `test_documented_api_references_resolve.py` resolves python imports and attribute accesses and says in its own docstring that it does not check string literals, so renaming a constant would leave seven documents confidently wrong and every test green. This is the gap class T105 and T106 argued about at length before choosing "check the hand-maintained list rather than abandon it", and T109 then applied to the docs' API references. The same fix serves here: assert every `DOCDOC_*` literal in the documentation set is a value some module actually defines, and every constant is documented. Cheap, and it removes the last hand-maintained duplication this milestone added
+
+- [X] T125 [P] Assert EXT-28 for adapter priority, per `data-model.md` EXT-28 (partial). EXT-28 states that an explicit argument beats configuration "for all three" configuration inputs. It is asserted for schema paths (`test_registry.py:161`) and for the model (`test_adapter_registry.py:249`), and not for adapter priority. Verified by hand this pass that the behaviour is correct — `AdapterRegistry(priority=("alpha","beta"))` keeps its argument while `DOCDOC_MODEL_ADAPTERS=beta` is set — which is exactly why it is a task and not a fix, on the same argument T109 and T117 were written from: a hand verification does not repeat itself. Two of three asserted is the shape that reads as covered and is not
+
+**Checkpoint**: no document describes the layer in terms the code has outgrown, and the last
+hand-maintained duplication this milestone introduced has a check behind it.

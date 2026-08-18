@@ -142,8 +142,21 @@ result.provenance.usage.input_tokens, result.provenance.usage.output_tokens
 ```
 
 **Expected**: a result of exactly the shape V1 produced. Nothing downstream can tell which adapter
-produced it except by reading provenance. Repoint configuration at a different model and confirm the same
-application code runs and only provenance changes.
+produced it except by reading provenance.
+
+Now perform the second half of US3/AC2 — "when the configured model or provider changes, no application
+code changes". Repointing is configuration, so it happens in the shell and the python above is not
+touched:
+
+```sh
+DOCDOC_GEMINI_MODEL=gemini-3.5-flash-lite python your_script.py
+```
+
+**Expected**: the same script runs unedited, and the only difference is
+`result.provenance.model_id` — and, because the artifact identity folds the model actually reached,
+`result.artifact_id`. Two other names configure the rest: `DOCDOC_MODEL_ADAPTERS` reorders adapter
+preference and `DOCDOC_SCHEMA_PATHS` tells `default_registry()` where schema data lives
+(contracts/extraction-api.md §8a).
 
 Then confirm the prompt cache is actually working — this is the difference between paying for the schema
 instructions once per document and once per schema:
@@ -155,8 +168,8 @@ second.provenance.usage.cache_read_input_tokens   # 0 today — see below
 ```
 
 **Expected today: zero.** A Gemini cache hit needs the shared prefix to clear a per-model minimum of
-2,048–4,096 tokens, and the current per-schema prefix is a few hundred (research.md R15). The ordering
-is still right and buys nothing yet. Once the prefix does clear the threshold, a zero would mean
+2,048–4,096 tokens, and the current per-schema prefix measures **817** (research.md R15) — so it must
+grow about 2.5× before the ordering starts paying. The ordering is still right and buys nothing yet. Once the prefix does clear the threshold, a zero would mean
 something volatile precedes the breakpoint — `tests/unit/test_prompt_assembly.py` guards that from the
 offline side, and `tests/integration/test_gemini_live.py` asserts the threshold arithmetic rather than
 a hit that cannot happen.
