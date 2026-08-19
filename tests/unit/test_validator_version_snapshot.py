@@ -187,6 +187,18 @@ def _rule_semantics() -> dict[str, list[str]]:
                 kind=RuleKind.CONDITIONAL_PRESENCE,
                 operands=("total", "reference"),
             ),
+            # The author's override — the branch of the severity logic no other
+            # fixture reaches. Without it, deleting `_severity()`'s override path
+            # left the whole suite green, which is how convergence found it. The
+            # rule is deliberately a duplicate of `sum_rule` in everything but its
+            # severity, so this line moves if and only if the override resolves
+            # differently (FR-040, VAL-11).
+            RuleSpec(
+                id="overridden_rule",
+                kind=RuleKind.SUM_EQUALS,
+                operands=("lines.amount", "total"),
+                severity="warning",
+            ),
         ),
         fields=(
             FieldSpec(name="total", type=FieldType.DECIMAL),
@@ -239,6 +251,11 @@ def _rule_semantics() -> dict[str, list[str]]:
                 (
                     item.check_id,
                     str(item.outcome),
+                    # Severity is part of what a kind *produces*, not decoration:
+                    # `overridden_rule` differs from `sum_rule` in nothing else, so
+                    # without this column the two lines were identical and the
+                    # snapshot could not see an override resolving differently.
+                    str(item.severity) if item.severity else "-",
                     str(item.reason) if item.reason else "-",
                     item.expected or "-",
                     item.actual or "-",

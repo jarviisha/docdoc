@@ -85,18 +85,20 @@
   ],
   "rule_semantics": {
     "outcomes": [
-      "rule:sum_rule@total|failed|sum_mismatch|250.00|200.00",
-      "rule:product_rule@lines[0].quantity|passed|-|-|-",
-      "rule:product_rule@lines[1].quantity|failed|product_mismatch|200.00|150.00",
-      "rule:comparison_rule@total|failed|comparison_failed|total <= subtotal (150.00)|200.00",
-      "rule:presence_rule@total|failed|companion_missing|a value at reference|absent"
+      "rule:sum_rule@total|failed|error|sum_mismatch|250.00|200.00",
+      "rule:product_rule@lines[0].quantity|passed|-|-|-|-",
+      "rule:product_rule@lines[1].quantity|failed|error|product_mismatch|200.00|150.00",
+      "rule:comparison_rule@total|failed|error|comparison_failed|total <= subtotal (150.00)|200.00",
+      "rule:presence_rule@total|failed|error|companion_missing|a value at reference|absent",
+      "rule:overridden_rule@total|failed|warning|sum_mismatch|250.00|200.00"
     ],
     "participants": [
       "rule:sum_rule@total: total,lines[0].amount,lines[1].amount",
       "rule:product_rule@lines[0].quantity: ",
       "rule:product_rule@lines[1].quantity: lines[1].quantity,lines[1].unit_price,lines[1].amount",
       "rule:comparison_rule@total: total,subtotal",
-      "rule:presence_rule@total: total,reference"
+      "rule:presence_rule@total: total,reference",
+      "rule:overridden_rule@total: total,lines[0].amount,lines[1].amount"
     ]
   },
   "rule_vocabulary_version": "rule_vocabulary@1",

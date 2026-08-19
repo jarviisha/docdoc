@@ -368,3 +368,20 @@ tasks are left as written: they are the record of what was asked.
 `VALIDATOR_VERSION` are pinned by the same mechanism against the same JSON snapshot, and a
 contributor who trips one needs to read the remedy for both. Splitting them would have meant two
 snapshots that must be refreshed together and one remedy message that has to explain the other file.
+
+---
+
+## Phase 12: Convergence (fifth pass)
+
+A different shape from the four passes before it. Those found code that was wrong; this one
+found code that is **right and unpinned** — the schema author's severity override works, and
+nothing would tell you if it stopped working.
+
+The evidence is a mutation rather than an inspection. Replacing `_severity()` in
+`src/docdoc/validation/rules.py` with a hardcoded `Severity.ERROR` — deleting the override
+entirely — leaves all 1722 tests green. A deployment that declares `severity: "warning"` on a
+rule would start having its documents **rejected**, and the suite would say nothing.
+
+- [X] T105 Pin the severity override's effect, per FR-040 and VAL-11 (partial). Add to `tests/unit/test_rules.py`: a rule declared `severity="warning"` produces a finding whose severity is `warning` and leaves the verdict `valid` while the same failure at the default severity makes it `invalid`; a rule declared `severity="info"` does the same; and the counts move between `errors` and `warnings` accordingly. Assert against the *verdict*, not only the finding — the override's whole purpose is to decide whether a document is rejected. Then add one overridden rule to `_rule_semantics()` in `tests/unit/test_validator_version_snapshot.py`, so the snapshot covers the branch of the severity logic no fixture currently reaches, and a change to how an override resolves moves `VALIDATOR_VERSION`. `tests/unit/test_rules_in_schema_hash.py` already asserts the override moves `schema_hash`; that is about identity, and says nothing about behaviour
+- [X] T106 [P] Document the override where a schema author would look for it, in `docs/concepts/validation.md` (partial). The doc explains that warnings and infos never reject a document; it does not say that a rule's author chooses which one their rule produces. The contract says "overridable per rule" in four words, in a table cell. Show the declaration — `"severity": "warning"` on a `RuleSpec` — beside the sentence about what warnings do, and state the one asymmetry: a rule's severity is the author's, while requiredness, constraints, and the grounding policy have fixed or run-level severities (VAL-11)
+- [X] T107 [P] Assert the empty enabled set in `tests/unit/test_rules.py`, per VAL-26 (partial). `enabled_rules=frozenset()` turns every rule off and is meaningfully different from `None`, which turns them all on: it produces `provenance.enabled_rules == ()` and a different artifact id, which is what stops "we ran no rules" from being indistinguishable from "this schema declares none". The subset case is covered; the empty set — the one a deployment reaches when it disables everything — is not

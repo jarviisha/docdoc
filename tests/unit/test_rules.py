@@ -12,7 +12,7 @@ from decimal import Decimal
 import pytest
 
 from docdoc.extraction.schema import Operator, Schema
-from docdoc.validation import ReasonCode, Verdict, validate
+from docdoc.validation import ReasonCode, Severity, Verdict, validate
 from docdoc.validation.result import Outcome
 from tests.fixtures.validation import artifacts
 from tests.fixtures.validation import rules as rule_fixtures
@@ -226,3 +226,101 @@ def test_a_schema_with_no_rules_still_validates() -> None:
     result = validate(pair.extraction, pair.grounding, pair.schema)
     assert result.provenance.enabled_rules == ()
     assert schema.rules == ()
+
+
+class TestSeverityOverride:
+    """T105 — FR-040, the branch of the severity logic no fixture reached.
+
+    A convergence pass found this by mutation rather than by reading: replacing
+    `_severity()` with a hardcoded `Severity.ERROR` — deleting the author's
+    override entirely — left all 1722 tests green. `test_rules_in_schema_hash.py`
+    asserts the override moves `schema_hash`, which is about identity and says
+    nothing about behaviour.
+
+    The assertions below are on the **verdict**, not only on the finding. The
+    override's whole purpose is to decide whether a document is rejected, so a
+    test that checked the severity field alone would still pass if the verdict
+    derivation stopped reading it.
+    """
+
+    @staticmethod
+    def _failing(severity: str | None):
+        schema = invoice_schema(rules=(rule_fixtures.sum_rule(severity=severity),))
+        pair = artifacts.build(schema=schema, total="1000.00", total_claim="1420.00")
+        result = validate(pair.extraction, pair.grounding, schema)
+        finding = next(f for f in result.findings if f.rule_id == "total_matches_lines")
+        return result, finding
+
+    def test_the_default_rejects_the_document(self) -> None:
+        result, finding = self._failing(None)
+        assert finding.severity is Severity.ERROR
+        assert result.verdict is Verdict.INVALID
+        assert result.counts.errors == 1
+
+    def test_an_author_can_make_the_same_failure_a_warning(self) -> None:
+        """The same document, the same broken arithmetic, a different verdict."""
+        result, finding = self._failing("warning")
+        assert finding.severity is Severity.WARNING
+        assert result.verdict is Verdict.VALID
+        assert result.counts.errors == 0
+        assert result.counts.warnings == 1
+
+    def test_an_author_can_make_it_informational(self) -> None:
+        result, finding = self._failing("info")
+        assert finding.severity is Severity.INFO
+        assert result.verdict is Verdict.VALID
+        assert result.counts.infos == 1
+
+    def test_the_check_still_failed_whatever_the_severity(self) -> None:
+        """An override changes what a failure *means*, never whether it happened.
+
+        A warning-severity rule that quietly reported `passed` would hide the
+        finding from `checks` as well, and the counts would stop reconciling with
+        what the document actually did.
+        """
+        for severity in (None, "warning", "info"):
+            result, _ = self._failing(severity)
+            assert result.check("rule:total_matches_lines@total").outcome is Outcome.FAILED
+            assert result.counts.failed == 1
+
+    def test_the_override_does_not_leak_to_other_check_kinds(self) -> None:
+        """VAL-11 — a rule's severity is the author's; requiredness is not."""
+        schema = invoice_schema(rules=(rule_fixtures.sum_rule(severity="warning"),))
+        pair = artifacts.build(
+            schema=schema,
+            total="1000.00",
+            total_claim="1420.00",
+            extraction_overrides={"currency": make_extracted("currency", present=False)},
+        )
+        result = validate(pair.extraction, pair.grounding, schema)
+        required = next(f for f in result.findings if f.field_path == "currency")
+        assert required.severity is Severity.ERROR
+        assert result.verdict is Verdict.INVALID  # the required field, not the rule
+
+
+def test_disabling_every_rule_is_not_the_same_as_declaring_none() -> None:
+    """T107, VAL-26 — the empty set a deployment reaches when it turns everything off.
+
+    `enabled_rules=None` runs them all; `frozenset()` runs none. Both produce a
+    result, and the difference has to be visible in the provenance and in the
+    artifact id — otherwise "we ran no rules" is indistinguishable from "this
+    schema declares none", which is the silent-omission VAL-26 forbids.
+    """
+    from docdoc.validation import ValidationOptions
+
+    schema = invoice_schema(rules=rule_fixtures.every_kind())
+    pair = artifacts.build(schema=schema, total="1000.00", total_claim="1420.00")
+
+    everything = validate(pair.extraction, pair.grounding, schema)
+    nothing = validate(
+        pair.extraction,
+        pair.grounding,
+        schema,
+        options=ValidationOptions(enabled_rules=frozenset()),
+    )
+
+    assert everything.verdict is Verdict.INVALID
+    assert nothing.verdict is Verdict.VALID
+    assert nothing.provenance.enabled_rules == ()
+    assert not any(check.check_id.startswith("rule:") for check in nothing.checks)
+    assert nothing.artifact_id != everything.artifact_id

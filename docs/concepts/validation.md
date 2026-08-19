@@ -50,6 +50,32 @@ Warnings and infos never reject a document. Deciding what to *do* with a verdict
 — route it, escalate it, send it to a human — is policy built on this stage's
 output, not part of producing it.
 
+### Who chooses a severity
+
+A **rule's author** does, on the rule:
+
+```json
+{
+  "id": "total_matches_lines",
+  "kind": "sum_equals",
+  "operands": ["line_items.amount", "total"],
+  "severity": "warning"
+}
+```
+
+The same broken arithmetic then produces the same finding, with the same numbers,
+and leaves the verdict `valid` instead of `invalid`. What the override changes is
+what a failure *means*, never whether it happened: the check still reports
+`failed`, and the counts still say so.
+
+Everything else has a severity the author does not set. Requiredness and
+constraint failures are always errors — a schema that declares a field required
+has already made that choice. The grounding severities are a **run-level** option
+(`GroundingPolicy`), because whether an unlocated value is acceptable is a
+property of the deployment rather than of the document type. And a check that
+could not be evaluated is always a warning, with its effect on the verdict coming
+from `incomplete` rather than from its severity.
+
 ## Rules are data
 
 A rule is declared in the schema and evaluated by one generic engine:
