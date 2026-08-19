@@ -30,7 +30,11 @@ import time
 from typing import TYPE_CHECKING
 
 from docdoc.validation import enumerate as enumerate_checks
-from docdoc.validation.constraints import check_constraints, check_required
+from docdoc.validation.constraints import (
+    check_constraints,
+    check_required,
+    compile_declared_patterns,
+)
 from docdoc.validation.errors import ValidationError
 from docdoc.validation.grounding_policy import check_grounding
 from docdoc.validation.identity import (
@@ -117,6 +121,11 @@ def validate(
     started = time.perf_counter()
 
     _refuse_mismatched_inputs(extraction, grounding, schema, started=started)
+
+    # Before the first check is enumerated: a pattern outside the dialect is an
+    # authoring fault, and FR-056 is that it must never reach verdict time to
+    # become a check nobody notices did not run.
+    compile_declared_patterns(schema)
 
     index = enumerate_checks.walk(schema, extraction.values)
     enabled = _enabled_rules(schema, options)

@@ -18,18 +18,20 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
+from docdoc.extraction.errors import SchemaError
 from docdoc.extraction.schema import Cardinality, FieldSpec
 from docdoc.validation import record
 from docdoc.validation.numeric import as_decimal, render, within_tolerance
-from docdoc.validation.pattern import Pattern, compile_pattern
+from docdoc.validation.pattern import Pattern, PatternSyntaxError, compile_pattern
 from docdoc.validation.result import CheckKind, ReasonCode
 from docdoc.validation.severity import Severity
 
 if TYPE_CHECKING:
+    from docdoc.extraction.schema import Schema
     from docdoc.validation.enumerate import Slot
     from docdoc.validation.record import CheckRecord
 
-__all__ = ["check_constraints", "check_required"]
+__all__ = ["check_constraints", "check_required", "compile_declared_patterns"]
 
 #: Compiled patterns, keyed by source. A schema is loaded once and validated many
 #: times, so compiling per call would pay the parser's cost per value.
@@ -42,6 +44,45 @@ def _pattern_for(source: str) -> Pattern:
         compiled = compile_pattern(source)
         _PATTERN_CACHE[source] = compiled
     return compiled
+
+
+def compile_declared_patterns(schema: Schema) -> None:
+    """Compile every declared ``pattern`` before any check runs (FR-056).
+
+    **Why this is here and not in the schema layer.** FR-056 says a pattern
+    outside ``pattern_dialect@1`` must be refused rather than reaching a
+    validation run, and the task list asked the extraction layer's loader to do
+    it. That is not implementable: `docdoc.extraction` may not import
+    `docdoc.validation`, and the dialect belongs to the layer that evaluates it —
+    moving the engine down would put it beneath the only layer that uses it, to
+    satisfy the letter of "at load" while breaking Principle X.
+
+    So the check runs at the *entry* to validation, which is what the requirement
+    is actually about: a pattern that cannot be evaluated must never become a
+    check that silently never ran. It fails before the first check is enumerated,
+    naming the field and the construct.
+
+    Raises:
+        SchemaError: a declared pattern is outside the dialect.
+    """
+    for path in schema.field_paths():
+        field = schema.field_at(path)
+        if field is None:  # pragma: no cover - field_paths walks the same tree
+            continue
+        source = field.constraints.get("pattern")
+        if source is None:
+            continue
+        try:
+            _pattern_for(str(source))
+        except PatternSyntaxError as exc:
+            raise SchemaError(
+                f"the pattern declared on {path!r} is not part of pattern_dialect@1: {exc}. "
+                "Patterns are compiled before any check runs, so one that cannot be "
+                "evaluated fails here rather than becoming a check nobody notices did "
+                "not run",
+                identity=schema.identity,
+                field_path=path,
+            ) from exc
 
 
 def check_required(slot: Slot) -> CheckRecord | None:

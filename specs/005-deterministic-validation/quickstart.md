@@ -124,9 +124,15 @@ uv run pytest tests/perf/test_validation_perf.py -m perf -v
 ```
 
 **Expected**: for patterns inside the dialect, docdoc's matcher and `re.fullmatch` return the same
-answer on random inputs (the stdlib is the oracle for *what* matches); a backreference or a lookahead is
-rejected when the schema loads, with the construct named; and `(a+)+` against 10,000 characters — the
-input on which CPython's `re` is effectively non-terminating — completes in milliseconds.
+answer on random inputs (the stdlib is the oracle for *what* matches); a backreference or a lookahead
+raises `SchemaError` from `validate()` **before the first check is enumerated**, naming the field and
+the construct; and `(a+)+` against 10,000 characters — the input on which CPython's `re` is effectively
+non-terminating — completes in milliseconds.
+
+The rejection happens at the entry to validation rather than at schema load, and that is a decision
+rather than a shortcut: `docdoc.extraction` may not import `docdoc.validation`, and the dialect belongs
+to the layer that evaluates it. What FR-056 requires is that such a pattern never reach verdict time,
+which is what the entry check delivers (plan.md design decision 6).
 
 ## Scenario 7 — Explain and reproduce a verdict (US4, SC-016, SC-017)
 

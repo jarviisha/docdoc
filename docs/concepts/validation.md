@@ -86,6 +86,14 @@ An **empty** repeating group is different and is evaluated: the sum of no entrie
 is a defined quantity, and a document stating a total over no lines is exactly
 the case a reader wants flagged.
 
+### What a length bound counts
+
+`min_length` and `max_length` count **Unicode code points** on a string, and
+**entries** on a repeating group. Not bytes, which would make the same bound mean
+something different in Vietnamese than in English; and not grapheme clusters,
+which would need a dependency and a version of their own. `"Cảm ơn"` is six code
+points and nine UTF-8 bytes, and a `max_length: 6` accepts it.
+
 ## Arithmetic
 
 Everything numeric is `Decimal`. A `number` field arrives as a Python `float`
@@ -113,8 +121,11 @@ escapes `\d \D \w \W \s \S`, groups, alternation, `*`, `+`, `?`, and counted
 repetition `{m}`, `{m,}`, `{m,n}`. A leading `^` and a trailing `$` are accepted
 and redundant.
 
-Not in the dialect, and rejected when the schema loads with the construct named:
-backreferences, lookaround, named groups, inline flags, lazy quantifiers.
+Not in the dialect, and rejected **before any check runs** — with the construct
+named and the field path attached, as a `SchemaError`: backreferences,
+lookaround, named groups, inline flags, lazy quantifiers. Every declared pattern
+is compiled at the entry to `validate()`, so one that cannot be evaluated fails
+there rather than becoming a check nobody notices did not run.
 
 **Why docdoc has its own engine.** CPython's `re` backtracks: `^(a+)+$` against 24
 characters takes about 1.2 seconds and doubles per character, so an ordinary

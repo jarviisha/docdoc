@@ -85,7 +85,7 @@ in `Decimal`; a `float` from a `number` field enters as `Decimal(str(v))` and ne
 (research.md R3). Values never reach logs, while findings carry them by design — the boundary is
 restated in research.md R9 because it is easy to read the logging rule as covering both.
 
-**Scale/Scope**: Extraction results to a few hundred values; schemas to a few dozen rules. Thirteen modules in
+**Scale/Scope**: Extraction results to a few hundred values; schemas to a few dozen rules. Fifteen modules in
 one new package, one additive field on `Schema`, one `import-linter` layer added, no kernel change. The
 committed documents from Milestone 2 and the `echo` adapter from Milestone 3 supply every input, plus
 hand-built schemas carrying each constraint key and each rule kind.
@@ -142,6 +142,15 @@ Recorded so reviewers see them here rather than discovering them in code.
 5. **Finding order follows schema declaration order, while `schema_hash` sorts by name.** Deliberate:
    order is presentation and may follow the file; identity must not (research.md R5).
 
+6. **The pattern-dialect check runs at the entry to `validate()`, not at schema load.** FR-056 says a
+   pattern outside the dialect must never reach verdict time, and the task list asked
+   `extraction/loader.py` to enforce it. That is not implementable: `docdoc.extraction` may not import
+   `docdoc.validation`, and moving the engine down would put it beneath the only layer that uses it —
+   satisfying the letter of "at load" by breaking Principle X. Every declared pattern is therefore
+   compiled before the first check is enumerated, and one outside the dialect raises `SchemaError`
+   naming the field and the construct. Found by `/speckit-converge`, which also found that the fault
+   was previously escaping as a bare `PatternSyntaxError` — a `ValueError`, contradicting FR-054.
+
 ## Project Structure
 
 ### Documentation (this feature)
@@ -173,6 +182,7 @@ src/docdoc/
 └── validation/                # new package, new import-linter layer
     ├── __init__.py            # validate(), the public surface of contracts/validation-api.md
     ├── errors.py              # ValidationError
+    ├── severity.py            # Severity alone — breaks the options/result import cycle
     ├── enumerate.py           # the schema × value-tree walk that produces the check list
     ├── constraints.py         # the eight recognised constraint keys
     ├── pattern.py             # pattern_dialect@1: parser, NFA construction, linear-time matcher
@@ -181,6 +191,7 @@ src/docdoc/
     ├── rules.py               # the four rule kinds
     ├── grounding_policy.py    # status → severity, reading Milestone 4's record
     ├── verdict.py             # counts, severity resolution, verdict derivation, finding order
+    ├── record.py              # the one internal record both public views derive from
     ├── result.py              # CheckOutcome, Finding, ValidationResult, provenance models
     ├── identity.py            # VALIDATOR_ID/VERSION, options_hash, artifact_id
     └── observe.py             # one structured event, no values

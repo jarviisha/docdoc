@@ -80,6 +80,54 @@ def _verdict_truth_table() -> dict[str, str]:
     return {name: str(derive_verdict(records)) for name, records in cases.items()}
 
 
+def _finding_order() -> list[str]:
+    """The ordering rule, as something a snapshot can hold.
+
+    FR-050 names the finding order alongside the default severities and the
+    verdict derivation, and convergence found it was the one of the four the
+    snapshot did not pin — so changing the sort key failed no build. Recorded as
+    the *result* of sorting a fixed set that spans two fields, two entry indices,
+    and three check kinds, because that is what a consumer observes.
+    """
+    from docdoc.extraction.schema import Cardinality, FieldSpec, FieldType, Schema
+    from docdoc.extraction.value import ExtractedValue
+    from docdoc.validation.enumerate import walk
+    from docdoc.validation.verdict import sort_key
+
+    def value(path: str, payload: object) -> ExtractedValue:
+        return ExtractedValue(field_path=path, value=payload, present=True)
+
+    schema = Schema(
+        name="order_probe",
+        version=1,
+        fields=(
+            FieldSpec(name="alpha", type=FieldType.STRING, required=True),
+            FieldSpec(name="beta", type=FieldType.STRING, required=True),
+            FieldSpec(
+                name="lines",
+                cardinality=Cardinality.REPEATING_GROUP,
+                fields=(FieldSpec(name="amount", type=FieldType.DECIMAL),),
+            ),
+        ),
+    )
+    values = {
+        "alpha": value("alpha", "a"),
+        "beta": value("beta", "b"),
+        "lines": tuple({"amount": value(f"lines[{index}].amount", 1)} for index in range(2)),
+    }
+    index = walk(schema, values)
+    records = [
+        passed("beta#required", "beta", CheckKind.REQUIRED),
+        passed("alpha#grounding", "alpha", CheckKind.GROUNDING),
+        passed("alpha#required", "alpha", CheckKind.REQUIRED),
+        passed("rule:r@lines[1].amount", "lines[1].amount", CheckKind.RULE),
+        passed("rule:r@lines[0].amount", "lines[0].amount", CheckKind.RULE),
+        passed("lines#min_length", "lines", CheckKind.CONSTRAINT),
+    ]
+    ordered = sorted(records, key=lambda item: sort_key(item, index))
+    return [item.check_id for item in ordered]
+
+
 def observed() -> dict[str, object]:
     policy = GroundingPolicy()
     return {
@@ -112,6 +160,7 @@ def observed() -> dict[str, object]:
             "rule:<rule_id>@<anchor_path>",
         ],
         "verdict_truth_table": _verdict_truth_table(),
+        "finding_order": _finding_order(),
     }
 
 
@@ -126,9 +175,13 @@ def test_the_snapshot_is_not_vacuous() -> None:
     recorded = observed()
     assert len(recorded["reason_codes"]) >= 15
     assert len(recorded["verdict_truth_table"]) >= 8
+    assert len(recorded["finding_order"]) >= 6
 
 
 if __name__ == "__main__":  # pragma: no cover - the documented refresh path
+    import sys
+
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     SNAPSHOT.parent.mkdir(parents=True, exist_ok=True)
     SNAPSHOT.write_text(json.dumps(observed(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"refreshed {SNAPSHOT}")

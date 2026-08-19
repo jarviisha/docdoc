@@ -22,6 +22,14 @@
     "required": "error",
     "rule": "error"
   },
+  "finding_order": [
+    "alpha#grounding",
+    "alpha#required",
+    "beta#required",
+    "lines#min_length",
+    "rule:r@lines[0].amount",
+    "rule:r@lines[1].amount"
+  ],
   "outcomes": [
     "failed",
     "not_evaluated",

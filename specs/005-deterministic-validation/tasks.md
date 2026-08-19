@@ -268,3 +268,26 @@ about cross-field arithmetic, and a schema that declares no rules gets a complet
 Then US2 makes the stage worth trusting for a financial document; US3 makes the verdict trustworthy as
 evidence; US4 makes it explainable after everything has moved. Each is a checkpoint that can be reviewed
 and merged on its own.
+
+---
+
+## Phase 8: Convergence
+
+Appended by `/speckit-converge` after the implementation pass. Each item traces to the
+requirement it closes and the kind of gap it is.
+
+**The first two are one defect seen from two sides.** FR-056 says a pattern outside the dialect is
+refused before any result is validated; FR-054 says every failure surfaces as one of docdoc's typed
+errors. Today an out-of-dialect pattern does neither: it escapes `validate()` as a bare
+`PatternSyntaxError`, which is a `ValueError`. T086 is also the one task in this milestone whose
+original form (T042) was **unimplementable as written** — it asked the extraction layer's loader to
+reject a pattern, and that layer may not import the validation layer that owns the dialect. The fix
+has to choose a side rather than smuggle the import.
+
+- [X] T086 Reject an out-of-dialect pattern **before any check runs**, per FR-056 and SC-014 (missing). Compile every `pattern` constraint the schema declares at the start of `validate()` in `src/docdoc/validation/__init__.py` — before the enumeration walk — and raise on the first that fails, naming the field path and the construct. This satisfies FR-056's actual requirement ("never at verdict time") without the layer inversion T042 assumed. Record in `specs/005-deterministic-validation/plan.md` under design decisions that the check moved from schema load to validation entry, and why: `docdoc.extraction` cannot import `docdoc.validation`, and moving the dialect down into the schema layer would put the engine below the only layer that uses it
+- [X] T087 Surface a dialect fault as `SchemaError`, per FR-054 and the constitution's error model (contradicts). `PatternSyntaxError` currently extends `ValueError` and reaches a caller untyped. Wrap it at the boundary added in T086 so the caller sees `SchemaError` with the field path, the pattern, and the named construct — an authoring fault, reported the way every other authoring fault in this milestone is. Keep `PatternSyntaxError` internal to `src/docdoc/validation/pattern.py`; the parser should not need to know which layer's error type is public. Depends on T086
+- [X] T088 [P] Extend `tests/unit/test_pattern_dialect_rejections.py` with the boundary behaviour T086 and T087 introduce: a schema declaring `(?=foo)bar` produces a `SchemaError` from `validate()` naming the field and the construct, before any check is recorded — asserted by confirming the raised error carries the field path and that no result was returned. Also assert the negative: a schema whose patterns are all in the dialect compiles once and validates normally. Depends on T087
+- [X] T089 [P] Add the finding order to the behaviour snapshot in `tests/unit/test_validator_version_snapshot.py`, per FR-050 (partial). The snapshot pins default severities, the verdict truth table, check-id formats, and reason codes, but not the ordering rule FR-050 names alongside them — so changing the sort key fails no build today. Record the ordering as an observable: build a fixed set of records spanning two fields, two entry indices, and two check kinds, sort them, and snapshot the resulting id sequence. Refresh `tests/fixtures/snapshots/validator_behaviour.json`
+- [X] T090 [P] State the length-counting unit in `docs/concepts/validation.md` and `specs/005-deterministic-validation/contracts/validation-api.md`, per FR-023 (partial). Both currently describe `min_length`/`max_length` without saying that they count **Unicode code points** — not bytes, which would make a bound mean less in some scripts, and not grapheme clusters, which would need a dependency and a version. FR-023 requires this "wherever the bound is exposed", and these two documents are where a schema author looks
+- [X] T091 [P] Correct `specs/005-deterministic-validation/quickstart.md` Scenario 6, which claims a backreference "is rejected when the schema loads" (partial). After T086 the rejection happens at validation entry, before any check runs; the sentence must describe what the code does rather than what the task list intended. Depends on T086
+- [X] T092 [P] Record `src/docdoc/validation/severity.py` and `src/docdoc/validation/record.py` in the plan's module tree in `specs/005-deterministic-validation/plan.md`, and correct "Thirteen modules" to fifteen (unrequested). Both exist for stated reasons that are currently only in their own docstrings: `severity.py` breaks an import cycle, because `options` and `result` both need `Severity` and `result` imports `options`; `record.py` holds the one internal shape from which `CheckOutcome` and `Finding` are both derived, which is what stops the two public views from ever disagreeing. A module absent from the plan is a module a reviewer cannot trace

@@ -2,8 +2,9 @@
 
 Two halves. The refusals are what make `pattern_dialect@1` a *documented* subset
 rather than "whatever this parser happened to accept": every construct outside it
-is named in its own error, at load, so a schema author is told which thing they
-wrote is unsupported.
+is named in its own error, raised before any check runs, so a schema author is
+told which thing they wrote is unsupported rather than discovering it in a
+verdict.
 
 The last test is the reason the module exists. `(a+)+` against ten thousand
 characters is effectively non-terminating under `re`; here it is milliseconds.
@@ -15,6 +16,7 @@ import time
 
 import pytest
 
+from docdoc.kernel import DocdocError
 from docdoc.validation.pattern import (
     MAX_NODES,
     MAX_REPEAT,
@@ -108,3 +110,105 @@ def test_growth_is_linear_not_exponential() -> None:
     # Generous: the assertion is about the *shape* of the growth, and a factor of
     # 40 still rules out anything exponential while surviving a noisy CI runner.
     assert large < small * 40
+
+
+class TestRejectedBeforeAnyCheckRuns:
+    """T086, T087 — where a dialect fault surfaces, and as what.
+
+    Convergence found that an out-of-dialect pattern reached a caller as a bare
+    `PatternSyntaxError` — a `ValueError`, raised mid-validation when the
+    constraint happened to be evaluated. It was neither one of docdoc's typed
+    errors (FR-054) nor refused before verdict time (FR-056).
+
+    The original task asked the *schema loader* to reject it. That is not
+    implementable: `docdoc.extraction` may not import `docdoc.validation`, and the
+    dialect belongs to the layer that evaluates it. The check therefore runs at
+    the entry to validation, which is what FR-056 is actually about.
+    """
+
+    @staticmethod
+    def _schema_with_pattern(source: str):
+        from docdoc.extraction.schema import Schema
+        from tests.fixtures.validation.schemas import invoice_schema
+
+        base = invoice_schema()
+        fields = tuple(
+            field.model_copy(update={"constraints": {"pattern": source}})
+            if field.name == "number"
+            else field
+            for field in base.fields
+        )
+        return Schema(name=base.name, version=base.version, fields=fields)
+
+    def test_it_is_a_schema_error_not_a_value_error(self) -> None:
+        from docdoc.extraction.errors import SchemaError
+        from docdoc.validation import validate
+        from tests.fixtures.validation import artifacts
+
+        schema = self._schema_with_pattern("(?=foo)bar")
+        pair = artifacts.build(schema=schema)
+        with pytest.raises(SchemaError) as caught:
+            validate(pair.extraction, pair.grounding, schema)
+
+        assert caught.value.field_path == "number"
+        assert "lookahead" in str(caught.value)
+        assert isinstance(caught.value, DocdocError)
+
+    def test_it_fails_before_a_single_check_is_recorded(self) -> None:
+        """FR-056 — never at verdict time.
+
+        Asserted by the shape of the failure rather than by counting: `validate`
+        returns exactly one result or raises, so a raise means no result exists
+        and therefore no check was recorded.
+        """
+        from docdoc.extraction.errors import SchemaError
+        from docdoc.validation import validate
+        from tests.fixtures.validation import artifacts
+
+        schema = self._schema_with_pattern(r"(\d)\1")
+        pair = artifacts.build(schema=schema)
+        result = None
+        with pytest.raises(SchemaError):
+            result = validate(pair.extraction, pair.grounding, schema)
+        assert result is None
+
+    def test_a_pattern_inside_the_dialect_validates_normally(self) -> None:
+        """The negative half: this must not refuse every schema that has a pattern."""
+        from docdoc.validation import validate
+        from tests.fixtures.validation import artifacts
+
+        schema = self._schema_with_pattern(r"INV-\d{4}-\d{3}")
+        pair = artifacts.build(schema=schema)
+        result = validate(pair.extraction, pair.grounding, schema)
+        assert result.check("number#pattern") is not None
+
+    def test_every_declared_pattern_is_checked_not_only_the_first(self) -> None:
+        from docdoc.extraction.errors import SchemaError
+        from docdoc.extraction.schema import Cardinality, FieldSpec, FieldType, Schema
+        from docdoc.validation.constraints import compile_declared_patterns
+
+        nested = Schema(
+            name="probe_nested",
+            version=1,
+            fields=(
+                FieldSpec(
+                    name="number",
+                    type=FieldType.STRING,
+                    constraints={"pattern": r"INV-\d{4}"},
+                ),
+                FieldSpec(
+                    name="lines",
+                    cardinality=Cardinality.REPEATING_GROUP,
+                    fields=(
+                        FieldSpec(
+                            name="code",
+                            type=FieldType.STRING,
+                            constraints={"pattern": r"a\b"},  # inside a repeating group
+                        ),
+                    ),
+                ),
+            ),
+        )
+        with pytest.raises(SchemaError) as caught:
+            compile_declared_patterns(nested)
+        assert caught.value.field_path == "lines.code"

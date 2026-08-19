@@ -83,9 +83,15 @@ Comparisons are exact: no case folding, no trimming, no coercion across declared
 Numeric work is `Decimal` throughout; a `number` field's `float` enters as `Decimal(str(value))`, and
 `number` is documented as lossy by declaration — `decimal` is the type for money (research.md R3).
 
+`min_length` and `max_length` count **Unicode code points** on a string and **entries** on a repeating
+group — not bytes, which would make one bound mean different things in different scripts, and not
+grapheme clusters, which would need a dependency and a version of their own (FR-023).
+
 `pattern` is evaluated against the **whole value** under `pattern_dialect@1`, docdoc's own documented,
-versioned, linear-time subset. Backreferences, lookaround, named groups, and inline flags are not in the
-dialect and are rejected when the schema loads, never silently at validation time (FR-024, FR-056).
+versioned, linear-time subset. Backreferences, lookaround, named groups, and inline flags are not in
+the dialect. Every declared pattern is compiled at the **entry** to `validate()`, before the first
+check is enumerated, and one outside the dialect raises `SchemaError` naming the field and the
+construct — never silently at verdict time (FR-024, FR-056).
 
 ## 5. Nothing is repaired
 
@@ -101,7 +107,7 @@ with the entry named, because summing a missing amount as zero is how a wrong to
 | Raised | When |
 |---|---|
 | `ValidationError` | the grounding result was not produced from the supplied extraction result; the recorded schema identity or hash differs from the supplied schema; the value tree does not fit the schema |
-| `SchemaError` | *(at schema load, not here)* an unrecognised rule kind, a duplicate rule id, an unresolvable or wrongly scoped operand, a constraint on an incompatible type, a pattern outside the dialect |
+| `SchemaError` | *at schema load*: an unrecognised rule kind, a duplicate rule id, an unresolvable or wrongly scoped operand, a constraint on an incompatible type. *At the entry to `validate()`, before any check is enumerated*: a pattern outside `pattern_dialect@1` — the dialect belongs to this layer, and the layer below may not import it |
 
 Both name both sides of the mismatch. Neither is retried (FR-055). A failing check never raises, and an
 error is never returned as a finding (FR-044) — a finding is a statement about the document, an error is
