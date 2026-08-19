@@ -75,6 +75,27 @@ operand, a comparison across declared types, a per-entry rule whose operands spa
 two groups. The alternative is a rule that reaches a validation run and quietly
 becomes a check nobody notices did not run.
 
+## What a schema author gets wrong, and when they are told
+
+Everything in this section fails **before any check runs** — at schema load where that is possible,
+and at the entry to `validate()` for the one case that is not. None of it can reach a verdict, because
+a declaration that cannot be evaluated would otherwise become a check that silently never runs, and a
+check that always passes is a rule that lies.
+
+| Declaration | What was meant | What it would have done |
+|---|---|---|
+| `"enum": "EUR"` | `["EUR"]` — a missing pair of brackets | read as `['E','U','R']`, so the schema rejects the value it names |
+| `"max_length": "abc"` | a number | failed with a raw error while a document was being checked |
+| `"min_length": 3.7` | `3` or `4` | truncated to 3, enforcing a bound nobody wrote |
+| `"minimum": null` | a bound | **passed every value** — the comparison could not be made |
+| `"multiple_of": 0` | a step | every number is a multiple of zero only by convention |
+| `"pattern": "(?=x)y"` | a lookahead | not in the dialect; refused with the construct named |
+| a rule operand that does not resolve | a field | a rule that never runs |
+
+The last two are worth separating. A rule or a constraint *value* is refused when the schema **loads**;
+a `pattern` is refused at the **entry to `validate()`**, because the dialect belongs to the validation
+layer and the schema layer may not import it. Both are before the first check, which is what matters.
+
 ### An absent operand is never zero
 
 A sum rule whose line is missing an amount is reported as `not_evaluated`, naming

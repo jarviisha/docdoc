@@ -120,3 +120,52 @@ def test_a_repeating_group_of_any_size_checks_each_entry(entries: int) -> None:
     ]
     # description and amount are the two required fields inside an entry.
     assert len(per_entry) == entries * 2
+
+
+def test_a_required_repeating_group_with_zero_entries_reports_once() -> None:
+    """T102 — the intersection of FR-016 and FR-017, at the size where they meet.
+
+    FR-016 says a required field inside a repeating group is checked once per
+    entry. FR-017 says an absent group is one finding rather than one per field.
+    With zero entries the interesting part is that the two must not both fire:
+    there are no entries to check, so the group is the only thing missing, and it
+    says so once.
+    """
+    from docdoc.extraction.schema import Schema
+
+    base = artifacts.build().schema
+    required_lines = tuple(
+        field.model_copy(update={"required": True}) if field.name == "line_items" else field
+        for field in base.fields
+    )
+    schema = Schema(name=base.name, version=base.version, fields=required_lines)
+    pair = artifacts.build(schema=schema)
+
+    values = dict(pair.extraction.values)
+    values["line_items"] = ()
+    extraction = pair.extraction.model_copy(update={"values": values})
+    result = validate(extraction, pair.grounding, schema)
+
+    missing = [
+        finding
+        for finding in result.findings
+        if finding.reason is ReasonCode.REQUIRED_VALUE_MISSING
+    ]
+    assert [finding.field_path for finding in missing] == ["line_items"]
+
+    # And nothing per-entry: no entries exist, so no obligation does either.
+    per_entry = [check for check in result.checks if check.field_path.startswith("line_items[")]
+    assert per_entry == []
+    assert result.verdict is Verdict.INVALID
+
+
+def test_an_optional_repeating_group_with_zero_entries_says_nothing() -> None:
+    """The negative half: an empty list is a legitimate answer where none is required."""
+    pair = artifacts.build()
+    values = dict(pair.extraction.values)
+    values["line_items"] = ()
+    extraction = pair.extraction.model_copy(update={"values": values})
+    result = validate(extraction, pair.grounding, pair.schema)
+
+    assert not any(f.field_path.startswith("line_items") for f in result.findings)
+    assert result.verdict is Verdict.VALID

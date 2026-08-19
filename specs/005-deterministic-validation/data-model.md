@@ -120,6 +120,7 @@ The non-passing view of a check. Derived from `CheckOutcome`, never authored ind
 | `kind` | `CheckKind` | As above |
 | `reason` | `ReasonCode` | Machine-readable, closed set |
 | `severity` | `Severity` | Resolved: author override or documented default |
+| `rule_id` | `str \| None` | The rule this came from, for a `rule` check; `None` otherwise |
 | `expected` | `str \| None` | The declared expectation, rendered canonically |
 | `actual` | `str \| None` | What was there, rendered canonically |
 | `participants` | `tuple[str, ...]` | Every field path the check read — for a rule, all of them (FR-032) |
@@ -129,6 +130,12 @@ The non-passing view of a check. Derived from `CheckOutcome`, never authored ind
 | `message` | `str` | Human prose. Carries nothing the structured fields do not (FR-039) |
 
 - **VAL-19** — every field a check read appears in `participants`, not only the anchor (FR-032).
+- **VAL-19a** — `rule_id` names the rule structurally. The id is also inside `check_id`
+  (`rule:<id>@<anchor>`), and that was the only way to reach it until convergence pointed out the
+  cost: a consumer grouping findings by rule had to split a composite string, which is the parsing
+  FR-039 exists to remove. **Adding the field moved `VALIDATOR_VERSION` to `1.1.0`** — a new field
+  changes the output for unchanged inputs, and FR-050 is taken literally rather than only when it is
+  convenient (FR-028, FR-039).
 - **VAL-20** — locations are copied from `GroundingOutcome`, byte-identical. Validation holds no document
   and can compute no location of its own (FR-005, FR-038, SC-011).
 - **VAL-21** — `message` is redundant by construction: removing it loses no machine-readable information
@@ -229,10 +236,25 @@ chain does *not* say is **which** of the declared rules a given run enabled, whi
 
 ## 12. Error model
 
-| Error | Raised when | Layer |
+| Error | Raised when | Raised from |
 |---|---|---|
 | `ValidationError` | the grounding result did not come from the supplied extraction result; the recorded schema identity or hash differs from the supplied schema; the value tree does not fit the schema (FR-002, FR-018) | `docdoc.validation` |
-| `SchemaError` *(existing)* | an unrecognised rule kind, a duplicate rule id, an unresolvable or wrongly scoped operand, a constraint on an incompatible type, a pattern outside `pattern_dialect@1` (FR-025, FR-028, FR-029, FR-056) | `docdoc.extraction` |
+| `SchemaError` *(existing)* | **at schema load**: an unrecognised rule kind, a duplicate rule id, an unresolvable or wrongly scoped operand, a constraint on an incompatible type, and a constraint whose declared *value* cannot be read — an unparseable bound, a length bound that is not a whole number, an `enum` that is not a non-empty list (FR-019, FR-025, FR-028, FR-029, SC-005) | `docdoc.extraction` |
+| `SchemaError` *(same type)* | **at the entry to `validate()`, before any check is enumerated**: a `pattern` outside `pattern_dialect@1` (FR-056) | `docdoc.validation` |
+
+**Why one error type is raised from two layers.** The fault is the same — the schema is wrong — so a
+second type would make one mistake into two depending on which layer noticed. What differs is *where*
+it can be noticed. Whether a bound parses as a number is a question about data, answerable beside the
+key and the type domain. Whether a pattern is inside `pattern_dialect@1` is a question about the
+dialect, which belongs to the layer that evaluates it — and `docdoc.extraction` may not import
+`docdoc.validation` (plan design decision 6). Both are refused before any check runs, which is what
+FR-056 and SC-014 actually require.
+
+**Two corrections convergence forced, recorded here rather than only in the changelog.** A constraint
+whose declared value could not be read used to report **passed** for every value, because a comparison
+that cannot be made was treated as one that found nothing wrong; the evaluators now raise instead
+(VAL-17's sibling defect, one level in). And `value_absent` is no longer a reason code at all — see
+VAL-17.
 
 Neither is retried (FR-055). A failing check never raises, and an error is never reported as a finding
 (FR-044).
