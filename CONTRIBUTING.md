@@ -64,6 +64,42 @@ State in the PR description which constitutional principles your change engages.
 one, say so explicitly and justify it — an unjustified violation is rejected regardless of how
 good the code is, and a justified one is usually fine.
 
+## Check that a test holds what it claims
+
+A passing test is evidence that the code and the test agree, not that the test tests anything.
+Twice in one milestone, a test here read as coverage and provided none:
+
+- `test_a_path_the_walk_never_produced_sorts_last_rather_than_first` compared its probe against
+  the **first** field in the walk, at position 0. The bug it existed to catch also put the probe
+  at position 0, the comparison tied and fell through to the check id, and the ids happened to
+  order the right way. It passed with the bug in place.
+- `test_it_chains_from_the_grounding_artifact` recomputed the expected artifact id **with the
+  function under test**, so truncating that function's input moved both sides of the assertion
+  equally. It proved that one function calls another, and nothing about the chain ADR-0003
+  exists to establish.
+
+Both were written to *describe* a property rather than to *refute* its absence, which is the
+shape to watch for. When a test is the only thing holding a requirement, spend a minute:
+
+```bash
+# Break the property on purpose, in the source.
+uv run pytest tests/unit/the_test_you_just_wrote.py    # it must FAIL
+git checkout src/docdoc/...                            # put it back
+```
+
+If it still passes, the test is describing the code rather than constraining it. This is worth
+doing for anything that pins a version, an ordering, an identity, or a refusal — the properties
+whose violations are silent.
+
+**There is deliberately no standing mutation-testing tier**, and the reason is the same argument.
+The ad-hoc harness that found both defects above used string replacement on the source, and two
+of its fourteen mutations silently stopped applying mid-session when `ruff format` moved a line —
+reporting "caught" for mutations it had never made. A checker that fails open is the exact defect
+class this repository keeps machine-checking away, so shipping one would be self-defeating. If a
+standing tier is wanted later, it should be an AST-based tool (`mutmut`, `cosmic-ray`) on its own
+CI schedule, decided when Milestone 6 weighs CI cost as a whole — not inherited from one feature
+branch.
+
 ## How work is planned here
 
 This repository uses [Spec Kit](https://github.com/github/spec-kit). Substantial features go

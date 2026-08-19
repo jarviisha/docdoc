@@ -103,6 +103,21 @@ Milestones 3 and 4. The three decisions most worth challenging in review:
   two. The float is now bound to a name, with a comment saying why. Worth knowing before the next
   `--unsafe-fixes` run.
 
+### Decided after the seventh convergence pass
+
+- **No standing mutation-testing tier.** The ad-hoc harness found seven real gaps across two
+  passes — including two tests that passed for the wrong reason — and it is still not being
+  committed. Three reasons, in order of weight: it uses string replacement on the source and
+  **already rotted inside one session** (two of fourteen mutations stopped applying when
+  `ruff format` moved a line, while the harness reported "caught" for mutations it never made),
+  so it fails *open* — the defect class this milestone spent four phases eliminating; its output
+  is already banked, since every gap it found is now pinned by a test in the suite; and a
+  standing tier binds every future milestone's CI, which CONTRIBUTING says should be an ADR-level
+  decision rather than something settled on a feature branch. The transferable part is the
+  technique, not the script, and it is written down in CONTRIBUTING under "Check that a test
+  holds what it claims". If a tier is wanted, it should use an AST-based tool and be decided at
+  Milestone 6 alongside the rest of the CI budget.
+
 ### Raised by the plan, for review
 
 - The grounding policy is folded into `options_hash` although ADR-0003's Validate row predates it and does
