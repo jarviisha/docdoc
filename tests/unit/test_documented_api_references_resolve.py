@@ -43,8 +43,10 @@ import pytest
 DOCUMENTS = (
     "README.md",
     "docs/concepts/extraction.md",
+    "docs/concepts/validation.md",
     "specs/003-schema-driven-extraction/quickstart.md",
     "specs/003-schema-driven-extraction/contracts/extraction-api.md",
+    "specs/005-deterministic-validation/contracts/validation-api.md",
 )
 
 _BLOCK = re.compile(r"```python\n(.*?)```", re.S)

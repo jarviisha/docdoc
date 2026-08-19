@@ -184,11 +184,16 @@ def make_extraction(
     document: Document | None = None,
     document_id: str | None = None,
     artifact_id: str = "sha256:" + "e" * 64,
+    schema_identity: str = "invoice@1",
+    schema_hash: str = "sha256:" + "5" * 64,
 ) -> ExtractionResult:
     """An ExtractionResult carrying `values`, provenanced to `document`.
 
     `document_id` overrides the document's own id, which is how the wrong-document
-    tests build a result that plausibly belongs somewhere else.
+    tests build a result that plausibly belongs somewhere else. `schema_identity`
+    and `schema_hash` are overridable for the same reason one milestone later:
+    validation refuses a result whose recorded schema is not the one it was handed,
+    so a fixture has to be able to record the right one — and the wrong one.
     """
     fallback = document.id if document else "sha256:" + "d" * 64
     doc_id = document_id if document_id is not None else fallback
@@ -197,8 +202,8 @@ def make_extraction(
         artifact_id=artifact_id,
         provenance=ExtractionProvenance(
             document_id=doc_id,
-            schema_identity="invoice@1",
-            schema_hash="sha256:" + "5" * 64,
+            schema_identity=schema_identity,
+            schema_hash=schema_hash,
             prompt_hash="sha256:" + "7" * 64,
             projection_id="response-shape@1",
             adapter_id="echo",

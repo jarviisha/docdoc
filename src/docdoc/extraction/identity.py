@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 from docdoc.kernel import canonical_json, options_hash_for
 
 if TYPE_CHECKING:
-    from docdoc.extraction.schema import FieldSpec, Schema
+    from docdoc.extraction.schema import FieldSpec, RuleSpec, Schema
 
 __all__ = [
     "EXTRACTOR_ID",
@@ -71,6 +71,31 @@ def _sorted_payloads(fields: tuple[FieldSpec, ...]) -> list[dict[str, Any]]:
     return sorted((_field_payload(child) for child in fields), key=lambda item: str(item["name"]))
 
 
+def _rule_payload(rule: RuleSpec) -> dict[str, Any]:
+    """The hashable form of one declared rule.
+
+    ``tolerance`` is rendered as a **normalised** string. Two halves to that:
+
+    * *A string*, because canonical JSON has no ``Decimal`` and encoding it as a
+      float would reintroduce the binary representation the type exists to avoid
+      -- for a value that decides whether an invoice is accepted.
+    * *Normalised*, because ``0.30`` and ``0.3`` are the same tolerance and
+      cannot change a verdict. Hashing them differently would invalidate an
+      extraction artifact over a trailing zero, which is the spurious-cache-miss
+      class ADR-0003 warns about from the other direction. ``format(..., "f")``
+      keeps the exponent notation ``normalize()`` produces for ``100`` out of the
+      payload.
+    """
+    return {
+        "id": rule.id,
+        "kind": str(rule.kind),
+        "operands": list(rule.operands),
+        "operator": None if rule.operator is None else str(rule.operator),
+        "tolerance": format(rule.tolerance.normalize(), "f"),
+        "severity": rule.severity,
+    }
+
+
 def schema_hash_for(schema: Schema) -> str:
     """``sha256`` over the whole schema's canonical form (EXT-6).
 
@@ -84,8 +109,24 @@ def schema_hash_for(schema: Schema) -> str:
     invalidates the extraction cache while changing nothing the model reads.
     That is correct under ADR-0008 and it looks like a spurious cache miss
     (research.md R3).
+
+    **Rules are folded only when there are any** (VAL-8, FR-053). The payload is
+    built by hand rather than dumped from the model, which is what makes the
+    conditional possible: a schema that declares no rules produces exactly the
+    payload it produced before Milestone 5, and therefore exactly the hash. The
+    alternative -- an unconditional ``"rules": []`` -- would move the identity of
+    every schema in existence, invalidating every stored extraction artifact, in
+    exchange for a feature those schemas do not use.
     """
-    return options_hash_for({"fields": _sorted_payloads(schema.fields)})
+    payload: dict[str, Any] = {"fields": _sorted_payloads(schema.fields)}
+    if schema.rules:
+        # Sorted by id for the same reason fields are sorted by name: declaration
+        # order is presentation, and reordering a file changes no result.
+        payload["rules"] = sorted(
+            (_rule_payload(rule) for rule in schema.rules),
+            key=lambda item: str(item["id"]),
+        )
+    return options_hash_for(payload)
 
 
 def prompt_hash_for(text: str) -> str:

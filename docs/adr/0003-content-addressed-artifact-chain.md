@@ -64,3 +64,38 @@ Canonical serialization rules from ADR-0002 apply to every `options_hash`.
   chain, and provide a CLI to explain how an id was derived.
 - Artifacts are immutable, so the store is append-only; garbage collection of unreachable
   artifacts is a later concern and deliberately out of MVP scope.
+
+---
+
+## Amendment (proposed, 2026-08-18) — the Validate row, refined by Milestone 5
+
+The Validate row above was written before a validation stage existed, and two of its terms turned out
+to under-describe what that stage folds. Recorded here rather than resolved silently in code, per the
+constitution's precedence rule.
+
+**1. The row's `options_hash` inputs are extended to:**
+
+| Stage | Inputs folded into `options_hash` |
+|-------|-----------------------------------|
+| Validate | `validator_version`, the enabled rule **ids**, `rule_vocabulary_version`, `pattern_dialect_version`, and the grounding policy |
+
+The two additions both change verdicts, which is this ADR's own test for inclusion. The **pattern
+dialect** decides what a `pattern` constraint means, so a dialect change silently re-decides every
+result that carries one. The **grounding policy** decides whether a value nobody could locate is
+acceptable; a deployment that raises it from a warning to an error has changed what its verdicts mean
+and must see its artifact ids move.
+
+**2. "rule versions" is satisfied by rule identities plus `schema_hash`, not by a per-rule counter.**
+
+Rules are declared in the schema (`Schema.rules`), so their content is already inside `schema_hash`,
+inside the extract stage's `options_hash`, and inside every artifact the chain composes from. A
+per-rule version integer would be a *third* identifier answering a question `schema_version` and
+`schema_hash` already answer between them — and ADR-0008 exists precisely because one integer being
+asked two questions is how a version stops meaning anything.
+
+What the chain does **not** carry is which of the declared rules a given run evaluated. That is why
+the enabled rule **ids** are folded, and why the rule bodies are not.
+
+**Consequence.** Editing a rule invalidates the extraction artifact and everything downstream of it,
+reusing the parse. That is the same behaviour ADR-0008 already specifies for editing a constraint, and
+it is correct for the same reason: the result did not change, but what the result *means* did.

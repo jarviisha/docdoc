@@ -186,11 +186,37 @@ src/docdoc/
     └── observe.py             # one structured event, no values
 
 tests/
-├── unit/                      # per-concern, incl. refusals, no-repair, verdict derivation, dialect rejects
-├── property/                  # pattern differential oracle, decimal vs Fraction, order totality, counts
-├── contract/                  # validation-api.md surface, identity stability
-├── integration/               # extract → ground → validate over committed documents
-└── perf/                      # SC-020 and the adversarial pattern case
+├── unit/
+│   ├── test_schema_authoring_errors.py        # FR-025, FR-029, FR-056, SC-014 — refused at load
+│   ├── test_rules_in_schema_hash.py           # FR-053, SC-019 — rules hashed only when declared
+│   ├── test_check_enumeration.py              # FR-008, FR-013, FR-018 — the walk and its refusals
+│   ├── test_required_checks.py                # FR-014 … FR-017 — presence, entries, absent groups
+│   ├── test_constraints.py                    # FR-019 … FR-023 — the eight keys, exactly compared
+│   ├── test_constraint_key_coverage.py        # SC-005 — no key may ship unenforced
+│   ├── test_pattern_dialect_rejections.py     # FR-024, FR-056 — the dialect's edges and budgets
+│   ├── test_rules.py                          # FR-026 … FR-030, FR-032 — the four kinds
+│   ├── test_rule_not_evaluated.py             # FR-031, VAL-17 — an absent operand is not zero
+│   ├── test_grounding_policy.py               # FR-034 … FR-038, SC-011 — evidence, read not re-decided
+│   ├── test_verdict_derivation.py             # FR-040 … FR-042 — three states, no boolean
+│   ├── test_no_repair.py                      # FR-004, FR-044, SC-006 — nothing fixed, nothing raised
+│   ├── test_model_confidence_routes_nothing.py # FR-045, SC-012 — the untrusted field routes nothing
+│   ├── test_validation_answers_whether.py     # Principle VII — the mirror of Milestone 4's boundary test
+│   ├── test_findings_are_addressable.py       # FR-039, VAL-21 — prose carries nothing extra
+│   ├── test_validation_refusals.py            # FR-002, SC-015 — three mismatches, none validated
+│   ├── test_validation_logging.py             # FR-057, FR-058, SC-021 — counts in logs, values in findings
+│   ├── test_finding_order_is_total.py         # FR-043, SC-013 — order independent of hash seed
+│   ├── test_validation_reads_no_document.py   # FR-005, FR-052 — no document, no mutation
+│   └── test_validator_version_snapshot.py     # FR-050, VAL-2, SC-018 — the change detector
+├── property/
+│   ├── test_pattern_dialect.py                # the differential oracle; `re` is right, we are fast
+│   ├── test_decimal_semantics.py              # FR-022, FR-030 — against `Fraction`, not against itself
+│   └── test_counts_reconcile.py               # FR-012, SC-002 — counts add up for any schema
+├── contract/
+│   └── test_validation_identity.py            # FR-047 … FR-049, SC-016, SC-017 — what moves the id
+├── integration/
+│   └── test_validate_invoice.py               # US1 and US2 end to end over a committed document
+└── perf/
+    └── test_validation_perf.py                # SC-020 and the adversarial pattern case
 
 examples/
 └── validate_invoice.py        # the quickstart's 30-second version

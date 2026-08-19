@@ -98,7 +98,14 @@ Verdict  = valid | invalid | incomplete
 - **VAL-16** — `check_id` is unique within a result and is derived from the anchor, so two runs over the
   same inputs produce the same ids (FR-051).
 - **VAL-17** — `not_evaluated` carries a closed reason code — `operand_absent`, `operand_group_absent`,
-  `type_mismatch`, `value_absent` — and never the string "unknown" (FR-010, research.md R10).
+  `type_mismatch` — and never the string "unknown" (FR-010, research.md R10).
+
+  **Corrected during implementation.** This invariant originally listed a fourth code,
+  `value_absent`, for a constraint on a field with no value. Building it showed the code cannot exist:
+  a constraint constrains a value, so where the model reported none there is no obligation, and
+  declaring one anyway would make an optional absent field push the verdict to `incomplete`. Nearly
+  every real document has one, so the state would stop meaning "an obligation went unchecked". Absence
+  is the requiredness check's subject and it is the one that reports it (FR-014).
 - **VAL-18** — a `not_evaluated` check is never reported as `passed`, and its missing operand is never
   replaced by a zero, an empty value, or a default (FR-010).
 

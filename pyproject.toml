@@ -167,10 +167,20 @@ include_external_packages = true
 # name grounding; ADR-0003's stage chain does, unambiguously
 # (parse -> extraction -> grounding -> validation), and is finer-grained and
 # consistent with it. See specs/004-deterministic-grounding/research.md R1.
+#
+# `validation` (Milestone 5) continues the same reading, one layer higher: it
+# consumes a GroundingResult and an ExtractionResult and produces the verdict.
+# See specs/005-deterministic-validation/research.md R1.
 [[tool.importlinter.contracts]]
 name = "docdoc layers (Constitution Principle X)"
 type = "layers"
-layers = ["docdoc.grounding", "docdoc.extraction", "docdoc.ingest", "docdoc.kernel"]
+layers = [
+    "docdoc.validation",
+    "docdoc.grounding",
+    "docdoc.extraction",
+    "docdoc.ingest",
+    "docdoc.kernel",
+]
 
 # Grounding is deterministic all the way down: no network, no credentials, no
 # provider, and no model call under any circumstance (FR-048). That is this
@@ -181,6 +191,30 @@ layers = ["docdoc.grounding", "docdoc.extraction", "docdoc.ingest", "docdoc.kern
 name = "grounding reaches no network and no provider (FR-048)"
 type = "forbidden"
 source_modules = ["docdoc.grounding"]
+forbidden_modules = [
+    "socket",
+    "urllib",
+    "http",
+    "httpx",
+    "requests",
+    "openai",
+    "anthropic",
+    "google",
+    "boto3",
+    "azure",
+    "fastapi",
+    "sqlalchemy",
+]
+
+# Validation is deterministic all the way down, for the same reason grounding is
+# and with one addition: this stage decides whether a document is acceptable, so
+# a verdict that could depend on a network call is a verdict nobody can
+# reproduce (FR-007). Asserted here so an import that would quietly break it
+# fails the build rather than waiting for a reviewer.
+[[tool.importlinter.contracts]]
+name = "validation reaches no network and no provider (FR-007)"
+type = "forbidden"
+source_modules = ["docdoc.validation"]
 forbidden_modules = [
     "socket",
     "urllib",

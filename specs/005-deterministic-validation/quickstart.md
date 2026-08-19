@@ -26,15 +26,20 @@ No new dependency arrives with this milestone. The pattern engine is docdoc's ow
 uv run python examples/validate_invoice.py
 ```
 
-Extracts `invoice@1` from a committed document with the deterministic `echo` adapter, grounds it, then
-validates it — twice. The first run uses a document whose arithmetic holds and prints `valid`. The
-second uses one whose stated total is a line short and prints:
+Builds a one-page invoice, grounds a constructed extraction against it, and validates twice against a
+schema declaring `sum(line_items[].amount) == total`. The first run states the total the lines add up
+to and prints `valid`; the second states `1240.00` — a transposition a human makes and a model repeats
+— and prints:
 
 ```text
-verdict: invalid
-  total  rule:line_items_sum  expected 1420.00, actual 1240.00
-         participants: total, line_items[0].amount, line_items[1].amount, line_items[2].amount
-         found at page 1, span [1180, 1188)
+stated total: 1240.00
+  verdict: invalid
+  checks: 10 declared, 9 passed, 1 failed, 0 not evaluated
+  [error] total: sum_mismatch
+      expected 1420.00, got 1240.00
+      participants: total, line_items[0].amount, line_items[1].amount
+      found on page 0 at Span(start=142, end=149), reading '1420.00'
+      box: (0.10, 0.40) - (0.90, 0.43)
 ```
 
 The last line is the point of the whole product: a failed rule that can be pointed at on the page,
@@ -156,7 +161,7 @@ schema is refused with both named; and neither produces a verdict of any kind.
 
 ```bash
 uv run pytest tests/perf/test_validation_perf.py -m perf -v      # SC-020's bound
-uv run python -m tests.support.bench_pattern_dialect             # the R2 table
+uv run python tests/perf/bench_pattern_dialect.py                 # the R2 table
 ```
 
 The R2 comparison against `google-re2` is not reproducible from the repository by design: that package

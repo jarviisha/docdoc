@@ -33,8 +33,16 @@ import pathlib
 import pytest
 
 import docdoc.extraction
+import docdoc.validation
 
 EXTRACTION_ROOT = pathlib.Path(docdoc.extraction.__file__).parent
+
+#: Milestone 5 brought a second layer under the same rule, and for a sharper
+#: reason: a validator is where "just special-case invoices" is most tempting,
+#: because a cross-field rule *feels* document-specific. It is not — the rule is
+#: data in the schema, and `rules.py` evaluates four kinds without ever knowing
+#: what an invoice is (specs/005 T074).
+VALIDATION_ROOT = pathlib.Path(docdoc.validation.__file__).parent
 SCHEMAS = pathlib.Path("schemas")
 EXAMPLES = pathlib.Path("examples")
 
@@ -67,7 +75,7 @@ def _document_type_names() -> tuple[str, ...]:
 
 
 def _library_modules() -> list[pathlib.Path]:
-    return sorted(EXTRACTION_ROOT.rglob("*.py"))
+    return sorted(EXTRACTION_ROOT.rglob("*.py")) + sorted(VALIDATION_ROOT.rglob("*.py"))
 
 
 def _executable_code(path: pathlib.Path) -> str:
@@ -103,7 +111,7 @@ def _executable_code(path: pathlib.Path) -> str:
 
 def test_the_scan_is_not_vacuous() -> None:
     """A structural check that scans nothing passes for the wrong reason."""
-    assert len(_library_modules()) >= 12
+    assert len(_library_modules()) >= 24
     assert len(_document_type_names()) >= 2, (
         "at least two document types must be registered, or 'no code path names one' "
         "is trivially true"

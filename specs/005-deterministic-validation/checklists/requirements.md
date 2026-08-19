@@ -82,6 +82,27 @@ Milestones 3 and 4. The three decisions most worth challenging in review:
   `incomplete` from the *outcome*, never from the severity. A consumer filtering by severity alone sees a
   warning; a consumer branching on the verdict cannot mistake the run for a clean one.
 
+### Raised by the implementation, for review
+
+- **`value_absent` was removed from the not-evaluated vocabulary (VAL-17).** The data model listed it
+  for a constraint on a field with no value. Building it showed it cannot exist: an optional field left
+  absent would then push the verdict to `incomplete`, and nearly every real document has one — so the
+  state would stop meaning "an obligation went unchecked". The rule is now that **an obligation exists
+  only where it applies**: a constraint constrains a value, and absence is the requiredness check's
+  subject. Recorded in `data-model.md` VAL-17 and in the `ReasonCode` docstring.
+- **Milestone 3's `test_schema_hash` strategy was updated.** FR-025 makes a numeric bound on a string
+  unconstructible, and that property test drew types and constraints independently. The strategy now
+  draws them together — the same "respect the invariant rather than filter for it" shape its own
+  docstring already used for the repetition bound.
+- **`tests/unit/test_plan_tree_is_current.py` now attributes a test file to the highest layer it
+  imports**, and accepts any plan listing it. Milestone 5 added two tests of *schema-layer* behaviour
+  that import only `docdoc.extraction`; listing them in Milestone 3's plan would attribute this
+  milestone's work to a feature that predates it.
+- **`ruff`'s RUF032 autofix rewrote `Decimal(1240.10)` into `Decimal("1240.10")`** in
+  `tests/property/test_decimal_semantics.py` — silently deleting the assertion that distinguishes the
+  two. The float is now bound to a name, with a comment saying why. Worth knowing before the next
+  `--unsafe-fixes` run.
+
 ### Raised by the plan, for review
 
 - The grounding policy is folded into `options_hash` although ADR-0003's Validate row predates it and does
