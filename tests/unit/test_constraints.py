@@ -76,9 +76,26 @@ class TestPattern:
     def test_a_matching_value_passes(self) -> None:
         assert _passes({"pattern": r"INV-\d{4}"}, "INV-2026", FieldType.STRING)
 
-    def test_the_whole_value_must_match(self) -> None:
-        """FR-024 — a substring match would accept anything containing four digits."""
-        assert not _passes({"pattern": r"INV-\d{4}"}, "xxINV-2026yy", FieldType.STRING)
+    @pytest.mark.parametrize(
+        ("value", "why"),
+        [
+            ("INV-2026yy", "trailing junk"),
+            ("xxINV-2026", "leading junk"),
+            ("xxINV-2026yy", "junk on both sides"),
+        ],
+    )
+    def test_the_whole_value_must_match(self, value: str, why: str) -> None:
+        """FR-024 — a substring match would accept anything containing four digits.
+
+        The three cases are separate because the both-sides case alone does not
+        pin the property. A mutation run found that a matcher tolerating a
+        **leading** prefix survived the original test, which used
+        `"xxINV-2026yy"`: junk at the end failed it, so junk at the start was
+        never exercised. Leading is also the likelier bug — a matcher written with
+        `search` instead of `fullmatch` anchors at the end more often than at the
+        start.
+        """
+        assert not _passes({"pattern": r"INV-\d{4}"}, value, FieldType.STRING), why
 
     def test_a_newline_does_not_end_the_value(self) -> None:
         assert not _passes({"pattern": r"INV-\d{4}"}, "INV-2026\nrubbish", FieldType.STRING)

@@ -106,22 +106,90 @@ def test_the_key_is_total_for_records_at_one_anchor() -> None:
 
 
 def test_a_path_the_walk_never_produced_sorts_last_rather_than_first() -> None:
-    """A missing key must not sort at position zero, which is what `.get` would give."""
+    """A missing key must not sort at position zero, which is what `.get` would give.
+
+    **This test used to pass for the wrong reason**, and a mutation run found it.
+    It compared the stray record against `number#required` — the *first* field in
+    the walk, at position 0. Setting the missing-path position to 0 as well made
+    the two tie, the comparison fell through to `check_id`, and
+    `"rule:ghost@nowhere"` happens to sort after `"number#required"`
+    alphabetically. The assertion succeeded with the bug in place.
+
+    The fix is to compare against a record from the **middle** of the walk, and in
+    both directions, so that position is the only term that can decide.
+    """
     pair, schema = _busy()
     from docdoc.validation.enumerate import walk
 
     index = walk(schema, pair.extraction.values)
     stray = CheckRecord(
-        check_id="rule:ghost@nowhere",
+        # Deliberately alphabetically *early*, so a fall-through to `check_id`
+        # would order it before the known record rather than after it.
+        check_id="aaa:ghost@nowhere",
         field_path="nowhere",
         kind=CheckKind.RULE,
         outcome=Outcome.NOT_EVALUATED,
         reason=ReasonCode.OPERAND_ABSENT,
     )
-    known = CheckRecord(
-        check_id="number#required",
-        field_path="number",
+    middle_path = list(index.order)[len(index.order) // 2]
+    assert index.order[middle_path] > 0, "the probe must not sit at position zero"
+    middle = CheckRecord(
+        check_id=f"{middle_path}#required",
+        field_path=middle_path,
         kind=CheckKind.REQUIRED,
         outcome=Outcome.PASSED,
     )
-    assert sort_key(stray, index) > sort_key(known, index)
+
+    assert sort_key(stray, index) > sort_key(middle, index)
+    assert sort_key(middle, index) < sort_key(stray, index)
+
+    # And against the very first field too: the stray must come after everything
+    # the walk produced, not merely after most of it.
+    first_path = next(iter(index.order))
+    first = CheckRecord(
+        check_id=f"{first_path}#required",
+        field_path=first_path,
+        kind=CheckKind.REQUIRED,
+        outcome=Outcome.PASSED,
+    )
+    assert sort_key(stray, index) > sort_key(first, index)
+
+
+def test_entry_indices_order_anchors_the_walk_never_produced() -> None:
+    """T110 — the one case where the middle term of the sort key decides (FR-043).
+
+    Every anchor the four rule kinds produce is a scalar path the walk emitted, so
+    position orders it and the index is never reached. A mutation run made that
+    concrete: dropping the index term broke nothing, which left the term looking
+    like dead code.
+
+    It is not dead — it is unreached *by the current vocabulary*. A rule kind
+    anchored at `line_items[2]` itself, rather than at a field inside it, would
+    produce records that share the fallback position, and `check_id` alone would
+    then sort entry 10 before entry 2. This pins that, so the next kind added
+    inherits the ordering instead of discovering it.
+    """
+    pair, schema = _busy()
+    from docdoc.validation.enumerate import walk
+
+    index = walk(schema, pair.extraction.values)
+
+    def anchored(entry: int) -> CheckRecord:
+        # A group-level anchor: `line_items` and `line_items[0].amount` are in the
+        # walk, `line_items[0]` is not.
+        return CheckRecord(
+            check_id=f"rule:per_entry@line_items[{entry}]",
+            field_path=f"line_items[{entry}]",
+            kind=CheckKind.RULE,
+            outcome=Outcome.NOT_EVALUATED,
+            reason=ReasonCode.OPERAND_ABSENT,
+        )
+
+    second, tenth = anchored(2), anchored(10)
+    assert second.field_path not in index.order
+    assert tenth.field_path not in index.order
+
+    # Both fall back to the same position, so only the index can order them —
+    # and lexicographically `[10]` precedes `[2]`, which is what this forbids.
+    assert sort_key(second, index) < sort_key(tenth, index)
+    assert second.check_id > tenth.check_id, "the check ids alone would sort the other way"

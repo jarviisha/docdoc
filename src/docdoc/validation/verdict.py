@@ -38,10 +38,19 @@ _INDEX = re.compile(r"\[(\d+)\]")
 def sort_key(record: CheckRecord, index: ValueIndex) -> tuple[int, tuple[int, ...], str]:
     """Walk position, then entry indices, then check id (VAL-28).
 
-    The walk position already accounts for entry order, so the middle term is
-    belt and braces -- it keeps the order stable for a path the walk never
-    produced, which is how a rule anchored at a synthesised path would otherwise
-    sort by whatever ``dict.get`` returned.
+    **When the middle term decides anything.** Every anchor the current rule kinds
+    produce is a scalar path the walk already emitted, so its position orders it
+    and the index is never consulted. The term is load-bearing exactly for an
+    anchor the walk did **not** produce but which carries an index -- a rule kind
+    anchored at ``line_items[2]`` itself rather than at a field inside it, which
+    the vocabulary does not yet have. Those records all share the same fallback
+    position, and without the index they would order by ``check_id`` alone, so
+    entry 10 would sort before entry 2.
+
+    Recorded rather than removed, and pinned by
+    ``tests/unit/test_finding_order_is_total.py``: a convergence pass found that
+    dropping the term broke no test, which left a reader unable to tell dead code
+    from load-bearing code.
     """
     position = index.order.get(record.field_path)
     if position is None:
