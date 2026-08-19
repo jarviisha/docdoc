@@ -128,6 +128,128 @@ def _finding_order() -> list[str]:
     return [item.check_id for item in ordered]
 
 
+def _rule_semantics() -> dict[str, list[str]]:
+    """What each rule kind *computes*, as something a snapshot can hold.
+
+    VAL-2 says `RULE_VOCABULARY_VERSION` designates the member set **and each
+    kind's semantics**. Until a convergence pass went looking, the snapshot held
+    only the four names: changing what `sum_equals` computes would break
+    `tests/unit/test_rules.py`, a contributor would update that test to match, and
+    the change would ship with the version untouched — which is exactly the
+    review-discipline failure a snapshot exists to convert into a build failure.
+
+    Semantics are recorded as **observed outcomes**, not as source text. Each
+    fixture is chosen so its kind's answer is distinctive: a sum short by a known
+    amount, a product off by one factor, a comparison false in one direction only,
+    a conditional whose antecedent holds and whose companion is absent. A change
+    to any kind's arithmetic, anchor, or tolerance convention moves these lines.
+    """
+    from decimal import Decimal
+
+    from docdoc.extraction.schema import (
+        Cardinality,
+        FieldSpec,
+        FieldType,
+        Operator,
+        RuleKind,
+        RuleSpec,
+        Schema,
+    )
+    from docdoc.extraction.value import ExtractedValue
+    from docdoc.validation.enumerate import walk
+    from docdoc.validation.rules import check_rules
+
+    def value(path: str, payload: object, *, present: bool = True) -> ExtractedValue:
+        return ExtractedValue(field_path=path, value=payload, present=present)
+
+    schema = Schema(
+        name="semantics_probe",
+        version=1,
+        rules=(
+            RuleSpec(
+                id="sum_rule",
+                kind=RuleKind.SUM_EQUALS,
+                operands=("lines.amount", "total"),
+            ),
+            RuleSpec(
+                id="product_rule",
+                kind=RuleKind.PRODUCT_EQUALS,
+                operands=("lines.quantity", "lines.unit_price", "lines.amount"),
+            ),
+            RuleSpec(
+                id="comparison_rule",
+                kind=RuleKind.COMPARISON,
+                operands=("total", "subtotal"),
+                operator=Operator.LE,
+            ),
+            RuleSpec(
+                id="presence_rule",
+                kind=RuleKind.CONDITIONAL_PRESENCE,
+                operands=("total", "reference"),
+            ),
+        ),
+        fields=(
+            FieldSpec(name="total", type=FieldType.DECIMAL),
+            FieldSpec(name="subtotal", type=FieldType.DECIMAL),
+            FieldSpec(name="reference", type=FieldType.STRING),
+            FieldSpec(
+                name="lines",
+                cardinality=Cardinality.REPEATING_GROUP,
+                fields=(
+                    FieldSpec(name="quantity", type=FieldType.INTEGER),
+                    FieldSpec(name="unit_price", type=FieldType.DECIMAL),
+                    FieldSpec(name="amount", type=FieldType.DECIMAL),
+                ),
+            ),
+        ),
+    )
+    values = {
+        # 100.00 short of the two lines: distinctive, so a sum over the wrong
+        # operand or a different anchor changes the recorded numbers.
+        "total": value("total", Decimal("200.00")),
+        # Below the total, so `total <= subtotal` is false in exactly one
+        # direction — flipping the comparison flips this line.
+        "subtotal": value("subtotal", Decimal("150.00")),
+        # Absent, so the conditional fires and fails rather than passing vacuously.
+        "reference": value("reference", None, present=False),
+        "lines": (
+            {
+                "quantity": value("lines[0].quantity", 2),
+                "unit_price": value("lines[0].unit_price", Decimal("50.00")),
+                # 100.00, so the product is right on this entry...
+                "amount": value("lines[0].amount", Decimal("100.00")),
+            },
+            {
+                "quantity": value("lines[1].quantity", 4),
+                "unit_price": value("lines[1].unit_price", Decimal("50.00")),
+                # ...and wrong on this one: 4 x 50.00 is 200.00, not 150.00. The
+                # first draft of this fixture stated 200.00 and therefore passed,
+                # which the snapshot caught on its first run — a reminder that a
+                # fixture meant to be wrong has to be checked as carefully as the
+                # code it pins.
+                "amount": value("lines[1].amount", Decimal("150.00")),
+            },
+        ),
+    }
+    index = walk(schema, values)
+    records = check_rules(schema, index, enabled=None)
+    return {
+        "outcomes": [
+            "|".join(
+                (
+                    item.check_id,
+                    str(item.outcome),
+                    str(item.reason) if item.reason else "-",
+                    item.expected or "-",
+                    item.actual or "-",
+                )
+            )
+            for item in records
+        ],
+        "participants": [f"{item.check_id}: {','.join(item.participants)}" for item in records],
+    }
+
+
 def observed() -> dict[str, object]:
     policy = GroundingPolicy()
     return {
@@ -161,6 +283,8 @@ def observed() -> dict[str, object]:
         ],
         "verdict_truth_table": _verdict_truth_table(),
         "finding_order": _finding_order(),
+        # What each kind *computes*, not only what it is called (VAL-2).
+        "rule_semantics": _rule_semantics(),
         # The *shape* of what a consumer reads. Adding or removing a field changes
         # the output for unchanged inputs, which FR-050 says moves the version --
         # and `Finding.rule_id` is the case that taught this snapshot to hold it.
@@ -182,6 +306,10 @@ def test_the_snapshot_is_not_vacuous() -> None:
     assert len(recorded["verdict_truth_table"]) >= 8
     assert len(recorded["finding_order"]) >= 6
     assert "rule_id" in recorded["finding_fields"]
+    semantics = recorded["rule_semantics"]
+    assert len(semantics["outcomes"]) >= 5, "every kind must contribute an observed outcome"
+    assert any("passed" in line for line in semantics["outcomes"])
+    assert any("failed" in line for line in semantics["outcomes"])
 
 
 if __name__ == "__main__":  # pragma: no cover - the documented refresh path

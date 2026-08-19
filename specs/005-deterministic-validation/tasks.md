@@ -331,3 +331,40 @@ did not follow.
 - [X] T100 Bring `specs/005-deterministic-validation/data-model.md` up to date with what §6 and §12 now describe (partial). §6's `Finding` table has no `rule_id`, though the field exists, is in the contract, and moved `VALIDATOR_VERSION` to `1.1.0` when it was added — add the row and record why a new field moves the version. §12's error-model table still says `SchemaError` comes from `docdoc.extraction`; since Phase 8 a pattern outside the dialect and, since Phase 9, every unreadable constraint declaration are raised from `docdoc.validation`'s entry point instead, for the layering reason in plan design decision 6. Split the row by *where* it is raised rather than leaving one row that is now half wrong. Also add the `value_absent` correction's companion: VAL-17 records it, §12 does not
 - [X] T101 [P] Document the authoring errors a schema author actually meets, in `docs/concepts/validation.md` (partial). The doc explains that a *rule* that cannot work is refused at load; it says nothing about a *constraint declaration* that cannot be read — which is the class Phase 9 added and the one an author is most likely to hit. Name the cases in the author's own terms: `"enum": "EUR"` (a missing pair of brackets, which would otherwise reject the value it names), `"max_length": "abc"`, `"minimum": null`, `"multiple_of": 0`. State the principle behind them once — a constraint that cannot be evaluated is refused rather than allowed to pass silently, because a check that always passes is a rule that lies (FR-019, SC-005)
 - [X] T102 [P] Assert the last untested edge case from the spec, in `tests/unit/test_required_checks.py` (partial): a **required repeating group with zero entries**. Verified by hand during convergence — one finding on the group, zero per-entry checks, no double report — and asserted nowhere. It is the intersection of FR-016 (a required field inside a group is checked once per entry) and FR-017 (an absent group is one finding, not one per field), and the interesting part is that with zero entries the two rules must not both fire
+
+---
+
+## Phase 11: Convergence (fourth pass)
+
+Two mechanical sweeps nobody had run: every file path named in this feature's artifacts, and
+every `FR-`/`SC-` reference made from the validation package, its tests, and the concepts doc.
+The second came back clean — **zero dangling requirement references**. The first found three
+named test files that do not exist, and one of them was hiding a real gap.
+
+**T103 is the third instance of one pattern.** A version constant's *stated* scope keeps being
+wider than what the check enforcing it actually holds. `VALIDATOR_VERSION` had that gap for the
+finding order (closed in Phase 8) and for the shape of a `Finding` (closed in Phase 9).
+`RULE_VOCABULARY_VERSION` still has it: VAL-2 says the constant designates the member set **and
+each kind's semantics**, while the snapshot pins only four names and a version string.
+
+- [X] T103 Pin each rule kind's **semantics** in `tests/unit/test_validator_version_snapshot.py`, per VAL-2 and FR-027 (partial). Today changing what `sum_equals` computes breaks `tests/unit/test_rules.py`, a contributor updates that test, and the change ships with `RULE_VOCABULARY_VERSION` untouched — which is exactly the review-discipline failure the snapshot exists to convert into a build failure. Record semantics as *observed outcomes* rather than as source text: build one fixed schema and value tree per kind, chosen so each kind's answer is distinctive (a sum that is short by a known amount, a product off by one factor, a comparison that is false in one direction only, a conditional whose antecedent is true and whose companion is absent), evaluate them, and snapshot the resulting `(check_id, outcome, reason, expected, actual)` tuples. A change to any kind's arithmetic, anchor, or tolerance convention then moves the snapshot, and clearing it means bumping the version and saying so
+- [X] T104 [P] Record where three tasks' coverage actually lives, in `specs/005-deterministic-validation/tasks.md` under this phase (partial). T052, T070, and T074 each name a test file that was never created because the coverage was folded into a neighbouring file: the rule-vocabulary snapshot into `tests/unit/test_validator_version_snapshot.py` (and completed by T103), the re-validation immutability tests into `tests/unit/test_validation_reads_no_document.py::TestRevalidation`, and the document-type check into the *extended* `tests/unit/test_extraction_has_no_document_type_code.py`, which now scans both layers. Folding was right in each case — three one-assertion files would be worse than three classes — but a reviewer following a task to its named file finds nothing there and reasonably concludes the task was skipped. Add the note here rather than editing the original tasks, which stay as the record of what was asked
+
+### Where three tasks' coverage actually lives (T104)
+
+T052, T070, and T074 each name a test file that was never created, because the coverage was
+folded into a neighbouring file. Folding was right in each case — three one-assertion files
+would be worse than three classes in files that already exist — but a reviewer following a task
+to its named file finds nothing and reasonably concludes the task was skipped. The original
+tasks are left as written: they are the record of what was asked.
+
+| Task | File it names | Where the coverage is |
+|---|---|---|
+| T052 | `tests/unit/test_rule_vocabulary_snapshot.py` | `tests/unit/test_validator_version_snapshot.py` — `RULE_VOCABULARY_VERSION`, the member set, and (since T103) each kind's semantics as observed outcomes |
+| T070 | `tests/unit/test_revalidation_is_immutable.py` | `tests/unit/test_validation_reads_no_document.py::TestRevalidation` — three tests: both results exist, the result is frozen, re-validating under new options leaves the old one alone |
+| T074 | `tests/unit/test_validation_has_no_document_type_code.py` | `tests/unit/test_extraction_has_no_document_type_code.py` — extended to scan `src/docdoc/validation/` as well, so one check covers both layers and `VALIDATION_ROOT` is named in it |
+
+**Why the snapshot ended up as one file rather than two.** `RULE_VOCABULARY_VERSION` and
+`VALIDATOR_VERSION` are pinned by the same mechanism against the same JSON snapshot, and a
+contributor who trips one needs to read the remedy for both. Splitting them would have meant two
+snapshots that must be refreshed together and one remedy message that has to explain the other file.
