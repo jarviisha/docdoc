@@ -134,6 +134,7 @@ def assemble(
                 expected=item.expected,
                 actual=item.actual,
                 participants=item.participants,
+                rule_id=item.rule_id,
                 span=located.span if located is not None else None,
                 pages=located.pages if located is not None else (),
                 geometry=located.geometry if located is not None else None,

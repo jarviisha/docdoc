@@ -8,6 +8,8 @@ what this milestone exists to make impossible (FR-025, FR-029, FR-056, SC-014).
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 from pydantic import ValidationError
 
@@ -106,3 +108,73 @@ class TestConstraints:
             fields=(lines.model_copy(update={"constraints": {"min_length": 1}}),),
         )
         assert schema.field_at("line_items").constraints == {"min_length": 1}
+
+
+class TestMalformedDeclarations:
+    """T093 — a constraint whose *value* cannot be evaluated (FR-019, SC-005).
+
+    The key and its type domain were already checked. The value was not, and the
+    failure mode was the quiet one: an unparseable `minimum` made the comparison
+    impossible, and an impossible comparison reported `passed` for every value —
+    the same defect SC-005 prevents for keys, one level in.
+
+    One of these was not quiet. `{"max_length": "abc"}` reached `int()` while a
+    document was being checked and escaped as a bare `ValueError`, which is the
+    error-model contradiction FR-054 names.
+    """
+
+    @pytest.mark.parametrize(
+        ("reason", "field_type", "constraints"),
+        schema_fixtures.MALFORMED_DECLARATIONS,
+        ids=[reason for reason, _, _ in schema_fixtures.MALFORMED_DECLARATIONS],
+    )
+    def test_it_is_refused_at_load(self, reason: str, field_type, constraints: dict) -> None:
+        with pytest.raises(SchemaError) as caught:
+            schema_fixtures.constraint_schema(constraints, field_type=field_type)
+        assert caught.value.field_path == "probe"
+        assert next(iter(constraints)) in str(caught.value)
+
+    def test_an_enum_as_a_string_would_have_rejected_the_value_it_names(self) -> None:
+        """The slip that motivates the check, stated as the damage it does.
+
+        `{"enum": "EUR"}` is a missing pair of brackets. Read as a list it becomes
+        `['E', 'U', 'R']`, so the schema rejects exactly the value its author
+        wrote it to accept — silently, and on every document.
+        """
+        assert list("EUR") == ["E", "U", "R"]
+        with pytest.raises(SchemaError, match="non-empty list"):
+            schema_fixtures.constraint_schema({"enum": "EUR"})
+
+    def test_a_single_member_enum_still_loads(self) -> None:
+        """The negative half: a one-item list is a legitimate enum, not a slip."""
+        schema = schema_fixtures.constraint_schema({"enum": ["EUR"]})
+        assert schema.field_at("probe").constraints == {"enum": ["EUR"]}
+
+    def test_no_evaluator_reports_passed_for_a_declaration_it_cannot_read(self) -> None:
+        """The property behind the whole list, asserted at the evaluator.
+
+        Reaching an evaluator with an unreadable declaration should be impossible
+        after the load-time check — so if the two layers ever disagree, the
+        evaluator raises rather than reporting a check that was never made.
+        """
+        from docdoc.extraction.schema import FieldSpec, FieldType
+        from docdoc.validation.constraints import check_constraints
+        from docdoc.validation.enumerate import Slot
+        from tests.support import make_extracted
+
+        for constraints, value in (
+            ({"minimum": "not-a-number"}, Decimal("-5")),
+            ({"maximum": None}, Decimal("9999")),
+            ({"multiple_of": "abc"}, Decimal("1.23")),
+        ):
+            field = FieldSpec.model_construct(
+                name="probe", type=FieldType.DECIMAL, constraints=constraints
+            )
+            slot = Slot(path="probe", field=field, value=make_extracted("probe", value=value))
+            with pytest.raises(SchemaError):
+                check_constraints(slot)
+
+    def test_a_well_formed_declaration_of_every_key_still_loads(self) -> None:
+        """SC-005 from the other side: the check must not refuse legitimate schemas."""
+        for key, (field_type, constraints) in schema_fixtures.EVERY_CONSTRAINT_KEY.items():
+            assert schema_fixtures.constraint_schema(constraints, field_type=field_type), key

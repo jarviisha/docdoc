@@ -131,6 +131,7 @@ def _sum_equals(schema: Schema, rule: RuleSpec, index: ValueIndex) -> CheckRecor
             CheckKind.RULE,
             reason=missing or ReasonCode.OPERAND_ABSENT,
             participants=participants,
+            rule_id=rule.id,
             message=f"rule {rule.id!r} cannot run: {total_path!r} has no value",
         )
 
@@ -159,6 +160,7 @@ def _sum_equals(schema: Schema, rule: RuleSpec, index: ValueIndex) -> CheckRecor
         CheckKind.RULE,
         reason=ReasonCode.SUM_MISMATCH,
         severity=_severity(rule),
+        rule_id=rule.id,
         expected=render(running),
         actual=render(total),
         participants=participants,
@@ -210,6 +212,7 @@ def _product_equals(
         CheckKind.RULE,
         reason=ReasonCode.PRODUCT_MISMATCH,
         severity=_severity(rule),
+        rule_id=rule.id,
         expected=render(computed),
         actual=render(stated),
         participants=participants,
@@ -238,6 +241,7 @@ def _comparison(
                 CheckKind.RULE,
                 reason=ReasonCode.OPERAND_GROUP_ABSENT,
                 participants=participants,
+                rule_id=rule.id,
                 message=f"rule {rule.id!r} cannot run: {path!r} is not in this result",
             )
         if not found.present:
@@ -247,6 +251,7 @@ def _comparison(
                 CheckKind.RULE,
                 reason=ReasonCode.OPERAND_ABSENT,
                 participants=participants,
+                rule_id=rule.id,
                 message=f"rule {rule.id!r} cannot run: {path!r} has no value",
             )
         values.append(found.value)
@@ -267,6 +272,7 @@ def _comparison(
             CheckKind.RULE,
             reason=ReasonCode.TYPE_MISMATCH,
             participants=participants,
+            rule_id=rule.id,
             message=f"rule {rule.id!r} cannot compare {type(left).__name__} with "
             f"{type(right).__name__}",
         )
@@ -278,6 +284,7 @@ def _comparison(
         CheckKind.RULE,
         reason=ReasonCode.COMPARISON_FAILED,
         severity=_severity(rule),
+        rule_id=rule.id,
         expected=f"{left_path} {rule.operator} {right_path} ({render(right)})",
         actual=render(left),
         participants=participants,
@@ -318,6 +325,7 @@ def _conditional_presence(
         CheckKind.RULE,
         reason=ReasonCode.COMPANION_MISSING,
         severity=_severity(rule),
+        rule_id=rule.id,
         expected=f"a value at {companion_path}",
         actual="absent",
         participants=participants,

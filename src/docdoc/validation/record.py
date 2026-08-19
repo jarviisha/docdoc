@@ -36,6 +36,10 @@ class CheckRecord:
     participants: tuple[str, ...] = field(default_factory=tuple)
     message: str = ""
 
+    #: Set by the rule engine so a finding can name its rule without anyone
+    #: parsing ``check_id`` (FR-028, FR-039).
+    rule_id: str | None = None
+
 
 def passed(check_id: str, field_path: str, kind: CheckKind) -> CheckRecord:
     return CheckRecord(check_id=check_id, field_path=field_path, kind=kind, outcome=Outcome.PASSED)
@@ -52,6 +56,7 @@ def failed(
     actual: str | None = None,
     participants: tuple[str, ...] = (),
     message: str = "",
+    rule_id: str | None = None,
 ) -> CheckRecord:
     return CheckRecord(
         check_id=check_id,
@@ -64,6 +69,7 @@ def failed(
         actual=actual,
         participants=participants or (field_path,),
         message=message,
+        rule_id=rule_id,
     )
 
 
@@ -75,6 +81,7 @@ def not_evaluated(
     reason: ReasonCode,
     participants: tuple[str, ...] = (),
     message: str = "",
+    rule_id: str | None = None,
 ) -> CheckRecord:
     """A check that could not run.
 
@@ -94,4 +101,5 @@ def not_evaluated(
         severity=Severity.WARNING,
         participants=participants or (field_path,),
         message=message,
+        rule_id=rule_id,
     )

@@ -147,6 +147,7 @@ for finding in result.findings:
     finding.expected       # "1420.00"
     finding.actual         # "1240.00"
     finding.participants   # every field the check read
+    finding.rule_id        # the rule it came from, or None
     finding.span           # copied from the grounding outcome
     finding.pages
     finding.geometry

@@ -22,7 +22,7 @@ from docdoc.validation import Severity, Verdict
 from docdoc.validation.identity import VALIDATOR_ID, VALIDATOR_VERSION
 from docdoc.validation.options import GroundingPolicy
 from docdoc.validation.record import failed, not_evaluated, passed
-from docdoc.validation.result import CheckKind, Outcome, ReasonCode
+from docdoc.validation.result import CheckKind, CheckOutcome, Finding, Outcome, ReasonCode
 from docdoc.validation.rules import RULE_VOCABULARY_VERSION
 from docdoc.validation.verdict import derive_verdict
 
@@ -161,6 +161,11 @@ def observed() -> dict[str, object]:
         ],
         "verdict_truth_table": _verdict_truth_table(),
         "finding_order": _finding_order(),
+        # The *shape* of what a consumer reads. Adding or removing a field changes
+        # the output for unchanged inputs, which FR-050 says moves the version --
+        # and `Finding.rule_id` is the case that taught this snapshot to hold it.
+        "finding_fields": sorted(Finding.model_fields),
+        "check_outcome_fields": sorted(CheckOutcome.model_fields),
     }
 
 
@@ -176,6 +181,7 @@ def test_the_snapshot_is_not_vacuous() -> None:
     assert len(recorded["reason_codes"]) >= 15
     assert len(recorded["verdict_truth_table"]) >= 8
     assert len(recorded["finding_order"]) >= 6
+    assert "rule_id" in recorded["finding_fields"]
 
 
 if __name__ == "__main__":  # pragma: no cover - the documented refresh path

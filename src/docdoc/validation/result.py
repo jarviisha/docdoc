@@ -164,6 +164,15 @@ class Finding(BaseModel):
     reason: ReasonCode
     severity: Severity
 
+    #: The rule this finding came from, for a `rule` check; ``None`` otherwise.
+    #:
+    #: The id is also inside ``check_id`` (``rule:<id>@<anchor>``), and that was
+    #: the only way to reach it until a convergence pass pointed out what that
+    #: costs: a consumer grouping findings by rule had to split a composite
+    #: string. FR-039's whole point is that no machine should have to parse
+    #: anything, so the id is a field (FR-028).
+    rule_id: str | None = None
+
     #: Rendered canonically, so two runs produce the same text for the same fact.
     expected: str | None = None
     actual: str | None = None

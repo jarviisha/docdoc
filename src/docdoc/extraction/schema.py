@@ -27,7 +27,8 @@ work. It does not know what any rule *means*, and nothing here evaluates one.
 from __future__ import annotations
 
 import re
-from decimal import Decimal
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Any
 
@@ -398,7 +399,9 @@ class Schema(BaseModel):
             field = self.field_at(path)
             assert field is not None
             for key in sorted(field.constraints):
-                _check_constraint_domain(field, key, path=path, identity=self.identity)
+                _check_constraint_domain(
+                    field, key, field.constraints[key], path=path, identity=self.identity
+                )
         return self
 
     @model_validator(mode="after")
@@ -479,8 +482,10 @@ class Schema(BaseModel):
         return None
 
 
-def _check_constraint_domain(field: FieldSpec, key: str, *, path: str, identity: str) -> None:
-    """One constraint key against one field's declared type (FR-025)."""
+def _check_constraint_domain(
+    field: FieldSpec, key: str, declared: Any, *, path: str, identity: str
+) -> None:
+    """One constraint key against one field's declared type (FR-025), then its value."""
     is_length = key in ("min_length", "max_length")
     if field.cardinality is Cardinality.REPEATING_GROUP:
         # A length bound on a repeating group counts entries, which is the one
@@ -510,6 +515,147 @@ def _check_constraint_domain(field: FieldSpec, key: str, *, path: str, identity:
             identity=identity,
             field_path=path,
         )
+    _check_constraint_value(field, key, declared, path=path, identity=identity)
+
+
+def _check_constraint_value(
+    field: FieldSpec, key: str, declared: Any, *, path: str, identity: str
+) -> None:
+    """The declared *value* of a constraint, not only its key (FR-019, SC-005).
+
+    The key and its type domain were already checked. What was not, until a
+    convergence pass went looking, is whether the declared value can be evaluated
+    at all -- and the failure mode was the worse one. ``{"minimum": "not a
+    number"}`` did not crash: the evaluator could not parse the declaration, and
+    a comparison it cannot make reported **passed**. A constraint that always
+    passes is a rule that lies, which is the exact defect this milestone exists
+    to end, one level in from the keys SC-005 protects.
+
+    Unlike the pattern dialect, none of this needs the validation layer: whether
+    a bound parses as a number, and whether an enum is a list, are questions about
+    data. So they are answered here, beside the key and the domain.
+    """
+    if key == "enum":
+        if not isinstance(declared, (list, tuple)) or not declared:
+            raise SchemaError(
+                f"constraint 'enum' on {path!r} must be a non-empty list, got "
+                f"{type(declared).__name__}. A bare string is the usual slip and is "
+                "the worst case: it would be read as a list of its characters, so the "
+                "schema would reject the very value it was written to accept",
+                identity=identity,
+                field_path=path,
+            )
+        return
+    if key == "const":
+        if isinstance(declared, (list, tuple, dict, set)) or declared is None:
+            raise SchemaError(
+                f"constraint 'const' on {path!r} must be a single value, got "
+                f"{type(declared).__name__}",
+                identity=identity,
+                field_path=path,
+            )
+        return
+    if key == "pattern":
+        # The *dialect* is the validation layer's to judge; that it is text at all
+        # is this layer's.
+        if not isinstance(declared, str):
+            raise SchemaError(
+                f"constraint 'pattern' on {path!r} must be a string, got {type(declared).__name__}",
+                identity=identity,
+                field_path=path,
+            )
+        return
+    if key in ("min_length", "max_length"):
+        _check_length_bound(declared, key, path=path, identity=identity)
+        return
+    _check_numeric_bound(field, declared, key, path=path, identity=identity)
+
+
+def _check_length_bound(declared: Any, key: str, *, path: str, identity: str) -> None:
+    """A length bound is a whole, non-negative count.
+
+    A float is rejected rather than truncated: ``{"max_length": 3.7}`` silently
+    became 3, so a value of four characters failed a bound its author never
+    wrote. A numeric string is rejected for a blunter reason -- it used to reach
+    ``int()`` mid-validation and escape as a bare ``ValueError``.
+    """
+    if isinstance(declared, bool) or not isinstance(declared, int):
+        raise SchemaError(
+            f"constraint {key!r} on {path!r} must be a whole number, got "
+            f"{type(declared).__name__} ({declared!r}). A float would be truncated and a "
+            "string would fail while a value was being checked, neither of which is what "
+            "the author asked for",
+            identity=identity,
+            field_path=path,
+        )
+    if declared < 0:
+        raise SchemaError(
+            f"constraint {key!r} on {path!r} is negative ({declared}). No value has a "
+            "length below zero, so the bound could never do anything",
+            identity=identity,
+            field_path=path,
+        )
+
+
+def _check_numeric_bound(
+    field: FieldSpec, declared: Any, key: str, *, path: str, identity: str
+) -> None:
+    """``minimum``, ``maximum``, and ``multiple_of`` -- parseable in the field's own type."""
+    if field.type in TEMPORAL_TYPES:
+        if not isinstance(declared, str) or not _parses_as_temporal(declared, field.type):
+            raise SchemaError(
+                f"constraint {key!r} on {path!r} must be an ISO-8601 {field.type}, got "
+                f"{declared!r}. A bound the comparison cannot read would be a check that "
+                "never fails",
+                identity=identity,
+                field_path=path,
+            )
+        return
+    parsed = _parses_as_decimal(declared)
+    if parsed is None:
+        raise SchemaError(
+            f"constraint {key!r} on {path!r} must be a number, got "
+            f"{type(declared).__name__} ({declared!r}). An unparseable bound is worse "
+            "than a wrong one: the comparison cannot be made, so the check passes for "
+            "every value",
+            identity=identity,
+            field_path=path,
+        )
+    if key == "multiple_of" and parsed == 0:
+        raise SchemaError(
+            f"constraint 'multiple_of' on {path!r} is zero. Every number is a multiple "
+            "of zero only by convention, and no author means that",
+            identity=identity,
+            field_path=path,
+        )
+
+
+def _parses_as_decimal(declared: Any) -> Decimal | None:
+    if isinstance(declared, bool) or declared is None:
+        return None
+    if isinstance(declared, Decimal):
+        return declared
+    if isinstance(declared, int):
+        return Decimal(declared)
+    if isinstance(declared, float):
+        return Decimal(str(declared))
+    if isinstance(declared, str):
+        try:
+            return Decimal(declared)
+        except InvalidOperation:
+            return None
+    return None
+
+
+def _parses_as_temporal(declared: str, kind: FieldType | None) -> bool:
+    try:
+        if kind is FieldType.DATETIME:
+            datetime.fromisoformat(declared)
+        else:
+            date.fromisoformat(declared)
+    except ValueError:
+        return False
+    return True
 
 
 def _check_rule_scoping(rule: RuleSpec, groups: list[str | None], *, identity: str) -> None:

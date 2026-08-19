@@ -258,18 +258,29 @@ def _bound(declared: Any, value: Any, *, low: bool) -> Failure:
 
     Dates compare as dates and numbers as exact decimals; nothing is coerced
     across the two, because the schema layer already refused a bound whose type
-    could not carry it (FR-025).
+    could not carry it (FR-025) and whose value could not be read (FR-019).
+
+    **There is no "cannot parse the declaration, so pass" path here any more.**
+    There used to be, and it was the quietest bug in the milestone: an
+    unparseable ``minimum`` made the comparison impossible, and an impossible
+    comparison reported *passed* for every value. The declaration is now checked
+    at schema load, so reaching the raise below means the two layers disagree —
+    which is worth an exception rather than a verdict.
     """
     limit: date | datetime | Decimal
     if isinstance(value, (date, datetime)):
         temporal = _temporal(declared, value)
         if temporal is None:
-            return None
+            return _unreadable_declaration(declared, value)
         limit = temporal
         satisfied = value >= temporal if low else value <= temporal
     else:
         left, right = as_decimal(value), as_decimal(declared) or _decimal(str(declared))
-        if left is None or right is None:
+        if right is None:
+            return _unreadable_declaration(declared, value)
+        if left is None:
+            # The *value* is not numeric, which is a fact about the document
+            # rather than about the schema: the bound cannot apply to it.
             return None
         limit = right
         satisfied = left >= right if low else left <= right
@@ -297,8 +308,10 @@ def _temporal(declared: Any, value: date | datetime) -> date | datetime | None:
 
 def _multiple_of(declared: Any, value: Any, field: FieldSpec) -> Failure:
     step = as_decimal(declared) or _decimal(str(declared))
+    if step is None or step == 0:
+        return _unreadable_declaration(declared, value)
     amount = as_decimal(value)
-    if step is None or amount is None or step == 0:
+    if amount is None:
         return None
     remainder = amount % step
     # Exact decimal remainder, and compared against zero with a zero tolerance:
@@ -307,6 +320,21 @@ def _multiple_of(declared: Any, value: Any, field: FieldSpec) -> Failure:
     if within_tolerance(remainder, Decimal(0), Decimal(0)):
         return None
     return ReasonCode.NOT_A_MULTIPLE, f"a multiple of {render(step)}", render(value)
+
+
+def _unreadable_declaration(declared: Any, value: Any) -> Failure:
+    """A declaration the schema layer should already have refused.
+
+    Raising rather than returning "satisfied" is the whole correction: a check
+    that cannot be made must never report that it was made and passed. It is a
+    `SchemaError` because the fault is in the schema, not in the document.
+    """
+    raise SchemaError(
+        f"a constraint declares {declared!r}, which cannot be compared against "
+        f"{type(value).__name__}. The schema layer refuses this at load, so reaching "
+        "here means the two layers disagree — and a comparison that cannot be made "
+        "must not be reported as one that passed"
+    )
 
 
 def _min_length(declared: Any, value: Any, field: FieldSpec) -> Failure:
@@ -325,6 +353,8 @@ def _length(declared: Any, value: Any, *, low: bool) -> Failure:
     #: scripts, and not grapheme clusters, which would need a dependency and a
     #: version of their own. Documented wherever the bound is exposed.
     size = len(value)
+    # Checked at schema load: a whole, non-negative count. No `int()` of a string
+    # here — that used to escape as a bare `ValueError` mid-validation.
     bound = int(declared)
     if (size >= bound) if low else (size <= bound):
         return None

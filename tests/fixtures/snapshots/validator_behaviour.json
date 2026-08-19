@@ -11,6 +11,13 @@
     "required",
     "rule"
   ],
+  "check_outcome_fields": [
+    "check_id",
+    "field_path",
+    "kind",
+    "outcome",
+    "reason"
+  ],
   "default_grounding_policy": {
     "exact": null,
     "fuzzy": "info",
@@ -22,6 +29,21 @@
     "required": "error",
     "rule": "error"
   },
+  "finding_fields": [
+    "actual",
+    "check_id",
+    "expected",
+    "field_path",
+    "geometry",
+    "kind",
+    "message",
+    "pages",
+    "participants",
+    "reason",
+    "rule_id",
+    "severity",
+    "span"
+  ],
   "finding_order": [
     "alpha#grounding",
     "alpha#required",
@@ -68,7 +90,7 @@
     "warning"
   ],
   "validator_id": "deterministic-validator",
-  "validator_version": "1.0.0",
+  "validator_version": "1.1.0",
   "verdict_truth_table": {
     "error": "invalid",
     "error+not_evaluated": "invalid",

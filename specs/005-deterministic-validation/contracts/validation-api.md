@@ -57,8 +57,10 @@ result.findings   # tuple[Finding, ...]      — the non-passing ones, in a tota
 is derived from the first, so they cannot disagree.
 
 A finding carries the field path, the check id, a closed reason code, the severity, the declared
-expectation, the actual value, every participating field, and — where the value grounded — the span,
-pages, and boxes **copied from the grounding outcome** (FR-038). A validation failure is therefore
+expectation, the actual value, every participating field, the `rule_id` where the check came from a
+rule, and — where the value grounded — the span, pages, and boxes **copied from the grounding
+outcome** (FR-038). `check_id` also embeds the rule id, but nothing should have to parse it: grouping
+findings by rule reads `finding.rule_id`. A validation failure is therefore
 something a reviewer can be shown on the page, not merely told about.
 
 ```python

@@ -64,6 +64,33 @@ INCOMPATIBLE_PAIRINGS: tuple[tuple[str, FieldType, dict[str, Any]], ...] = (
 )
 
 
+#: Declarations whose *value* cannot be evaluated (FR-019, SC-005).
+#:
+#: Distinct from `INCOMPATIBLE_PAIRINGS` above, which is about the key against
+#: the field's type. These are well-matched keys carrying nonsense — and until a
+#: convergence pass went looking, most of them did not raise: the evaluator could
+#: not read the declaration, so the comparison could not be made, so the check
+#: reported **passed** for every value. A constraint that always passes is a rule
+#: that lies, and this list is what stops one being written.
+MALFORMED_DECLARATIONS: tuple[tuple[str, FieldType, dict[str, Any]], ...] = (
+    ("an unparseable numeric bound", FieldType.DECIMAL, {"minimum": "not-a-number"}),
+    ("a null bound", FieldType.DECIMAL, {"maximum": None}),
+    ("a boolean bound", FieldType.DECIMAL, {"minimum": True}),
+    ("an unparseable multiple", FieldType.DECIMAL, {"multiple_of": "abc"}),
+    ("a multiple of zero", FieldType.DECIMAL, {"multiple_of": 0}),
+    ("an unparseable date bound", FieldType.DATE, {"minimum": "not-a-date"}),
+    ("a date bound that is not a string", FieldType.DATE, {"maximum": 2026}),
+    ("a length bound as a string", FieldType.STRING, {"max_length": "abc"}),
+    ("a fractional length bound", FieldType.STRING, {"min_length": 3.7}),
+    ("a negative length bound", FieldType.STRING, {"min_length": -1}),
+    ("an enum as a bare string", FieldType.STRING, {"enum": "EUR"}),
+    ("an empty enum", FieldType.STRING, {"enum": []}),
+    ("a const as a list", FieldType.STRING, {"const": ["EUR"]}),
+    ("a null const", FieldType.STRING, {"const": None}),
+    ("a pattern that is not text", FieldType.STRING, {"pattern": 42}),
+)
+
+
 def invoice_schema(*, rules: tuple[Any, ...] = ()) -> Schema:
     """A realistic invoice: scalars, a group, a repeating group, and every kind of constraint.
 

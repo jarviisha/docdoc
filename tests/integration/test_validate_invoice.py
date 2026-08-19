@@ -143,3 +143,73 @@ class TestArithmetic:
         pair = artifacts.build(schema=schema, total="1420.0000")
         assert pair.extraction.values["total"].value == Decimal("1420.0000")
         assert validate(pair.extraction, pair.grounding, schema).verdict is Verdict.VALID
+
+
+class TestBoringAnswers:
+    """The spec's Edge Cases, which are only boring until something raises.
+
+    "A schema that declares no fields, and one that declares fields but no
+    constraints and no rules: a valid verdict with zero findings and zero checks,
+    not an error and not a refusal."
+    """
+
+    @staticmethod
+    def _validated(schema):
+        from tests.support import make_document, make_extraction
+
+        from docdoc.extraction.identity import schema_hash_for
+        from docdoc.grounding import ground
+
+        document = make_document("nothing to see here\n")
+        extraction = make_extraction(
+            {},
+            document=document,
+            schema_identity=schema.identity,
+            schema_hash=schema_hash_for(schema),
+        )
+        return validate(extraction, ground(document, extraction), schema)
+
+    def test_a_schema_that_declares_nothing_is_valid(self) -> None:
+        from docdoc.extraction.schema import Schema
+
+        result = self._validated(Schema(name="empty_probe", version=1))
+        assert result.verdict is Verdict.VALID
+        assert result.checks == ()
+        assert result.findings == ()
+        assert result.counts.declared == 0
+
+    def test_it_still_records_its_provenance_and_identity(self) -> None:
+        """A boring verdict is still a verdict, and still has to be explainable."""
+        from docdoc.extraction.schema import Schema
+
+        result = self._validated(Schema(name="empty_probe", version=1))
+        assert result.artifact_id.startswith("sha256:")
+        assert result.provenance.validator_version
+        assert result.provenance.enabled_rules == ()
+
+    def test_a_schema_with_fields_but_no_obligations_is_valid(self) -> None:
+        """Fields with no `required`, no constraints, and no rules ask nothing."""
+        from tests.support import make_extracted
+
+        from docdoc.extraction.schema import FieldSpec, FieldType, Schema
+
+        schema = Schema(
+            name="lax_probe",
+            version=1,
+            fields=(FieldSpec(name="anything", type=FieldType.STRING),),
+        )
+        from tests.support import make_document, make_extraction
+
+        from docdoc.extraction.identity import schema_hash_for
+        from docdoc.grounding import ground
+
+        document = make_document("nothing to see here\n")
+        extraction = make_extraction(
+            {"anything": make_extracted("anything", present=False)},
+            document=document,
+            schema_identity=schema.identity,
+            schema_hash=schema_hash_for(schema),
+        )
+        result = validate(extraction, ground(document, extraction), schema)
+        assert result.verdict is Verdict.VALID
+        assert result.counts.declared == 0

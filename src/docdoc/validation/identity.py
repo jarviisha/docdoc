@@ -46,9 +46,14 @@ VALIDATOR_ID = "deterministic-validator"
 
 #: Moves whenever output changes for unchanged inputs -- which here means the
 #: semantics of any check, a documented default severity, the verdict
-#: derivation, or the finding order. ``tests/unit/test_validator_version_snapshot.py``
-#: is what makes that a build failure rather than a review obligation (FR-050).
-VALIDATOR_VERSION = "1.0.0"
+#: derivation, the finding order, or the shape of a finding.
+#: ``tests/unit/test_validator_version_snapshot.py`` is what makes that a build
+#: failure rather than a review obligation (FR-050).
+#:
+#: ``1.1.0`` added ``Finding.rule_id``. A new field changes the output for
+#: unchanged inputs, so it moves this number even though no verdict changed --
+#: which is the rule taken literally rather than only when it is inconvenient.
+VALIDATOR_VERSION = "1.1.0"
 
 
 def options_hash_for_validation(

@@ -73,6 +73,30 @@ the page the total was read from.
   imports, and accepts any plan listing it — Milestone 5 added tests of schema-layer behaviour that
   belong to its own plan rather than to Milestone 3's.
 
+### Fixed after convergence
+
+- **A malformed constraint *value* silently passed.** `{"minimum": "not-a-number"}`,
+  `{"maximum": null}` and `{"multiple_of": "abc"}` each reported **passed** for every value: the
+  evaluator could not read the declaration, so the comparison could not be made, so nothing failed.
+  SC-005 makes it impossible for a recognised *key* to ship unenforced; nothing made it impossible
+  for its value to be nonsense, and this failure mode was the worse one because it produced a clean
+  verdict. Constraint values are now checked at schema load, and the evaluators raise rather than
+  return "satisfied" if the two layers ever disagree.
+- **`{"enum": "EUR"}`** — a missing pair of brackets — was read as `['E','U','R']`, so the schema
+  rejected exactly the value it was written to accept. Now refused at load.
+- **`{"max_length": "abc"}`** reached `int()` mid-validation and escaped as a bare `ValueError`,
+  contradicting the constitution's error model. Same fix.
+- **An out-of-dialect `pattern`** was not refused until the constraint happened to be evaluated, and
+  escaped as a bare `PatternSyntaxError`. Every declared pattern is now compiled at the entry to
+  `validate()`, raising `SchemaError` with the field and the construct named. The task list had asked
+  the *schema loader* to do this, which is not implementable — `docdoc.extraction` may not import
+  `docdoc.validation` — so the check moved to the entry point rather than the layering being bent.
+- `Finding.rule_id` names the rule structurally; it was reachable only by splitting `check_id`.
+  `VALIDATOR_VERSION` moves to `1.1.0` for it: a new field changes the output for unchanged inputs,
+  which is what FR-050 says moves the number, taken literally rather than only when convenient.
+- The behaviour snapshot now pins the finding order and the shape of a `Finding` and a
+  `CheckOutcome`, so the next change of either fails the build.
+
 ### Measured
 
 - Validating 444 checks (200 line items, 20 rules) takes **4.4 ms** against SC-020's 50 ms bound.

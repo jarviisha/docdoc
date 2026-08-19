@@ -41,8 +41,12 @@ oracle for *what* matches while docdoc's engine supplies the guarantee about *ho
 **Primary Dependencies**: **None added.** The base install stays `pydantic` + `rapidfuzz`. Stdlib used:
 `decimal` (all arithmetic), `datetime` (temporal comparisons), `enum`, `hashlib` via the kernel's
 `options_hash_for`, `logging`, `time` (a monotonic clock read once, for the log event's duration only),
-`typing`. `re` is used **in tests** as the differential oracle for the pattern dialect, and not in
-`src/` — a distinction the plan states because it looks like an inconsistency otherwise.
+`typing`. `re` appears in two places, and the distinction between them is the point: it is the
+**differential oracle** in `tests/property/test_pattern_dialect.py`, and it parses **entry indices out
+of field paths docdoc itself generated** in `src/docdoc/validation/verdict.py`. It never touches an
+authored pattern or a document value, which is why it cannot reintroduce the backtracking risk
+`pattern_dialect@1` exists to remove. (An earlier draft of this section claimed `re` was absent from
+`src/` altogether; convergence found that was simply untrue.)
 
 The rejected alternative was `google-re2`, and the reason it was rejected is a correctness argument
 before a weight one: its dialect version would have to enter `options_hash`, making two machines with
