@@ -132,16 +132,74 @@ class TestProvenance:
         assert provenance.validator_version
 
     def test_it_chains_from_the_grounding_artifact(self) -> None:
-        """ADR-0003 — the id inherits the parse, the schema, the model, the threshold."""
+        """ADR-0003 — the id inherits the parse, the schema, the model, the threshold.
+
+        **This assertion used to be circular**, and a mutation run found it: it
+        recomputed the expected value with `validation_artifact_id_for` itself, so
+        truncating the grounding artifact id *inside* that function moved both
+        sides equally and the test passed. It proved that `validate()` calls the
+        helper, and nothing about what the helper depends on.
+
+        What is asserted now cannot be satisfied by a function that discards its
+        input: two grounding ids differing only in their **last** characters must
+        produce different validation ids.
+        """
         from docdoc.validation.identity import (
             options_hash_for_validation,
             validation_artifact_id_for,
         )
 
+        options_hash = options_hash_for_validation(ValidationOptions(), enabled_rules=())
+        base = "sha256:" + "a" * 64
+        tail_differs = "sha256:" + "a" * 63 + "b"
+
+        first = validation_artifact_id_for(grounding_artifact_id=base, options_hash=options_hash)
+        second = validation_artifact_id_for(
+            grounding_artifact_id=tail_differs, options_hash=options_hash
+        )
+        assert first != second, (
+            "the validation id must depend on the whole grounding artifact id; a "
+            "truncation or a prefix would collide across documents"
+        )
+        assert (
+            validation_artifact_id_for(grounding_artifact_id=base, options_hash=options_hash)
+            == first
+        )
+
+    def test_the_chain_holds_end_to_end(self) -> None:
+        """The same property through `validate()`, so the wiring is covered too.
+
+        Two runs of one extraction against grounding results whose ids differ must
+        produce different validation ids — otherwise a stored verdict could not say
+        which grounding it judged.
+        """
         schema = invoice_schema()
         pair = artifacts.build(schema=schema)
-        result = validate(pair.extraction, pair.grounding, schema)
-        assert result.artifact_id == validation_artifact_id_for(
-            grounding_artifact_id=pair.grounding.artifact_id,
-            options_hash=options_hash_for_validation(ValidationOptions(), enabled_rules=()),
-        )
+        other = artifacts.build(schema=schema, number="INV-2026-424")
+        assert pair.grounding.artifact_id != other.grounding.artifact_id
+
+        mine = validate(pair.extraction, pair.grounding, schema)
+        theirs = validate(other.extraction, other.grounding, schema)
+        assert mine.artifact_id != theirs.artifact_id
+        assert mine.provenance.grounding_artifact_id == pair.grounding.artifact_id
+
+    def test_the_order_of_an_enabled_rule_set_never_moves_the_hash(self) -> None:
+        """T113, FR-048, FR-051 — a set's iteration order must not reach identity.
+
+        `options_hash_for_validation` sorts what it is given, and every caller
+        inside `validate()` already hands it a sorted tuple — so dropping the sort
+        broke nothing, which left it looking like dead code. It is not: this
+        function is reachable from outside `validate()`, and a hash that varied
+        with a caller's iteration order would be exactly the reproducibility bug
+        FR-051 forbids.
+        """
+        from docdoc.validation.identity import options_hash_for_validation
+
+        forwards = ("alpha", "beta", "gamma")
+        backwards = tuple(reversed(forwards))
+        assert options_hash_for_validation(
+            ValidationOptions(), enabled_rules=forwards
+        ) == options_hash_for_validation(ValidationOptions(), enabled_rules=backwards)
+        assert options_hash_for_validation(
+            ValidationOptions(), enabled_rules=forwards
+        ) != options_hash_for_validation(ValidationOptions(), enabled_rules=("alpha",))

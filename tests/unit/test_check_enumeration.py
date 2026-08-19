@@ -107,6 +107,28 @@ class TestShapeRefusals:
         with pytest.raises(ValidationError, match="repeating group"):
             walk(pair.schema, broken)
 
+    def test_a_group_where_a_scalar_was_declared_is_refused(self, pair) -> None:
+        """T112, FR-018 — the third direction, which no test tried.
+
+        Disabling this branch of `_field` survived a mutation run: the other two
+        refusals cover a scalar where a *group* belongs and a group where a
+        *repeating group* belongs, so a dict arriving under a scalar field was
+        never attempted. Without the check the walk reaches `node.present` on a
+        plain dict and dies with an `AttributeError` — an untyped failure, several
+        frames from the artifacts that caused it.
+        """
+        broken = dict(pair.extraction.values)
+        broken["number"] = {"nested": broken["number"]}
+        with pytest.raises(ValidationError, match="number"):
+            walk(pair.schema, broken)
+
+    def test_a_repeating_group_where_a_scalar_was_declared_is_refused(self, pair) -> None:
+        """The same direction with a tuple, which is how a repeating group arrives."""
+        broken = dict(pair.extraction.values)
+        broken["total"] = (dict(pair.extraction.values["supplier"]),)
+        with pytest.raises(ValidationError, match="total"):
+            walk(pair.schema, broken)
+
     def test_the_refusal_names_the_field(self, pair) -> None:
         broken = {key: value for key, value in pair.extraction.values.items() if key != "notes"}
         with pytest.raises(ValidationError) as caught:
