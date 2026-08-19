@@ -9,6 +9,105 @@ API may change in any release. `document_id` derivation is versioned separately 
 
 ## [Unreleased]
 
+Milestone 5: deterministic validation. **A located value is now a checked value** — docdoc will
+reject an invoice whose stated total does not equal the sum of its lines, and point at the place on
+the page the total was read from.
+
+### Added
+
+- **`docdoc.validation`** — a new layer, above `docdoc.grounding` in the `import-linter` layers
+  contract, with a forbidden-imports contract of its own. `validate(extraction, grounding, schema)`
+  returns one `ValidationResult`: a verdict, one `CheckOutcome` per declared obligation (passed ones
+  included), the findings in a total order, counts that reconcile, provenance, and a content-addressed
+  artifact id chained from the grounding artifact.
+- **The eight constraint keys Milestone 3 declared and never applied are now enforced** — `enum`,
+  `const`, `pattern`, `minimum`, `maximum`, `multiple_of`, `min_length`, `max_length`.
+  `tests/unit/test_constraint_key_coverage.py` fails the build if a recognised key ever has no
+  enforcement path, so the defect cannot recur one key at a time.
+- **Cross-field rules, declared as schema data.** `Schema.rules` carries a closed vocabulary of four
+  kinds — `sum_equals`, `product_equals`, `comparison`, `conditional_presence` — evaluated by one
+  generic engine that never learns what an invoice is. Principle VI forbids a per-document-type code
+  path; Principle VII forbids expressing the rule in a prompt.
+- **Three verdicts: `valid`, `invalid`, `incomplete`.** The third exists so that a run whose checks
+  could not be evaluated cannot report the same word as a run where everything ran and passed. There
+  is no boolean anywhere in the result.
+- **`pattern_dialect@1`** — docdoc's own linear-time regular-expression subset, with the constructs
+  outside it (backreferences, lookaround, named groups, inline flags, lazy quantifiers) rejected when
+  the schema loads, naming the construct.
+- **Grounding validation.** A value that is present but that nothing in the document supports is
+  reported, at a severity the run's `GroundingPolicy` declares (default: a warning).
+
+### Decisions worth reading
+
+- **docdoc ships a regular-expression engine, and that needed an argument.** CPython's `re` takes
+  1,183 ms on `^(a+)+$` against 24 characters and doubles per character, so an ordinary 40-character
+  field value runs for days; a timeout would make a verdict depend on machine speed, which no artifact
+  id could describe. `google-re2` was measured (6.08 µs typical, 499 µs on a 10,000-character
+  adversarial input, against this engine's 6.11 µs and 9.8 ms) and **declined** — with RE2 the dialect
+  would be whatever binary happened to be installed, and its version would have to enter
+  `options_hash`, so two machines could produce different verdicts. The risk is contained by a
+  Hypothesis test that makes `re.fullmatch` the oracle for *what* matches; this engine exists only for
+  *how long it may take*.
+- **The grounding policy is folded into `options_hash`, beyond ADR-0003's literal Validate row.** The
+  row predates the policy and the policy changes verdicts, so the ADR's own rule about omitted inputs
+  settles it. Raised as a clarifying amendment rather than resolved silently.
+- **`Schema.rules` is hashed only when non-empty.** Every schema hash committed at Milestone 3 is
+  unchanged, and `tests/unit/test_schema_snapshot.py` passes **unedited** — introducing rules
+  invalidates no stored extraction artifact.
+- **An obligation exists only where it applies.** No constraint check is declared for a value the
+  model reported absent. Declaring one and marking it not-evaluated would make `incomplete` the
+  verdict of nearly every real document, and the state would stop carrying information. This refines
+  data-model VAL-17, which had listed `value_absent` as a not-evaluated reason.
+- **`number` is lossy by declaration.** Milestone 3 parses a `number` field to a Python `float`, so
+  validation reads it through `Decimal(str(v))` — never `Decimal(v)` — and the documentation says
+  plainly that `decimal` is the type for money. A guarantee the type system contradicts would be worse
+  than the honest sentence.
+
+### Changed
+
+- `Schema` gains `rules`; `FieldSpec` constraints are now checked against their declared type **at
+  load** (FR-025), so a numeric bound on a boolean is an authoring error rather than a check that
+  silently never runs. Milestone 3's `test_schema_hash` property strategy was updated to draw types
+  and constraints together, since an ill-matched pairing is no longer constructible.
+- `tests/unit/test_plan_tree_is_current.py` now attributes a test file to the **highest** layer it
+  imports, and accepts any plan listing it — Milestone 5 added tests of schema-layer behaviour that
+  belong to its own plan rather than to Milestone 3's.
+
+### Fixed after convergence
+
+- **A malformed constraint *value* silently passed.** `{"minimum": "not-a-number"}`,
+  `{"maximum": null}` and `{"multiple_of": "abc"}` each reported **passed** for every value: the
+  evaluator could not read the declaration, so the comparison could not be made, so nothing failed.
+  SC-005 makes it impossible for a recognised *key* to ship unenforced; nothing made it impossible
+  for its value to be nonsense, and this failure mode was the worse one because it produced a clean
+  verdict. Constraint values are now checked at schema load, and the evaluators raise rather than
+  return "satisfied" if the two layers ever disagree.
+- **`{"enum": "EUR"}`** — a missing pair of brackets — was read as `['E','U','R']`, so the schema
+  rejected exactly the value it was written to accept. Now refused at load.
+- **`{"max_length": "abc"}`** reached `int()` mid-validation and escaped as a bare `ValueError`,
+  contradicting the constitution's error model. Same fix.
+- **An out-of-dialect `pattern`** was not refused until the constraint happened to be evaluated, and
+  escaped as a bare `PatternSyntaxError`. Every declared pattern is now compiled at the entry to
+  `validate()`, raising `SchemaError` with the field and the construct named. The task list had asked
+  the *schema loader* to do this, which is not implementable — `docdoc.extraction` may not import
+  `docdoc.validation` — so the check moved to the entry point rather than the layering being bent.
+- `Finding.rule_id` names the rule structurally; it was reachable only by splitting `check_id`.
+  `VALIDATOR_VERSION` moves to `1.1.0` for it: a new field changes the output for unchanged inputs,
+  which is what FR-050 says moves the number, taken literally rather than only when convenient.
+- The behaviour snapshot now pins the finding order and the shape of a `Finding` and a
+  `CheckOutcome`, so the next change of either fails the build.
+
+### Measured
+
+- Validating 444 checks (200 line items, 20 rules) takes **4.4 ms** against SC-020's 50 ms bound.
+- The adversarial pattern `(a+)+` against 10,000 characters: **9.8 ms**, where CPython's `re` does not
+  finish.
+
+---
+
+**Milestone 4: deterministic grounding** — also unreleased, and kept here in full because nothing has
+shipped between the two.
+
 Milestone 4: deterministic grounding. **docdoc's central claim is now demonstrable end to end** — an
 extracted value can be taken to the character range, page, and bounding box it came from.
 

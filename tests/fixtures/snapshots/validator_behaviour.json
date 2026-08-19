@@ -1,0 +1,128 @@
+{
+  "check_id_formats": [
+    "<field_path>#required",
+    "<field_path>#<constraint_key>",
+    "<field_path>#grounding",
+    "rule:<rule_id>@<anchor_path>"
+  ],
+  "check_kinds": [
+    "constraint",
+    "grounding",
+    "required",
+    "rule"
+  ],
+  "check_outcome_fields": [
+    "check_id",
+    "field_path",
+    "kind",
+    "outcome",
+    "reason"
+  ],
+  "default_grounding_policy": {
+    "exact": null,
+    "fuzzy": "info",
+    "ungrounded": "warning"
+  },
+  "default_severities": {
+    "constraint": "error",
+    "not_evaluated": "warning",
+    "required": "error",
+    "rule": "error"
+  },
+  "finding_fields": [
+    "actual",
+    "check_id",
+    "expected",
+    "field_path",
+    "geometry",
+    "kind",
+    "message",
+    "pages",
+    "participants",
+    "reason",
+    "rule_id",
+    "severity",
+    "span"
+  ],
+  "finding_order": [
+    "alpha#grounding",
+    "alpha#required",
+    "beta#required",
+    "lines#min_length",
+    "rule:r@lines[0].amount",
+    "rule:r@lines[1].amount"
+  ],
+  "outcomes": [
+    "failed",
+    "not_evaluated",
+    "passed"
+  ],
+  "reason_codes": [
+    "above_maximum",
+    "below_minimum",
+    "companion_missing",
+    "comparison_failed",
+    "not_a_multiple",
+    "not_in_enum",
+    "not_the_constant",
+    "operand_absent",
+    "operand_group_absent",
+    "pattern_unmatched",
+    "product_mismatch",
+    "required_value_missing",
+    "sum_mismatch",
+    "too_long",
+    "too_short",
+    "type_mismatch",
+    "value_grounded_approximately",
+    "value_not_grounded"
+  ],
+  "rule_kinds": [
+    "comparison",
+    "conditional_presence",
+    "product_equals",
+    "sum_equals"
+  ],
+  "rule_semantics": {
+    "outcomes": [
+      "rule:sum_rule@total|failed|error|sum_mismatch|250.00|200.00",
+      "rule:product_rule@lines[0].quantity|passed|-|-|-|-",
+      "rule:product_rule@lines[1].quantity|failed|error|product_mismatch|200.00|150.00",
+      "rule:comparison_rule@total|failed|error|comparison_failed|total <= subtotal (150.00)|200.00",
+      "rule:presence_rule@total|failed|error|companion_missing|a value at reference|absent",
+      "rule:overridden_rule@total|failed|warning|sum_mismatch|250.00|200.00"
+    ],
+    "participants": [
+      "rule:sum_rule@total: total,lines[0].amount,lines[1].amount",
+      "rule:product_rule@lines[0].quantity: ",
+      "rule:product_rule@lines[1].quantity: lines[1].quantity,lines[1].unit_price,lines[1].amount",
+      "rule:comparison_rule@total: total,subtotal",
+      "rule:presence_rule@total: total,reference",
+      "rule:overridden_rule@total: total,lines[0].amount,lines[1].amount"
+    ]
+  },
+  "rule_vocabulary_version": "rule_vocabulary@1",
+  "severities": [
+    "error",
+    "info",
+    "warning"
+  ],
+  "validator_id": "deterministic-validator",
+  "validator_version": "1.1.0",
+  "verdict_truth_table": {
+    "error": "invalid",
+    "error+not_evaluated": "invalid",
+    "info": "valid",
+    "not_evaluated": "incomplete",
+    "nothing": "valid",
+    "passed": "valid",
+    "passed+warning": "valid",
+    "warning": "valid",
+    "warning+not_evaluated": "incomplete"
+  },
+  "verdicts": [
+    "incomplete",
+    "invalid",
+    "valid"
+  ]
+}

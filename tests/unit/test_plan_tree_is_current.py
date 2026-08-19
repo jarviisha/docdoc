@@ -44,12 +44,20 @@ TESTS = pathlib.Path("tests")
 
 #: Each layer package, and the plan whose tree must list the tests that exercise it.
 #: Adding a layer costs one line; the checks below are parameterised over this.
+#: Ordered **highest layer first**, because a test file belongs in exactly one
+#: plan: the one for the topmost layer it reaches. Milestone 5's tests import
+#: `docdoc.extraction` (to build a schema) and `docdoc.grounding` (to build the
+#: artifact they validate), and listing them in three plans would make each plan's
+#: tree a description of the repository rather than of its own feature.
 LAYERS: tuple[tuple[str, pathlib.Path], ...] = (
+    ("docdoc.validation", pathlib.Path("specs/005-deterministic-validation/plan.md")),
     ("docdoc.extraction", pathlib.Path("specs/003-schema-driven-extraction/plan.md")),
     ("docdoc.grounding", pathlib.Path("specs/004-deterministic-grounding/plan.md")),
 )
 
-PLAN = LAYERS[0][1]  # kept for the self-check at the bottom
+#: The extraction plan, kept by name for the self-check at the bottom: that check
+#: needs a plan known to list a specific file, and `LAYERS[0]` is no longer it.
+PLAN = LAYERS[1][1]
 
 
 def _imports(path: pathlib.Path, package: str) -> bool:
@@ -101,8 +109,16 @@ META_TESTS = {
 }
 
 
+def _owning_layer(path: pathlib.Path) -> str | None:
+    """The topmost layer a test file reaches, which is the plan that owns it."""
+    for package, _plan in LAYERS:
+        if _imports(path, package):
+            return package
+    return None
+
+
 def _layer_test_files(package: str) -> list[pathlib.Path]:
-    return sorted(path for path in TESTS.rglob("test_*.py") if _imports(path, package))
+    return sorted(path for path in TESTS.rglob("test_*.py") if _owning_layer(path) == package)
 
 
 def _meta_test_files() -> list[pathlib.Path]:
@@ -116,10 +132,23 @@ def test_the_scan_finds_the_tests_it_is_meant_to(package: str, plan: pathlib.Pat
     assert len(found) >= 8, f"expected the {package} suite to be substantial, found {found}"
 
 
+def _all_plan_text() -> str:
+    """Every layer plan's text, concatenated.
+
+    A test file must be traceable to *a* plan, not to the one an import graph
+    would guess. Milestone 5 made the difference concrete: it added two tests of
+    schema-layer behaviour that import only `docdoc.extraction`, and listing them
+    in Milestone 3's plan would attribute work to a feature that predates it. They
+    belong in the plan of the milestone that introduced them, and the guarantee a
+    reviewer needs — every test file appears in some plan's tree — survives intact.
+    """
+    return "\n".join(plan.read_text(encoding="utf-8") for _package, plan in LAYERS)
+
+
 @pytest.mark.parametrize(("package", "plan"), LAYERS, ids=lambda v: getattr(v, "name", v))
 def test_every_layer_test_file_appears_in_its_plan(package: str, plan: pathlib.Path) -> None:
     """The assertion that ends three rounds of the same finding."""
-    text = plan.read_text(encoding="utf-8")
+    text = _all_plan_text()
     missing = [path.name for path in _layer_test_files(package) if path.name not in text]
     assert not missing, (
         f"these test files exercise {package} but are absent from {plan}: "

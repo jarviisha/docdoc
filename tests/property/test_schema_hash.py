@@ -26,12 +26,28 @@ from docdoc.extraction.schema import Cardinality, FieldSpec, FieldType, Schema
 
 _NAMES = st.from_regex(r"[a-z][a-z0-9_]{0,11}", fullmatch=True)
 _DESCRIPTIONS = st.text(min_size=0, max_size=24)
-_SCALAR_TYPES = st.sampled_from(list(FieldType))
-_CONSTRAINTS = st.one_of(
-    st.just({}),
-    st.builds(lambda n: {"minimum": n}, st.integers(min_value=-5, max_value=5)),
-    st.builds(lambda n: {"max_length": n}, st.integers(min_value=1, max_value=64)),
-    st.builds(lambda v: {"enum": v}, st.lists(st.text(max_size=4), min_size=1, max_size=3)),
+
+_ENUM = st.builds(lambda v: {"enum": v}, st.lists(st.text(max_size=4), min_size=1, max_size=3))
+_BOUND = st.builds(lambda n: {"minimum": n}, st.integers(min_value=-5, max_value=5))
+_LENGTH = st.builds(lambda n: {"max_length": n}, st.integers(min_value=1, max_value=64))
+
+#: Type and constraints are drawn **together**, because Milestone 5's FR-025
+#: makes an ill-matched pairing -- a numeric bound on a string, a length bound on
+#: a boolean -- unconstructible rather than merely unenforceable. Drawing them
+#: independently, as this strategy did while constraints were recognised and
+#: never applied, now discards most of the search space at construction. Same
+#: reasoning as the one-level repetition bound below: respect the invariant in
+#: the strategy rather than filter for it.
+_TYPED_SCALARS = st.one_of(
+    st.tuples(st.just(FieldType.STRING), st.one_of(st.just({}), _LENGTH, _ENUM)),
+    st.tuples(
+        st.sampled_from([FieldType.INTEGER, FieldType.NUMBER, FieldType.DECIMAL]),
+        st.one_of(st.just({}), _BOUND, _ENUM),
+    ),
+    st.tuples(
+        st.sampled_from([FieldType.BOOLEAN, FieldType.DATE, FieldType.DATETIME]),
+        st.one_of(st.just({}), _ENUM),
+    ),
 )
 
 
@@ -40,13 +56,17 @@ def _scalars(names: list[str]) -> st.SearchStrategy[tuple[FieldSpec, ...]]:
     return st.tuples(
         *(
             st.builds(
-                FieldSpec,
-                name=st.just(name),
-                type=_SCALAR_TYPES,
-                cardinality=st.just(Cardinality.SCALAR),
+                lambda typed, required, description, name=name: FieldSpec(
+                    name=name,
+                    type=typed[0],
+                    cardinality=Cardinality.SCALAR,
+                    required=required,
+                    description=description,
+                    constraints=typed[1],
+                ),
+                typed=_TYPED_SCALARS,
                 required=st.booleans(),
                 description=_DESCRIPTIONS,
-                constraints=_CONSTRAINTS,
             )
             for name in names
         )

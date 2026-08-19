@@ -8,9 +8,10 @@ LLM — everyone can do that. It is that every extracted value can answer:
 
 > **Where did this come from?**
 
-**Status:** Milestones 1 (kernel), 2 (parsers), 3 (extraction), and 4 (grounding) implemented.
-Validation is not built yet, so an extracted value can be **located** but is not yet **checked** —
-see [Roadmap](#roadmap).
+**Status:** Milestones 1 (kernel), 2 (parsers), 3 (extraction), 4 (grounding), and 5 (validation)
+implemented. An extracted value can be **located** and **checked**: docdoc will tell you that an
+invoice's stated total does not equal the sum of its lines, and point at the place on the page the
+total was read from — see [Roadmap](#roadmap).
 
 ## What it does today
 
@@ -89,8 +90,26 @@ located.counts.grounding_rate                       # 1.0
 
 Grounding is deterministic and entirely offline — no network, no credentials, no model call, enforced
 by an import contract. It answers *where*, never *whether*: a value that disagrees with the text it
-resolved to is a **validation** finding, which is Milestone 5. And `model_confidence` is stored
-verbatim, labelled UNTRUSTED, and routes nothing ([ADR-0004](docs/adr/0004-confidence-semantics.md)).
+resolved to is a **validation** finding. And `model_confidence` is stored verbatim, labelled
+UNTRUSTED, and routes nothing ([ADR-0004](docs/adr/0004-confidence-semantics.md)).
+
+Then ask whether the result is acceptable:
+
+```python
+from docdoc.validation import validate
+
+result = validate(extraction, located, schema)
+result.verdict                                      # Verdict.INVALID
+[(f.field_path, f.reason, f.expected, f.actual) for f in result.findings]
+# [('total', 'sum_mismatch', '1420.00', '1240.00')]
+result.findings[0].span, result.findings[0].pages   # copied from grounding, never recomputed
+```
+
+Validation is a separate stage with its own artifact, because a validator built into a prompt is
+unverifiable and cannot be regression-tested (Principle VII). Cross-field rules are **data in the
+schema** evaluated by one generic engine — there is no `InvoiceValidator` — and the verdict has three
+states, because a run where nothing could be checked must not report the same word as one where
+everything was checked and passed.
 
 Run the examples, which need no infrastructure and no credentials at all:
 
@@ -210,8 +229,8 @@ higher-layer work merges while that property is failing or absent.
 | 2 | Parsers: native PDF text path, one geometry-capable cloud provider | **Done** |
 | 3 | Schema-driven extraction, one LLM adapter | **Done** |
 | 4 | Deterministic grounding: exact → fuzzy → ungrounded | **Done** |
-| 5 | Validation: schema, field, and cross-field rules | Next |
-| 6 | Evaluation: golden dataset, field accuracy, grounding rate | Planned |
+| 5 | Validation: schema, field, and cross-field rules | **Done** |
+| 6 | Evaluation: golden dataset, field accuracy, grounding rate | Next |
 | 7 | API and CLI | Planned |
 
 ## Documentation
@@ -225,7 +244,9 @@ higher-layer work merges while that property is failing or absent.
 - [How ingest works](docs/concepts/ingest.md) — the two paths and the text-layer decision
 - [How extraction works](docs/concepts/extraction.md) — the two identities, and the stage boundary with grounding
 - [How grounding works](docs/concepts/grounding.md) — the three states, the match view, and why the two scores are not comparable
+- [How validation works](docs/concepts/validation.md) — the three verdicts, rules as data, and why docdoc has its own regex dialect
 - [Grounding API contract](specs/004-deterministic-grounding/contracts/grounding-api.md)
+- [Validation API contract](specs/005-deterministic-validation/contracts/validation-api.md)
 - [Extraction API contract](specs/003-schema-driven-extraction/contracts/extraction-api.md)
 - [Contributing](CONTRIBUTING.md)
 

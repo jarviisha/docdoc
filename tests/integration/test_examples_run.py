@@ -172,6 +172,28 @@ def test_the_grounding_example_demonstrates_what_it_claims_to() -> None:
     assert "not_applicable = 1" in out, "the reported absence should stay out of the rate"
 
 
+def test_the_validation_example_runs_with_no_credentials() -> None:
+    """Milestone 5's example. It passes no document to the validator at all."""
+    _assert_ran(_run(str(EXAMPLES / "validate_invoice.py")), "validate_invoice.py")
+
+
+def test_the_validation_example_demonstrates_what_it_claims_to() -> None:
+    """It claims a sound invoice passes, a line-short one is rejected, and the
+    rejection can be pointed at on the page.
+
+    Asserting the output rather than the exit code: an example that runs and
+    prints something else is documentation that has quietly stopped being true.
+    """
+    out = _run(str(EXAMPLES / "validate_invoice.py")).stdout
+    assert "verdict: valid" in out
+    assert "verdict: invalid" in out
+    assert "sum_mismatch" in out
+    assert "expected 1420.00, got 1240.00" in out
+    # The location the finding carries came from the grounding outcome.
+    assert "found on page 0" in out
+    assert "reading '1420.00'" in out
+
+
 def test_the_harness_reads_utf8_whatever_the_parent_locale_is() -> None:
     """The Windows failure of this file's own `_run`, reproduced on every platform.
 
@@ -231,7 +253,13 @@ def test_every_committed_example_is_covered_here() -> None:
     the contract suite, and for the same reason.
     """
     shipped = {path.name for path in EXAMPLES.glob("*.py")}
-    covered = {"extract_invoice.py", "build_document.py", "parse_pdf.py", "ground_invoice.py"}
+    covered = {
+        "extract_invoice.py",
+        "build_document.py",
+        "parse_pdf.py",
+        "ground_invoice.py",
+        "validate_invoice.py",
+    }
     assert shipped <= covered, (
         f"these examples ship but nothing executes them: {sorted(shipped - covered)}"
     )
