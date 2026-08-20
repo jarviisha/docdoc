@@ -136,7 +136,15 @@ markers = [
 ]
 
 # ---------------------------------------------------------------------------
-# Coverage — SC-006 requires 100% statement coverage of the four core operations
+# Coverage — enforced by the `coverage` job in .github/workflows/ci.yml, which
+# runs `--cov-fail-under=93` against a measured 95%. This section was configured
+# at Milestone 1 and nothing ran with `--cov` until Milestone 6, so the bar it
+# describes went unmeasured for five milestones.
+#
+# SC-006's claim is narrower than a global percentage: 100% *statement* coverage
+# of the four core operations. Those live in `kernel/document.py`, which reports
+# 199 statements and zero missed. The global threshold is a separate, weaker
+# regression ratchet and should not be read as that claim.
 # ---------------------------------------------------------------------------
 [tool.coverage.run]
 source = ["src/docdoc"]
