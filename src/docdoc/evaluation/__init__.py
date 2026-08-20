@@ -49,4 +49,290 @@ the import fails the build (FR-003).
 
 from __future__ import annotations
 
-__all__: list[str] = []
+import time
+from typing import TYPE_CHECKING
+
+from docdoc.evaluation.errors import EvaluationError
+from docdoc.evaluation.golden import (
+    EntryKeySpec,
+    GoldenDocument,
+    GoldenSet,
+    load_golden_set,
+)
+from docdoc.evaluation.identity import (
+    SCORER_ID,
+    SCORER_VERSION,
+    golden_set_id_for,
+    options_hash_for_evaluation,
+    prediction_set_id_for,
+    report_id_for,
+)
+from docdoc.evaluation.labels import Expectation, ExpectedLocation, Label
+from docdoc.evaluation.location import LocationAgreement
+from docdoc.evaluation.metrics import (
+    Averaging,
+    DatasetMetrics,
+    DocumentScore,
+    MetricValue,
+    OutcomeCounts,
+    dataset_metrics,
+    document_score,
+)
+from docdoc.evaluation.observe import log_evaluation, log_refusal
+from docdoc.evaluation.outcomes import FieldOutcome, FieldOutcomeKind
+from docdoc.evaluation.predictions import (
+    DocumentPrediction,
+    PredictionSet,
+    Stage,
+    check_against,
+)
+from docdoc.evaluation.redact import redacted_tiers_in
+from docdoc.evaluation.report import (
+    EvaluationOptions,
+    EvaluationProvenance,
+    EvaluationReport,
+    PartialDeclaration,
+)
+from docdoc.evaluation.score import outcome_sort_key, score_document, value_path_index
+from docdoc.evaluation.tiers import DocumentOrigin, OriginKind, Tier
+
+if TYPE_CHECKING:
+    from docdoc.grounding.result import GroundingCounts
+
+__all__ = [
+    "SCORER_ID",
+    "SCORER_VERSION",
+    "Averaging",
+    "DatasetMetrics",
+    "DocumentOrigin",
+    "DocumentPrediction",
+    "DocumentScore",
+    "EntryKeySpec",
+    "EvaluationError",
+    "EvaluationOptions",
+    "EvaluationProvenance",
+    "EvaluationReport",
+    "Expectation",
+    "ExpectedLocation",
+    "FieldOutcome",
+    "FieldOutcomeKind",
+    "GoldenDocument",
+    "GoldenSet",
+    "Label",
+    "LocationAgreement",
+    "MetricValue",
+    "OriginKind",
+    "OutcomeCounts",
+    "PartialDeclaration",
+    "PredictionSet",
+    "Stage",
+    "Tier",
+    "evaluate",
+    "load_golden_set",
+]
+
+
+def _aggregate_grounding(predictions: PredictionSet, document_ids: list[str]) -> GroundingCounts:
+    """Sum Milestone 4's recorded counts. Never recompute them (FR-033)."""
+    from docdoc.grounding.result import GroundingCounts
+
+    exact = fuzzy = ungrounded = not_applicable = truncated = 0
+    for document_id in document_ids:
+        prediction = predictions.for_document(document_id)
+        if prediction is None or prediction.grounding is None:
+            continue
+        counts = prediction.grounding.counts
+        exact += counts.exact
+        fuzzy += counts.fuzzy
+        ungrounded += counts.ungrounded
+        not_applicable += counts.not_applicable
+        truncated += counts.truncated
+    return GroundingCounts(
+        exact=exact,
+        fuzzy=fuzzy,
+        ungrounded=ungrounded,
+        not_applicable=not_applicable,
+        truncated=truncated,
+    )
+
+
+def evaluate(
+    golden: GoldenSet,
+    predictions: PredictionSet,
+    *,
+    options: EvaluationOptions | None = None,
+    repo_revision: str = "unknown",
+) -> EvaluationReport:
+    """Score a prediction set against a golden set.
+
+    Returns **exactly one** report or raises :class:`EvaluationError`. It never
+    returns a partial report without ``report.partial`` being set and naming what
+    it omitted (FR-001).
+    """
+    started = time.monotonic()
+    options = options or EvaluationOptions()
+    golden_id = golden.golden_set_id or golden_set_id_for(golden)
+    prediction_id = predictions.prediction_set_id or prediction_set_id_for(predictions)
+
+    try:
+        check_against(predictions, golden)
+    except EvaluationError as error:
+        log_refusal(
+            reason=str(error),
+            golden_set_id=golden_id,
+            prediction_set_id=prediction_id,
+            document_id=error.document_id,
+            expected=error.expected,
+            actual=error.actual,
+            duration_ms=(time.monotonic() - started) * 1000,
+        )
+        raise
+
+    considered = [
+        document
+        for document in golden.documents
+        if options.include_restricted or document.tier is Tier.PUBLIC
+    ]
+
+    outcomes: list[FieldOutcome] = []
+    scores: list[DocumentScore] = []
+    value_paths = value_path_index(golden)
+    verdicts: dict[object, int] = {}
+
+    for document in considered:
+        labels = golden.labels_for(document.document_id)
+        prediction = predictions.for_document(document.document_id)
+        document_outcomes = score_document(document, labels, prediction)
+        outcomes.extend(document_outcomes)
+
+        grounding = (
+            None
+            if prediction is None
+            else (prediction.grounding.counts if prediction.grounding else None)
+        )
+        scores.append(
+            document_score(
+                document_id=document.document_id,
+                outcomes=document_outcomes,
+                value_paths=value_paths,
+                grounding=grounding,
+                evaluated=prediction is not None,
+                failed_stage=None if prediction is None else prediction.failed_stage,
+            )
+        )
+        if prediction is not None and prediction.validation is not None:
+            verdict = prediction.validation.verdict
+            verdicts[verdict] = verdicts.get(verdict, 0) + 1
+
+    outcomes.sort(key=outcome_sort_key)
+
+    metrics = dataset_metrics(
+        outcomes=outcomes,
+        document_scores=scores,
+        value_paths=value_paths,
+        grounding=_aggregate_grounding(
+            predictions, [document.document_id for document in considered]
+        ),
+        verdicts=verdicts,  # type: ignore[arg-type]
+    )
+
+    provenance = _provenance_for(
+        golden=golden,
+        predictions=predictions,
+        considered=considered,
+        options=options,
+        golden_id=golden_id,
+        prediction_id=prediction_id,
+        repo_revision=repo_revision,
+    )
+    provenance.refuse_if_incomplete()
+
+    report = EvaluationReport(
+        outcomes=tuple(outcomes),
+        document_scores=tuple(scores),
+        metrics=metrics,
+        partial=_partial_for(golden, considered),
+        redacted_tiers=redacted_tiers_in(outcomes),
+        provenance=provenance,
+        report_id=report_id_for(
+            golden_set_id=golden_id,
+            prediction_set_id=prediction_id,
+            options_hash=options_hash_for_evaluation(options),
+        ),
+    )
+    log_evaluation(report, duration_ms=(time.monotonic() - started) * 1000)
+    return report
+
+
+def _partial_for(golden: GoldenSet, considered: list[GoldenDocument]) -> PartialDeclaration | None:
+    """Name what was skipped, in exact integers read from the manifest (EVA-27a)."""
+    considered_ids = {document.document_id for document in considered}
+    skipped = [d for d in golden.documents if d.document_id not in considered_ids]
+    if not skipped:
+        return None
+    return PartialDeclaration(
+        skipped_documents=tuple(sorted(d.document_id for d in skipped)),
+        skipped_tiers=tuple(sorted({d.tier for d in skipped}, key=str)),
+        covered_documents=len(considered),
+        declared_documents=len(golden.documents),
+        covered_labels=sum(d.declared_label_count for d in considered),
+        declared_labels=sum(d.declared_label_count for d in golden.documents),
+    )
+
+
+def _provenance_for(
+    *,
+    golden: GoldenSet,
+    predictions: PredictionSet,
+    considered: list[GoldenDocument],
+    options: EvaluationOptions,
+    golden_id: str,
+    prediction_id: str,
+    repo_revision: str,
+) -> EvaluationProvenance:
+    def _unique(values: list[str]) -> tuple[str, ...]:
+        return tuple(sorted({value for value in values if value}))
+
+    prompt_hashes: list[str] = []
+    model_ids: list[str] = []
+    model_versions: list[str] = []
+    grounding_versions: list[str] = []
+    validator_versions: list[str] = []
+    parser_ids: list[str] = []
+    parser_versions: list[str] = []
+
+    for document in considered:
+        prediction = predictions.for_document(document.document_id)
+        if prediction is None:
+            continue
+        if prediction.extraction is not None:
+            extraction = prediction.extraction.provenance
+            prompt_hashes.append(extraction.prompt_hash)
+            model_ids.append(extraction.model_id)
+            model_versions.append(extraction.model_version)
+        if prediction.grounding is not None:
+            grounding_versions.append(prediction.grounding.provenance.grounding_version)
+        if prediction.validation is not None:
+            validator_versions.append(prediction.validation.provenance.validator_version)
+
+    return EvaluationProvenance(
+        repo_revision=repo_revision,
+        golden_set_id=golden_id,
+        prediction_set_id=prediction_id,
+        schema_identities=_unique([d.schema_identity for d in considered]),
+        schema_hashes=_unique([d.schema_hash for d in considered]),
+        prompt_hashes=_unique(prompt_hashes),
+        model_ids=_unique(model_ids),
+        model_versions=_unique(model_versions),
+        parser_ids=_unique(parser_ids),
+        parser_versions=_unique(parser_versions),
+        grounding_versions=_unique(grounding_versions),
+        validator_versions=_unique(validator_versions),
+        scorer_id=SCORER_ID,
+        scorer_version=SCORER_VERSION,
+        metric_definition_version=options.metric_definition_version,
+        comparator_versions=dict(options.comparator_versions),
+        entry_alignment_version=options.entry_alignment_version,
+        location_rule_version=options.location_rule_version,
+        options=options,
+    )
