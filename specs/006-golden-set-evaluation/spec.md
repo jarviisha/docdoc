@@ -13,7 +13,7 @@ Milestone 6 of the docdoc MVP — the milestone that turns four milestones of co
 *measured* ones. Milestone 3 recorded what the model answered, Milestone 4 made the grounding rate
 computable and set no target for it, Milestone 5 made the validation rate computable and set no target
 for it either. Each deferred the same question here: **is any of this any good, and did the last change
-make it worse?** This feature is governed by the constitution (v1.3.0) — Principle IX above all — and by
+make it worse?** This feature is governed by the constitution (v1.4.0) — Principle IX above all — and by
 ADR-0002, ADR-0003, ADR-0004, ADR-0005, ADR-0008, and ADR-0009.
 
 It was also the milestone gated by a constitutional decision. `TODO(GOLDEN_DATASET_LICENSING)` named this
@@ -673,7 +673,7 @@ silently and the second depends on it.
   and assigned corrections and annotations to this milestone in its own Out of Scope section. Its typed
   errors, provenance conventions, and field-path form MUST be reused rather than duplicated under a
   second incompatible name.
-- **Constitution v1.3.0** — Principles III, VIII, IX, X, XI, and XII bind this feature directly.
+- **Constitution v1.4.0** — Principles III, VIII, IX, X, XI, and XII bind this feature directly.
   Principle IX is the one it exists to satisfy; quality gates 4 and 5 are the ones it makes enforceable.
 - **ADR-0002, ADR-0003** — supply the identity model the dataset, prediction set, and report identities
   extend.

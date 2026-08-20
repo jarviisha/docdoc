@@ -124,7 +124,7 @@ uv run python examples/ground_invoice.py                       # grounding, offl
 ### Installing
 
 ```bash
-pip install docdoc          # kernel + ingest + extraction contracts; pydantic is the only dependency
+pip install docdoc          # every deterministic layer, no provider SDK; pydantic + rapidfuzz
 pip install docdoc[pdf]     # native PDF text path
 pip install docdoc[azure]   # geometry-capable cloud path, for scans and images
 pip install docdoc[google]  # the LLM adapter for extraction
@@ -177,11 +177,14 @@ governs every specification, plan, and code change in this repository.
 Dependencies flow strictly downward, and the rule is machine-checked in CI:
 
 ```text
-API → Pipeline → Extraction → Transform → Ingest → Kernel
+Validation → Grounding → Extraction → Ingest → Kernel
 ```
 
+Evaluation and Recording land at Milestone 6, Pipeline and API at Milestone 7. The chain above is
+the one `pyproject.toml` enforces, which is the only one worth writing down.
+
 The **kernel** is the bottom layer and depends on nothing above it. Its only runtime dependency is
-`pydantic`. It performs no file, network, clock, or random access, so identical inputs always
+`pydantic`; the base install adds `rapidfuzz` for grounding's approximate matching (ADR-0005). It performs no file, network, clock, or random access, so identical inputs always
 produce identical outputs — enforced by an AST scan and a runtime audit hook, not by convention.
 
 Identity is two-level ([ADR-0002](docs/adr/0002-blob-and-document-identity.md)):

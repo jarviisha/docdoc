@@ -23,7 +23,7 @@ deferred**. What it does *not* build is a golden set at quality gate 5's target 
 and 500 labelled fields: that is dataset authoring and generator work, not implementation work. T074
 delivers a committed public tier large enough to exercise every code path and **states its own size**,
 so the distance to the target is a number a reader can see rather than a gap nobody mentions. The gate
-stays advisory, which is exactly what constitution v1.3.0 says and what this milestone deliberately
+stays advisory, which is exactly what constitution v1.4.0 says and what this milestone deliberately
 does not flip.
 
 **Organization**: Grouped by user story so each is independently implementable and testable.
