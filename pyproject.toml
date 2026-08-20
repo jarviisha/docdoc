@@ -179,10 +179,26 @@ include_external_packages = true
 # `validation` (Milestone 5) continues the same reading, one layer higher: it
 # consumes a GroundingResult and an ExtractionResult and produces the verdict.
 # See specs/005-deterministic-validation/research.md R1.
+#
+# `evaluation` and `recording` (Milestone 6) are the first pair added at once, and
+# the order between them is the point. `recording` runs the pipeline to produce a
+# PredictionSet; `evaluation` scores one. The data flows one way, so the layers do
+# too -- and that ordering is what makes `evaluation -> recording` a build failure
+# rather than a sentence in a specification. FR-003 says recording MUST NOT be
+# part of evaluation; inside one package that is a naming convention, and as two
+# layers it is this contract.
+#
+# Constitution v1.4.0 states this chain in Principle X. Through Milestone 5 it did
+# not: the principle named `Transform` and `Pipeline`, which have never existed,
+# and omitted `grounding` and `validation`, which do. This list is the
+# authoritative form because it is the one CI checks, and the constitution is now
+# amended in the same change that adds a layer here.
 [[tool.importlinter.contracts]]
 name = "docdoc layers (Constitution Principle X)"
 type = "layers"
 layers = [
+    "docdoc.recording",
+    "docdoc.evaluation",
     "docdoc.validation",
     "docdoc.grounding",
     "docdoc.extraction",
@@ -223,6 +239,45 @@ forbidden_modules = [
 name = "validation reaches no network and no provider (FR-007)"
 type = "forbidden"
 source_modules = ["docdoc.validation"]
+forbidden_modules = [
+    "socket",
+    "urllib",
+    "http",
+    "httpx",
+    "requests",
+    "openai",
+    "anthropic",
+    "google",
+    "boto3",
+    "azure",
+    "fastapi",
+    "sqlalchemy",
+]
+
+# Evaluation is the layer the quality gates read, so a scorer that could reach a
+# network is a metric nobody can reproduce (FR-007).
+#
+# This contract has teeth, and it drew blood on the first module that needed
+# `ExtractionResult`. import-linter follows FUNCTION-SCOPED imports, so
+# `from docdoc.extraction import ExtractionResult` pulls in the package's
+# `__init__.py` -> `adapter_registry` -> `adapters.gemini` -> `google` and breaks
+# this contract immediately.
+#
+# The rule every layer above extraction follows, and the reason grounding's and
+# validation's contracts are green: import extraction's SUBMODULES, never the
+# package. `docdoc.grounding` takes `docdoc.extraction.value`; `docdoc.validation`
+# takes `docdoc.extraction.schema`, `.value`, `.errors`; `docdoc.evaluation` takes
+# `docdoc.extraction.extract`. None of them execute `extraction/__init__.py`, so
+# the adapter registry never enters their graph.
+#
+# Two other things carry FR-007 alongside this: the layers contract above, which
+# forbids `evaluation -> recording`; and `tests/unit/test_scoring_is_offline.py`,
+# which scores the committed public tier with `socket.socket` patched to raise --
+# because a graph proves nothing about a module that assembles a URL by hand.
+[[tool.importlinter.contracts]]
+name = "evaluation reaches no network and no provider (FR-007)"
+type = "forbidden"
+source_modules = ["docdoc.evaluation"]
 forbidden_modules = [
     "socket",
     "urllib",

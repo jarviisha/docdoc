@@ -30,27 +30,40 @@ may import `evaluation` (it constructs a `PredictionSet`), and `evaluation` impo
 fails the build. FR-058 asks for exactly this to be machine-checked, and the ordering falls out of the
 data flow rather than being imposed on it — the recorder produces the type the scorer consumes.
 
-**The uncomfortable finding that shaped this.** The obvious alternative was one package plus a
-forbidden-imports contract on `docdoc.evaluation` naming `socket`, `httpx`, `google`, and the rest,
-mirroring what `docdoc.grounding` and `docdoc.validation` already carry. That contract would **pass
-whether or not the recorder were inside it.** `src/docdoc/extraction/adapters/gemini.py` imports
-`google.genai` inside a function (line 182), and `adapter_registry` imports `GeminiAdapter` inside a
-function (line 173) — deliberately, so that the SDK stays out of the import graph. The provider is
-therefore invisible to static import analysis, and a forbidden contract cannot see a package that
-reaches a provider through `docdoc.extraction`.
+**The finding that shaped this, corrected during implementation.** This section previously argued
+that a forbidden-imports contract on `docdoc.evaluation` would be near-useless, because
+`adapters/gemini.py` imports `google.genai` inside a function and `adapter_registry` imports the
+adapter inside a function, so the provider would be "invisible to static import analysis". **That was
+wrong, and writing the code proved it wrong.** import-linter's graph builder follows function-scoped
+imports, and the first version of `evaluation/predictions.py` broke the contract immediately:
 
-This is not a defect in the existing contracts: as *preventive* checks they still fire the moment
-someone writes `import httpx` in `docdoc.grounding`, which is what they were for. But it means FR-007
-cannot be proved for evaluation the way it was proved for grounding. Three things are needed instead,
-and all three are carried:
+```text
+docdoc.evaluation.predictions -> docdoc.extraction (l.31)
+docdoc.extraction -> docdoc.extraction.adapter_registry (l.34)
+docdoc.extraction.adapter_registry -> docdoc.extraction.adapters.gemini (l.173)
+docdoc.extraction.adapters.gemini -> google (l.182, …)
+```
 
-1. The **layers contract**, forbidding `evaluation → recording`. This is the edge that is real and
-   statically visible, and it is docdoc-internal.
-2. The same **forbidden-imports list** on `docdoc.evaluation`, kept for its preventive value and not
-   mistaken for proof.
+The real mechanism is narrower and more useful. **Lower layers import extraction's *submodules*,
+never the package.** `docdoc.grounding` reaches for `docdoc.extraction.value`; `docdoc.validation`
+reaches for `docdoc.extraction.schema`, `.value`, and `.errors`. Neither imports `docdoc.extraction`,
+so neither executes its `__init__.py`, so the adapter registry never enters their graph. That is what
+keeps their contracts green — not an analyser blind spot.
+
+So the contract is genuinely load-bearing, and `evaluation/predictions.py` imports
+`docdoc.extraction.extract`, `docdoc.grounding.result`, and `docdoc.validation.result` directly. The
+import must be at runtime rather than under `TYPE_CHECKING` because pydantic resolves field
+annotations when it builds the model, which is precisely why this package cannot dodge the question
+the way a module using those types only in function signatures can.
+
+Three things carry FR-007, and the middle one is stronger than this section first credited:
+
+1. The **layers contract**, forbidding `evaluation → recording` — a docdoc-internal edge.
+2. The **forbidden-imports list** on `docdoc.evaluation`, which catches a real and easy mistake: one
+   package-level import instead of a submodule import puts a provider SDK in the graph.
 3. A **runtime test** that scores the committed public tier with `socket.socket` patched to raise, so
-   that "the scorer touches no network" is asserted against behaviour rather than against a graph
-   (R14).
+   that "the scorer touches no network" is asserted against behaviour and not only against a graph
+   (R14). Still worth having: the graph proves nothing about a module that builds a URL by hand.
 
 **Alternatives rejected.** *One package with the contract scoped to submodules by name*
 (`source_modules = ["docdoc.evaluation.score", …]`) — a new module added later escapes the contract

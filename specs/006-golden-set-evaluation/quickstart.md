@@ -136,12 +136,12 @@ uv run pytest tests/unit/test_scoring_is_offline.py -v
 
 Scores the committed public tier with `socket.socket` patched to raise.
 
-**What it proves — and why a static check was not enough.** `docdoc.extraction` reaches a provider
-through imports made *inside functions* (`adapters/gemini.py` imports `google.genai` at call time), so
-a forbidden-imports contract on a package that legitimately imports `docdoc.extraction` cannot see the
-provider and would pass regardless. The import contracts are kept for their preventive value; this test
-is the one that actually asserts the property, against behaviour rather than against a graph. See
-research.md R1.
+**What it proves, and what the import contract proves instead.** These are two different checks and
+neither replaces the other. `lint-imports` catches the graph-visible mistake — importing
+`docdoc.extraction` as a package pulls in its adapter registry and a provider SDK, and the contract
+fires on it. This test catches what a graph cannot see: a module that opens a socket by hand, or
+reaches a network through something the contract does not name. Run both. See research.md R1, which
+records that an earlier draft had the relationship between them backwards.
 
 ---
 
