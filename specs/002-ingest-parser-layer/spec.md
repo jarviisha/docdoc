@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-17
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: User description: "Parser layer biến một blob (PDF/ảnh) thành `Document` IR của kernel. Hai
 đường: native PDF text path cho PDF có text layer dùng được, và một cloud document-intelligence

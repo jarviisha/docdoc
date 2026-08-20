@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-19
 
-**Status**: Draft
+**Status**: Accepted
 
 **Input**: User description: "dựng cho 006 nhé" — Milestone 6 of the roadmap in `README.md`:
 *Evaluation: golden dataset, field accuracy, grounding rate*.

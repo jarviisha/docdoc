@@ -6,6 +6,23 @@
 
 **Status**: Draft
 
+<!--
+  Status vocabulary, and who moves it. Every spec in this repository read "Draft"
+  through Milestone 5 — including five that had shipped and merged — because
+  nothing ever moved it. A field nobody maintains is a field that lies, so the
+  transitions are named here and each one is owned by a step that already runs.
+
+    Draft        still being written; /speckit-clarify may still change answers
+    Accepted     clarified, planned, and tasked; implementation not started
+    Implemented  the behaviour this spec describes exists and is merged
+    Superseded by NNN-name   replaced by a later spec
+
+  Draft -> Accepted is manual, done when tasks.md is first produced. Nothing
+  enforces it. Accepted -> Implemented is wired: every milestone's task list
+  carries a README-roadmap task, and that task now flips this field too, so the
+  transition that matters most rides on a step the milestone already has to do.
+-->
+
 **Input**: User description: "$ARGUMENTS"
 
 ## User Scenarios & Testing *(mandatory)*

@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-14
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: Milestone 1 of the docdoc MVP — the canonical Document Intermediate Representation and
 its deterministic operations, as governed by the project constitution (v1.1.0) and ADR-0002 and
