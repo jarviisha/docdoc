@@ -28,6 +28,7 @@ from docdoc.kernel.geometry import BBox, Geometry
 from docdoc.kernel.identity import (
     blob_id_for,
     canonical_json,
+    content_id_for,
     document_id_for,
     options_hash_for,
 )
@@ -70,6 +71,7 @@ __all__ = [
     "Token",
     "blob_id_for",
     "canonical_json",
+    "content_id_for",
     "document_id_for",
     "options_hash_for",
 ]
