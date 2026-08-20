@@ -235,6 +235,7 @@ tests/
 ├── unit/
 │   ├── test_golden_set_authoring_errors.py   # FR-014, SC-021 — refused at load, named
 │   ├── test_document_provenance_required.py  # FR-011, EVA-2a/2b — no basis, no admission
+│   ├── test_ordering.py                      # EVA-26 — entry 2 before entry 10, and total
 │   ├── test_comparators.py                   # FR-023, FR-024, EVA-12a — True is not 1
 │   ├── test_entry_alignment.py               # FR-020, FR-021 — positional, keyed, count mismatch
 │   ├── test_location_agreement.py            # FR-038, EVA-14 — three values, containment
@@ -249,8 +250,11 @@ tests/
 │   ├── test_scoring_is_offline.py            # FR-007 — socket patched to raise
 │   ├── test_inputs_unchanged.py              # FR-006, SC-008 — byte-identical before and after
 │   ├── test_no_model_is_asked.py             # FR-008 — the adapter is never constructed
+│   ├── test_no_rederivation.py               # FR-002, FR-044 — reads, never recomputes
 │   ├── test_model_confidence_unread.py       # FR-028 — untrusted upstream, unread here
 │   ├── test_grounding_rate_reused.py         # FR-033 — Milestone 4's counts, not a second rate
+│   ├── test_scores_never_averaged.py         # FR-039 — exact and fuzzy never pooled
+│   ├── test_base_install_excludes_evaluation_data.py  # FR-059 — datasets/ outside the wheel
 │   ├── test_comparison_judgements.py         # FR-045, FR-047, FR-049, SC-014, SC-015
 │   ├── test_corrections.py                   # FR-050 … FR-053, SC-019, SC-020
 │   ├── test_evaluation_has_no_document_type_code.py  # Principle VI, extending Milestone 3's test

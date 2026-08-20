@@ -268,6 +268,11 @@ wreckage positional alignment produces downstream of a missing entry.
 
 ### EVA-17 · `MetricDefinition` — `metric_definitions@1`
 
+`metric_definitions@1` pins, in addition to the table below, the `comparator_versions`, the
+`entry_alignment_version`, and the `location_rule_version` **with its threshold** (EVA-22a). Each of
+them can change a numerator, so FR-035 requires a bump when one moves and FR-046's refusal then
+applies without a second mechanism having to exist.
+
 Labels partition into **V** (`expectation is VALUE`) and **A** (`expectation is ABSENT`).
 
 | Metric | Numerator | Denominator |
@@ -338,7 +343,18 @@ metric whose origin is unknown is the vague quality claim Principle IX rejects a
 ### EVA-22 · `EvaluationOptions`
 
 `metric_definition_version`, `comparator_versions`, `entry_alignment_version`, `location_rule_version`,
-`location_threshold`, `include_restricted`. Identity-bearing: folded into `options_hash` (EVA-24).
+`include_restricted`. Identity-bearing: folded into `options_hash` (EVA-24).
+
+**EVA-22a** — the location threshold is **not** an option. It is fixed by `location_rule_version`:
+`page_box@1` means containment ≥ 0.5, and changing the number is `page_box@2`. A caller-settable
+threshold would let two reports both claiming `page_box@1` disagree about the mislocation rate, and
+EVA-28a does not refuse on it — so `compare()` would diff them silently and the delta would mean
+nothing. The threshold changes a metric's numerator, which makes it part of the metric definition
+under FR-035, and the refusal already in EVA-28a then covers it without a second mechanism.
+
+This **diverges from Milestone 4's fuzzy threshold, which is an option** (ADR-0003's `Ground` row),
+and the divergence is deliberate: that threshold moves a grounding artifact no quality gate compares,
+while this one moves a number that blocks merges.
 
 ### EVA-23 · `EvaluationReport`
 

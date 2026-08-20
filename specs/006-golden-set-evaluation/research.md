@@ -201,7 +201,10 @@ fields) that is 0.93 ms if recomputed per comparison, so keys are computed once 
 | `report_id` | `sha256(golden_set_id ‖ prediction_set_id ‖ SCORER_ID ‖ SCORER_VERSION ‖ options_hash)` |
 
 `options_hash` folds the metric definition version, the comparator versions, the entry-alignment
-version, the location-rule version and its threshold, and whether the restricted tier was included.
+version, the location-rule version, and whether the restricted tier was included. The location
+**threshold** is not among them because it is not an option: it is fixed by `page_box@1` and changing
+it is `page_box@2` (EVA-22a). A caller-settable threshold would let two reports both claiming
+`page_box@1` disagree about the mislocation rate, and the comparison refusal does not read it.
 
 **`prediction_set_id` leans on one validation artifact id per document deliberately.** ADR-0003 makes
 the terminal artifact id transitively cover every result-affecting input of every earlier stage, so
