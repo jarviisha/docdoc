@@ -102,6 +102,38 @@ open: GOLDEN_DATASET_LICENSING, PRE_1_0_VERSIONING.
 
 Templates: no changes required — the plan-template gate table references
 principles by number and remains accurate.
+
+---
+AMENDMENT 1.2.0 → 1.3.0 (2026-08-20)
+Bump rationale: MINOR — resolves the decision gating Milestone 6, adds two
+binding rules to Principle IX, and gives quality gate 5 the target size it
+referenced but never stated. No principle is removed or redefined; no previously
+compliant work becomes non-compliant, because no evaluation code exists yet.
+
+  - TODO(GOLDEN_DATASET_LICENSING) resolved (ADR-0009). The golden dataset is
+    two tiers. A public tier is vendored into the repository — synthetic
+    documents from committed generators plus permissively licensed or
+    public-domain ones — and MUST be sufficient on its own for a complete
+    report, evaluable with no credentials and no network. An optional restricted
+    tier is referenced by content hash and never committed; a run without it
+    produces a report marked partial, never a smaller full one. Every document
+    in either tier records its origin and the basis on which docdoc may use it.
+    Predictions follow the tier of the document they describe, because a
+    recorded prediction carries the values it extracted.
+
+  - Quality gate 5's target size stated: 50 documents and 500 labeled fields in
+    the public tier, across at least two schemas with at least twenty documents
+    each. Counted on the public tier because gate 5 is a CI gate and CI cannot
+    see the restricted tier. Reaching the size does not flip the gate; flipping
+    it remains an amendment.
+
+Sections amended: Principle IX (two rules added); Development Workflow and
+Quality Gates (gate 5 given its target size); Open Constitutional Decisions
+(GOLDEN_DATASET_LICENSING moved to Resolved). One non-blocking decision remains
+open: PRE_1_0_VERSIONING.
+
+Templates: no changes required — the plan-template gate table references
+principles by number and remains accurate.
 -->
 
 # docdoc Constitution
@@ -304,6 +336,13 @@ Quality MUST be measurable, not asserted.
 Rules:
 
 - The project MUST support a golden dataset and regression evaluation over it.
+- The golden dataset MUST have a **public tier** vendored into the repository that any contributor
+  can evaluate with no credentials and no network, and that is sufficient on its own to produce a
+  complete report. An optional **restricted tier** MAY exist, referenced by content hash and never
+  committed; a run without it MUST produce a report marked partial, naming what it skipped, and
+  MUST NOT produce a smaller full one (ADR-0009).
+- Every golden-set document MUST record its origin and the basis on which docdoc may use it. A
+  document whose provenance cannot be stated MUST NOT be admitted.
 - Minimum metrics: field accuracy, coverage, missing rate, incorrect rate, grounding rate.
 - Metrics MUST be reported at both document level and field level. Vague "AI quality" claims are
   not acceptable evidence in any plan or PR.
@@ -441,8 +480,11 @@ provider, model, and token usage. OpenTelemetry where practical.
 4. **Grounding regressions are blocking.** A change that lowers grounding rate on the golden set
    MUST be justified explicitly; it is not an acceptable side effect of an unrelated change.
 5. **Evaluation gate.** Changes to parsers, prompts, models, schemas, or grounding MUST report
-   golden-set metrics. The CI gate is advisory during the MVP and becomes blocking once the
-   golden dataset reaches its target size.
+   golden-set metrics. The CI gate is advisory during the MVP. Its target size is **50 documents
+   and 500 labeled fields in the public tier**, across at least two schemas with at least twenty
+   documents each (ADR-0009) — counted on the public tier because this is a CI gate and CI cannot
+   see the restricted one. Reaching that size does not flip the gate; flipping it is an amendment,
+   made on evidence that the metrics are stable enough to block a merge on.
 6. **Provider changes stay in adapters.** A PR that adds a provider SDK import outside an
    adapter directory is rejected on sight.
 7. **Every feature ships with documentation and at least one example.**
@@ -466,12 +508,10 @@ on 2026-08-14:
 | `NORMALIZATION_VS_GROUNDING` | Comparison-time match view with offset map; `Document.text` stays byte-faithful | [0006](../../docs/adr/0006-comparison-time-match-view.md) |
 | `LICENSE` | Apache-2.0, chosen for its explicit patent grant | [0007](../../docs/adr/0007-apache-2-license.md) |
 | `SCHEMA_EVOLUTION_POLICY` | Major `schema_version` for contract breaks, derived `schema_hash` for cache invalidation; concurrent majors allowed; no `latest` in the core (2026-08-17) | [0008](../../docs/adr/0008-schema-evolution-policy.md) |
+| `GOLDEN_DATASET_LICENSING` | Two tiers: a vendored public tier sufficient on its own for a complete report, plus an optional hash-referenced restricted tier whose absence makes a report partial; gate 5's target size stated (2026-08-20) | [0009](../../docs/adr/0009-golden-dataset-licensing.md) |
 
 **Still open:**
 
-- **TODO(GOLDEN_DATASET_LICENSING)** — Milestone 6. A public repository cannot ship real
-  customer invoices. Decide the sourcing strategy — synthetic, public-domain, or a private
-  dataset referenced by hash — and how contributors run evaluation without it.
 - **TODO(PRE_1_0_VERSIONING)** — before first public release. Principle XII mandates semantic
   versioning while the kernel API is expected to churn. Confirm the `0.x` policy and what
   stability, if any, is promised before `1.0.0`.
@@ -503,4 +543,4 @@ insufficient. Unjustified violations are rejected regardless of the code's quali
 **Precedence for unresolved items.** Where an "Open Constitutional Decision" is unresolved,
 implementers MUST NOT resolve it silently in code. Raise it, decide it, record it.
 
-**Version**: 1.2.0 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-08-17
+**Version**: 1.3.0 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-08-20

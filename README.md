@@ -236,7 +236,7 @@ higher-layer work merges while that property is failing or absent.
 ## Documentation
 
 - [Constitution](.specify/memory/constitution.md) — the governing principles
-- [Architecture decisions](docs/adr/) — eight accepted ADRs
+- [Architecture decisions](docs/adr/) — nine accepted ADRs
 - [Document concepts](docs/concepts/document.md)
 - [Identity model](docs/concepts/identity.md)
 - [Kernel API contract](specs/001-kernel-document-ir/contracts/kernel-api.md)

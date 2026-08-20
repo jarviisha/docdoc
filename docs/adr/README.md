@@ -14,6 +14,7 @@ it would be decided explicitly rather than settled by whichever code landed firs
 | [0006](0006-comparison-time-match-view.md) | Normalization happens in a comparison-time match view | Accepted | `NORMALIZATION_VS_GROUNDING` |
 | [0007](0007-apache-2-license.md) | Apache License 2.0 | Accepted | `LICENSE` |
 | [0008](0008-schema-evolution-policy.md) | Schema evolution is a two-level contract | Accepted | `SCHEMA_EVOLUTION_POLICY` |
+| [0009](0009-golden-dataset-licensing.md) | The golden dataset is two tiers, and the public one is sufficient | Accepted | `GOLDEN_DATASET_LICENSING` |
 
 ## Conventions
 

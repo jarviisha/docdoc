@@ -49,7 +49,9 @@ rule: the location-agreement rule (FR-038), where a repeating group's alignment 
 (FR-020), and the golden dataset's target size for the constitution's fifth quality gate (FR-009 and
 Assumptions).
 
-**One item remains outstanding, and it is not a spec defect.** The decision behind FR-010 is made but not
-yet *recorded* where the constitution requires: `/speckit-plan`'s Constitution Check (gate 14, open
-decisions) will still fail until **ADR-0009** exists under `docs/adr/` and the matching constitution
-amendment moves `TODO(GOLDEN_DATASET_LICENSING)` from Still open to Resolved. Write both before planning.
+**Nothing remains outstanding.** The decision behind FR-010 is now recorded where the constitution
+requires it: [ADR-0009](../../../docs/adr/0009-golden-dataset-licensing.md), with the amendment moving
+`TODO(GOLDEN_DATASET_LICENSING)` from Still open to Resolved in constitution v1.3.0. That amendment also
+adds the two golden-set rules to Principle IX and gives quality gate 5 the target size it referenced but
+never stated. `/speckit-plan`'s Constitution Check (gate 14, open decisions) now has nothing open that
+gates this milestone.

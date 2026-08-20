@@ -13,14 +13,14 @@ Milestone 6 of the docdoc MVP — the milestone that turns four milestones of co
 *measured* ones. Milestone 3 recorded what the model answered, Milestone 4 made the grounding rate
 computable and set no target for it, Milestone 5 made the validation rate computable and set no target
 for it either. Each deferred the same question here: **is any of this any good, and did the last change
-make it worse?** This feature is governed by the constitution (v1.2.0) — Principle IX above all — and by
-ADR-0002, ADR-0003, ADR-0004, ADR-0005, and ADR-0008.
+make it worse?** This feature is governed by the constitution (v1.3.0) — Principle IX above all — and by
+ADR-0002, ADR-0003, ADR-0004, ADR-0005, ADR-0008, and ADR-0009.
 
-It is also the milestone gated by a constitutional decision. `TODO(GOLDEN_DATASET_LICENSING)` names this
+It was also the milestone gated by a constitutional decision. `TODO(GOLDEN_DATASET_LICENSING)` named this
 milestone explicitly, and the constitution's precedence rule forbids resolving it in code. It was decided
-explicitly in the clarification session below rather than implicitly here; FR-010 and FR-003 now record
-the outcome, and **ADR-0009 plus the matching constitution amendment must still be written** before
-planning begins. See the note under Dependencies.
+explicitly in the clarification session below rather than implicitly here, and is now recorded where the
+constitution requires: **ADR-0009**, with the amendment moving the item to Resolved in constitution
+v1.3.0. FR-010 and FR-003 carry its consequences.
 
 ## Clarifications
 
@@ -656,13 +656,12 @@ silently and the second depends on it.
 
 ## Dependencies
 
-- **`TODO(GOLDEN_DATASET_LICENSING)` — a constitutional decision that gates this milestone, now decided
-  but not yet recorded.** The constitution requires it to be resolved by an ADR under `docs/adr/` and
-  forbids resolving it implicitly in an implementation choice. The decision itself was taken explicitly
-  in the Clarifications session — a vendored public tier plus an optional hash-referenced restricted
-  tier — and FR-010 and FR-003 record its consequences. What remains is the recording: **ADR-0009** and
-  the matching constitution amendment moving the item from Still open to Resolved. The Constitution
-  Check in `/speckit-plan` cannot pass until both exist. This is the one dependency that is not code.
+- **ADR-0009 — the resolution of `TODO(GOLDEN_DATASET_LICENSING)`, the constitutional decision that
+  gated this milestone.** A vendored public tier that is sufficient on its own for a complete report,
+  plus an optional restricted tier referenced by content hash whose absence makes a report partial.
+  FR-010 and FR-003 carry its consequences, and it is the source of the target size in FR-009. Recorded
+  in constitution v1.3.0, which also states that target size in quality gate 5 and adds the two
+  golden-set rules to Principle IX. This is the one dependency that is not code.
 - **Milestone 3 (`003-schema-driven-extraction`)** — supplies the schema identities and hashes labels are
   written against, the typed values comparison operates on, the presence/absence distinction that
   separates *missing* from *incorrect*, the prompt hash and model identity every report must record, and
@@ -674,7 +673,7 @@ silently and the second depends on it.
   and assigned corrections and annotations to this milestone in its own Out of Scope section. Its typed
   errors, provenance conventions, and field-path form MUST be reused rather than duplicated under a
   second incompatible name.
-- **Constitution v1.2.0** — Principles III, VIII, IX, X, XI, and XII bind this feature directly.
+- **Constitution v1.3.0** — Principles III, VIII, IX, X, XI, and XII bind this feature directly.
   Principle IX is the one it exists to satisfy; quality gates 4 and 5 are the ones it makes enforceable.
 - **ADR-0002, ADR-0003** — supply the identity model the dataset, prediction set, and report identities
   extend.
