@@ -102,6 +102,78 @@ open: GOLDEN_DATASET_LICENSING, PRE_1_0_VERSIONING.
 
 Templates: no changes required — the plan-template gate table references
 principles by number and remains accurate.
+
+---
+AMENDMENT 1.2.0 → 1.3.0 (2026-08-20)
+Bump rationale: MINOR — resolves the decision gating Milestone 6, adds two
+binding rules to Principle IX, and gives quality gate 5 the target size it
+referenced but never stated. No principle is removed or redefined; no previously
+compliant work becomes non-compliant, because no evaluation code exists yet.
+
+  - TODO(GOLDEN_DATASET_LICENSING) resolved (ADR-0009). The golden dataset is
+    two tiers. A public tier is vendored into the repository — synthetic
+    documents from committed generators plus permissively licensed or
+    public-domain ones — and MUST be sufficient on its own for a complete
+    report, evaluable with no credentials and no network. An optional restricted
+    tier is referenced by content hash and never committed; a run without it
+    produces a report marked partial, never a smaller full one. Every document
+    in either tier records its origin and the basis on which docdoc may use it.
+    Predictions follow the tier of the document they describe, because a
+    recorded prediction carries the values it extracted.
+
+  - Quality gate 5's target size stated: 50 documents and 500 labeled fields in
+    the public tier, across at least two schemas with at least twenty documents
+    each. Counted on the public tier because gate 5 is a CI gate and CI cannot
+    see the restricted tier. Reaching the size does not flip the gate; flipping
+    it remains an amendment.
+
+Sections amended: Principle IX (two rules added); Development Workflow and
+Quality Gates (gate 5 given its target size); Open Constitutional Decisions
+(GOLDEN_DATASET_LICENSING moved to Resolved). One non-blocking decision remains
+open: PRE_1_0_VERSIONING.
+
+Templates: no changes required — the plan-template gate table references
+principles by number and remains accurate.
+
+---
+AMENDMENT 1.3.0 → 1.4.0 (2026-08-20)
+Bump rationale: MINOR — Principle X's guidance is materially expanded and its
+chain is corrected to the one that exists. No principle is removed and nothing
+previously compliant becomes non-compliant: the code already obeyed the real
+chain, which is precisely the problem being fixed.
+
+  - Principle X's chain corrected from
+    `API -> Pipeline -> Extraction -> Transform -> Ingest -> Kernel` to
+    `Evaluation -> Validation -> Grounding -> Extraction -> Ingest -> Kernel`,
+    with Recording, Pipeline, and API listed separately as planned and not yet
+    built. From Milestone 4 to Milestone 6 this document named layers that did
+    not exist (`Transform`, `Pipeline`, `API`) and omitted layers that did
+    (`grounding`, `validation`), and the reconciliation lived only in a
+    `pyproject.toml` comment and three `research.md` files. Milestone 6 would
+    have taken the count of unnamed-but-real layers from two to four.
+
+  - `Transform` is recorded as never built: ADR-0006 placed its transformations
+    inside grounding's versioned match view, so the layer it would have been is
+    grounding.
+
+  - Two rules added to Principle X: the layers contract in `pyproject.toml` is
+    the authoritative form of the chain because it is the one CI checks, and
+    this text MUST be amended in the same change that adds a layer to it; and
+    the chain MUST name only layers that exist, with planned ones listed
+    separately.
+
+  - Principle IV's provider-SDK rule rewritten to name the directories that
+    exist rather than `transform/` and `pipeline/`, which do not.
+
+  - Packaging paragraph corrected: the base install carries `pydantic` **and**
+    `rapidfuzz`, not `pydantic` alone. Only the kernel is `pydantic`-only.
+
+Sections amended: Principle IV (one rule); Principle X (chain, three rules,
+Transform's fate); MVP Scope Constraints (Packaging). No decision moved; one
+non-blocking decision remains open: PRE_1_0_VERSIONING.
+
+Templates: no changes required — the plan-template gate table references
+principles by number and remains accurate.
 -->
 
 # docdoc Constitution
@@ -206,9 +278,10 @@ Rules:
   `ArtifactStore`. `OCRProvider` is **deferred** (ADR-0001): a document-intelligence provider
   satisfies the `Parser` contract, and an interface with no implementation would violate
   Principle XI. It is introduced only when a local OCR engine proves the contracts diverge.
-- Provider SDK types MUST NOT appear in `kernel/`, `transform/`, `extraction/` (outside
-  `providers/`), or `pipeline/`. Provider exceptions MUST be translated to docdoc's error model
-  and MUST NOT leak through the public API.
+- Provider SDK types MUST NOT appear in any layer outside an adapter directory — today that means
+  `kernel/`, `grounding/`, `validation/`, `evaluation/`, and `extraction/` outside
+  `extraction/adapters/`, with `ingest/` restricted to `ingest/parsers/`. Provider exceptions MUST
+  be translated to docdoc's error model and MUST NOT leak through the public API.
 - Parsers are selected by declared capabilities, never by hard-coded provider name.
 - Local/open-source components MUST remain a viable path; cloud providers are optional extras.
 - The base install MUST NOT force installation of any provider SDK or OCR engine. Provider
@@ -304,6 +377,13 @@ Quality MUST be measurable, not asserted.
 Rules:
 
 - The project MUST support a golden dataset and regression evaluation over it.
+- The golden dataset MUST have a **public tier** vendored into the repository that any contributor
+  can evaluate with no credentials and no network, and that is sufficient on its own to produce a
+  complete report. An optional **restricted tier** MAY exist, referenced by content hash and never
+  committed; a run without it MUST produce a report marked partial, naming what it skipped, and
+  MUST NOT produce a smaller full one (ADR-0009).
+- Every golden-set document MUST record its origin and the basis on which docdoc may use it. A
+  document whose provenance cannot be stated MUST NOT be admitted.
 - Minimum metrics: field accuracy, coverage, missing rate, incorrect rate, grounding rate.
 - Metrics MUST be reported at both document level and field level. Vague "AI quality" claims are
   not acceptable evidence in any plan or PR.
@@ -321,15 +401,32 @@ not regress.
 
 ### X. Layered Dependency Direction and Bounded Concepts
 
-The dependency direction MUST be, strictly downward:
+The dependency direction MUST be, strictly downward. The layers that **exist**, in order:
 
 ```text
-API → Pipeline → Extraction → Transform → Ingest → Kernel
+Evaluation → Validation → Grounding → Extraction → Ingest → Kernel
 ```
+
+Planned and not yet built: **Recording** (above Evaluation), and **Pipeline** and **API** above
+both — Milestones 6 and 7. `Transform` was named as a layer in this document until v1.4.0 and was
+never built: ADR-0006 put its transformations inside grounding's versioned match view instead, so
+the layer it would have been is grounding.
 
 Rules:
 
 - The kernel MUST NOT depend on any layer above it.
+- **The layers contract in `pyproject.toml` is the authoritative form of this chain**, because it
+  is the one CI checks. This text MUST be amended in the same change that adds a layer to it. From
+  Milestone 4 to Milestone 6 the two disagreed — grounding and validation shipped as layers this
+  document never named — and the reconciliation lived only in a `pyproject.toml` comment and three
+  `research.md` files. A dependency graph a reader must reconstruct from three research documents
+  is not a governing one.
+- **This chain MUST name only layers that exist**, with planned ones listed separately as above. A
+  principle that names `Transform` and `Pipeline` alongside `Kernel` invites a designer to build
+  against a graph that is partly aspiration, which is the specific failure this rule now prevents.
+- ADR-0003's per-document stage chain — parse → extraction → grounding → validation — is finer
+  grained than this list and consistent with it. Where they overlap, both hold; neither overrides
+  the other.
 - The domain model MUST NOT depend on FastAPI, HTTP, CLI, ORM/database models, or provider SDKs.
 - `Document` is the canonical root but MUST NOT become a god object. These concepts stay
   conceptually separate even when their MVP implementation is small: Document, Content, Layout,
@@ -402,8 +499,11 @@ geometry-capable cloud document-intelligence parser (scanned/image/mixed path); 
 (ADR-0001). The core library MUST remain installable and usable without any of the optional
 infrastructure.
 
-**Packaging.** `pip install docdoc` installs kernel, transform, and core extraction contracts
-only. Provider integrations are optional extras (for example `docdoc[openai]`, `docdoc[pdf]`).
+**Packaging.** `pip install docdoc` installs the deterministic layers — kernel, ingest, extraction,
+grounding, validation, and evaluation contracts — and no provider SDK. Provider integrations are
+optional extras (for example `docdoc[google]`, `docdoc[pdf]`). The base install's runtime
+dependencies are `pydantic` and `rapidfuzz`; the latter is sanctioned by the stack line above and by
+ADR-0005, and the **kernel** alone depends on `pydantic` only.
 
 **Deferred technology.** The following are postponed, not architecturally rejected, and MUST NOT
 appear in the MVP without an approved amendment: Kafka, Temporal, Kubernetes, multi-region
@@ -441,8 +541,11 @@ provider, model, and token usage. OpenTelemetry where practical.
 4. **Grounding regressions are blocking.** A change that lowers grounding rate on the golden set
    MUST be justified explicitly; it is not an acceptable side effect of an unrelated change.
 5. **Evaluation gate.** Changes to parsers, prompts, models, schemas, or grounding MUST report
-   golden-set metrics. The CI gate is advisory during the MVP and becomes blocking once the
-   golden dataset reaches its target size.
+   golden-set metrics. The CI gate is advisory during the MVP. Its target size is **50 documents
+   and 500 labeled fields in the public tier**, across at least two schemas with at least twenty
+   documents each (ADR-0009) — counted on the public tier because this is a CI gate and CI cannot
+   see the restricted one. Reaching that size does not flip the gate; flipping it is an amendment,
+   made on evidence that the metrics are stable enough to block a merge on.
 6. **Provider changes stay in adapters.** A PR that adds a provider SDK import outside an
    adapter directory is rejected on sight.
 7. **Every feature ships with documentation and at least one example.**
@@ -466,12 +569,10 @@ on 2026-08-14:
 | `NORMALIZATION_VS_GROUNDING` | Comparison-time match view with offset map; `Document.text` stays byte-faithful | [0006](../../docs/adr/0006-comparison-time-match-view.md) |
 | `LICENSE` | Apache-2.0, chosen for its explicit patent grant | [0007](../../docs/adr/0007-apache-2-license.md) |
 | `SCHEMA_EVOLUTION_POLICY` | Major `schema_version` for contract breaks, derived `schema_hash` for cache invalidation; concurrent majors allowed; no `latest` in the core (2026-08-17) | [0008](../../docs/adr/0008-schema-evolution-policy.md) |
+| `GOLDEN_DATASET_LICENSING` | Two tiers: a vendored public tier sufficient on its own for a complete report, plus an optional hash-referenced restricted tier whose absence makes a report partial; gate 5's target size stated (2026-08-20) | [0009](../../docs/adr/0009-golden-dataset-licensing.md) |
 
 **Still open:**
 
-- **TODO(GOLDEN_DATASET_LICENSING)** — Milestone 6. A public repository cannot ship real
-  customer invoices. Decide the sourcing strategy — synthetic, public-domain, or a private
-  dataset referenced by hash — and how contributors run evaluation without it.
 - **TODO(PRE_1_0_VERSIONING)** — before first public release. Principle XII mandates semantic
   versioning while the kernel API is expected to churn. Confirm the `0.x` policy and what
   stability, if any, is promised before `1.0.0`.
@@ -503,4 +604,4 @@ insufficient. Unjustified violations are rejected regardless of the code's quali
 **Precedence for unresolved items.** Where an "Open Constitutional Decision" is unresolved,
 implementers MUST NOT resolve it silently in code. Raise it, decide it, record it.
 
-**Version**: 1.2.0 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-08-17
+**Version**: 1.4.0 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-08-20

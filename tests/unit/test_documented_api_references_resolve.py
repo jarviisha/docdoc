@@ -47,6 +47,8 @@ DOCUMENTS = (
     "specs/003-schema-driven-extraction/quickstart.md",
     "specs/003-schema-driven-extraction/contracts/extraction-api.md",
     "specs/005-deterministic-validation/contracts/validation-api.md",
+    "docs/concepts/evaluation.md",
+    "specs/006-golden-set-evaluation/contracts/evaluation-api.md",
 )
 
 _BLOCK = re.compile(r"```python\n(.*?)```", re.S)
@@ -143,6 +145,47 @@ DOCUMENTED_ATTRIBUTES = (
             "model_version",
             "usage",
         ),
+    ),
+    (
+        "docdoc.evaluation:EvaluationReport",
+        (
+            "outcomes",
+            "metrics",
+            "document_scores",
+            "partial",
+            "redacted_tiers",
+            "provenance",
+            "report_id",
+        ),
+    ),
+    (
+        "docdoc.evaluation:DatasetMetrics",
+        ("micro", "macro", "per_field_path", "group_outcomes", "validation_verdicts"),
+    ),
+    ("docdoc.evaluation:MetricValue", ("value", "numerator", "denominator", "averaging")),
+    (
+        "docdoc.evaluation:PartialDeclaration",
+        ("skipped_documents", "skipped_tiers", "covered_labels", "declared_labels"),
+    ),
+    (
+        "docdoc.evaluation:Comparison",
+        ("metrics", "grounding_regression", "provenance_differences", "changed_outcomes"),
+    ),
+    (
+        "docdoc.evaluation:Correction",
+        (
+            "field_path",
+            "predicted_value",
+            "corrected_value",
+            "location",
+            "reason",
+            "annotator",
+            "timestamp",
+        ),
+    ),
+    (
+        "docdoc.evaluation:FieldOutcome",
+        ("expected_hash", "predicted_hash", "comparator_version", "grounding_status"),
     ),
 )
 

@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-18
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: User description: "Milestone 5 — validation: nhận kết quả đã trích xuất và đã grounded, rồi
 trả lời câu hỏi *kết quả này có chấp nhận được không?* bằng code deterministic. Bao gồm structural

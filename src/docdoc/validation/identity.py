@@ -26,8 +26,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from docdoc.kernel import canonical_json, options_hash_for
-from docdoc.kernel.identity import _sha256
+from docdoc.kernel import canonical_json, content_id_for, options_hash_for
 from docdoc.validation.pattern import PATTERN_DIALECT_VERSION
 from docdoc.validation.rules import RULE_VOCABULARY_VERSION
 
@@ -101,4 +100,4 @@ def validation_artifact_id_for(
             "options_hash": options_hash,
         }
     )
-    return _sha256(payload)
+    return content_id_for(payload)

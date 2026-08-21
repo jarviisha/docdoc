@@ -1,0 +1,86 @@
+[
+  {
+    "field_path": "invoice_number",
+    "expectation": "value",
+    "value": "INV-001",
+    "labeler": "docdoc-maintainers",
+    "labeled_at": "2026-08-20T00:00:00",
+    "location": {
+      "page": 0,
+      "bbox": [
+        0.0,
+        0.0,
+        1.0,
+        0.5
+      ]
+    }
+  },
+  {
+    "field_path": "issue_date",
+    "expectation": "value",
+    "value": "2026-03-01",
+    "labeler": "docdoc-maintainers",
+    "labeled_at": "2026-08-20T00:00:00"
+  },
+  {
+    "field_path": "currency",
+    "expectation": "value",
+    "value": "USD",
+    "labeler": "docdoc-maintainers",
+    "labeled_at": "2026-08-20T00:00:00"
+  },
+  {
+    "field_path": "total",
+    "expectation": "value",
+    "value": "1240.00",
+    "labeler": "docdoc-maintainers",
+    "labeled_at": "2026-08-20T00:00:00"
+  },
+  {
+    "field_path": "supplier.legal_name",
+    "expectation": "value",
+    "value": "ACME SUPPLIES LIMITED",
+    "labeler": "docdoc-maintainers",
+    "labeled_at": "2026-08-20T00:00:00"
+  },
+  {
+    "field_path": "supplier.tax_id",
+    "expectation": "absent",
+    "labeler": "docdoc-maintainers",
+    "labeled_at": "2026-08-20T00:00:00"
+  },
+  {
+    "field_path": "due_date",
+    "expectation": "absent",
+    "labeler": "docdoc-maintainers",
+    "labeled_at": "2026-08-20T00:00:00"
+  },
+  {
+    "field_path": "line_items[0].description",
+    "expectation": "value",
+    "value": "Widget, large",
+    "labeler": "docdoc-maintainers",
+    "labeled_at": "2026-08-20T00:00:00"
+  },
+  {
+    "field_path": "line_items[0].amount",
+    "expectation": "value",
+    "value": "1000.00",
+    "labeler": "docdoc-maintainers",
+    "labeled_at": "2026-08-20T00:00:00"
+  },
+  {
+    "field_path": "line_items[1].description",
+    "expectation": "value",
+    "value": "Delivery",
+    "labeler": "docdoc-maintainers",
+    "labeled_at": "2026-08-20T00:00:00"
+  },
+  {
+    "field_path": "line_items[1].amount",
+    "expectation": "value",
+    "value": "240.00",
+    "labeler": "docdoc-maintainers",
+    "labeled_at": "2026-08-20T00:00:00"
+  }
+]

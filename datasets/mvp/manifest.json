@@ -1,0 +1,111 @@
+{
+  "name": "docdoc-mvp",
+  "generator": {
+    "id": "datasets.mvp.make_dataset",
+    "version": "1.0.0"
+  },
+  "size": {
+    "public": {
+      "documents": 4,
+      "labelled_fields": 28
+    },
+    "restricted": {
+      "documents": 2,
+      "labelled_fields": 20
+    },
+    "gate_5_target": {
+      "documents": 50,
+      "labelled_fields": 500
+    }
+  },
+  "documents": [
+    {
+      "document_id": "invoice-001",
+      "blob_sha256": "sha256:b0d9b6313a50500eed5db2a1773b2252b37dc5a8d856863df74d148ba917bc7e",
+      "tier": "public",
+      "origin": {
+        "kind": "synthetic",
+        "basis": "Synthetic. Written for this repository's golden set; no real document content and nothing that could carry PII.",
+        "source": "datasets/mvp/make_dataset.py",
+        "generator_id": "datasets.mvp.make_dataset",
+        "generator_version": "1.0.0"
+      },
+      "schema_identity": "invoice@1",
+      "schema_hash": "sha256:37a9f66014c4a99a4fa3e2442e4557184e3fa4e3985f55bc04130b937076fd00",
+      "path": "documents/invoice-001.pdf",
+      "declared_label_count": 11
+    },
+    {
+      "document_id": "invoice-002",
+      "blob_sha256": "sha256:f30e000331c6a8a31685ec8a355f7850560a991ff35b3d0abdb0582c145bc9e0",
+      "tier": "public",
+      "origin": {
+        "kind": "synthetic",
+        "basis": "Synthetic. Written for this repository's golden set; no real document content and nothing that could carry PII.",
+        "source": "datasets/mvp/make_dataset.py",
+        "generator_id": "datasets.mvp.make_dataset",
+        "generator_version": "1.0.0"
+      },
+      "schema_identity": "invoice@1",
+      "schema_hash": "sha256:37a9f66014c4a99a4fa3e2442e4557184e3fa4e3985f55bc04130b937076fd00",
+      "path": "documents/invoice-002.pdf",
+      "declared_label_count": 9
+    },
+    {
+      "document_id": "receipt-001",
+      "blob_sha256": "sha256:ec85f51d1362dd6569b0e1ac9cbcc6d1f0f55f5e264599fbc8a6aa4560e49758",
+      "tier": "public",
+      "origin": {
+        "kind": "synthetic",
+        "basis": "Synthetic. Written for this repository's golden set; no real document content and nothing that could carry PII.",
+        "source": "datasets/mvp/make_dataset.py",
+        "generator_id": "datasets.mvp.make_dataset",
+        "generator_version": "1.0.0"
+      },
+      "schema_identity": "receipt@1",
+      "schema_hash": "sha256:b88cd54bba4ffd11e1c6b4076d31cc03af0e69667fc668e7fb5c53a123420347",
+      "path": "documents/receipt-001.pdf",
+      "declared_label_count": 4
+    },
+    {
+      "document_id": "receipt-002",
+      "blob_sha256": "sha256:d3f8a90489884a8cf61f94ce8f4041d014463e6d3981673a69ffe9499b2944e3",
+      "tier": "public",
+      "origin": {
+        "kind": "synthetic",
+        "basis": "Synthetic. Written for this repository's golden set; no real document content and nothing that could carry PII.",
+        "source": "datasets/mvp/make_dataset.py",
+        "generator_id": "datasets.mvp.make_dataset",
+        "generator_version": "1.0.0"
+      },
+      "schema_identity": "receipt@1",
+      "schema_hash": "sha256:b88cd54bba4ffd11e1c6b4076d31cc03af0e69667fc668e7fb5c53a123420347",
+      "path": "documents/receipt-002.pdf",
+      "declared_label_count": 4
+    },
+    {
+      "document_id": "restricted-invoice-001",
+      "blob_sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "declared_label_count": 11,
+      "tier": "restricted",
+      "origin": {
+        "kind": "restricted",
+        "basis": "Held by the corpus owner under terms that forbid redistribution. Referenced by content hash only."
+      },
+      "schema_identity": "invoice@1",
+      "schema_hash": "sha256:37a9f66014c4a99a4fa3e2442e4557184e3fa4e3985f55bc04130b937076fd00"
+    },
+    {
+      "document_id": "restricted-invoice-002",
+      "blob_sha256": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "declared_label_count": 9,
+      "tier": "restricted",
+      "origin": {
+        "kind": "restricted",
+        "basis": "Held by the corpus owner under terms that forbid redistribution. Referenced by content hash only."
+      },
+      "schema_identity": "invoice@1",
+      "schema_hash": "sha256:37a9f66014c4a99a4fa3e2442e4557184e3fa4e3985f55bc04130b937076fd00"
+    }
+  ]
+}

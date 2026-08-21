@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-18
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: User description: "Milestone 4 — grounding: mỗi giá trị đã trích từ Milestone 3 mang một
 `claimed_text` do model tự khai; milestone này biến nó thành vị trí thật trong tài liệu — span, page,

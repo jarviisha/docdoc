@@ -35,6 +35,7 @@ __all__ = [
     "ID_PATTERN",
     "blob_id_for",
     "canonical_json",
+    "content_id_for",
     "document_id_for",
     "options_hash_for",
 ]
@@ -105,7 +106,20 @@ def canonical_json(value: Any) -> bytes:
     ).encode("utf-8")
 
 
-def _sha256(data: bytes) -> str:
+def content_id_for(data: bytes) -> str:
+    """The ``sha256:``-prefixed content id of raw bytes.
+
+    Public, and named like its neighbours, because it stopped being an
+    implementation detail two milestones ago. It was private through Milestone 3;
+    Milestones 4 and 5 both reached past ``__all__`` for it
+    (``from docdoc.kernel.identity import _sha256``) because a stage deriving its
+    own artifact id needs exactly this and there was nothing else to call. A
+    helper three layers import is not private, and leaving the underscore on it
+    only meant the dependency was unreviewable.
+
+    The derivation is unchanged, so every identity computed before this rename
+    is byte-identical to one computed after it.
+    """
     return ID_PREFIX + hashlib.sha256(data).hexdigest()
 
 
@@ -116,12 +130,12 @@ def blob_id_for(data: bytes) -> str:
             f"blob identity requires bytes, got {type(data).__name__}",
             field="data",
         )
-    return _sha256(bytes(data))
+    return content_id_for(bytes(data))
 
 
 def options_hash_for(options: Any) -> str:
     """Identity of a processing-options mapping (FR-018)."""
-    return _sha256(canonical_json(options))
+    return content_id_for(canonical_json(options))
 
 
 def document_id_for(
@@ -151,4 +165,4 @@ def document_id_for(
         "parser_version": parser_version,
         "options_hash": options_hash,
     }
-    return _sha256(canonical_json(payload))
+    return content_id_for(canonical_json(payload))

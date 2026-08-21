@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-17
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: User description: "Milestone 3 — schema-driven extraction: một schema có version
 (`invoice@1`) khai báo cần lấy field nào, engine đưa document + schema cho một LLM adapter

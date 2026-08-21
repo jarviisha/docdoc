@@ -245,6 +245,65 @@ def test_the_harness_reads_utf8_whatever_the_parent_locale_is() -> None:
     )
 
 
+def test_the_evaluation_example_runs_with_no_credentials() -> None:
+    """Milestone 6's example, and quickstart Scenario 1 — the 30-second version.
+
+    It replays committed predictions, so it needs no provider and no PDF reader.
+    That is the property under test as much as the numbers it prints: SC-022 says
+    a contributor runs 100% of this feature's documented examples, and one that
+    needed an extra would be the first thing to make that false.
+    """
+    _assert_ran(_run(str(EXAMPLES / "evaluate_golden_set.py")), "evaluate_golden_set.py")
+
+
+def test_the_evaluation_example_demonstrates_what_it_claims_to() -> None:
+    """Its own teaching points, so a change that quietly drops one fails here.
+
+    The denominators are the load-bearing part: a metric printed without one is
+    FR-029 broken, and a metric printed as `0.00` where it should read `undefined`
+    is FR-032 broken. Neither would fail a zero-exit-code check.
+    """
+    out = _run(str(EXAMPLES / "evaluate_golden_set.py")).stdout
+
+    assert "field_accuracy" in out
+    assert "(26/28)" in out, "every metric must print the terms it divided"
+    assert "grounding_rate" in out, "the fifth constitutionally required metric"
+    assert "unlabeled" in out, (
+        "the third state must stay visible; treating it as right or wrong makes "
+        "accuracy a function of how completely the dataset happens to be labelled"
+    )
+    assert "covered 28 of 48" in out, "a partial run must state its covered fraction exactly"
+    assert "report_id  sha256:" in out
+
+
+def test_the_comparison_example_runs_with_no_credentials() -> None:
+    """Milestone 6's second example, and quickstart Scenario 9.
+
+    It builds its own document from the kernel rather than parsing one, so it
+    needs no `pdf` extra either.
+    """
+    _assert_ran(_run(str(EXAMPLES / "compare_reports.py")), "compare_reports.py")
+
+
+def test_the_comparison_example_shows_an_attributable_regression() -> None:
+    """SC-014 and SC-015 as the example presents them to a reader.
+
+    A delta that named no changed field, or a grounding fall buried in a table,
+    or a movement with nothing connecting it to a change, would each leave the
+    example running and no longer demonstrating what it exists to show.
+    """
+    out = _run(str(EXAMPLES / "compare_reports.py")).stdout
+
+    assert "invoice-001/total: correct -> incorrect" in out, "the field that broke, by name"
+    assert "field_accuracy" in out
+    assert "regressed" in out
+    assert "REGRESSION" in out, "the grounding fall must be named, not one row among many"
+    assert "model_version" in out, (
+        "the provenance difference is what turns a coincidence into a finding"
+    )
+    assert "decides nothing" in out
+
+
 def test_every_committed_example_is_covered_here() -> None:
     """The assertion that keeps this file honest as examples are added.
 
@@ -259,6 +318,8 @@ def test_every_committed_example_is_covered_here() -> None:
         "parse_pdf.py",
         "ground_invoice.py",
         "validate_invoice.py",
+        "evaluate_golden_set.py",
+        "compare_reports.py",
     }
     assert shipped <= covered, (
         f"these examples ship but nothing executes them: {sorted(shipped - covered)}"

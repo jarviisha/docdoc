@@ -48,11 +48,21 @@ jobs:
       # single-seeded suite passes a non-deterministic alternatives list by luck.
       # Running a second seed is what makes "identical on every run and every
       # platform" a checked claim rather than a hopeful one.
-      - name: Grounding determinism under a second hash seed
+      # Milestone 6 extends this rather than adding a second job. Its reports must
+      # be byte-identical for fixed inputs (FR-043), and the hazard is the same
+      # one: a dict or set iterated to produce order passes under one seed by
+      # luck. `report_determinism` also spawns both seeds itself, so this is the
+      # belt to that file's braces -- and it covers `report_identity_sensitivity`,
+      # which does not.
+      #
+      # Selected by term rather than by file path, deliberately: a path list goes
+      # stale exactly when a new file makes it matter, which is the failure
+      # `tests/unit/test_plan_tree_is_current.py` exists to end.
+      - name: Grounding and evaluation determinism under a second hash seed
         env:
           HYPOTHESIS_PROFILE: ci
           PYTHONHASHSEED: "12345"
-        run: uv run pytest tests/unit tests/property -k "grounding or tiebreak or offset or candidates or match_view or fuzzy or exact_tier or repeating_group" -m "not perf"
+        run: uv run pytest tests/unit tests/property -k "grounding or tiebreak or offset or candidates or match_view or fuzzy or exact_tier or repeating_group or report_determinism or report_identity or ordering" -m "not perf"
 
       - name: Type check (strict)
         run: uv run mypy src/docdoc
@@ -109,6 +119,52 @@ jobs:
 
       - name: Performance budgets
         run: uv run pytest -m perf -q
+
+  # `[tool.coverage]` has been configured since Milestone 1, under a comment
+  # citing SC-006, and nothing ever ran with `--cov`. A quality bar that is
+  # configured but never measured is the same shape of defect as the `perf` job
+  # above: enforcement by nobody.
+  #
+  # Two things this job deliberately does NOT do:
+  #
+  #   - It does not run `perf`. Coverage instrumentation slows execution enough
+  #     to blow five wall-clock budgets (three kernel, two grounding) — measured,
+  #     not assumed. Those budgets are the `perf` job's business and are timed
+  #     without a tracer attached.
+  #   - It does not run on the full matrix. Coverage is a property of the test
+  #     suite, not of the platform, and paying the tracer's cost six times to
+  #     learn the same number is waste.
+  #
+  # The threshold is 93 against a measured 95 (3894 statements, 154 missed),
+  # stable at 95 under both the default and `ci` Hypothesis profiles. The two
+  # points of slack are for branch-coverage wobble across generated examples;
+  # they are not enough to hide an untested module, which is the regression this
+  # catches. Raise it when the real number rises — a ratchet only works if it
+  # turns.
+  #
+  # SC-006's actual claim is narrower and is met: `kernel/document.py`, which
+  # holds `locate`, `find`, `slice`, and `merge`, has 199 statements and zero
+  # missed.
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-extras --frozen
+
+      - name: Coverage
+        env:
+          HYPOTHESIS_PROFILE: ci
+        run: >
+          uv run pytest tests/unit tests/property tests/contract tests/integration
+          -m "not perf"
+          --cov=docdoc --cov-report=term-missing --cov-fail-under=93
 
   # The base install must stay usable with no provider SDK at all (SC-010).
   # Verified separately because the job above installs every extra.
