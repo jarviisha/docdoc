@@ -73,9 +73,15 @@ what it divided.
 - **`compare()` states what moved and decides nothing about it.** Whether a build fails is policy
   configured on top of this output; a comparison that also decided would bury the decision inside the
   thing being measured.
-- **This milestone changes no existing layer.** The first purely additive one, which the spec's Out of
-  Scope requires rather than merely permits: a milestone that both measures and improves can report
-  honestly on neither.
+- **This milestone changes no existing layer's behaviour**, which the spec's Out of Scope requires
+  rather than merely permits: a milestone that both measures and improves can report honestly on
+  neither. The qualifier is load-bearing and the exception is worth naming rather than glossing —
+  one enabling refactor landed first, renaming the kernel's `_sha256` to a public `content_id_for`
+  and updating three call sites. Milestones 4 and 5 had both already reached past `__all__` for it,
+  so the dependency existed and was merely unreviewable. **The derivation is unchanged, so every
+  identity computed before that rename is byte-identical to one computed after it** — no metric, no
+  artifact id, and no committed report moved. A claim of "purely additive" without that sentence
+  would be the kind of overclaim this feature exists to make harder.
 
 ### Closed by a convergence pass, and worth naming
 
