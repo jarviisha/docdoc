@@ -365,6 +365,7 @@ while this one moves a number that blocks merges.
 | `document_scores` | `tuple[DocumentScore, ...]` |
 | `metrics` | `DatasetMetrics` |
 | `validation_verdicts` | `dict[Verdict, int]` — reused from Milestone 5 (FR-034) |
+| `dataset_size` | `tuple[TierSize, ...]` — per tier, never merged; on every report (FR-009) |
 | `partial` | `PartialDeclaration \| None` |
 | `redacted_tiers` | `tuple[Tier, ...]` |
 | `provenance` | `EvaluationProvenance` |

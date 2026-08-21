@@ -34,13 +34,18 @@ predictions = load_prediction_set("datasets/mvp/predictions/")
 
 report = evaluate(golden, predictions)
 
-report.metrics.field_accuracy.value        # 0.94, or None if the denominator is empty
-report.metrics.field_accuracy.numerator    # 470
-report.metrics.field_accuracy.denominator  # 500
-report.report_id                           # "sha256:…"
+report.metrics.micro["field_accuracy"].value        # 0.94, or None if the denominator is empty
+report.metrics.micro["field_accuracy"].numerator    # 470
+report.metrics.micro["field_accuracy"].denominator  # 500
+report.report_id                                    # "sha256:…"
 ```
 
-`evaluate(golden_set, prediction_set, *, options=None) -> EvaluationReport`
+`evaluate(golden_set, prediction_set, *, options=None, facts=None, repo_revision=...) -> EvaluationReport`
+
+`facts` is what the schemas declare, from `schema_facts(...)`. It affects **no number** — it decides
+only which comparator version each outcome records. Typing the *values* is the loader's job, done once
+when the dataset and the predictions are read, so a caller who omits it still gets a correct report
+rather than a quietly wrong one.
 
 Returns **exactly one** report or raises `EvaluationError`. It never returns a partial report without
 `report.partial` being set and naming what was omitted (FR-001).
@@ -64,12 +69,18 @@ cannot raise a score.
 ## 3. What a report guarantees
 
 ```python
-report.outcomes            # tuple[FieldOutcome, ...] in a total order
-report.metrics             # DatasetMetrics, per-field-path breakdown included
-report.document_scores     # per document
-report.validation_verdicts # Milestone 5's counts, reused not recomputed
-report.partial             # PartialDeclaration | None
-report.provenance          # everything FR-040 lists
+report.outcomes                    # tuple[FieldOutcome, ...] in a total order
+report.metrics                     # DatasetMetrics: micro, macro, per_field_path, group_outcomes
+report.document_scores             # per document
+report.metrics.validation_verdicts # Milestone 5's verdict distribution, reused
+report.metrics.validation_counts   # and its counts — None when nothing was validated
+report.dataset_size                # per tier, never merged, on every report (FR-009)
+report.group_outcomes              # reads through to metrics; EVA-23's surface
+report.outcomes_for(document_id)   # one document's outcomes, in the report's order
+report.groups_for(document_id)     # and its repeating groups (EVA-19)
+report.partial                     # PartialDeclaration | None
+report.redacted_tiers              # which tiers carried hashes instead of values
+report.provenance                  # everything FR-040 lists
 ```
 
 - **Every metric states its numerator and denominator** (FR-029). A metric with an empty denominator is
@@ -168,7 +179,11 @@ from docdoc.recording import record_predictions
 predictions = record_predictions(golden, adapter=adapter, restricted_root=path)
 ```
 
-`record_predictions(golden_set, *, adapter, restricted_root=None, ...) -> PredictionSet`
+`record_predictions(golden_set, *, adapter, registry, documents=None, root=None, include_restricted=False) -> PredictionSet`
+
+`documents` supplies already-parsed documents and **skips the parse**, which is how the offline suite
+records without a PDF reader — and how a caller who already holds parsed documents avoids re-parsing
+them, since there is no `ArtifactStore` to do it for them.
 
 Runs parse → extract → ground → validate for each document and records the result. It is:
 

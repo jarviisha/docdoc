@@ -190,8 +190,21 @@ reading the implementation and without writing code**.
    optional and not a formality (FR-011) — and its `declared_label_count`.
 3. Add its labels to `labels/<document_id>.json`. Field paths are Milestone 3's form, entry indices
    included: `line_items[2].amount`.
-4. Record a prediction set: `uv run python -m docdoc.recording …` (the only step needing a provider).
+4. Record a prediction set: `uv run --extra pdf python datasets/mvp/make_dataset.py`. The only step
+   that runs the pipeline, and the **only one that needs an extra**: it parses the documents, and
+   PyMuPDF is the parser. It needs no provider — the public tier is recorded with the `echo` adapter,
+   and a provider is required only for a restricted corpus.
 5. `uv run python examples/evaluate_golden_set.py`.
+
+**Why step 4 carries a dependency and step 5 carries none.** Regeneration parses; replay does not.
+The predictions are recorded once and committed, so the contributor's path has no extras and the
+maintainer's path is the one that has them — which is the whole reason the public tier ships its
+predictions rather than its instructions for producing them.
+
+There is deliberately **no `docdoc.recording` command-line entry point**. The spec's Out of Scope
+places "any HTTP interface or command-line tool" in Milestone 7, so this milestone reaches the
+recorder through `record_predictions()` and the committed generator above, not through a CLI it would
+have to keep.
 
 If step 3 requires reading Python to know what to write, FR-022 is not met and the format is the
 defect — not the maintainer.
