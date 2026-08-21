@@ -50,14 +50,24 @@ TESTS = pathlib.Path("tests")
 #: artifact they validate), and listing them in three plans would make each plan's
 #: tree a description of the repository rather than of its own feature.
 LAYERS: tuple[tuple[str, pathlib.Path], ...] = (
+    ("docdoc.evaluation", pathlib.Path("specs/006-golden-set-evaluation/plan.md")),
     ("docdoc.validation", pathlib.Path("specs/005-deterministic-validation/plan.md")),
     ("docdoc.extraction", pathlib.Path("specs/003-schema-driven-extraction/plan.md")),
     ("docdoc.grounding", pathlib.Path("specs/004-deterministic-grounding/plan.md")),
 )
 
+#: `docdoc.recording` is deliberately **not** listed, though it is a layer and it
+#: sits above `docdoc.evaluation`. Its tests reach it *through* the evaluation
+#: package -- a recorded prediction is a `PredictionSet` -- so they already
+#: attribute to Milestone 6's plan, which is where they belong. Listing it as its
+#: own entry would create a layer with two test files and trip the "the scan
+#: finds a substantial suite" guard below, which exists to catch exactly the case
+#: of a layer whose tests have quietly gone missing.
+
 #: The extraction plan, kept by name for the self-check at the bottom: that check
-#: needs a plan known to list a specific file, and `LAYERS[0]` is no longer it.
-PLAN = LAYERS[1][1]
+#: needs a plan known to list a specific file, and neither `LAYERS[0]` nor
+#: `LAYERS[1]` is it.
+PLAN = LAYERS[2][1]
 
 
 def _imports(path: pathlib.Path, package: str) -> bool:
