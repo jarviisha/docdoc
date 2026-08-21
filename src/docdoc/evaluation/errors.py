@@ -17,9 +17,15 @@ time before failing identically (FR-060).
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from typing import TYPE_CHECKING
+
 from docdoc.kernel import DocdocError
 
-__all__ = ["EvaluationError"]
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+__all__ = ["EvaluationError", "naming"]
 
 
 class EvaluationError(DocdocError):
@@ -52,3 +58,38 @@ class EvaluationError(DocdocError):
         self.expected = expected
         #: What they actually said.
         self.actual = actual
+
+
+@contextmanager
+def naming(dataset: str | None) -> Iterator[None]:
+    """Label every :class:`EvaluationError` raised inside with the dataset at fault.
+
+    FR-060 requires an error to name the dataset, the document, and the field. The
+    document and the field are known at the raise site; **the dataset usually is
+    not**. A comparator refusing a duplicate alignment key knows the group and the
+    entry and has never been told which golden set it is scoring, and threading an
+    identity through every helper to satisfy one attribute would put a parameter
+    nobody reads into a dozen signatures.
+
+    So the label is attached where it becomes known -- at the entry points, which
+    all have it -- rather than where the error is raised. Three consequences worth
+    stating:
+
+    - **The innermost label wins.** A nested call that already named a dataset
+      keeps it; the outer entry point does not overwrite it. That matters for
+      :func:`~docdoc.evaluation.compare`, where two datasets are in scope and the
+      refusal has already named the right one.
+    - **A future raise site gets this for free**, which is the point. The
+      alternative decays: someone adds a check, forgets the argument, and the
+      attribute is silently ``None`` again -- which is the state this replaced.
+    - **``None`` stays ``None`` when nothing is known.** Where a manifest is
+      malformed there is no identity yet, so the caller passes the *path* it read
+      rather than inventing an id. An error that has to lie about which field it
+      cannot fill is worse than one that carries the path it does know.
+    """
+    try:
+        yield
+    except EvaluationError as error:
+        if error.dataset is None:
+            error.dataset = dataset
+        raise

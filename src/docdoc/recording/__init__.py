@@ -35,4 +35,16 @@ specification.
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from docdoc.recording.record import (
+    RECORDER_ID,
+    RECORDER_VERSION,
+    record_predictions,
+    write_prediction_set,
+)
+
+__all__ = [
+    "RECORDER_ID",
+    "RECORDER_VERSION",
+    "record_predictions",
+    "write_prediction_set",
+]

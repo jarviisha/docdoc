@@ -16,14 +16,16 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 # Runtime imports: these appear in pydantic field annotations.
 from docdoc.evaluation.alignment import GroupOutcome
 from docdoc.evaluation.definitions import METRIC_DEFINITION_VERSION
+from docdoc.evaluation.errors import EvaluationError, naming
 from docdoc.evaluation.location import LocationAgreement
 from docdoc.evaluation.outcomes import FieldOutcomeKind
 from docdoc.evaluation.predictions import Stage
+from docdoc.validation.result import ValidationCounts
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -111,6 +113,47 @@ class OutcomeCounts(BaseModel):
     agrees: int = 0
     disagrees: int = 0
     not_assessable: int = 0
+
+    @model_validator(mode="after")
+    def _no_count_is_negative(self) -> OutcomeCounts:
+        """The only invariant this model can check on its own, and it is worth stating.
+
+        **A validator asserting that ``value_labels`` equals its four parts would be
+        checking Python's ``+``**, because ``value_labels``, ``absence_labels``, and
+        ``labelled`` are derived properties rather than stored fields -- they cannot
+        disagree with the tallies they are computed from. Milestone 5's
+        ``ValidationCounts`` reconciles because ``declared`` and ``evaluated`` are
+        *stored* alongside their parts and can drift; nothing here can.
+
+        The reconciliation that genuinely can fail is between the three
+        independently computed views of one dataset -- the flat outcome list, the
+        per-document slices, and the per-field-path grouping -- and that is checked
+        in :func:`dataset_metrics`, where all three exist (T051, FR-055).
+        """
+        negative = [
+            name
+            for name in (
+                "correct_value",
+                "incorrect",
+                "missing",
+                "unevaluated_value",
+                "correct_absence",
+                "spurious",
+                "unevaluated_absence",
+                "unlabeled",
+                "agrees",
+                "disagrees",
+                "not_assessable",
+            )
+            if getattr(self, name) < 0
+        ]
+        if negative:
+            raise ValueError(
+                f"outcome counts must not be negative: {negative}. A negative tally "
+                "means a subtraction reached a counter, and every metric dividing it "
+                "is now reporting a number with no interpretation"
+            )
+        return self
 
     @property
     def value_labels(self) -> int:
@@ -265,6 +308,22 @@ class DatasetMetrics(BaseModel):
     #: extraction was wrong" and "validation caught it" stay two visible facts.
     validation_verdicts: dict[str, int] = {}
 
+    #: Milestone 5's counts, summed across the documents scored and **reused
+    #: rather than recomputed** (FR-034). The verdict distribution above and these
+    #: counts answer different questions, and the second one is the one a reader
+    #: usually wants: the distribution says how many documents came out
+    #: ``invalid``, and only the counts say how many checks ran, how many passed,
+    #: and how many could not be evaluated at all.
+    #:
+    #: Without them a document that failed one check and a document where nothing
+    #: could be checked are indistinguishable in the report -- which is precisely
+    #: the distinction Milestone 5 introduced a third verdict to preserve.
+    #:
+    #: ``None`` when no scored document carried a validation result, because
+    #: "nothing was validated" and "everything passed" are not the same fact and
+    #: a zeroed ``ValidationCounts`` would read as the second.
+    validation_counts: ValidationCounts | None = None
+
 
 def _macro(
     document_scores: Sequence[DocumentScore], names: Iterable[str]
@@ -297,6 +356,61 @@ def _macro(
     return macro
 
 
+#: The tallies that must agree across every view of one dataset. Derived
+#: properties are excluded deliberately -- they are computed from these, so
+#: including them would restate the same equality twice.
+_RECONCILED = (
+    "correct_value",
+    "incorrect",
+    "missing",
+    "unevaluated_value",
+    "correct_absence",
+    "spurious",
+    "unevaluated_absence",
+    "unlabeled",
+)
+
+
+def _reconcile(
+    dataset: OutcomeCounts,
+    per_document: Sequence[OutcomeCounts],
+    per_field_path: Sequence[OutcomeCounts],
+) -> None:
+    """Every aggregate must equal the outcomes that produced it (FR-055, T051).
+
+    Three views of one dataset are computed by three separate paths: the flat
+    outcome list, the per-document slices, and the per-field-path grouping. They
+    are built from the same outcomes and must therefore agree exactly -- and a
+    disagreement is not a rounding difference, it is a lost or double-counted
+    outcome.
+
+    Checked at runtime rather than left to the property suite, for the reason
+    Milestone 5 gives about ``ValidationCounts``: putting the arithmetic where the
+    aggregate is produced means no caller has to think to check it.
+    ``tests/property/test_metrics_reconcile.py`` covers the datasets Hypothesis
+    generates; this covers every report anyone produces.
+
+    Raises:
+        EvaluationError: an aggregate does not match its outcomes. Never a field
+            outcome -- this is a statement about the computation, not about a
+            document.
+    """
+    for view, name in ((per_document, "per-document"), (per_field_path, "per-field-path")):
+        for field in _RECONCILED:
+            expected = getattr(dataset, field)
+            summed = sum(getattr(counts, field) for counts in view)
+            if summed != expected:
+                raise EvaluationError(
+                    f"the {name} counts do not reconcile with the dataset totals: "
+                    f"{field} is {expected} over the whole dataset but {summed} when "
+                    f"summed {name}. An outcome was dropped or counted twice, and "
+                    "every metric dividing this tally is wrong by the difference",
+                    field_path=field,
+                    expected=str(expected),
+                    actual=str(summed),
+                )
+
+
 def dataset_metrics(
     *,
     outcomes: Sequence[FieldOutcome],
@@ -305,6 +419,8 @@ def dataset_metrics(
     grounding: GroundingCounts | None,
     group_outcomes: Sequence[GroupOutcome] = (),
     verdicts: dict[Verdict, int] | None = None,
+    validation: ValidationCounts | None = None,
+    dataset: str | None = None,
 ) -> DatasetMetrics:
     counts = count_outcomes(outcomes, value_paths=value_paths)
     micro = _metrics_from(counts, grounding)
@@ -313,10 +429,18 @@ def dataset_metrics(
     for outcome in outcomes:
         by_path.setdefault(outcome.field_path, []).append(outcome)
 
-    per_field_path = {
-        path: _metrics_from(count_outcomes(items, value_paths=value_paths), None)
+    path_counts = {
+        path: count_outcomes(items, value_paths=value_paths)
         for path, items in sorted(by_path.items())
     }
+    per_field_path = {path: _metrics_from(tally, None) for path, tally in path_counts.items()}
+
+    with naming(dataset):
+        _reconcile(
+            counts,
+            [score.counts for score in document_scores],
+            list(path_counts.values()),
+        )
 
     return DatasetMetrics(
         counts=counts,
@@ -325,4 +449,5 @@ def dataset_metrics(
         per_field_path=per_field_path,
         group_outcomes=tuple(group_outcomes),
         validation_verdicts={str(k): v for k, v in sorted((verdicts or {}).items())},
+        validation_counts=validation,
     )

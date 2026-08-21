@@ -41,6 +41,12 @@ a regression. Whether a build fails is policy configured on top of this output; 
 comparison that also decided would bury the decision inside the thing being
 measured (FR-049).
 
+**It does not provide a review interface, assignment, workflow, queue, or
+storage service.** :class:`Correction` and :func:`promote` are a model and an
+explicit act; Principle IX permits that and forbids the MVP becoming a review
+platform (FR-054). Where corrections live between being recorded and being
+promoted is the caller's decision.
+
 **It does not import :mod:`docdoc.recording`.** Producing a prediction set needs a
 provider; scoring one must not. That separation is the ``import-linter`` layers
 contract, not a convention -- ``docdoc.recording`` sits *above* this package, so
@@ -52,7 +58,16 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-from docdoc.evaluation.errors import EvaluationError
+from docdoc.evaluation.alignment import EntryAlignment, GroupOutcome
+from docdoc.evaluation.compare import (
+    ChangedOutcome,
+    Comparison,
+    Judgement,
+    MetricDelta,
+    compare,
+)
+from docdoc.evaluation.corrections import Correction, promote
+from docdoc.evaluation.errors import EvaluationError, naming
 from docdoc.evaluation.golden import (
     EntryKeySpec,
     GoldenDocument,
@@ -85,6 +100,7 @@ from docdoc.evaluation.predictions import (
     PredictionSet,
     Stage,
     check_against,
+    load_prediction_set,
 )
 from docdoc.evaluation.redact import redacted_tiers_in
 from docdoc.evaluation.report import (
@@ -92,9 +108,12 @@ from docdoc.evaluation.report import (
     EvaluationProvenance,
     EvaluationReport,
     PartialDeclaration,
+    TierSize,
 )
 from docdoc.evaluation.score import outcome_sort_key, score_document, value_path_index
 from docdoc.evaluation.tiers import DocumentOrigin, OriginKind, Tier
+from docdoc.evaluation.values import SchemaFacts, schema_facts
+from docdoc.validation.result import ValidationCounts
 
 if TYPE_CHECKING:
     from docdoc.grounding.result import GroundingCounts
@@ -103,10 +122,14 @@ __all__ = [
     "SCORER_ID",
     "SCORER_VERSION",
     "Averaging",
+    "ChangedOutcome",
+    "Comparison",
+    "Correction",
     "DatasetMetrics",
     "DocumentOrigin",
     "DocumentPrediction",
     "DocumentScore",
+    "EntryAlignment",
     "EntryKeySpec",
     "EvaluationError",
     "EvaluationOptions",
@@ -118,18 +141,64 @@ __all__ = [
     "FieldOutcomeKind",
     "GoldenDocument",
     "GoldenSet",
+    "GroupOutcome",
+    "Judgement",
     "Label",
     "LocationAgreement",
+    "MetricDelta",
     "MetricValue",
     "OriginKind",
     "OutcomeCounts",
     "PartialDeclaration",
     "PredictionSet",
+    "SchemaFacts",
     "Stage",
     "Tier",
+    "TierSize",
+    "compare",
     "evaluate",
     "load_golden_set",
+    "load_prediction_set",
+    "promote",
+    "schema_facts",
 ]
+
+
+def _aggregate_validation(
+    predictions: PredictionSet, document_ids: list[str]
+) -> ValidationCounts | None:
+    """Sum Milestone 5's recorded counts. Never recompute them (FR-034).
+
+    ``None`` when no scored document carried a validation result. A zeroed
+    ``ValidationCounts`` would reconcile perfectly and read as "every check
+    passed", which is the opposite of what an absence means -- the same reason
+    FR-032 refuses to report an empty denominator as ``0.0``.
+
+    Summation is safe here because Milestone 5's own reconciliation is linear:
+    ``declared == passed + failed + not_evaluated`` holds for each document, so
+    it holds for their sum, and ``ValidationCounts`` re-checks it on construction.
+    """
+    totals = {
+        "declared": 0,
+        "evaluated": 0,
+        "passed": 0,
+        "failed": 0,
+        "not_evaluated": 0,
+        "errors": 0,
+        "warnings": 0,
+        "infos": 0,
+    }
+    seen = False
+    for document_id in document_ids:
+        prediction = predictions.for_document(document_id)
+        if prediction is None or prediction.validation is None:
+            continue
+        seen = True
+        counts = prediction.validation.counts
+        for name in totals:
+            totals[name] += getattr(counts, name)
+
+    return ValidationCounts(**totals) if seen else None
 
 
 def _aggregate_grounding(predictions: PredictionSet, document_ids: list[str]) -> GroundingCounts:
@@ -161,6 +230,7 @@ def evaluate(
     predictions: PredictionSet,
     *,
     options: EvaluationOptions | None = None,
+    facts: SchemaFacts | None = None,
     repo_revision: str = "unknown",
 ) -> EvaluationReport:
     """Score a prediction set against a golden set.
@@ -168,14 +238,25 @@ def evaluate(
     Returns **exactly one** report or raises :class:`EvaluationError`. It never
     returns a partial report without ``report.partial`` being set and naming what
     it omitted (FR-001).
+
+    ``facts`` is what the schemas declare, from :func:`schema_facts`. It is
+    optional and affects **no number**: it decides only which comparator version
+    each outcome records. Typing the *values* is the loader's job, done once when
+    the dataset and the predictions are read, so a caller who omits it here still
+    gets a correct report rather than a quietly wrong one.
     """
     started = time.monotonic()
     options = options or EvaluationOptions()
     golden_id = golden.golden_set_id or golden_set_id_for(golden)
     prediction_id = predictions.prediction_set_id or prediction_set_id_for(predictions)
 
+    # `golden_id` rather than `golden.golden_set_id`: a set built in memory carries
+    # no identity of its own, and the one computed above is the honest answer to
+    # "which dataset?" (FR-060). `naming` here rather than inside `check_against`,
+    # which cannot see it.
     try:
-        check_against(predictions, golden)
+        with naming(golden_id):
+            check_against(predictions, golden)
     except EvaluationError as error:
         log_refusal(
             reason=str(error),
@@ -188,41 +269,65 @@ def evaluate(
         )
         raise
 
-    considered = [
-        document
-        for document in golden.documents
-        if options.include_restricted or document.tier is Tier.PUBLIC
-    ]
+    # Sorted here rather than trusted from the manifest. `load_golden_set` does
+    # sort, but a `GoldenSet` can also be built in memory, and FR-043 requires
+    # byte-identical output from the *inputs* rather than from the order somebody
+    # happened to write them in: `document_scores`, `group_outcomes`, and the
+    # provenance tuples all follow this order, so a manifest with one document
+    # appended at the end would otherwise produce a different report for an
+    # identical dataset. The lead key is the tier, matching the outcome order of
+    # EVA-26, so a public-only report reads as a prefix of a full one.
+    dataset = golden_id
+
+    considered = sorted(
+        (
+            document
+            for document in golden.documents
+            if options.include_restricted or document.tier is Tier.PUBLIC
+        ),
+        key=lambda document: (str(document.tier), document.document_id),
+    )
 
     outcomes: list[FieldOutcome] = []
     scores: list[DocumentScore] = []
+    group_outcomes: list[GroupOutcome] = []
     value_paths = value_path_index(golden)
     verdicts: dict[object, int] = {}
 
     for document in considered:
-        labels = golden.labels_for(document.document_id)
-        prediction = predictions.for_document(document.document_id)
-        document_outcomes = score_document(document, labels, prediction)
-        outcomes.extend(document_outcomes)
-
-        grounding = (
-            None
-            if prediction is None
-            else (prediction.grounding.counts if prediction.grounding else None)
-        )
-        scores.append(
-            document_score(
-                document_id=document.document_id,
-                outcomes=document_outcomes,
-                value_paths=value_paths,
-                grounding=grounding,
-                evaluated=prediction is not None,
-                failed_stage=None if prediction is None else prediction.failed_stage,
+        with naming(dataset):
+            labels = golden.labels_for(document.document_id)
+            prediction = predictions.for_document(document.document_id)
+            document_outcomes, document_groups = score_document(
+                document,
+                labels,
+                prediction,
+                field_type_for=(
+                    None if facts is None else dict(facts.types_for(document.schema_identity))
+                ),
+                key_for=golden.key_for,
             )
-        )
-        if prediction is not None and prediction.validation is not None:
-            verdict = prediction.validation.verdict
-            verdicts[verdict] = verdicts.get(verdict, 0) + 1
+            outcomes.extend(document_outcomes)
+            group_outcomes.extend(document_groups)
+
+            grounding = (
+                None
+                if prediction is None
+                else (prediction.grounding.counts if prediction.grounding else None)
+            )
+            scores.append(
+                document_score(
+                    document_id=document.document_id,
+                    outcomes=document_outcomes,
+                    value_paths=value_paths,
+                    grounding=grounding,
+                    evaluated=prediction is not None,
+                    failed_stage=None if prediction is None else prediction.failed_stage,
+                )
+            )
+            if prediction is not None and prediction.validation is not None:
+                verdict = prediction.validation.verdict
+                verdicts[verdict] = verdicts.get(verdict, 0) + 1
 
     outcomes.sort(key=outcome_sort_key)
 
@@ -233,7 +338,12 @@ def evaluate(
         grounding=_aggregate_grounding(
             predictions, [document.document_id for document in considered]
         ),
+        group_outcomes=group_outcomes,
         verdicts=verdicts,  # type: ignore[arg-type]
+        dataset=dataset,
+        validation=_aggregate_validation(
+            predictions, [document.document_id for document in considered]
+        ),
     )
 
     provenance = _provenance_for(
@@ -245,12 +355,13 @@ def evaluate(
         prediction_id=prediction_id,
         repo_revision=repo_revision,
     )
-    provenance.refuse_if_incomplete()
+    provenance.refuse_if_incomplete(documents_considered=len(considered))
 
     report = EvaluationReport(
         outcomes=tuple(outcomes),
         document_scores=tuple(scores),
         metrics=metrics,
+        dataset_size=_dataset_size(golden),
         partial=_partial_for(golden, considered),
         redacted_tiers=redacted_tiers_in(outcomes),
         provenance=provenance,
@@ -262,6 +373,26 @@ def evaluate(
     )
     log_evaluation(report, duration_ms=(time.monotonic() - started) * 1000)
     return report
+
+
+def _dataset_size(golden: GoldenSet) -> tuple[TierSize, ...]:
+    """The dataset's size per tier, for every report to carry (FR-009).
+
+    Read from ``GoldenSet.tier_counts()``, which sums ``declared_label_count`` --
+    so a restricted tier contributes its labelled-field count even though its
+    labels are not present, which is what that field exists for (EVA-5a).
+
+    **Deliberately outside ``report_id``.** These counts are a function of the
+    golden set, so ``golden_set_id`` already covers them: folding them in again
+    would move every committed report's identity without any measurement having
+    changed, which is exactly the over-sensitivity FR-042's second half forbids.
+    """
+    return tuple(
+        TierSize(tier=tier, documents=documents, labelled_fields=labels)
+        for tier, (documents, labels) in sorted(
+            golden.tier_counts().items(), key=lambda item: str(item[0])
+        )
+    )
 
 
 def _partial_for(golden: GoldenSet, considered: list[GoldenDocument]) -> PartialDeclaration | None:
@@ -305,6 +436,10 @@ def _provenance_for(
         prediction = predictions.for_document(document.document_id)
         if prediction is None:
             continue
+        if prediction.parser_id:
+            parser_ids.append(prediction.parser_id)
+        if prediction.parser_version:
+            parser_versions.append(prediction.parser_version)
         if prediction.extraction is not None:
             extraction = prediction.extraction.provenance
             prompt_hashes.append(extraction.prompt_hash)

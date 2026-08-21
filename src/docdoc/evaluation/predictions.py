@@ -18,12 +18,15 @@ broke, so the two results are not describing the same fields.
 
 from __future__ import annotations
 
+import json
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict
 
-from docdoc.evaluation.errors import EvaluationError
+from docdoc.evaluation.errors import EvaluationError, naming
+from docdoc.evaluation.values import carry, strip_indices
 
 # Imported at runtime, not under TYPE_CHECKING: pydantic resolves field
 # annotations when it builds the model, so these names must actually exist. The
@@ -39,13 +42,30 @@ from docdoc.evaluation.errors import EvaluationError
 # `docdoc.validation` already follow -- both import `docdoc.extraction.value`
 # and `docdoc.extraction.schema`, neither imports `docdoc.extraction`.
 from docdoc.extraction.extract import ExtractionResult
+from docdoc.extraction.value import ExtractedValue
 from docdoc.grounding.result import GroundingResult
 from docdoc.validation.result import ValidationResult
 
 if TYPE_CHECKING:
-    from docdoc.evaluation.golden import GoldenSet
+    from collections.abc import Mapping
 
-__all__ = ["DocumentPrediction", "PredictionSet", "Stage", "check_against"]
+    from docdoc.evaluation.golden import GoldenSet
+    from docdoc.evaluation.values import SchemaFacts
+
+__all__ = [
+    "RECORDER_FILE",
+    "DocumentPrediction",
+    "PredictionSet",
+    "Stage",
+    "check_against",
+    "load_prediction_set",
+]
+
+#: Where a recorded prediction set stamps the recorder's identity and version.
+#: Named here rather than in :mod:`docdoc.recording` because the *reader* is the
+#: one that must agree with the writer, and the reader is the layer that cannot
+#: import the writer.
+RECORDER_FILE = "recorder.json"
 
 
 class Stage(StrEnum):
@@ -78,6 +98,19 @@ class DocumentPrediction(BaseModel):
     #: logs where FR-057 forbids that.
     failure_reason: str | None = None
 
+    #: Which parser produced the document these results describe. FR-040 requires
+    #: a report to record the parser version, and this layer is the only place it
+    #: could go missing: the scorer never opens a document, and an
+    #: ``ExtractionResult`` does not carry its document's ingest provenance. So
+    #: the recorder -- which does hold the ``Document`` -- copies it here.
+    #:
+    #: **Not part of ``prediction_set_id``.** ADR-0003 already folds the parser
+    #: into the validation artifact id transitively, so hashing it again would
+    #: add nothing and make a replayed set's identity depend on whether whoever
+    #: replayed it happened to fill these in.
+    parser_id: str | None = None
+    parser_version: str | None = None
+
     @property
     def processed(self) -> bool:
         return self.failed_stage is None
@@ -97,6 +130,120 @@ class PredictionSet(BaseModel):
         return self.predictions.get(document_id)
 
 
+def load_prediction_set(
+    root: str | Path,
+    *,
+    facts: SchemaFacts | None = None,
+    recorder_id: str = "",
+    recorder_version: str = "",
+) -> PredictionSet:
+    """Read committed predictions from disk, one JSON file per document.
+
+    This is the **replay** path, and it is the default for the public tier: the
+    predictions were recorded once by :mod:`docdoc.recording`, committed, and are
+    read back here by a contributor with no credentials and no network (FR-003).
+
+    ``facts`` is what makes replay faithful rather than approximate -- see
+    :func:`_rehydrate_values`. Without it the values come back as the JSON
+    scalars they were serialized as, and every decimal, date, and datetime in the
+    dataset compares unequal.
+    """
+    directory = Path(root)
+    # The directory read, not an identity: a prediction set has none until it is
+    # assembled, and the path is what a caller can act on.
+    with naming(str(directory)):
+        return _load_predictions(directory, facts, recorder_id, recorder_version)
+
+
+def _load_predictions(
+    directory: Path,
+    facts: SchemaFacts | None,
+    recorder_id: str,
+    recorder_version: str,
+) -> PredictionSet:
+    predictions: dict[str, DocumentPrediction] = {}
+    for file in sorted(directory.glob("*.json")):
+        if file.name == RECORDER_FILE:
+            continue
+        payload = json.loads(file.read_text(encoding="utf-8"))
+        prediction = _prediction_from_json(payload, source=file, facts=facts)
+        if prediction.document_id in predictions:
+            raise EvaluationError(
+                f"two prediction files describe document {prediction.document_id!r}; "
+                f"the second is {file.name}",
+                document_id=prediction.document_id,
+            )
+        predictions[prediction.document_id] = prediction
+
+    # The recorder's identity folds into `prediction_set_id` (EVA-24), so it is
+    # committed next to the predictions rather than reconstructed by whoever
+    # replays them -- a value a reader has to supply correctly is one that will
+    # eventually be supplied incorrectly, and the identity would move for it.
+    recorded = directory / RECORDER_FILE
+    stamped = json.loads(recorded.read_text(encoding="utf-8")) if recorded.exists() else {}
+
+    return PredictionSet(
+        predictions=predictions,
+        recorder_id=recorder_id or str(stamped.get("recorder_id", "")),
+        recorder_version=recorder_version or str(stamped.get("recorder_version", "")),
+    )
+
+
+def _prediction_from_json(
+    payload: Mapping[str, Any], *, source: Path, facts: SchemaFacts | None
+) -> DocumentPrediction:
+    raw = dict(payload)
+    raw.pop("recorder_id", None)
+    raw.pop("recorder_version", None)
+    extraction = raw.get("extraction")
+    if isinstance(extraction, dict):
+        schema_identity = str(extraction.get("provenance", {}).get("schema_identity", ""))
+        types = None if facts is None else facts.types_for(schema_identity)
+        extraction = dict(extraction)
+        extraction["values"] = _rehydrate_values(extraction.get("values", {}), types, prefix="")
+        raw["extraction"] = extraction
+
+    try:
+        return DocumentPrediction.model_validate(raw)
+    except Exception as exc:
+        raise EvaluationError(
+            f"prediction file {source.name} is not well formed: {exc}",
+            document_id=str(raw.get("document_id", "")) or None,
+        ) from exc
+
+
+def _rehydrate_values(node: Any, types: Mapping[str, str] | None, *, prefix: str) -> Any:
+    """Rebuild the value tree pydantic could not, and retype what JSON flattened.
+
+    ``ExtractionResult.values`` is ``dict[str, Any]``, so pydantic reads a
+    serialized tree back as plain dictionaries: the scorer's walk would find no
+    ``field_path`` anywhere and score a complete prediction as entirely missing.
+    That is one of two losses, and the quieter one is worse -- ``Decimal`` and the
+    date types serialize to strings, and a string that comes back a string fails
+    `comparators@1`'s type gate against a correctly typed label (EVA-12a). Both
+    are repaired here, using the **same** rules the label loader uses, because
+    the moment those two coercions disagree is the moment every decimal in the
+    dataset reads as an extraction error.
+    """
+    if isinstance(node, dict) and "field_path" in node and "present" in node:
+        field = dict(node)
+        declared = (types or {}).get(strip_indices(str(field.get("field_path", ""))))
+        if declared is not None and field.get("value") is not None:
+            field["value"] = carry(field["value"], declared)
+        return ExtractedValue.model_validate(field)
+    if isinstance(node, dict):
+        return {
+            name: _rehydrate_values(child, types, prefix=f"{prefix}.{name}" if prefix else name)
+            for name, child in node.items()
+        }
+    if isinstance(node, (list, tuple)):
+        return tuple(
+            _rehydrate_values(child, types, prefix=f"{prefix}[{index}]")
+            for index, child in enumerate(node)
+        )
+    return node
+
+
 def check_against(predictions: PredictionSet, golden: GoldenSet) -> None:
     """Refuse a prediction set that does not describe this golden set.
 
@@ -106,6 +253,11 @@ def check_against(predictions: PredictionSet, golden: GoldenSet) -> None:
     ``UNEVALUATED`` and stays in every denominator, because dropping it is how a
     crash becomes an accuracy improvement.
     """
+    with naming(golden.golden_set_id or None):
+        _check(predictions, golden)
+
+
+def _check(predictions: PredictionSet, golden: GoldenSet) -> None:
     for document_id, prediction in sorted(predictions.predictions.items()):
         document = golden.document(document_id)
         if document is None:
