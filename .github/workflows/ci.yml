@@ -48,11 +48,21 @@ jobs:
       # single-seeded suite passes a non-deterministic alternatives list by luck.
       # Running a second seed is what makes "identical on every run and every
       # platform" a checked claim rather than a hopeful one.
-      - name: Grounding determinism under a second hash seed
+      # Milestone 6 extends this rather than adding a second job. Its reports must
+      # be byte-identical for fixed inputs (FR-043), and the hazard is the same
+      # one: a dict or set iterated to produce order passes under one seed by
+      # luck. `report_determinism` also spawns both seeds itself, so this is the
+      # belt to that file's braces -- and it covers `report_identity_sensitivity`,
+      # which does not.
+      #
+      # Selected by term rather than by file path, deliberately: a path list goes
+      # stale exactly when a new file makes it matter, which is the failure
+      # `tests/unit/test_plan_tree_is_current.py` exists to end.
+      - name: Grounding and evaluation determinism under a second hash seed
         env:
           HYPOTHESIS_PROFILE: ci
           PYTHONHASHSEED: "12345"
-        run: uv run pytest tests/unit tests/property -k "grounding or tiebreak or offset or candidates or match_view or fuzzy or exact_tier or repeating_group" -m "not perf"
+        run: uv run pytest tests/unit tests/property -k "grounding or tiebreak or offset or candidates or match_view or fuzzy or exact_tier or repeating_group or report_determinism or report_identity or ordering" -m "not perf"
 
       - name: Type check (strict)
         run: uv run mypy src/docdoc

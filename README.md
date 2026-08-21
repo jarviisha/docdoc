@@ -8,10 +8,11 @@ LLM — everyone can do that. It is that every extracted value can answer:
 
 > **Where did this come from?**
 
-**Status:** Milestones 1 (kernel), 2 (parsers), 3 (extraction), 4 (grounding), and 5 (validation)
-implemented. An extracted value can be **located** and **checked**: docdoc will tell you that an
-invoice's stated total does not equal the sum of its lines, and point at the place on the page the
-total was read from — see [Roadmap](#roadmap).
+**Status:** Milestones 1 (kernel), 2 (parsers), 3 (extraction), 4 (grounding), 5 (validation), and
+6 (evaluation) implemented. An extracted value can be **located**, **checked**, and now **measured**:
+docdoc will tell you that an invoice's stated total does not equal the sum of its lines, point at the
+place on the page the total was read from, and tell you how often it gets that right against a golden
+set — see [Roadmap](#roadmap).
 
 ## What it does today
 
@@ -111,6 +112,26 @@ schema** evaluated by one generic engine — there is no `InvoiceValidator` — 
 states, because a run where nothing could be checked must not report the same word as one where
 everything was checked and passed.
 
+And finally, ask how often it gets that right:
+
+```python
+from docdoc.evaluation import evaluate, load_golden_set, load_prediction_set
+
+golden = load_golden_set("datasets/mvp/manifest.json")
+report = evaluate(golden, load_prediction_set("datasets/mvp/predictions"))
+
+report.metrics.micro["field_accuracy"].value        # 0.9286
+report.metrics.micro["field_accuracy"].numerator    # 26
+report.metrics.micro["field_accuracy"].denominator  # 28
+report.partial.covered_labels                       # 28 of 48 — the restricted tier was skipped
+report.report_id                                    # "sha256:c3b4bc8e…"
+```
+
+Every metric states its numerator and denominator, and a metric with an empty denominator is `None`
+rather than `0.00` — a rate of zero reads as total failure, and an unasked question is not one. A
+document that crashes has its labelled fields counted as *missing* and stays in every denominator, so
+failing on the hard documents can never raise a score.
+
 Run the examples, which need no infrastructure and no credentials at all:
 
 ```bash
@@ -119,6 +140,9 @@ uv run python examples/build_document.py                       # kernel only
 uv run python examples/parse_pdf.py tests/fixtures/pdf/digital_invoice.pdf
 uv run python examples/extract_invoice.py                      # extraction, offline
 uv run python examples/ground_invoice.py                       # grounding, offline
+uv run python examples/validate_invoice.py                     # validation, offline
+uv run python examples/evaluate_golden_set.py                  # evaluation, offline
+uv run python examples/compare_reports.py                      # regression detection, offline
 ```
 
 ### Installing
@@ -177,11 +201,14 @@ governs every specification, plan, and code change in this repository.
 Dependencies flow strictly downward, and the rule is machine-checked in CI:
 
 ```text
-Validation → Grounding → Extraction → Ingest → Kernel
+Recording → Evaluation → Validation → Grounding → Extraction → Ingest → Kernel
 ```
 
-Evaluation and Recording land at Milestone 6, Pipeline and API at Milestone 7. The chain above is
-the one `pyproject.toml` enforces, which is the only one worth writing down.
+Pipeline and API land at Milestone 7. The chain above is the one `pyproject.toml` enforces, which is
+the only one worth writing down. **`Recording` sits above `Evaluation` deliberately**: the recorder
+produces a prediction set and the scorer consumes one, so the data flows one way and the layers do
+too — which is what makes `evaluation → recording` a build failure rather than a sentence in a
+specification. Producing a prediction set needs a provider; scoring one must not.
 
 The **kernel** is the bottom layer and depends on nothing above it. Its only runtime dependency is
 `pydantic`; the base install adds `rapidfuzz` for grounding's approximate matching (ADR-0005). It performs no file, network, clock, or random access, so identical inputs always
@@ -233,7 +260,7 @@ higher-layer work merges while that property is failing or absent.
 | 3 | Schema-driven extraction, one LLM adapter | **Done** |
 | 4 | Deterministic grounding: exact → fuzzy → ungrounded | **Done** |
 | 5 | Validation: schema, field, and cross-field rules | **Done** |
-| 6 | Evaluation: golden dataset, field accuracy, grounding rate | Next |
+| 6 | Evaluation: golden dataset, field accuracy, grounding rate | **Done** |
 | 7 | API and CLI | Planned |
 
 ## Documentation
@@ -248,6 +275,7 @@ higher-layer work merges while that property is failing or absent.
 - [How extraction works](docs/concepts/extraction.md) — the two identities, and the stage boundary with grounding
 - [How grounding works](docs/concepts/grounding.md) — the three states, the match view, and why the two scores are not comparable
 - [How validation works](docs/concepts/validation.md) — the three verdicts, rules as data, and why docdoc has its own regex dialect
+- [How evaluation works](docs/concepts/evaluation.md) — the six outcomes, the denominators, the two tiers, and how to add a document to the golden set
 - [Grounding API contract](specs/004-deterministic-grounding/contracts/grounding-api.md)
 - [Validation API contract](specs/005-deterministic-validation/contracts/validation-api.md)
 - [Extraction API contract](specs/003-schema-driven-extraction/contracts/extraction-api.md)

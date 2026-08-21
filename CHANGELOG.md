@@ -9,6 +9,166 @@ API may change in any release. `document_id` derivation is versioned separately 
 
 ## [Unreleased]
 
+Milestone 6: golden-set evaluation. **Every quality claim in this repository stops being an
+assertion.** Milestone 4 made the grounding rate computable and set no target; Milestone 5 did the
+same for validation. Both deferred the same question here, and it is now answered: docdoc scores a
+recorded pipeline run against a golden set and says how often it was right, with every number stating
+what it divided.
+
+### Added
+
+- **`docdoc.evaluation`** — a new layer above `docdoc.validation` in the `import-linter` layers
+  contract, with a forbidden-imports contract of its own. `evaluate(golden, predictions)` returns one
+  `EvaluationReport`: every labelled field resolved to exactly one of six closed outcomes, the metrics
+  computed from those outcomes, per-document and per-field-path breakdowns, the provenance that says
+  what was measured, and a content-addressed `report_id`.
+- **`docdoc.recording`** — a second new layer, *above* `docdoc.evaluation`, and the only part of this
+  milestone that reaches a provider. `record_predictions()` runs parse → extract → ground → validate
+  and records the result. The ordering follows the data — the recorder produces a prediction set and
+  the scorer consumes one — and it is what makes `evaluation → recording` a build failure rather than
+  a sentence in a specification.
+- **The five metrics Principle IX requires**, each with its numerator and denominator: field
+  accuracy, coverage, missing rate, incorrect rate, and grounding rate — plus spurious rate,
+  unevaluated rate, and mislocation rate. Reported at dataset, document, and field-path level, and in
+  both micro and macro averaging wherever the two can differ.
+- **`metric_definitions@1`** — the numerators and denominators as **data behind a version**, not as
+  formulas inside the scorer. A denominator edit becomes a visible, comparison-breaking act.
+- **A two-tier golden set** under `datasets/mvp/`, resolving `TODO(GOLDEN_DATASET_LICENSING)` as
+  ADR-0009 decided: a public tier vendored into the repository and sufficient on its own for a
+  complete report, and a restricted tier referenced only by content hash. A run without the restricted
+  bundle is **partial**, names what it skipped, and states its covered fraction as exact integers.
+- **`compare(before, after)`** — what moved, by how much, which fields broke and which were fixed,
+  which recorded versions differed, and a **named** `grounding_regression`, because the
+  constitution's fourth quality gate blocks on that one and a gate cannot read a table.
+- **`Correction` and `promote()`** — a reviewer's correction carries the seven fields the
+  constitution requires, alters nothing it annotates, and moves no metric until an explicit promotion
+  returns a new golden set with a new identity.
+- **`docs/concepts/evaluation.md`**, including the authoring path: how a maintainer adds a document
+  and its labels as data, with a worked manifest entry and label file.
+
+### Decisions worth reading
+
+- **A crash cannot raise a score.** A document that fails mid-pipeline has its labelled fields counted
+  as `missing`, and a document with no prediction is `unevaluated`; neither leaves a denominator. This
+  is the single most important rule in the milestone, because the failure it prevents — dropping the
+  documents you crashed on — is invisible in every individual number and moves every metric in the
+  direction a team celebrates.
+- **An empty denominator is `None`, never `0.0`.** A rate of zero and an unasked question are
+  different facts, and two of the three substitutions are silently reassuring.
+- **`equal(a, b) := type(a) is type(b) and a == b`.** In Python `True == 1`, `Decimal(1) == True`, and
+  `1 == 1.0` are all true, so without the type gate a boolean label silently matches an integer
+  prediction and the report calls it correct. `isinstance` is actively wrong here, because `bool`
+  subclasses `int`.
+- **Location agreement is three-valued and a separate axis from the outcome.** `not_assessable` is
+  never reported as `disagrees`: geometry the parser never supplied is not a grounding error, and
+  collapsing the two would make the mislocation rate a function of which parser ran. The rule is
+  containment rather than IoU, because a hand-drawn label box is loose and docdoc's geometry is tight
+  on the tokens — IoU punishes exactly that pairing.
+- **The grounding rate is Milestone 4's, reused from its recorded counts.** This feature defines no
+  second one: two grounding rates in one system is worse than none, because they diverge and every
+  conversation then starts by establishing which number somebody is quoting.
+- **Disclosure follows the tier, not the caller.** A restricted outcome carries hashes instead of
+  values and there is no flag to pass — because there would then be a flag to forget, and the
+  dataset's terms would be enforced by memory.
+- **`compare()` states what moved and decides nothing about it.** Whether a build fails is policy
+  configured on top of this output; a comparison that also decided would bury the decision inside the
+  thing being measured.
+- **This milestone changes no existing layer.** The first purely additive one, which the spec's Out of
+  Scope requires rather than merely permits: a milestone that both measures and improves can report
+  honestly on neither.
+
+### Closed by a convergence pass, and worth naming
+
+A `/speckit-converge` pass over the finished milestone found four gaps of the same
+shape and one of another. The shape is worth recording because it is the one a diff
+does not show: **a field exists, is documented as carrying something, and is never
+populated.** The code is present, the tests pass, and the value is silently absent
+at runtime.
+
+- **`EvaluationError.dataset` was set by none of its 31 raise sites.** FR-060
+  requires an error to name the dataset, the document, and the field; a caller
+  reading that attribute got a confident `None` for a dataset that was perfectly
+  well known. It is now attached at the entry points rather than at the raise
+  sites — a comparator refusing a duplicate alignment key knows the group and the
+  entry and has never been told which golden set it is scoring, and threading an
+  identity through every helper to satisfy one attribute would put an unread
+  parameter into a dozen signatures that the next contributor would forget.
+- **The report carried Milestone 5's verdict distribution and not its counts**
+  (FR-034). The distribution says how many documents came out `invalid`; only the
+  counts say how many checks ran, passed, failed, or could not be evaluated. Both
+  are now carried, and `validation_counts` is `None` rather than zeroed when
+  nothing was validated — zeroed counts reconcile perfectly and read as
+  "everything passed".
+- **No report stated the dataset's size** (FR-009). The per-tier counts existed on
+  `GoldenSet.tier_counts()` and reached only the example, so a complete run
+  reported no size at all. `report.dataset_size` now carries them on every report,
+  per tier and never merged, because the constitution's fifth quality gate turns
+  blocking at a target size and *a target nobody can read off a report is a target
+  nobody can apply*. Deliberately outside `report_id`: the counts are a function
+  of the golden set, so folding them in would move every committed report's
+  identity without any measurement having changed.
+- **The reconciliation between aggregates and outcomes was only in the test
+  suite** (FR-055). It now runs on every report, across the three independently
+  computed views — the flat outcome list, the per-document slices, and the
+  per-field-path grouping. A disagreement between them is a lost or double-counted
+  outcome, and it is refused rather than reported.
+- CI's second-hash-seed job selected Milestone 4's concepts by keyword, so this
+  milestone's determinism tests ran under one seed there. The filter now covers
+  them.
+
+### Closed by a second convergence pass
+
+The first pass swept the requirements; the second swept the **data model
+field-by-field** and the **acceptance scenarios one at a time**. Both findings sit
+below the first pass's in severity, and neither is a wrong number — they are gaps
+between what a reader is promised and what the code offers.
+
+- **`EvaluationReport` did not match EVA-23.** `group_outcomes` and
+  `validation_verdicts` were documented as report fields and lived one level down
+  on `report.metrics`, so a consumer following `data-model.md` got an
+  `AttributeError`. They are now delegating properties, joined by
+  `outcomes_for(document_id)` and `groups_for(document_id)` for the per-document
+  view EVA-19 describes. **Accessors, not copies**: storing each document's
+  outcomes on its `DocumentScore` as well would put every outcome in the
+  serialized report twice, doubling the bytes FR-043 requires to be identical to
+  save a filter the report performs itself.
+- **`data-model.md` was checked by nothing.**
+  `test_documented_api_references_resolve.py` reads documents with ```python
+  blocks, and the data model has none — it specifies models as markdown tables,
+  which is why the drift above went unnoticed. `test_data_model_matches_the_code.py`
+  now parses those tables and asserts every documented field exists. The check is
+  one-directional on purpose: a field the code has and the table does not is not a
+  failure, or every additive change would need a documentation edit before the
+  build goes green, which is how a check like this gets deleted. Its own
+  mapping guard immediately caught a bug in its heading parser, which is the
+  argument for having written the guard.
+- **The restricted-tier log path was asserted nowhere.** US3/AC5 pairs "written
+  **or logged**", and all seven sweeps in the logging test ran the public tier.
+  The code was already structurally safe — the log payload carries identities,
+  versions, and counts, with no field a value could travel in — so this is an
+  assertion catching up with a guarantee, not a leak being fixed.
+
+### Known gaps, recorded rather than hidden
+
+- **The committed dataset is 4 public documents and 28 labelled fields**, across two schemas, plus 2
+  restricted documents declaring 20 more. The constitution's fifth quality gate targets **50 documents
+  and 500 labelled fields**. This milestone built the machinery and a dataset large enough to exercise
+  every code path; it did not build one at the target size, because that is dataset authoring work
+  rather than implementation work. **The gate stays advisory** until the dataset reaches that size,
+  which is what constitution v1.4.0 says and what this milestone deliberately does not flip. The
+  distance is stated in `manifest.json` and in `docs/concepts/evaluation.md` so it is a number a
+  reader can see rather than a gap nobody mentions.
+- **There is no `ArtifactStore`, so every recording run re-parses every document.** ADR-0003's whole
+  point is that changing a prompt invalidates the extraction artifact and *reuses* the parse; with no
+  store it cannot, and grounding rebuilds its match view per call although ADR-0006 says it is cached.
+  Free on the public tier, which uses the `echo` adapter; a real and repeated cost on a restricted
+  tier reached through a provider. Recorded so it is known rather than discovered on an invoice.
+- **Regenerating the dataset needs the `pdf` extra**; scoring it needs nothing. The predictions are
+  committed and replayed, so the contributor's path has no dependencies and the maintainer's path is
+  the one that carries them.
+
+---
+
 Milestone 5: deterministic validation. **A located value is now a checked value** — docdoc will
 reject an invoice whose stated total does not equal the sum of its lines, and point at the place on
 the page the total was read from.
