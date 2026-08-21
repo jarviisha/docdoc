@@ -60,11 +60,6 @@ __all__ = [
 RECORDER_ID = "pipeline-recorder"
 RECORDER_VERSION = "1.0.0"
 
-#: Which stage each exception type belongs to, in pipeline order. Read by
-#: :func:`_stage_of` so a failure is attributed to where it happened rather than
-#: to where it was caught.
-_STAGE_ORDER = (Stage.PARSE, Stage.EXTRACT, Stage.GROUND, Stage.VALIDATE)
-
 
 class _Adapter(Protocol):
     """The bit of ``ModelAdapter`` this module needs.

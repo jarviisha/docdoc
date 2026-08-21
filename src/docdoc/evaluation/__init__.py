@@ -294,8 +294,10 @@ def evaluate(
     value_paths = value_path_index(golden)
     verdicts: dict[object, int] = {}
 
-    for document in considered:
-        with naming(dataset):
+    # One label for the whole walk. Inside the loop it would be re-entered per
+    # document to say the same thing each time.
+    with naming(dataset):
+        for document in considered:
             labels = golden.labels_for(document.document_id)
             prediction = predictions.for_document(document.document_id)
             document_outcomes, document_groups = score_document(
