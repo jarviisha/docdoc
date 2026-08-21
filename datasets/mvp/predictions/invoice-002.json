@@ -1,0 +1,590 @@
+{
+  "document_id": "invoice-002",
+  "extraction": {
+    "values": {
+      "invoice_number": {
+        "field_path": "invoice_number",
+        "value": "INV-002",
+        "present": true,
+        "claimed_text": "INV-002",
+        "model_confidence": null,
+        "grounding": null,
+        "grounding_score": null,
+        "calibrated_confidence": null,
+        "calibrator_version": null
+      },
+      "issue_date": {
+        "field_path": "issue_date",
+        "value": "2026-03-08",
+        "present": true,
+        "claimed_text": "2026-03-08",
+        "model_confidence": null,
+        "grounding": null,
+        "grounding_score": null,
+        "calibrated_confidence": null,
+        "calibrator_version": null
+      },
+      "due_date": {
+        "field_path": "due_date",
+        "value": null,
+        "present": false,
+        "claimed_text": null,
+        "model_confidence": null,
+        "grounding": null,
+        "grounding_score": null,
+        "calibrated_confidence": null,
+        "calibrator_version": null
+      },
+      "currency": {
+        "field_path": "currency",
+        "value": "EUR",
+        "present": true,
+        "claimed_text": "EUR",
+        "model_confidence": null,
+        "grounding": null,
+        "grounding_score": null,
+        "calibrated_confidence": null,
+        "calibrator_version": null
+      },
+      "total": {
+        "field_path": "total",
+        "value": "1000.00",
+        "present": true,
+        "claimed_text": "1000.00",
+        "model_confidence": null,
+        "grounding": null,
+        "grounding_score": null,
+        "calibrated_confidence": null,
+        "calibrator_version": null
+      },
+      "supplier": {
+        "legal_name": {
+          "field_path": "supplier.legal_name",
+          "value": "NORTHWIND TRADING COMPANY",
+          "present": true,
+          "claimed_text": "NORTHWIND TRADING COMPANY",
+          "model_confidence": null,
+          "grounding": null,
+          "grounding_score": null,
+          "calibrated_confidence": null,
+          "calibrator_version": null
+        },
+        "tax_id": {
+          "field_path": "supplier.tax_id",
+          "value": null,
+          "present": false,
+          "claimed_text": null,
+          "model_confidence": null,
+          "grounding": null,
+          "grounding_score": null,
+          "calibrated_confidence": null,
+          "calibrator_version": null
+        }
+      },
+      "line_items": [
+        {
+          "description": {
+            "field_path": "line_items[0].description",
+            "value": "Consulting, March",
+            "present": true,
+            "claimed_text": "Consulting, March",
+            "model_confidence": null,
+            "grounding": null,
+            "grounding_score": null,
+            "calibrated_confidence": null,
+            "calibrator_version": null
+          },
+          "quantity": {
+            "field_path": "line_items[0].quantity",
+            "value": 8.0,
+            "present": true,
+            "claimed_text": "8",
+            "model_confidence": null,
+            "grounding": null,
+            "grounding_score": null,
+            "calibrated_confidence": null,
+            "calibrator_version": null
+          },
+          "unit_price": {
+            "field_path": "line_items[0].unit_price",
+            "value": "125.00",
+            "present": true,
+            "claimed_text": "125.00",
+            "model_confidence": null,
+            "grounding": null,
+            "grounding_score": null,
+            "calibrated_confidence": null,
+            "calibrator_version": null
+          },
+          "amount": {
+            "field_path": "line_items[0].amount",
+            "value": "1000.00",
+            "present": true,
+            "claimed_text": "1000.00",
+            "model_confidence": null,
+            "grounding": null,
+            "grounding_score": null,
+            "calibrated_confidence": null,
+            "calibrator_version": null
+          }
+        }
+      ]
+    },
+    "provenance": {
+      "document_id": "sha256:4729a58dda25f42ebbf56492392d0c60bc03f62e1616a8eb1c736f751402a7e6",
+      "schema_identity": "invoice@1",
+      "schema_hash": "sha256:37a9f66014c4a99a4fa3e2442e4557184e3fa4e3985f55bc04130b937076fd00",
+      "prompt_hash": "sha256:87e8c15ef798eb4f23e73625f718707d0a33a550725b246aec126120e7564dc6",
+      "projection_id": "response-shape@1",
+      "adapter_id": "echo",
+      "adapter_version": "1.0.0",
+      "model_id": "echo-fixture",
+      "model_version": "1",
+      "decoding": {
+        "max_output_tokens": 8192,
+        "temperature": 0.0,
+        "top_p": null,
+        "top_k": null,
+        "seed": null,
+        "thinking_budget": null,
+        "input_budget_tokens": 200000
+      },
+      "extractor_version": "1.0.0+echo-1.0.0",
+      "usage": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_input_tokens": null,
+        "cache_creation_input_tokens": null,
+        "reasoning_tokens": null
+      }
+    },
+    "artifact_id": "sha256:a1ba9420e742bc22b2602d65cc1a9908ff5fd3d2cea4122cf009ad612ed04c80",
+    "discarded": []
+  },
+  "grounding": {
+    "outcomes": {
+      "invoice_number": {
+        "field_path": "invoice_number",
+        "status": "exact",
+        "score": 1.0,
+        "span": [
+          34,
+          41
+        ],
+        "pages": [
+          0
+        ],
+        "geometry": [
+          [
+            0,
+            [
+              0.1645478833623293,
+              0.09997031241301403,
+              0.2323596345276392,
+              0.1179204292931636
+            ]
+          ]
+        ],
+        "alternatives": [],
+        "truncated": false
+      },
+      "issue_date": {
+        "field_path": "issue_date",
+        "status": "exact",
+        "score": 1.0,
+        "span": [
+          49,
+          59
+        ],
+        "pages": [
+          0
+        ],
+        "geometry": [
+          [
+            0,
+            [
+              0.16044367942489496,
+              0.11897268770992614,
+              0.25498818790211397,
+              0.13692280459007572
+            ]
+          ]
+        ],
+        "alternatives": [],
+        "truncated": false
+      },
+      "currency": {
+        "field_path": "currency",
+        "status": "exact",
+        "score": 1.0,
+        "span": [
+          69,
+          72
+        ],
+        "pages": [
+          0
+        ],
+        "geometry": [
+          [
+            0,
+            [
+              0.1809646991120667,
+              0.13797506300683826,
+              0.21999157817423845,
+              0.1559251798869878
+            ]
+          ]
+        ],
+        "alternatives": [],
+        "truncated": false
+      },
+      "total": {
+        "field_path": "total",
+        "status": "exact",
+        "score": 1.0,
+        "span": [
+          157,
+          164
+        ],
+        "pages": [
+          0
+        ],
+        "geometry": [
+          [
+            0,
+            [
+              0.3937175590451024,
+              0.21398456419448672,
+              0.4605310263753939,
+              0.23193468107463627
+            ]
+          ]
+        ],
+        "alternatives": [
+          {
+            "span": [
+              171,
+              178
+            ],
+            "score": 1.0
+          }
+        ],
+        "truncated": false
+      },
+      "supplier.legal_name": {
+        "field_path": "supplier.legal_name",
+        "status": "exact",
+        "score": 1.0,
+        "span": [
+          0,
+          25
+        ],
+        "pages": [
+          0
+        ],
+        "geometry": [
+          [
+            0,
+            [
+              0.10084033613445378,
+              0.08096793711610191,
+              0.21585041975774685,
+              0.09891805399625149
+            ]
+          ],
+          [
+            0,
+            [
+              0.2209899132993041,
+              0.08096793711610191,
+              0.30418319061022847,
+              0.09891805399625149
+            ]
+          ],
+          [
+            0,
+            [
+              0.3093226841517857,
+              0.08096793711610191,
+              0.4027949741908482,
+              0.09891805399625149
+            ]
+          ]
+        ],
+        "alternatives": [],
+        "truncated": false
+      },
+      "line_items[0].description": {
+        "field_path": "line_items[0].description",
+        "status": "exact",
+        "score": 1.0,
+        "span": [
+          130,
+          147
+        ],
+        "pages": [
+          0
+        ],
+        "geometry": [
+          [
+            0,
+            [
+              0.10084033613445378,
+              0.21398456419448672,
+              0.193314265403427,
+              0.23193468107463627
+            ]
+          ],
+          [
+            0,
+            [
+              0.19845375894498424,
+              0.21398456419448672,
+              0.24981173988149946,
+              0.23193468107463627
+            ]
+          ]
+        ],
+        "alternatives": [],
+        "truncated": false
+      },
+      "line_items[0].quantity": {
+        "field_path": "line_items[0].quantity",
+        "status": "exact",
+        "score": 1.0,
+        "span": [
+          58,
+          59
+        ],
+        "pages": [
+          0
+        ],
+        "geometry": [
+          [
+            0,
+            [
+              0.16044367942489496,
+              0.11897268770992614,
+              0.25498818790211397,
+              0.13692280459007572
+            ]
+          ]
+        ],
+        "alternatives": [
+          {
+            "span": [
+              99,
+              100
+            ],
+            "score": 1.0
+          },
+          {
+            "span": [
+              148,
+              149
+            ],
+            "score": 1.0
+          }
+        ],
+        "truncated": false
+      },
+      "line_items[0].unit_price": {
+        "field_path": "line_items[0].unit_price",
+        "status": "exact",
+        "score": 1.0,
+        "span": [
+          150,
+          156
+        ],
+        "pages": [
+          0
+        ],
+        "geometry": [
+          [
+            0,
+            [
+              0.3166251559217437,
+              0.21398456419448672,
+              0.3731595848788734,
+              0.23193468107463627
+            ]
+          ]
+        ],
+        "alternatives": [],
+        "truncated": false
+      },
+      "line_items[0].amount": {
+        "field_path": "line_items[0].amount",
+        "status": "exact",
+        "score": 1.0,
+        "span": [
+          157,
+          164
+        ],
+        "pages": [
+          0
+        ],
+        "geometry": [
+          [
+            0,
+            [
+              0.3937175590451024,
+              0.21398456419448672,
+              0.4605310263753939,
+              0.23193468107463627
+            ]
+          ]
+        ],
+        "alternatives": [
+          {
+            "span": [
+              171,
+              178
+            ],
+            "score": 1.0
+          }
+        ],
+        "truncated": false
+      }
+    },
+    "counts": {
+      "exact": 9,
+      "fuzzy": 0,
+      "ungrounded": 0,
+      "not_applicable": 2,
+      "truncated": 0
+    },
+    "provenance": {
+      "document_id": "sha256:4729a58dda25f42ebbf56492392d0c60bc03f62e1616a8eb1c736f751402a7e6",
+      "extraction_artifact_id": "sha256:a1ba9420e742bc22b2602d65cc1a9908ff5fd3d2cea4122cf009ad612ed04c80",
+      "grounding_version": "v1",
+      "match_view_version": "v1",
+      "view_id": "sha256:e367482e1eace6de7f657ed628fee8b8ccb86cd6a9d45a56d0c653b03a0375c1",
+      "options": {
+        "threshold": 0.9,
+        "candidate_budget": 1500
+      },
+      "grounder_id": "deterministic-grounder",
+      "grounder_version": "1.0.0"
+    },
+    "artifact_id": "sha256:68d0ffb01b0806a4dd75a39cc98a4fdc7308f31c6106ad14895611e4c0fd513c"
+  },
+  "validation": {
+    "verdict": "valid",
+    "checks": [
+      {
+        "check_id": "invoice_number#max_length",
+        "field_path": "invoice_number",
+        "kind": "constraint",
+        "outcome": "passed",
+        "reason": null
+      },
+      {
+        "check_id": "invoice_number#required",
+        "field_path": "invoice_number",
+        "kind": "required",
+        "outcome": "passed",
+        "reason": null
+      },
+      {
+        "check_id": "issue_date#required",
+        "field_path": "issue_date",
+        "kind": "required",
+        "outcome": "passed",
+        "reason": null
+      },
+      {
+        "check_id": "currency#enum",
+        "field_path": "currency",
+        "kind": "constraint",
+        "outcome": "passed",
+        "reason": null
+      },
+      {
+        "check_id": "currency#required",
+        "field_path": "currency",
+        "kind": "required",
+        "outcome": "passed",
+        "reason": null
+      },
+      {
+        "check_id": "total#minimum",
+        "field_path": "total",
+        "kind": "constraint",
+        "outcome": "passed",
+        "reason": null
+      },
+      {
+        "check_id": "total#required",
+        "field_path": "total",
+        "kind": "required",
+        "outcome": "passed",
+        "reason": null
+      },
+      {
+        "check_id": "supplier#required",
+        "field_path": "supplier",
+        "kind": "required",
+        "outcome": "passed",
+        "reason": null
+      },
+      {
+        "check_id": "supplier.legal_name#required",
+        "field_path": "supplier.legal_name",
+        "kind": "required",
+        "outcome": "passed",
+        "reason": null
+      },
+      {
+        "check_id": "line_items[0].description#required",
+        "field_path": "line_items[0].description",
+        "kind": "required",
+        "outcome": "passed",
+        "reason": null
+      },
+      {
+        "check_id": "line_items[0].amount#required",
+        "field_path": "line_items[0].amount",
+        "kind": "required",
+        "outcome": "passed",
+        "reason": null
+      }
+    ],
+    "findings": [],
+    "counts": {
+      "declared": 11,
+      "evaluated": 11,
+      "passed": 11,
+      "failed": 0,
+      "not_evaluated": 0,
+      "errors": 0,
+      "warnings": 0,
+      "infos": 0
+    },
+    "provenance": {
+      "document_id": "sha256:4729a58dda25f42ebbf56492392d0c60bc03f62e1616a8eb1c736f751402a7e6",
+      "extraction_artifact_id": "sha256:a1ba9420e742bc22b2602d65cc1a9908ff5fd3d2cea4122cf009ad612ed04c80",
+      "grounding_artifact_id": "sha256:68d0ffb01b0806a4dd75a39cc98a4fdc7308f31c6106ad14895611e4c0fd513c",
+      "schema_identity": "invoice@1",
+      "schema_hash": "sha256:37a9f66014c4a99a4fa3e2442e4557184e3fa4e3985f55bc04130b937076fd00",
+      "rule_vocabulary_version": "rule_vocabulary@1",
+      "pattern_dialect_version": "pattern_dialect@1",
+      "enabled_rules": [],
+      "options": {
+        "grounding_policy": {
+          "ungrounded": "warning",
+          "fuzzy": "info",
+          "exact": null
+        },
+        "enabled_rules": null
+      },
+      "validator_id": "deterministic-validator",
+      "validator_version": "1.1.0"
+    },
+    "artifact_id": "sha256:a3fd976e49ea75d80bea448e4b24e10bbe417d281990c47ae2a0ab7f7e395d7e"
+  },
+  "failed_stage": null,
+  "failure_reason": null,
+  "parser_id": "pdf-text",
+  "parser_version": "1.0.0+pymupdf-1.28.2"
+}

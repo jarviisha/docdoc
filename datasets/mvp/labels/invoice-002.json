@@ -1,0 +1,64 @@
+[
+  {
+    "field_path": "invoice_number",
+    "expectation": "value",
+    "value": "INV-002",
+    "labeler": "docdoc-maintainers",
+    "labeled_at": "2026-08-20T00:00:00"
+  },
+  {
+    "field_path": "issue_date",
+    "expectation": "value",
+    "value": "2026-03-08",
+    "labeler": "docdoc-maintainers",
+    "labeled_at": "2026-08-20T00:00:00"
+  },
+  {
+    "field_path": "currency",
+    "expectation": "value",
+    "value": "EUR",
+    "labeler": "docdoc-maintainers",
+    "labeled_at": "2026-08-20T00:00:00"
+  },
+  {
+    "field_path": "total",
+    "expectation": "value",
+    "value": "1000.00",
+    "labeler": "docdoc-maintainers",
+    "labeled_at": "2026-08-20T00:00:00"
+  },
+  {
+    "field_path": "supplier.legal_name",
+    "expectation": "value",
+    "value": "NORTHWIND TRADING COMPANY",
+    "labeler": "docdoc-maintainers",
+    "labeled_at": "2026-08-20T00:00:00"
+  },
+  {
+    "field_path": "supplier.tax_id",
+    "expectation": "value",
+    "value": "DE123456789",
+    "labeler": "docdoc-maintainers",
+    "labeled_at": "2026-08-20T00:00:00"
+  },
+  {
+    "field_path": "due_date",
+    "expectation": "absent",
+    "labeler": "docdoc-maintainers",
+    "labeled_at": "2026-08-20T00:00:00"
+  },
+  {
+    "field_path": "line_items[0].description",
+    "expectation": "value",
+    "value": "Consulting, March",
+    "labeler": "docdoc-maintainers",
+    "labeled_at": "2026-08-20T00:00:00"
+  },
+  {
+    "field_path": "line_items[0].amount",
+    "expectation": "value",
+    "value": "1000.00",
+    "labeler": "docdoc-maintainers",
+    "labeled_at": "2026-08-20T00:00:00"
+  }
+]

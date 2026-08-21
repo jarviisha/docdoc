@@ -1,0 +1,308 @@
+{
+  "document_id": "receipt-002",
+  "extraction": {
+    "values": {
+      "merchant_name": {
+        "field_path": "merchant_name",
+        "value": "HARBOUR CAFE",
+        "present": true,
+        "claimed_text": "HARBOUR CAFE",
+        "model_confidence": null,
+        "grounding": null,
+        "grounding_score": null,
+        "calibrated_confidence": null,
+        "calibrator_version": null
+      },
+      "purchased_at": {
+        "field_path": "purchased_at",
+        "value": "2026-03-09T09:20:00",
+        "present": true,
+        "claimed_text": "2026-03-09 09:20",
+        "model_confidence": null,
+        "grounding": null,
+        "grounding_score": null,
+        "calibrated_confidence": null,
+        "calibrator_version": null
+      },
+      "total": {
+        "field_path": "total",
+        "value": "3.40",
+        "present": true,
+        "claimed_text": "3.40",
+        "model_confidence": null,
+        "grounding": null,
+        "grounding_score": null,
+        "calibrated_confidence": null,
+        "calibrator_version": null
+      },
+      "payment_method": {
+        "field_path": "payment_method",
+        "value": "cash",
+        "present": true,
+        "claimed_text": "cash",
+        "model_confidence": null,
+        "grounding": null,
+        "grounding_score": null,
+        "calibrated_confidence": null,
+        "calibrator_version": null
+      }
+    },
+    "provenance": {
+      "document_id": "sha256:5205f6241bef96a96bebd936aa1c3add4a540f6193d17492ab366fc59185fa77",
+      "schema_identity": "receipt@1",
+      "schema_hash": "sha256:b88cd54bba4ffd11e1c6b4076d31cc03af0e69667fc668e7fb5c53a123420347",
+      "prompt_hash": "sha256:a0757647faa172933fa00bcd135492d8e549643689a98bc1b5ebafdeb8b79f56",
+      "projection_id": "response-shape@1",
+      "adapter_id": "echo",
+      "adapter_version": "1.0.0",
+      "model_id": "echo-fixture",
+      "model_version": "1",
+      "decoding": {
+        "max_output_tokens": 8192,
+        "temperature": 0.0,
+        "top_p": null,
+        "top_k": null,
+        "seed": null,
+        "thinking_budget": null,
+        "input_budget_tokens": 200000
+      },
+      "extractor_version": "1.0.0+echo-1.0.0",
+      "usage": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_input_tokens": null,
+        "cache_creation_input_tokens": null,
+        "reasoning_tokens": null
+      }
+    },
+    "artifact_id": "sha256:cffff4639fb080e8057feac0a3831b54a0e22fb2d833298f34afc54863c5949e",
+    "discarded": []
+  },
+  "grounding": {
+    "outcomes": {
+      "merchant_name": {
+        "field_path": "merchant_name",
+        "status": "exact",
+        "score": 1.0,
+        "span": [
+          0,
+          12
+        ],
+        "pages": [
+          0
+        ],
+        "geometry": [
+          [
+            0,
+            [
+              0.10084033613445378,
+              0.08096793711610191,
+              0.19327731092436976,
+              0.09891805399625149
+            ]
+          ],
+          [
+            0,
+            [
+              0.198416804465927,
+              0.08096793711610191,
+              0.24772269625623686,
+              0.09891805399625149
+            ]
+          ]
+        ],
+        "alternatives": [],
+        "truncated": false
+      },
+      "purchased_at": {
+        "field_path": "purchased_at",
+        "status": "exact",
+        "score": 1.0,
+        "span": [
+          74,
+          90
+        ],
+        "pages": [
+          0
+        ],
+        "geometry": [
+          [
+            0,
+            [
+              0.10084033613445378,
+              0.13797506300683826,
+              0.1953848446116728,
+              0.1559251798869878
+            ]
+          ],
+          [
+            0,
+            [
+              0.20052433815323004,
+              0.13797506300683826,
+              0.24677978002724527,
+              0.1559251798869878
+            ]
+          ]
+        ],
+        "alternatives": [],
+        "truncated": false
+      },
+      "total": {
+        "field_path": "total",
+        "status": "exact",
+        "score": 1.0,
+        "span": [
+          98,
+          102
+        ],
+        "pages": [
+          0
+        ],
+        "geometry": [
+          [
+            0,
+            [
+              0.3351864598378414,
+              0.17597981360066248,
+              0.3711629146287421,
+              0.19392993048081206
+            ]
+          ]
+        ],
+        "alternatives": [
+          {
+            "span": [
+              109,
+              113
+            ],
+            "score": 1.0
+          }
+        ],
+        "truncated": false
+      },
+      "payment_method": {
+        "field_path": "payment_method",
+        "status": "exact",
+        "score": 1.0,
+        "span": [
+          122,
+          126
+        ],
+        "pages": [
+          0
+        ],
+        "geometry": [
+          [
+            0,
+            [
+              0.1676352749351694,
+              0.21398456419448672,
+              0.20668064405938155,
+              0.23193468107463627
+            ]
+          ]
+        ],
+        "alternatives": [],
+        "truncated": false
+      }
+    },
+    "counts": {
+      "exact": 4,
+      "fuzzy": 0,
+      "ungrounded": 0,
+      "not_applicable": 0,
+      "truncated": 0
+    },
+    "provenance": {
+      "document_id": "sha256:5205f6241bef96a96bebd936aa1c3add4a540f6193d17492ab366fc59185fa77",
+      "extraction_artifact_id": "sha256:cffff4639fb080e8057feac0a3831b54a0e22fb2d833298f34afc54863c5949e",
+      "grounding_version": "v1",
+      "match_view_version": "v1",
+      "view_id": "sha256:becf0a9de41defc567e752edd1559b7076e00b39a9d5d145bf288310b43fe6c0",
+      "options": {
+        "threshold": 0.9,
+        "candidate_budget": 1500
+      },
+      "grounder_id": "deterministic-grounder",
+      "grounder_version": "1.0.0"
+    },
+    "artifact_id": "sha256:6cafa1d151f9232ca81a3e60b42e5bfa1988c297cb91f5a50b39bad0902ec338"
+  },
+  "validation": {
+    "verdict": "valid",
+    "checks": [
+      {
+        "check_id": "merchant_name#required",
+        "field_path": "merchant_name",
+        "kind": "required",
+        "outcome": "passed",
+        "reason": null
+      },
+      {
+        "check_id": "purchased_at#required",
+        "field_path": "purchased_at",
+        "kind": "required",
+        "outcome": "passed",
+        "reason": null
+      },
+      {
+        "check_id": "total#minimum",
+        "field_path": "total",
+        "kind": "constraint",
+        "outcome": "passed",
+        "reason": null
+      },
+      {
+        "check_id": "total#required",
+        "field_path": "total",
+        "kind": "required",
+        "outcome": "passed",
+        "reason": null
+      },
+      {
+        "check_id": "payment_method#enum",
+        "field_path": "payment_method",
+        "kind": "constraint",
+        "outcome": "passed",
+        "reason": null
+      }
+    ],
+    "findings": [],
+    "counts": {
+      "declared": 5,
+      "evaluated": 5,
+      "passed": 5,
+      "failed": 0,
+      "not_evaluated": 0,
+      "errors": 0,
+      "warnings": 0,
+      "infos": 0
+    },
+    "provenance": {
+      "document_id": "sha256:5205f6241bef96a96bebd936aa1c3add4a540f6193d17492ab366fc59185fa77",
+      "extraction_artifact_id": "sha256:cffff4639fb080e8057feac0a3831b54a0e22fb2d833298f34afc54863c5949e",
+      "grounding_artifact_id": "sha256:6cafa1d151f9232ca81a3e60b42e5bfa1988c297cb91f5a50b39bad0902ec338",
+      "schema_identity": "receipt@1",
+      "schema_hash": "sha256:b88cd54bba4ffd11e1c6b4076d31cc03af0e69667fc668e7fb5c53a123420347",
+      "rule_vocabulary_version": "rule_vocabulary@1",
+      "pattern_dialect_version": "pattern_dialect@1",
+      "enabled_rules": [],
+      "options": {
+        "grounding_policy": {
+          "ungrounded": "warning",
+          "fuzzy": "info",
+          "exact": null
+        },
+        "enabled_rules": null
+      },
+      "validator_id": "deterministic-validator",
+      "validator_version": "1.1.0"
+    },
+    "artifact_id": "sha256:95eb8ff35fcd7a1d603f487768b92516820fd71607d280da6eaf652e1daf05c3"
+  },
+  "failed_stage": null,
+  "failure_reason": null,
+  "parser_id": "pdf-text",
+  "parser_version": "1.0.0+pymupdf-1.28.2"
+}
