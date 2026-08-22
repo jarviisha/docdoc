@@ -268,6 +268,13 @@ Delivers operability without creating a second copy of the documents in the log 
 
 ### Functional Requirements
 
+<!--
+  Numbering is append-only. FR-058 onward were added by the caching checklist pass
+  (checklists/caching.md, 2026-08-22) and are placed beside the requirements they
+  refine rather than at the end, so a reader finds them in context while every
+  existing number keeps pointing at the same sentence.
+-->
+
 **The pipeline as an explicit stage machine**
 
 - **FR-001**: The system MUST provide a pipeline that executes the stages parse → extract → ground →
@@ -275,6 +282,10 @@ Delivers operability without creating a second copy of the documents in the log 
 - **FR-002**: Each stage MUST be an explicit, separately identified step carrying a stable processor
   identity and a version that moves whenever its output moves for fixed inputs. The pipeline MUST NOT
   be a generic DAG engine and MUST NOT accept a user-supplied stage graph.
+  - Bumping that version is a **review obligation**, not something the system detects: ADR-0003 says
+    so, and this feature does not change it. What this feature adds is that the obligation now has a
+    symptom — FR-062 — and a way to provoke it — FR-064. A reviewer of any change to a stage's
+    output MUST state whether the version moved.
 - **FR-003**: The pipeline MUST NOT redefine, reimplement, or re-derive any behaviour of the parse,
   extraction, grounding, or validation stages. It sequences them, records what happened, and decides
   reuse. Any rule about *what a stage means* stays in that stage's layer.
@@ -294,39 +305,103 @@ Delivers operability without creating a second copy of the documents in the log 
   in one repository is the condition this requirement exists to prevent.
 - **FR-010**: Retries MUST be permitted for provider and network calls only. Validation, grounding,
   and schema errors MUST NOT be retried.
+- **FR-058**: Each stage's options hash MUST fold exactly the inputs ADR-0003 names for that stage,
+  including its Milestone 5 amendment, and MUST fold nothing else. An input that can change a
+  result and is not folded produces a stale reuse; a value that cannot change a result and is
+  folded destroys reuse for no reason. Both are defects, and neither is visible in any output — so
+  the folded set MUST be asserted per stage by a test naming each input, not left to review.
+- **FR-059**: Computing a stage's identity MUST NOT require credentials, a network, a provider call,
+  or the document's content beyond what the preceding stage already produced. Only *executing* a
+  stage may need those. A run whose every stage is reused MUST therefore succeed with no credentials
+  configured at all.
+- **FR-060**: Durations, timestamps, request identifiers, retry counts, and transport settings MUST
+  NOT enter any identity, artifact, or verdict. They are recorded for correlation and cost, and the
+  separation is the one `ingest.options` already makes between what a parse *produces* and how it
+  talks to a service.
+- **FR-061**: The parse stage's identity MUST be computed after routing and parser selection and
+  before the parser executes, so a reused parse skips the parser — including a billable
+  service-backed one — while the text-layer verdict is still computed and recorded on every run.
+  A cached document MUST NOT arrive carrying a routing decision this run did not make.
 
 **The artifact store**
 
 - **FR-011**: The system MUST provide an artifact store addressed by the content-addressed identity
   of ADR-0003, in which every artifact is immutable and the store is append-only.
 - **FR-012**: Before executing a stage, the pipeline MUST compute that stage's artifact identity from
-  its recorded inputs and MUST return the stored artifact instead of executing the stage when one is
+  the inputs ADR-0003 defines for it — which are known before the stage runs, not read back from a
+  previous run — and MUST return the stored artifact instead of executing the stage when one is
   present. A reused stage MUST produce a result byte-identical to the one it replaced.
-- **FR-013**: Reuse MUST be partial and per-stage. A change confined to one stage's inputs MUST
-  invalidate that stage and everything downstream of it, and MUST reuse everything upstream of it.
+- **FR-013**: Reuse MUST be partial and per-stage. A change to one stage's folded inputs gives that
+  stage a **different identity**, so it and everything downstream of it are computed afresh while
+  everything upstream is reused. Nothing is deleted or marked stale: the store is append-only, and
+  invalidation here is a consequence of a new identity rather than an act performed on an old one.
+  Which schema edits move which identity is ADR-0008's, and this requirement MUST NOT restate it in
+  weaker words.
 - **FR-014**: The store MUST refuse to return an artifact whose stored content does not match the
   identity it is stored under, raising an explicit error.
 - **FR-015**: The store MUST record, alongside each artifact, the artifact-format version under
   which it was written, and MUST NOT return an artifact written under an incompatible one.
+  - **Incompatible** means the stored payload cannot be read back into the current shape without
+    loss: a field removed, renamed, or retyped, or a new field whose absence is not answerable from
+    what was stored. Adding a field whose default is never load-bearing is compatible and MUST NOT
+    move the version.
+  - An artifact under an incompatible version is a **miss, not an error**: the stage is executed and
+    the mismatch is logged. A version bump is an expected event on upgrade, and making it fatal
+    would mean every run fails until somebody clears a directory by hand.
 - **FR-016**: A partially written artifact MUST NOT be readable as a complete one.
-- **FR-017**: The store MUST be optional. With no store configured, every run recomputes every stage
-  and produces identical results; nothing about correctness may depend on the store being present.
+- **FR-017**: The store MUST be optional, and **off unless configured**. There is no default
+  location: the artifacts carry extracted values and the blobs carry whole documents, so where they
+  land is a decision an operator makes rather than one docdoc makes for them (FR-044). With no store
+  configured, every run recomputes every stage and produces identical results; nothing about
+  correctness may depend on the store being present.
 - **FR-018**: The store MUST NOT require a database or an object store. It MUST NOT prevent one being
   added later behind the same boundary.
-- **FR-019**: The system MUST provide a way to clear the store, or a subset of it, so a suspect
-  result can be reproduced from scratch.
+- **FR-019**: The system MUST provide a way to clear the store: **all of it, or one stage of it** —
+  those two subsets and no open-ended query language. Clearing one stage is what makes a suspect
+  result reproducible from scratch without discarding the expensive parses, and clearing a stage
+  necessarily discards nothing downstream, because downstream artifacts stay addressable and their
+  inputs have not moved.
+  - This is also the supported recovery path from FR-014: an artifact that fails its integrity check
+    is cleared and recomputed, deliberately by a human, rather than silently overwritten by the run
+    that found it.
 - **FR-020**: Grounding's comparison-time match view MUST be cached by document identity and match
   view version, as ADR-0006 specifies and as grounding does not currently do.
+  - The cache MUST be **bounded by a stated maximum number of entries**, evicting least-recently
+    used, with the bound configurable and its default documented. An unbounded cache over a corpus
+    sweep is a memory profile nobody chose.
+  - It serves the case artifact reuse does not: several extractions grounding against **one**
+    document inside one process. When the grounding artifact itself is reused, the view is never
+    built and this cache is never reached.
 - **FR-021**: The system MUST store the submitted source bytes under their blob identity when a
   caller submits a document for later processing, and MUST NOT store two copies of identical bytes.
-- **FR-022**: Garbage collection of unreachable artifacts is out of scope, and the store MUST NOT be
-  designed in a way that makes adding it a breaking change.
+- **FR-022**: Garbage collection of unreachable artifacts is out of scope. What that deferral
+  requires of this milestone is one checkable thing rather than a promise about future design:
+  **every stored artifact MUST record its own stage and the identity of its input**, so that
+  reachability from a set of roots is computable by walking the store alone. A collector needs no
+  more than that, and an artifact that lacks it can never be collected safely.
+- **FR-062**: A write for an identity already present MUST be a no-op when the content matches, and
+  MUST raise an explicit error naming both contents when it does not. Two writes of one identity
+  disagreeing means either corruption or a processor whose output moved without its version moving —
+  the failure ADR-0003 assigns to human review because the system cannot detect it. This is the one
+  place the system *can*: it MUST NOT overwrite, and it MUST NOT stay quiet.
+  - Concurrent writes of identical content MUST both succeed. The store MUST NOT require a lock, a
+    lease, or a coordinator; atomic replacement of an immutable, content-addressed entry is what
+    makes the race benign.
+- **FR-063**: A store that cannot be read or written — absent root, no permission, no space — MUST
+  degrade rather than fail: the run proceeds without reuse, the condition is logged once, and the
+  result is the one a run with no store would have produced. A failure to *write* an artifact MUST
+  NOT fail a run whose stages succeeded, and the stage MUST still be reported as executed.
+- **FR-064**: The system MUST provide a way to run every stage while still writing, so that FR-062's
+  check fires on results that would otherwise have been read from the store. Without it, a processor
+  whose output has drifted is only ever caught by a cache miss that happens not to occur.
 
 **Explaining an identity**
 
-- **FR-023**: The system MUST be able to explain how any artifact identity it produced was derived:
-  the stage, the input artifact identity, the processor identity and version, and every input folded
-  into that stage's options hash.
+- **FR-023**: The system MUST be able to explain how an artifact identity **held in a store** was
+  derived: the stage, the input artifact identity, the processor identity and version, and every
+  input folded into that stage's options hash. A derivation is read from the record the write left
+  behind, so an identity produced by a run with no store configured (FR-017) has none, and the
+  system MUST say that plainly rather than reconstruct one.
 - **FR-024**: The explanation MUST be able to walk the chain back to the source blob identity.
 - **FR-025**: The explanation MUST NOT expose document content, extracted values, prompt bodies, or
   credentials. It explains identities, not documents.
@@ -384,8 +459,11 @@ Delivers operability without creating a second copy of the documents in the log 
   into any identity.
 - **FR-043**: Document contents, extracted values, personally identifying information, credentials,
   and prompt bodies MUST NOT be written to logs. Logs carry hashes and identifiers.
-- **FR-044**: Stored artifacts contain extracted values by nature. The system MUST state where the
-  store writes and MUST NOT write it to a shared or world-readable location by default.
+- **FR-044**: Stored artifacts contain extracted values by nature, and stored blobs are the source
+  documents **in full** — the more sensitive of the two, and the one easier to overlook. The system
+  MUST state where each writes, MUST create both readable only by the account that owns them, and
+  MUST NOT write either to a shared or world-readable location. There is no default location at all
+  (FR-017): a store exists because an operator asked for one and said where.
 
 **Observability**
 
@@ -429,6 +507,25 @@ Delivers operability without creating a second copy of the documents in the log 
   open-decision table MUST be moved from *Still open* to *Resolved* in the same change, as its own
   amendment procedure requires. This changes no runtime behaviour; it is the last unresolved
   constitutional decision, and this is the last milestone able to carry it.
+- **FR-065**: ADR-0003's amendment of 2026-08-18 — the refined Validate row, which Milestone 5 wrote
+  and left marked **proposed** — MUST be accepted or superseded in this milestone. FR-058 requires
+  folding exactly the inputs that amendment names, so the design depends on a decision the record
+  says was never made. A dependency on an unaccepted amendment is the implicit resolution the
+  constitution's precedence rule forbids.
+
+### One value, three names
+
+Four terms circulate here for what is sometimes one thing, and a reader who guesses wrong reads a
+requirement backwards. They are fixed as:
+
+| Term | Means |
+|---|---|
+| **artifact id** | The identity of one stage's output, per ADR-0003's formula. Every stage has one. |
+| **`document_id`** | The parse stage's artifact id. It has its own name because ADR-0002 gave it one first. |
+| **`processing_id`** | The **terminal** artifact id — the validate stage's. One per completed run. |
+| **job id** | The HTTP interface's name for `processing_id`. Not a separate value (FR-033). |
+
+"Artifact identity" and "artifact id" are the same word; the spec should prefer the short one.
 
 ### Key Entities
 
@@ -468,16 +565,23 @@ Delivers operability without creating a second copy of the documents in the log 
 
 - **SC-001**: From a fresh checkout with no credentials and no network, one command produces a result
   in which 100% of extracted values carry a page and, where geometry exists, a bounding box.
-- **SC-002**: A second identical run of the same document executes zero stages and produces a result
-  byte-identical to the first.
+- **SC-002**: A second identical run of the same document executes zero stages, and every field of
+  its result equals the first run's **except the per-stage durations and the executed/reused
+  statuses**, which necessarily differ and are the only fields permitted to. Stating the exception
+  is the point: "byte-identical" would be false on a field the run is required to record (FR-060),
+  and a criterion that is false as written gets satisfied by deleting the inconvenient field.
 - **SC-003**: After a change confined to the prompt or the schema, the parse is executed zero times
-  and every stage from extraction onward is executed exactly once.
+  and every stage from extraction onward is executed exactly once — counted from the per-stage
+  executed/reused counters FR-047 requires, not inferred from a timing.
 - **SC-004**: 100% of runs report, per stage, whether it was executed or reused, so the cost of any
   run is answerable from its own output.
-- **SC-005**: An artifact whose content does not match its identity, and an artifact written under an
-  incompatible format version, are returned as reusable results in 0% of attempts.
-- **SC-006**: A run's terminal identity is recomputable from the inputs the run recorded in 100% of
-  runs, with no field required that the run did not record.
+- **SC-005**: Over a fixture store seeded with one corrupt artifact, one artifact under an
+  incompatible format version, and one conflicting write per stage, 0% are returned as reusable
+  results: the corrupt one and the conflicting write raise, and the incompatible one misses.
+- **SC-006**: A run's terminal identity is recomputable, in 100% of runs, from `RunProvenance` and
+  the per-stage processor identities, versions, and options hashes the run recorded — and from
+  nothing else. A recomputation needing a field the run did not record is a failure of this
+  criterion, not a gap in the test.
 - **SC-007**: For any identity a run produced, the derivation names the stage, the input identity,
   the processor, its version, and the folded inputs — in 100% of cases, and with 0% of them
   containing document content or credentials.
@@ -533,6 +637,22 @@ Delivers operability without creating a second copy of the documents in the log 
   is FR-015's failure mode.
 - **"Inspect" reads a result, not a document.** The inspect command shows values, verdicts, pages,
   and rectangles; rendering an image of the page with boxes drawn on it is not part of this feature.
+- **Two docdoc versions may share one store**, and are safe to when the artifact-format versions and
+  processor versions agree — which is exactly what those versions are for. Nothing further is
+  required of them, and FR-062 is what catches the case where that assumption was wrong.
+- **The recorder runs with no store by default**, so a committed prediction set is always the
+  product of full execution. This is what keeps a stale artifact from quietly moving a published
+  metric, and it is why the store can be a cost optimisation (SC-015) without becoming an input to
+  the numbers of record.
+- **The kernel's canonical serialisation is stable across versions.** Every stored artifact's
+  integrity check is `content_id_for(canonical_json(payload))`, so a change to either derivation
+  would invalidate every artifact ever written. The kernel already carries
+  `IDENTITY_SCHEMA_VERSION` for exactly that event; this feature assumes it does not move, and
+  FR-015's format version is what absorbs it if it ever does.
+- **An artifact fits in memory and is serialised whole.** A parsed `Document` carries every token
+  and its geometry, so this is an assumption about document size rather than a safe general truth.
+  Streaming or chunked artifacts are not in this milestone; the size limits of FR-039 are what keep
+  the assumption true.
 
 ## Dependencies
 

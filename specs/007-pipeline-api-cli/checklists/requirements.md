@@ -60,6 +60,21 @@ the sections that own them rather than left as a note:
 
 **Zero markers remain. All 16 items pass.** Spec is ready for `/speckit-plan`.
 
+### Validation iteration 3 — 2026-08-22, after the caching checklist
+
+The spec was amended by [caching.md](caching.md): eight requirements added (FR-058…FR-065), eighteen
+requirements and criteria rewritten, four assumptions added, one terminology table added.
+Re-validated against all 16 items and all 16 still pass. Two of them are now *better* supported than
+before:
+
+- **Requirements are testable and unambiguous** — CHK010–CHK017 replaced eight vague terms
+  ("incompatible", "a subset", "bounded", "invalidate", "recorded inputs") with definitions.
+- **Success criteria are measurable** — CHK024–CHK027 removed one unfalsifiable requirement (the old
+  FR-022) and gave three criteria a named instrument or population.
+
+No new [NEEDS CLARIFICATION] marker was introduced: every question the caching pass raised was
+answerable from ADR-0003, ADR-0008, or the existing code.
+
 **On "no implementation details"**: this feature's subject matter *is* a command-line interface and
 an HTTP interface, so naming them is scope, not leakage. No framework, library, language, wire
 format, endpoint path, on-disk layout, or storage engine is named anywhere in the spec — those are
