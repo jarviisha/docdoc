@@ -139,7 +139,7 @@ PDF), exit `2`, zero parses, zero provider calls, and no temporary file left beh
 **Proves**: SC-010, US3. The only scenario needing the `docdoc[api]` extra.
 
 ```bash
-docdoc-api --store "$DOCDOC_STORE_ROOT" &        # or: uvicorn docdoc.api:app
+DOCDOC_STORE_ROOT="$DOCDOC_STORE_ROOT" uvicorn docdoc.api:app --port 8000 &
 blob=$(curl -sF file=@tests/fixtures/pdf/digital_invoice.pdf \
   localhost:8000/v1/documents | jq -r .blob_id)
 job=$(curl -s -XPOST localhost:8000/v1/documents/$blob/extract \

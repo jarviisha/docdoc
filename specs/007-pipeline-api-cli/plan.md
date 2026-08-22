@@ -74,7 +74,9 @@ repository is the 48-document public golden set, which is also the milestone's c
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-Evaluated against constitution **v1.4.0**. Note on gate 11: the template's gate text quotes the
+Evaluated against constitution **v1.4.0** — the version current at planning. T007 amends Principle X
+and bumps the document to 1.5.0 as part of this milestone, so a later reader should not take this
+line as the current version. Note on gate 11: the template's gate text quotes the
 pre-1.4.0 layer chain, which named `Transform` and `Pipeline` and omitted `grounding` and
 `validation`. The authoritative chain is the `import-linter` contract in `pyproject.toml`, as
 Principle X now says itself; the gate is answered against that.
@@ -167,7 +169,7 @@ src/docdoc/
 │   └── record.py        # CHANGED — calls pipeline.run(); outputs byte-identical
 ├── cli/                 # NEW — argparse; no new dependency; in the base install
 │   ├── __init__.py      # main()
-│   ├── commands/        # parse, extract, inspect, explain, eval
+│   ├── commands/        # parse, extract, inspect, explain, eval, store
 │   └── render.py        # the human form and the machine form
 └── api/                 # NEW — behind docdoc[api]
     ├── __init__.py
