@@ -46,7 +46,7 @@ def _race(store: FileArtifactStore, values: list[str], workers: int) -> list[Bas
         barrier.wait()
         try:
             _put(store, values[index % len(values)])
-        except BaseException as error:  # noqa: BLE001 - collected, then asserted on
+        except BaseException as error:
             with lock:
                 failures.append(error)
 

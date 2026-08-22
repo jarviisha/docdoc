@@ -27,4 +27,32 @@ these four.
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from docdoc.pipeline.errors import PipelineError
+from docdoc.pipeline.result import (
+    PipelineResult,
+    RunProvenance,
+    StageOutcome,
+    StageStatus,
+)
+from docdoc.pipeline.runner import run
+from docdoc.pipeline.stages import (
+    PIPELINE_ID,
+    PIPELINE_VERSION,
+    STAGE_SPECS,
+    Stage,
+    StageSpec,
+)
+
+__all__ = [
+    "PIPELINE_ID",
+    "PIPELINE_VERSION",
+    "STAGE_SPECS",
+    "PipelineError",
+    "PipelineResult",
+    "RunProvenance",
+    "Stage",
+    "StageOutcome",
+    "StageSpec",
+    "StageStatus",
+    "run",
+]

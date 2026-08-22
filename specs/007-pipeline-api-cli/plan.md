@@ -178,10 +178,32 @@ src/docdoc/
     └── errors.py        # docdoc error -> status mapping
 
 tests/
-├── unit/                # store, envelope, stage identity, CLI rendering, error mapping
-├── property/            # store round-trip and integrity properties
-├── contract/            # the three contracts in contracts/ asserted against the code
-└── integration/         # end-to-end reuse counts, offline path, leak scan, recorder parity
+├── unit/
+│   ├── test_artifact_envelope.py     # the two hashes, and why one cannot do the job
+│   ├── test_artifact_store.py        # every row of contracts/pipeline-api.md §6
+│   ├── test_stage_identity.py        # FR-058, input by input, per stage
+│   ├── test_pipeline_errors.py       # FR-004, FR-005, FR-010, FR-051
+│   ├── test_layer_boundaries.py      # the chain, and that the constitution agrees
+│   ├── test_match_view_cache.py      # FR-020 (US2)
+│   ├── test_explain.py               # FR-024, FR-025 (US4)
+│   ├── test_parse_plan.py            # the ingest plan/execute split (US2)
+│   ├── test_identity_recompute.py    # SC-006
+│   └── test_pipeline_observe.py      # FR-049 (US5)
+├── property/
+│   └── test_artifact_store_properties.py   # put/get round-trip, hash stability
+├── contract/
+│   ├── test_cli_contract.py          # contracts/cli.md
+│   └── test_http_contract.py         # contracts/http-api.md
+└── integration/
+    ├── test_store_concurrency.py     # ADR-0010 §5, no lock required
+    ├── test_pipeline_failures.py     # SC-012, real failures rather than injected ones
+    ├── test_cli_offline.py           # SC-001, no credentials and no network
+    ├── test_reuse.py                 # SC-002, SC-003, SC-005, FR-059, FR-061
+    ├── test_http_parity.py           # SC-010
+    ├── test_http_limits.py           # SC-009
+    ├── test_no_leak.py               # SC-008, all six surfaces of FR-042
+    ├── test_recorder_parity.py       # SC-014
+    └── test_eval_cost.py             # SC-015
 ```
 
 **Structure Decision**: Four new top-level packages under `src/docdoc/`, inserted into the enforced

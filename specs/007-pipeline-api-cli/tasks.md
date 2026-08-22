@@ -86,17 +86,17 @@ until they exist and are proven.
 
 ### The stage machine
 
-- [ ] T028 Implement per-stage processor identity and options-hash construction in `src/docdoc/pipeline/stages.py`, folding **exactly** the inputs ADR-0003 names for each stage and nothing else. Depends on T011 (FR-058)
-- [ ] T029 Implement `Stage`, `StageOutcome`, `PipelineResult`, and `RunProvenance` in `src/docdoc/pipeline/result.py` per `data-model.md`, with `failure_class` documented as the error's class name and never its message (FR-004)
-- [ ] T030 Implement `run()` in `src/docdoc/pipeline/run.py` — the four stages in order against `NullArtifactStore`, returning one `PipelineResult`, with `processing_id` set to the terminal artifact id (FR-001, FR-002, FR-006, FR-007, FR-008)
-- [ ] T031 Implement failure handling in `src/docdoc/pipeline/run.py`: a failed stage ends the run, every preceding result is kept, and the stage is attributed by the **declaring layer** of the error rather than by what was executing (FR-004, FR-005)
-- [ ] T032 [P] Test in `tests/unit/test_stage_identity.py` that each stage folds exactly the inputs ADR-0003 names — asserted input by input, by name — and that adding an unfolded input that changes a result is caught. Under-folding causes stale reuse and over-folding destroys reuse, and neither is visible in any output (FR-058)
-- [ ] T033 [P] Test in `tests/unit/test_stage_identity.py` that durations, `request_id`, retry counts, and transport settings never enter an identity (FR-060)
-- [ ] T034 [P] Test in `tests/unit/test_stage_identity.py` that computing every stage identity succeeds with no credentials, no network, and no provider configured (FR-059)
-- [ ] T035 [P] Integration test in `tests/integration/test_pipeline_failures.py` injecting a failure at each of the four stages and asserting the preceding results survive and the failing stage is named (FR-004, SC-012)
-- [ ] T036 [P] Test in `tests/unit/test_pipeline_errors.py` that no untyped exception escapes `run()` for any injected failure (FR-051, SC-011)
-- [ ] T107 [P] Test in `tests/unit/test_pipeline_errors.py` that a `ValidationError`, a `GroundingError`, and a `SchemaError` each cause exactly **one** stage execution, while a provider error is retried under the policy the extraction layer already owns. The pipeline adds no retry of its own, and nothing else asserts that (FR-010)
-- [ ] T037 Add the dependency-direction test in `tests/unit/test_layer_boundaries.py`, covering the new chain and the `api`/`cli` independence, so the boundary is checked by a test as well as by `lint-imports` (constitution override, FR-052, FR-054)
+- [X] T028 Implement per-stage processor identity and options-hash construction in `src/docdoc/pipeline/stages.py`, folding **exactly** the inputs ADR-0003 names for each stage and nothing else. Depends on T011 (FR-058)
+- [X] T029 Implement `Stage`, `StageOutcome`, `PipelineResult`, and `RunProvenance` in `src/docdoc/pipeline/result.py` per `data-model.md`, with `failure_class` documented as the error's class name and never its message (FR-004)
+- [X] T030 Implement `run()` in `src/docdoc/pipeline/run.py` — the four stages in order against `NullArtifactStore`, returning one `PipelineResult`, with `processing_id` set to the terminal artifact id (FR-001, FR-002, FR-006, FR-007, FR-008)
+- [X] T031 Implement failure handling in `src/docdoc/pipeline/run.py`: a failed stage ends the run, every preceding result is kept, and the stage is attributed by the **declaring layer** of the error rather than by what was executing (FR-004, FR-005)
+- [X] T032 [P] Test in `tests/unit/test_stage_identity.py` that each stage folds exactly the inputs ADR-0003 names — asserted input by input, by name — and that adding an unfolded input that changes a result is caught. Under-folding causes stale reuse and over-folding destroys reuse, and neither is visible in any output (FR-058)
+- [X] T033 [P] Test in `tests/unit/test_stage_identity.py` that durations, `request_id`, retry counts, and transport settings never enter an identity (FR-060)
+- [X] T034 [P] Test in `tests/unit/test_stage_identity.py` that computing every stage identity succeeds with no credentials, no network, and no provider configured (FR-059)
+- [X] T035 [P] Integration test in `tests/integration/test_pipeline_failures.py` injecting a failure at each of the four stages and asserting the preceding results survive and the failing stage is named (FR-004, SC-012)
+- [X] T036 [P] Test in `tests/unit/test_pipeline_errors.py` that no untyped exception escapes `run()` for any injected failure (FR-051, SC-011)
+- [X] T107 [P] Test in `tests/unit/test_pipeline_errors.py` that a `ValidationError`, a `GroundingError`, and a `SchemaError` each cause exactly **one** stage execution, while a provider error is retried under the policy the extraction layer already owns. The pipeline adds no retry of its own, and nothing else asserts that (FR-010)
+- [X] T037 Add the dependency-direction test in `tests/unit/test_layer_boundaries.py`, covering the new chain and the `api`/`cli` independence, so the boundary is checked by a test as well as by `lint-imports` (constitution override, FR-052, FR-054)
 
 **Checkpoint**: the store is trustworthy and the pipeline runs end to end without reuse. User stories can begin.
 

@@ -56,6 +56,23 @@ LAYERS: tuple[tuple[str, pathlib.Path], ...] = (
     ("docdoc.grounding", pathlib.Path("specs/004-deterministic-grounding/plan.md")),
 )
 
+#: Plans that are read for traceability but whose layers are not yet in `LAYERS`.
+#:
+#: Milestone 7 adds `docdoc.pipeline` and `docdoc.artifacts`. Neither joins
+#: `LAYERS` yet, for the reason already recorded below for `docdoc.recording`:
+#: the "substantial suite" guard requires eight files per layer, and a layer that
+#: is half-built has fewer. Registering the plan here keeps the traceability rule
+#: whole -- every test file still has to appear in *some* plan's tree -- without
+#: weakening a guard that exists to catch a layer whose tests went missing.
+#:
+#: When Milestone 7's suites are complete, `docdoc.pipeline` moves into `LAYERS`
+#: **between** `docdoc.evaluation` and `docdoc.validation`, which is its height in
+#: the chain. `docdoc.artifacts` stays out for the same reason `docdoc.recording`
+#: does: its tests reach it directly and would form a layer of four.
+EXTRA_PLANS: tuple[pathlib.Path, ...] = (
+    pathlib.Path("specs/007-pipeline-api-cli/plan.md"),
+)
+
 #: `docdoc.recording` is deliberately **not** listed, though it is a layer and it
 #: sits above `docdoc.evaluation`. Its tests reach it *through* the evaluation
 #: package -- a recorded prediction is a `PredictionSet` -- so they already
@@ -152,7 +169,8 @@ def _all_plan_text() -> str:
     belong in the plan of the milestone that introduced them, and the guarantee a
     reviewer needs — every test file appears in some plan's tree — survives intact.
     """
-    return "\n".join(plan.read_text(encoding="utf-8") for _package, plan in LAYERS)
+    plans = [plan for _package, plan in LAYERS] + list(EXTRA_PLANS)
+    return "\n".join(plan.read_text(encoding="utf-8") for plan in dict.fromkeys(plans))
 
 
 @pytest.mark.parametrize(("package", "plan"), LAYERS, ids=lambda v: getattr(v, "name", v))
