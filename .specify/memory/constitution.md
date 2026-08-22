@@ -174,6 +174,45 @@ non-blocking decision remains open: PRE_1_0_VERSIONING.
 
 Templates: no changes required — the plan-template gate table references
 principles by number and remains accurate.
+
+---
+AMENDMENT 1.4.0 → 1.5.0 (2026-08-22)
+Bump rationale: MINOR — Principle X's chain gains four layers and the guidance
+around two of their positions. No principle is removed and nothing previously
+compliant becomes non-compliant.
+
+  - Principle X's chain extended to
+    `API, CLI -> Recording -> Evaluation -> Pipeline -> Validation -> Grounding
+    -> Extraction -> Ingest -> Artifacts -> Kernel`, the form the `import-linter`
+    contract in `pyproject.toml` now enforces. This amendment lands in the same
+    change as that contract, which is what the rule added at 1.4.0 requires.
+
+  - `Artifacts` is recorded as sitting directly ABOVE the kernel. It stores whole
+    result models without importing one — the caller names the model at the call
+    site — so its dependencies are `pydantic` and two kernel hashing helpers, and
+    the lowest position that is true is the honest one.
+
+  - `Pipeline` is recorded as sitting directly ABOVE `Validation`, the highest
+    stage it drives, rather than above `Evaluation` where its milestone number
+    might suggest. This leaves the `Recording > Evaluation` edge of 1.3.0
+    untouched and yields `Recording > Pipeline`, which is what makes the recorder
+    a caller of the pipeline rather than a second definition of the stage order.
+
+  - `API` and `CLI` are siblings, not a stack, separated by an `independence`
+    contract. Neither may import the other; a position in an ordered list would
+    have implied a permission.
+
+  - The "planned and not yet built" list is now empty. Every layer this document
+    names exists.
+
+Sections amended: Principle X (chain, one rule clarified). No decision moved; one
+non-blocking decision remains open: PRE_1_0_VERSIONING, which Milestone 7
+resolves separately via ADR-0011.
+
+Templates: no changes required — the plan-template gate table references
+principles by number and remains accurate. Note that gate 11's parenthetical in
+`plan-template.md` still quotes the pre-1.4.0 chain and should be corrected when
+that template is next touched; it is advisory text, not the enforced contract.
 -->
 
 # docdoc Constitution
@@ -404,13 +443,23 @@ not regress.
 The dependency direction MUST be, strictly downward. The layers that **exist**, in order:
 
 ```text
-Evaluation → Validation → Grounding → Extraction → Ingest → Kernel
+API, CLI → Recording → Evaluation → Pipeline → Validation → Grounding
+         → Extraction → Ingest → Artifacts → Kernel
 ```
 
-Planned and not yet built: **Recording** (above Evaluation), and **Pipeline** and **API** above
-both — Milestones 6 and 7. `Transform` was named as a layer in this document until v1.4.0 and was
-never built: ADR-0006 put its transformations inside grounding's versioned match view instead, so
-the layer it would have been is grounding.
+Nothing is planned and unbuilt: every layer named here exists. `Transform` was named as a layer in
+this document until v1.4.0 and was never built — ADR-0006 put its transformations inside grounding's
+versioned match view instead, so the layer it would have been is grounding.
+
+Two positions in that chain are not the ones a reader would guess, and both are deliberate.
+**`Artifacts` sits directly above the kernel**, because it stores whole result models without
+importing one — the caller names the model — so it depends on `pydantic` and two kernel helpers and
+nothing else. **`Pipeline` sits directly above `Validation`**, the highest stage it drives, which
+leaves `Recording → Evaluation` as it was and yields `Recording → Pipeline`: the recorder *calls* the
+pipeline rather than holding a second copy of the stage order.
+
+**`API` and `CLI` are siblings, not a stack.** Neither may import the other, which an ordered
+position cannot express; an `independence` contract states it instead.
 
 Rules:
 
@@ -421,9 +470,10 @@ Rules:
   document never named — and the reconciliation lived only in a `pyproject.toml` comment and three
   `research.md` files. A dependency graph a reader must reconstruct from three research documents
   is not a governing one.
-- **This chain MUST name only layers that exist**, with planned ones listed separately as above. A
-  principle that names `Transform` and `Pipeline` alongside `Kernel` invites a designer to build
-  against a graph that is partly aspiration, which is the specific failure this rule now prevents.
+- **This chain MUST name only layers that exist**, with planned ones listed separately. A principle
+  that names `Transform` and `Pipeline` alongside `Kernel` invites a designer to build against a
+  graph that is partly aspiration, which is the specific failure this rule now prevents. As of
+  v1.5.0 the separate list is empty, and it MUST stay empty rather than becoming a wish list.
 - ADR-0003's per-document stage chain — parse → extraction → grounding → validation — is finer
   grained than this list and consistent with it. Where they overlap, both hold; neither overrides
   the other.
@@ -604,4 +654,4 @@ insufficient. Unjustified violations are rejected regardless of the code's quali
 **Precedence for unresolved items.** Where an "Open Constitutional Decision" is unresolved,
 implementers MUST NOT resolve it silently in code. Raise it, decide it, record it.
 
-**Version**: 1.4.0 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-08-20
+**Version**: 1.5.0 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-08-22

@@ -186,10 +186,16 @@ jobs:
           uv venv .venv-base
           uv pip install --python .venv-base .
 
-      - name: The kernel, ingest, and extraction import with pydantic alone
-        run: .venv-base/bin/python -c "import docdoc.kernel, docdoc.ingest, docdoc.extraction"
+      - name: Every deterministic layer imports with pydantic alone
+        run: .venv-base/bin/python -c "import docdoc.kernel, docdoc.artifacts, docdoc.ingest, docdoc.extraction, docdoc.grounding, docdoc.validation, docdoc.pipeline, docdoc.evaluation, docdoc.cli"
 
-      - name: No provider SDK came with it
+      # The command belongs to the base install, which is the whole argument for
+      # argparse over a CLI framework. If this step ever needs an extra, that
+      # decision was reversed by accident.
+      - name: The docdoc command works without any extra
+        run: .venv-base/bin/docdoc --help > /dev/null
+
+      - name: No provider SDK and no web framework came with it
         run: |
           if .venv-base/bin/python -c "import pymupdf" 2>/dev/null; then
             echo "pymupdf is installed by the base package; it must be an extra" >&2
@@ -203,6 +209,18 @@ jobs:
             echo "the google-genai SDK is installed by the base package; it must be an extra" >&2
             exit 1
           fi
+          if .venv-base/bin/python -c "import fastapi" 2>/dev/null; then
+            echo "fastapi is installed by the base package; it must be the api extra" >&2
+            exit 1
+          fi
+
+      # FR-053 and SC-013: the base install must not merely import, it must run
+      # the offline suite. A layer that imports and then needs an extra to do
+      # anything has moved the dependency rather than removed it.
+      - name: The offline suite passes on the base install
+        run: |
+          uv pip install --python .venv-base pytest hypothesis
+          .venv-base/bin/python -m pytest tests/unit tests/property tests/contract -q
 
       # An absence check passes trivially if the import name is wrong, so prove
       # the same commands do detect a provider SDK when one is present.

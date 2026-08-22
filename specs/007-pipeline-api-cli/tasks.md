@@ -35,15 +35,15 @@ Single project: `src/docdoc/`, `tests/` at repository root, per the Structure De
 **Purpose**: create the four packages and make the layer boundary a build failure before any code
 can cross it.
 
-- [ ] T001 Create package skeletons `src/docdoc/artifacts/__init__.py`, `src/docdoc/pipeline/__init__.py`, `src/docdoc/cli/__init__.py`, `src/docdoc/api/__init__.py`, each with a module docstring naming what the layer owns and what it must never import
-- [ ] T002 Extend the `import-linter` layers contract in `pyproject.toml` to `api, cli > recording > evaluation > pipeline > validation > grounding > extraction > ingest > artifacts > kernel`, with a comment explaining why `artifacts` sits directly above the kernel and `pipeline` directly above `validation` (research R1, FR-052)
-- [ ] T003 Add an `independence` contract between `docdoc.api` and `docdoc.cli` in `pyproject.toml`, since neither may import the other and a layer position would have implied a permission (FR-054, research R1)
-- [ ] T004 [P] Add `docdoc.artifacts` and `fastapi` to the existing forbidden-imports contracts for `docdoc.grounding` and `docdoc.validation` in `pyproject.toml`, so "these layers do no I/O and know no transport" stays a build failure (plan post-design re-check, gates 4 and 5)
-- [ ] T005 [P] Add the `api = ["fastapi>=0.110", "uvicorn>=0.29"]` extra to `pyproject.toml` with a comment stating it is confined to `docdoc.api` (research R13, FR-038)
-- [ ] T006 [P] Add `[project.scripts] docdoc = "docdoc.cli:main"` to `pyproject.toml`; no new runtime dependency, because the CLI is argparse (research R12, FR-053)
-- [ ] T007 Amend Principle X in `.specify/memory/constitution.md` to the chain T002 enforces, bump the document to 1.5.0, and record the amendment with its rationale and migration note — **in the same commit as T002**, which is what Principle X itself requires (FR-055)
-- [ ] T008 [P] Add a CI job to `.github/workflows/ci.yml` that installs the base package with no extras and runs the offline suite, so "the base install acquires nothing" is checked rather than asserted (FR-053, SC-013)
-- [ ] T009 Run `uv run lint-imports` and confirm the new contracts pass against the empty packages before any code is written
+- [X] T001 Create package skeletons `src/docdoc/artifacts/__init__.py`, `src/docdoc/pipeline/__init__.py`, `src/docdoc/cli/__init__.py`, `src/docdoc/api/__init__.py`, each with a module docstring naming what the layer owns and what it must never import
+- [X] T002 Extend the `import-linter` layers contract in `pyproject.toml` to `api, cli > recording > evaluation > pipeline > validation > grounding > extraction > ingest > artifacts > kernel`, with a comment explaining why `artifacts` sits directly above the kernel and `pipeline` directly above `validation` (research R1, FR-052)
+- [X] T003 Add an `independence` contract between `docdoc.api` and `docdoc.cli` in `pyproject.toml`, since neither may import the other and a layer position would have implied a permission (FR-054, research R1)
+- [X] T004 [P] Add `docdoc.artifacts` and `fastapi` to the existing forbidden-imports contracts for `docdoc.grounding` and `docdoc.validation` in `pyproject.toml`, so "these layers do no I/O and know no transport" stays a build failure (plan post-design re-check, gates 4 and 5)
+- [X] T005 [P] Add the `api = ["fastapi>=0.110", "uvicorn>=0.29"]` extra to `pyproject.toml` with a comment stating it is confined to `docdoc.api` (research R13, FR-038)
+- [X] T006 [P] Add `[project.scripts] docdoc = "docdoc.cli:main"` to `pyproject.toml`; no new runtime dependency, because the CLI is argparse (research R12, FR-053)
+- [X] T007 Amend Principle X in `.specify/memory/constitution.md` to the chain T002 enforces, bump the document to 1.5.0, and record the amendment with its rationale and migration note — **in the same commit as T002**, which is what Principle X itself requires (FR-055)
+- [X] T008 [P] Add a CI job to `.github/workflows/ci.yml` that installs the base package with no extras and runs the offline suite, so "the base install acquires nothing" is checked rather than asserted (FR-053, SC-013)
+- [X] T009 Run `uv run lint-imports` and confirm the new contracts pass against the empty packages before any code is written
 
 ---
 
@@ -56,33 +56,33 @@ until they exist and are proven.
 
 ### Decisions that gate code
 
-- [ ] T010 Write `docs/adr/0010-artifact-store-and-job-model.md`: the on-disk layout, the artifact-format version and why it is not the package version, the synchronous job model, and the decision not to require a database or an object store while leaving room for one behind the same boundary — each a choice a later reader would otherwise reconstruct from code (FR-018, research R4, R6, R7)
-- [ ] T011 Accept or supersede ADR-0003's amendment of 2026-08-18 in `docs/adr/0003-content-addressed-artifact-chain.md`, which Milestone 5 wrote and left marked **proposed**, and update the constitution's decision table if it names it. **Blocks T028**: FR-058 requires folding exactly the inputs that amendment names, so building on it while it is unaccepted is the implicit resolution the constitution's precedence rule forbids (FR-065)
+- [X] T010 Write `docs/adr/0010-artifact-store-and-job-model.md`: the on-disk layout, the artifact-format version and why it is not the package version, the synchronous job model, and the decision not to require a database or an object store while leaving room for one behind the same boundary — each a choice a later reader would otherwise reconstruct from code (FR-018, research R4, R6, R7)
+- [X] T011 Accept or supersede ADR-0003's amendment of 2026-08-18 in `docs/adr/0003-content-addressed-artifact-chain.md`, which Milestone 5 wrote and left marked **proposed**, and update the constitution's decision table if it names it. **Blocks T028**: FR-058 requires folding exactly the inputs that amendment names, so building on it while it is unaccepted is the implicit resolution the constitution's precedence rule forbids (FR-065)
 
 ### Errors
 
-- [ ] T012 [P] Add `ArtifactError` to `src/docdoc/artifacts/errors.py` as a `DocdocError` subclass, carrying the store root, the artifact id, and the reason (FR-050)
-- [ ] T013 [P] Add `PipelineError` to `src/docdoc/pipeline/errors.py` as a `DocdocError` subclass (FR-050)
+- [X] T012 [P] Add `ArtifactError` to `src/docdoc/artifacts/errors.py` as a `DocdocError` subclass, carrying the store root, the artifact id, and the reason (FR-050)
+- [X] T013 [P] Add `PipelineError` to `src/docdoc/pipeline/errors.py` as a `DocdocError` subclass (FR-050)
 
 ### The artifact store
 
-- [ ] T014 Implement `ArtifactEnvelope` in `src/docdoc/artifacts/envelope.py` with `artifact_id`, `stage`, `input_artifact_id`, `processor_id`, `processor_version`, `options_hash`, `artifact_format_version`, `content_id`, and `payload`. Document in the docstring why `content_id` exists: an `artifact_id` hashes a stage's *inputs*, so rehashing the payload against it would always fail, and corruption would be undetectable (research R4, FR-014, FR-022)
-- [ ] T015 Implement the `ArtifactStore` protocol and `NullArtifactStore` in `src/docdoc/artifacts/store.py` — content-addressed, immutable, append-only, per ADR-0003. The null store is the default and there is no default root, which is what makes FR-017 true by construction rather than by a flag being checked correctly at every call site (FR-011, FR-017)
-- [ ] T016 Implement `FileArtifactStore` in `src/docdoc/artifacts/store.py`: two-character hash fan-out, writes via a temporary file in the same directory followed by an atomic replace, and directories created readable only by the owning account (research R4, FR-016, FR-044)
-- [ ] T017 Implement `get()` in `src/docdoc/artifacts/store.py` with all three read outcomes — absent is a miss, an incompatible `artifact_format_version` is a **miss that is logged**, and a `content_id` mismatch **raises** (FR-014, FR-015)
-- [ ] T018 Implement `put()` in `src/docdoc/artifacts/store.py` with the conflict rule: a no-op when the stored content matches, and `ArtifactError` naming both contents when it does not. Never overwrite — this is what makes "append-only" a property rather than a description, and the only mechanical symptom available for a processor whose output moved while its version did not (FR-011, FR-062)
-- [ ] T019 Implement `clear(stage=None)` in `src/docdoc/artifacts/store.py` — all of it or one stage, and no query language (FR-019)
-- [ ] T020 Implement `BlobStore` in `src/docdoc/artifacts/blobs.py`: idempotent `put` keyed by `blob_id`, owner-only permissions, no envelope. Blobs are whole source documents and are the more sensitive of the two stores (FR-021, FR-044)
-- [ ] T021 Implement `DerivationRecord` and `derivation()` in `src/docdoc/artifacts/derivation.py`, carrying the stage, the input id, the processor and version, and the **names** of the folded inputs — no payload, no value, no prompt, no credential — and returning `None` when no record was written (FR-023, FR-025)
+- [X] T014 Implement `ArtifactEnvelope` in `src/docdoc/artifacts/envelope.py` with `artifact_id`, `stage`, `input_artifact_id`, `processor_id`, `processor_version`, `options_hash`, `artifact_format_version`, `content_id`, and `payload`. Document in the docstring why `content_id` exists: an `artifact_id` hashes a stage's *inputs*, so rehashing the payload against it would always fail, and corruption would be undetectable (research R4, FR-014, FR-022)
+- [X] T015 Implement the `ArtifactStore` protocol and `NullArtifactStore` in `src/docdoc/artifacts/store.py` — content-addressed, immutable, append-only, per ADR-0003. The null store is the default and there is no default root, which is what makes FR-017 true by construction rather than by a flag being checked correctly at every call site (FR-011, FR-017)
+- [X] T016 Implement `FileArtifactStore` in `src/docdoc/artifacts/store.py`: two-character hash fan-out, writes via a temporary file in the same directory followed by an atomic replace, and directories created readable only by the owning account (research R4, FR-016, FR-044)
+- [X] T017 Implement `get()` in `src/docdoc/artifacts/store.py` with all three read outcomes — absent is a miss, an incompatible `artifact_format_version` is a **miss that is logged**, and a `content_id` mismatch **raises** (FR-014, FR-015)
+- [X] T018 Implement `put()` in `src/docdoc/artifacts/store.py` with the conflict rule: a no-op when the stored content matches, and `ArtifactError` naming both contents when it does not. Never overwrite — this is what makes "append-only" a property rather than a description, and the only mechanical symptom available for a processor whose output moved while its version did not (FR-011, FR-062)
+- [X] T019 Implement `clear(stage=None)` in `src/docdoc/artifacts/store.py` — all of it or one stage, and no query language (FR-019)
+- [X] T020 Implement `BlobStore` in `src/docdoc/artifacts/blobs.py`: idempotent `put` keyed by `blob_id`, owner-only permissions, no envelope. Blobs are whole source documents and are the more sensitive of the two stores (FR-021, FR-044)
+- [X] T021 Implement `DerivationRecord` and `derivation()` in `src/docdoc/artifacts/derivation.py`, carrying the stage, the input id, the processor and version, and the **names** of the folded inputs — no payload, no value, no prompt, no credential — and returning `None` when no record was written (FR-023, FR-025)
 
 ### The store, proven
 
-- [ ] T022 [P] Unit tests for envelope integrity in `tests/unit/test_artifact_envelope.py`: a mutated payload fails its `content_id`, and an `artifact_id` alone cannot detect it
-- [ ] T023 [P] Unit tests in `tests/unit/test_artifact_store.py` covering **every row** of the semantics table in `contracts/pipeline-api.md` §6, including the two conflict rows and the two degradation rows
-- [ ] T024 [P] Property test in `tests/property/test_artifact_store_properties.py`: `put` then `get` returns a model equal to the original, for each of `Document`, `ExtractionResult`, `GroundingResult`, and `ValidationResult`
-- [ ] T025 [P] Test in `tests/unit/test_artifact_store.py` that a partially written file is never readable as a complete artifact (FR-016)
-- [ ] T026 [P] Test in `tests/integration/test_store_concurrency.py` that two concurrent puts of identical content both succeed with no lock, and that divergent concurrent puts raise (FR-062)
-- [ ] T027 [P] Test in `tests/unit/test_artifact_store.py` that the store root and every directory it creates are not group- or world-readable (FR-044)
+- [X] T022 [P] Unit tests for envelope integrity in `tests/unit/test_artifact_envelope.py`: a mutated payload fails its `content_id`, and an `artifact_id` alone cannot detect it
+- [X] T023 [P] Unit tests in `tests/unit/test_artifact_store.py` covering **every row** of the semantics table in `contracts/pipeline-api.md` §6, including the two conflict rows and the two degradation rows
+- [X] T024 [P] Property test in `tests/property/test_artifact_store_properties.py`: `put` then `get` returns a model equal to the original, for each of `Document`, `ExtractionResult`, `GroundingResult`, and `ValidationResult`
+- [X] T025 [P] Test in `tests/unit/test_artifact_store.py` that a partially written file is never readable as a complete artifact (FR-016)
+- [X] T026 [P] Test in `tests/integration/test_store_concurrency.py` that two concurrent puts of identical content both succeed with no lock, and that divergent concurrent puts raise (FR-062)
+- [X] T027 [P] Test in `tests/unit/test_artifact_store.py` that the store root and every directory it creates are not group- or world-readable (FR-044)
 
 ### The stage machine
 

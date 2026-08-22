@@ -67,7 +67,15 @@ Canonical serialization rules from ADR-0002 apply to every `options_hash`.
 
 ---
 
-## Amendment (proposed, 2026-08-18) — the Validate row, refined by Milestone 5
+## Amendment (**accepted 2026-08-22**, proposed 2026-08-18) — the Validate row, refined by Milestone 5
+
+> **Accepted by Milestone 7.** This amendment was written by Milestone 5 and left marked *proposed*
+> for four months, during which the validation stage already folded what it describes. Milestone 7's
+> FR-058 requires each stage to fold **exactly** the inputs this ADR names, which made building on an
+> unaccepted amendment an implicit resolution of an open question — the thing the constitution's
+> precedence rule forbids. So it is decided rather than inherited: the table below is the operative
+> one, and the Validate row in the Decision section above is superseded by it.
+
 
 The Validate row above was written before a validation stage existed, and two of its terms turned out
 to under-describe what that stage folds. Recorded here rather than resolved silently in code, per the
