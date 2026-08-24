@@ -27,8 +27,19 @@ FIXTURES = Path(__file__).parent.parent / "fixtures"
 def offline_parsers() -> list[tuple[str, Parser, Path]]:
     """Every parser that needs neither credentials nor network, with a fixture
     it accepts. A parser absent from this list is untested by this suite, which
-    is itself worth noticing."""
-    from docdoc.ingest.parsers.pdf_text import PdfTextParser
+    is itself worth noticing.
+
+    **Returns empty rather than raising when the extra is absent.** This runs at
+    *collection* time, as a `parametrize` argument, so an ImportError here fails
+    the whole module rather than skipping it — and SC-013 requires this suite to
+    pass on a base install with no provider SDK. "No credentials and no network"
+    is not the same condition as "the native reader is installed", and this
+    function had been conflating them.
+    """
+    try:
+        from docdoc.ingest.parsers.pdf_text import PdfTextParser
+    except ImportError:
+        return []
 
     return [("pdf-text", PdfTextParser(), FIXTURES / "pdf" / "digital_invoice.pdf")]
 
