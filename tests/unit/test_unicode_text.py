@@ -57,17 +57,19 @@ def text_of(lines: list[list[str]]) -> object:
     )
 
 
-@pytest.fixture
-def _needs_native_reader() -> None:
-    """SC-013 — the base install has no native PDF reader, and these need one."""
-    pytest.importorskip("pymupdf")
-
-
 class TestThroughARealPdf:
     """End-to-end, with the multi-byte text the toolchain can actually embed."""
 
     @pytest.fixture
     def document(self) -> object:
+        """SC-013 — the base install has no native PDF reader, and this needs one.
+
+        Guarded in the fixture rather than on the class, because every test here
+        takes ``document`` and the fixture is the single place the requirement
+        actually bites. A class decorator would have to be remembered by whoever
+        adds the next test; this cannot be forgotten.
+        """
+        pytest.importorskip("pymupdf")
         return parse((FIXTURES / "pdf" / "unicode_text.pdf").read_bytes())
 
     def test_nothing_was_lost_to_a_broken_decode(self, document) -> None:  # type: ignore[no-untyped-def]

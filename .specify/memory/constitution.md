@@ -239,6 +239,31 @@ untouched — ADR-0011 states what "follows semantic versioning" means below
 `1.0.0` rather than changing the requirement.
 
 Templates: no changes required.
+
+---
+AMENDMENT 1.5.1 → 1.5.2 (2026-08-24)
+Bump rationale: PATCH — a clarification, not a widening. `pydantic_core` is
+recorded as being `pydantic` rather than admitted as a second dependency, so
+nothing previously compliant becomes non-compliant and nothing previously
+forbidden becomes permitted.
+
+  - Principle I gains a sub-clause stating that `pydantic_core` counts as
+    `pydantic`. It is pydantic's own compiled runtime: installing pydantic
+    installs it, pydantic cannot function without it, and it is not separately
+    declared in `pyproject.toml`. The kernel reaches it for one purpose —
+    `SpanIndex.__get_pydantic_core_schema__`, without which a `Document` cannot
+    be serialised and the parse stage has no storable artifact.
+
+  - Recorded here because it had been argued **only in a comment inside
+    `tests/unit/test_kernel_purity.py`**, whose own failure message says that
+    adding a kernel dependency requires a constitution amendment. A permission
+    that lives in the test enforcing the prohibition is not a governed decision,
+    and `/speckit-converge` was right to raise it as CRITICAL.
+
+Sections amended: Principle I (one sub-clause). No decision moved; the open list
+stays empty.
+
+Templates: no changes required.
 -->
 
 # docdoc Constitution
@@ -274,6 +299,15 @@ Rules:
 - The kernel's only permitted runtime dependency is `pydantic`. The kernel MUST NOT import
   HTTP clients, provider SDKs, PDF/OCR libraries, database drivers, queue clients, or web
   frameworks. A dependency-boundary test MUST enforce this mechanically.
+  - `pydantic_core` counts as `pydantic` and not as a second dependency. It is pydantic's own
+    compiled runtime: `pip install pydantic` installs it, pydantic cannot function without it, and
+    it is not separately declared in `pyproject.toml`. The kernel reaches it for exactly one
+    purpose — `SpanIndex.__get_pydantic_core_schema__`, which is the documented way to make a
+    non-pydantic class serialisable and is what lets a `Document` survive a round trip through the
+    artifact store. Without it the parse stage has no storable artifact and ADR-0003's central
+    promise is unkeepable. It is named here because the boundary test reads top-level module names
+    and cannot know the two ship together, and because a permission argued only in a test comment
+    is not recorded.
 - `locate()`, `find()`, `slice()`, and `merge()` are mandatory kernel operations. `slice()` and
   `merge()` MUST preserve geometry and rebase offsets without losing source mapping.
 - `find()` is **exact-only** and stdlib-implemented; fuzzy matching lives in the extraction layer
@@ -683,4 +717,4 @@ insufficient. Unjustified violations are rejected regardless of the code's quali
 **Precedence for unresolved items.** Where an "Open Constitutional Decision" is unresolved,
 implementers MUST NOT resolve it silently in code. Raise it, decide it, record it.
 
-**Version**: 1.5.1 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-08-24
+**Version**: 1.5.2 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-08-24
