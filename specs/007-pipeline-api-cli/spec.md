@@ -638,8 +638,20 @@ requirement backwards. They are fixed as:
 - **SC-014**: The stage sequence parse → extract → ground → validate is expressed in exactly one
   place in the repository, verified by the recording step producing identical prediction sets before
   and after it is rewritten to call the pipeline.
-- **SC-015**: The evaluation of the committed golden set, run through the command line with the store
-  enabled, performs zero repeated parses across repeated runs — the cost the store exists to remove.
+- **SC-015**: Processing the committed golden set's documents twice with the store enabled performs
+  **zero parses on the second pass**, proved by a parser that raises if it is called at all — the
+  repeated, billable cost the store exists to remove.
+  - **Amended 2026-08-24**, because as first written this criterion measured nothing. It read "the
+    evaluation of the committed golden set, run through the command line with the store enabled,
+    performs zero repeated parses", and `docdoc eval` loads a golden set and a **committed prediction
+    set** and scores them: it parses no document, with a store or without one. The criterion passed
+    trivially and would have gone on passing if the store had never been built.
+  - The cost is on the path that *produces* predictions — the recorder, and any run over a corpus —
+    which is where `tests/integration/test_eval_cost.py` measures it. Naming the command was the
+    error: the store's benefit belongs to the pipeline, and `docdoc eval` is downstream of it.
+  - Counted, never timed. A criterion a slow machine can fail is not a criterion, and a stale cache
+    returns a result that looks correct — so "it was faster" is not evidence that anything was
+    reused.
 - **SC-016**: At merge, the constitution lists zero decisions as still open, and every one of them
   points at an accepted ADR.
 

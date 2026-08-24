@@ -134,20 +134,63 @@ An alias for the existing `ingest.Limits`, threaded through. Not a new type (res
 
 ### `SubmittedDocument`
 
-`blob_id`, `size_bytes`, `media_type`. The response to a submission and the body of
-`GET /v1/documents/{id}`. Deliberately **not** called `document_id` (research R8).
+`blob_id`, `size_bytes`, `media_type`. Deliberately **not** called `document_id` (research R8): a
+`document_id` identifies one *parse*, and at submission no parse has happened or even been chosen, so
+returning a blob id under that name would hand a caller an identifier whose spans anchor to nothing.
+
+**Realised as two types rather than one** — `SubmissionResponse` and `BlobMetadata` — because they
+differ in one field and the difference is real. A submission has just seen the bytes, so its
+`media_type` is known; a metadata read of a blob already in the store may not be able to re-detect
+one, so there it is optional. Collapsing them would mean either an optional field on the response
+that is never absent, or a required field on the lookup that cannot always be filled.
 
 ### `Job`
 
 Not a stored row. A view assembled from the store: `job_id` (= terminal artifact id), `status`, and
-where available the result. `status` is drawn from a closed set of `SUCCEEDED` and `UNAVAILABLE` —
-there is no `PENDING`, because a synchronous run that has not finished has not returned a job id
-(research R7, FR-035).
+where available the result. There is no `PENDING`, because a synchronous run that has not finished
+has not returned a job id (research R7).
+
+`status` is drawn from a closed set of **three** (FR-035 as amended, ADR-0010's amendment of
+2026-08-24):
+
+| Status | When |
+|---|---|
+| `succeeded` | the terminal artifact is in the store |
+| `unavailable` | the id is well-formed and is not in the store |
+| `unknown` | the id is not a well-formed artifact identity, so no run could have produced it |
+
+**`unavailable` deliberately does not distinguish "never produced" from "produced and since
+cleared".** The store is content-addressed and append-only, `clear()` leaves no tombstone, and
+nothing records what the store was never asked to hold — so the two are one observation, and a status
+claiming to tell them apart would be inventing the difference. `unknown` is reserved for the
+judgement that *can* be made without history: whether the id is syntactically an artifact id at all.
+
+This section said `SUCCEEDED` and `UNAVAILABLE` until 2026-08-24. The two-member set came from an
+earlier draft in which `unknown` meant *never produced* — a distinction an append-only store cannot
+make. Recorded rather than quietly corrected, because the earlier reading is the one a reader would
+otherwise reconstruct.
 
 ### `ErrorBody`
 
-`type` (the docdoc error class name), `stage`, `message`, and `detail`. The message is docdoc's own,
-never a provider's, which may quote the document it choked on (FR-037).
+`error` — carrying `class` (the docdoc error class name), `stage`, `message`, and `detail` — plus
+`outcomes` and `results` where the failure happened mid-run (FR-066).
+
+The message is docdoc's own, never a provider's, which may quote the document it choked on (FR-037).
+
+**The partial results are not optional detail.** A failed run produces no terminal artifact and
+therefore no job to fetch later, so this response is the *only* place the completed stages' output
+can appear — without it, FR-004's "MUST NOT discard partial results" would be honoured in the library
+and defeated one layer out. `results` legitimately carries extracted values: it is the caller's own
+document returning on the caller's own request, which is a different thing from a log line, and
+FR-043's prohibition is about logs.
+
+The parsed document is represented by its identity rather than inline. It carries every token and
+bounding box — the largest thing in the run — and the parse stage's `artifact_id` is already in
+`outcomes` for a caller who wants it.
+
+This section gave `type`, `stage`, `message`, `detail` and no partial results until 2026-08-24; the
+field also serialises as `class`, since `type` is not a keyword worth fighting and `class` is what the
+contract's example shows.
 
 ---
 

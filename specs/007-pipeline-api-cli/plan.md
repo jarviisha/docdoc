@@ -148,6 +148,7 @@ src/docdoc/
 │   ├── store.py         # ArtifactStore protocol + FileArtifactStore + NullArtifactStore
 │   ├── blobs.py         # BlobStore for submitted source bytes
 │   ├── derivation.py    # DerivationRecord — how an id was derived (ADR-0003)
+│   ├── paths.py         # owner-only directories, per level (FR-044)
 │   └── errors.py        # ArtifactError
 ├── ingest/
 │   ├── parse.py         # CHANGED — plan/execute split; parse() keeps its signature
@@ -160,7 +161,8 @@ src/docdoc/
 ├── pipeline/            # NEW — the four stages as one identified, versioned processor
 │   ├── __init__.py      # run()
 │   ├── stages.py        # Stage enum, per-stage processor identity and options hash
-│   ├── run.py           # the reuse decision and the stage loop
+│   ├── runner.py        # the reuse decision and the stage loop
+│   ├── plan.py          # each stage's identity, computed BEFORE the stage runs
 │   ├── result.py        # PipelineResult, StageOutcome, RunProvenance
 │   ├── observe.py       # correlation ids, stage events, counters
 │   └── errors.py        # PipelineError
@@ -175,6 +177,7 @@ src/docdoc/
     ├── __init__.py
     ├── app.py           # routes only
     ├── models.py        # request/response shapes
+    ├── settings.py      # configuration NAMES, importable without FastAPI
     └── errors.py        # docdoc error -> status mapping
 
 tests/
@@ -188,7 +191,7 @@ tests/
 │   ├── test_explain.py               # FR-024, FR-025 (US4)
 │   ├── test_parse_plan.py            # the ingest plan/execute split (US2)
 │   ├── test_identity_recompute.py    # SC-006
-│   └── test_pipeline_observe.py      # FR-049 (US5)
+│   └── test_packaging.py             # git and the wheel, not the working tree
 ├── property/
 │   └── test_artifact_store_properties.py   # put/get round-trip, hash stability
 ├── contract/
@@ -199,9 +202,7 @@ tests/
     ├── test_pipeline_failures.py     # SC-012, real failures rather than injected ones
     ├── test_cli_offline.py           # SC-001, no credentials and no network
     ├── test_reuse.py                 # SC-002, SC-003, SC-005, FR-059, FR-061
-    ├── test_http_parity.py           # SC-010
-    ├── test_http_limits.py           # SC-009
-    ├── test_no_leak.py               # SC-008, all six surfaces of FR-042
+    ├── test_no_leak.py               # SC-008, FR-042's surfaces, FR-045 on the raise path
     ├── test_recorder_parity.py       # SC-014
     └── test_eval_cost.py             # SC-015
 ```
@@ -212,6 +213,34 @@ artifacts > kernel`. `artifacts` sits directly above the kernel because it depen
 `pipeline` sits directly above `validation` because that is the highest stage it drives, which
 leaves the existing `recording > evaluation` ordering untouched. `api` and `cli` are siblings at the
 top, kept apart by an independence contract so neither can grow a dependency on the other.
+
+### Four paths this block named that do not exist
+
+Corrected on 2026-08-24, after two convergence passes found the tree describing files nobody wrote.
+Recorded rather than silently edited, because three of the four moved for a reason worth keeping.
+
+**`pipeline/run.py` is `pipeline/runner.py`.** A module named `run` beside a function named `run`
+re-exported from the package `__init__` is shadowed by that re-export: `docdoc.pipeline.run` resolves
+to the function, and anything reaching for the module by that path silently gets something else.
+`tests/integration/test_eval_cost.py` has to reach through `sys.modules` for the same reason on
+`docdoc.ingest.parse`, which has the identical collision.
+
+**`pipeline/plan.py` was not planned and is load-bearing.** Each stage's identity has to be computed
+*before* the stage runs, or the store can only record and never reuse — and no single layer could own
+that, because it composes four layers' own `options_hash_for_*` functions.
+
+**Three test files hold their assertions somewhere else.** `test_http_parity.py` (SC-010) and
+`test_http_limits.py` (SC-009) are inside `tests/contract/test_http_contract.py`, beside the contract
+they check; `test_pipeline_observe.py` (FR-049) is inside `tests/integration/test_no_leak.py`, beside
+the prohibition it shares a fixture with. Each assertion belongs next to the property it tests rather
+than in a file named after the task that asked for it.
+
+**Two source files this block never named** were added by the convergence passes and are listed
+above: `artifacts/paths.py`, which applies a directory mode per level because
+`mkdir(parents=True, mode=…)` applies it to the leaf only — which had left both store roots
+world-readable against FR-044 — and `api/settings.py`, which holds the HTTP interface's configuration
+*names* outside the module that imports FastAPI, so that the check asserting every documented setting
+exists can run on a base install with no extras.
 
 ## Complexity Tracking
 

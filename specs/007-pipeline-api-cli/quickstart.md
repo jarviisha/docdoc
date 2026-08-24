@@ -184,7 +184,13 @@ no thing.
 
 ## 8. The golden set through the command line, twice
 
-**Proves**: SC-015, SC-014, and the whole cost argument.
+**Proves**: SC-014, and the whole cost argument.
+
+> SC-015 is **not** proved here, and was cited here until 2026-08-24. `docdoc eval` scores a
+> *committed* prediction set — it parses no document, with a store or without one, so "zero repeated
+> parses" is true of it whether or not the store exists. The store's benefit is on the path that
+> produces predictions, and `tests/integration/test_eval_cost.py` measures it there with a parser
+> that raises if it is called at all.
 
 ```bash
 docdoc eval datasets/mvp/manifest.json --predictions datasets/mvp/predictions --json \
@@ -216,7 +222,10 @@ and if that changed any prediction, this is where it shows.
 | 5 | SC-005 |
 | 6 | SC-009 |
 | 7 | SC-010 |
-| 8 | SC-014, SC-015 |
+| 8 | SC-014 |
+
+SC-015 is asserted by `tests/integration/test_eval_cost.py`, not by hand: it needs a parser rigged to
+raise, which is not something to type at a shell.
 
 The remaining criteria are asserted by the suite rather than by hand: SC-006 (identity recomputable
 from recorded inputs) and SC-008 (nothing leaks into logs) as integration tests, SC-011 and SC-012

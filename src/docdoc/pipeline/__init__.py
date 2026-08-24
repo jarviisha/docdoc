@@ -27,6 +27,7 @@ these four.
 
 from __future__ import annotations
 
+from docdoc.pipeline import observe
 from docdoc.pipeline.errors import PipelineError
 from docdoc.pipeline.result import (
     PipelineResult,
@@ -54,5 +55,6 @@ __all__ = [
     "StageOutcome",
     "StageSpec",
     "StageStatus",
+    "observe",
     "run",
 ]

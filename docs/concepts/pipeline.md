@@ -123,6 +123,24 @@ re-derived.
 Content, values, credentials, and prompt bodies never appear. Durations, timestamps, request ids,
 retry counts, and transport settings enter no identity, no artifact, and no verdict.
 
+**A run that raises still emits the events for the stages that ran.** They were emitted nowhere at
+all until a convergence pass measured it, because the emit sat only on the return path — and the runs
+most worth having events for are disproportionately the ones that failed. An operator whose store has
+gone bad wants to know how far the run got before it noticed.
+
+### Counters
+
+```python
+from docdoc.pipeline import observe
+
+observe.counters()   # {'executed': 4, 'reused': 0, 'failed': 0, 'skipped': 0}
+```
+
+Two surfaces, because the questions differ. `PipelineResult.cost_summary()` answers *what did this
+run cost* and is what the command line prints; `observe.counters()` accumulates across a process and
+is what a corpus sweep reads (FR-047). Neither enters an identity, an artifact, or a verdict, and a
+run with observability disabled produces the same result as one with it on.
+
 ## See also
 
 - [Artifacts](artifacts.md) — the chain, the two hashes, and what a store read may and may not do.

@@ -114,6 +114,22 @@ A derivation is *read* from the record a write left behind. A run with no store 
 identities that were never recorded, and the tool says so rather than reconstructing something
 plausible — a reconstruction would be a guess wearing the costume of a record.
 
+## Reading a result back
+
+```bash
+docdoc inspect --result sha256:3a1ede… --store ./store
+```
+
+Three lookups rather than a re-run. The validation artifact records its grounding input, which
+records its extraction input, so the whole result is reachable from the terminal identity alone —
+which is the reachability this milestone owes a future collector, paying for itself early. The HTTP
+interface does the same walk for `GET /v1/jobs/{id}/result`.
+
+A result that is not in the store is reported absent and **never recomputed**: the inputs may have
+moved since, and producing a different result under the same identity would break the one promise
+that identity makes. That is not a failure — the command was asked a question and answered it — so it
+exits `0`.
+
 ## What is out of scope
 
 Garbage collection, retention policy, and eviction. What this milestone owes a future collector is

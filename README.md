@@ -157,6 +157,7 @@ Everything above, without writing a script. `pip install docdoc` gives you the c
 docdoc parse    invoice.pdf                        # route, parse, report what came back
 docdoc extract  invoice.pdf --schema invoice@1     # the whole pipeline
 docdoc inspect  invoice.pdf --schema invoice@1     # every value, its verdict, its page, its rectangle
+docdoc inspect  --result sha256:3a1e…              # the same, read back from the store
 docdoc explain  sha256:3a1e… --chain               # why an identity is that value
 docdoc eval     manifest.json --predictions ./p    # score a golden set
 docdoc store    clear --stage extract              # all of it, or one stage
