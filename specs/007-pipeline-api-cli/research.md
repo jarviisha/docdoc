@@ -176,10 +176,16 @@ bump would invalidate every artifact. Recorded as a plausible later refinement i
 ## R7 — The job model, and why nothing needs a queue
 
 **Decision.** Execution is synchronous. `POST /v1/documents/{id}/extract` runs the pipeline inside
-the request. On success it returns the terminal artifact id as the job id (ADR-0003); on failure it
-returns a typed error immediately and creates no job. `GET /v1/jobs/{id}` and
-`GET /v1/jobs/{id}/result` are store lookups. An id that was never produced is reported unknown, and
-never pending (FR-035).
+the request. On success it returns the terminal artifact id as the job id (ADR-0003) **and the result
+itself**; on failure it returns a typed error immediately, carrying the completed stages' results, and
+creates no job. `GET /v1/jobs/{id}` and `GET /v1/jobs/{id}/result` are store lookups, answering
+`succeeded`, `unavailable`, or `unknown`, and never pending (FR-035).
+
+> **Amended 2026-08-24** (ADR-0010 amendment, checklist CHK019/021/022/032). This paragraph
+> originally reported an id that was never produced as `unknown` and a cleared one as `unavailable`,
+> and returned only a job id. An append-only store with no tombstones cannot tell those two apart, and
+> a response carrying only an identity is unredeemable whenever no store is configured — which is the
+> default. `unknown` now means *not a well-formed artifact id*; the result travels in the response.
 
 **Rationale.** The obvious reading of "job status" is asynchronous, and it is wrong here twice over.
 The deferred-technology list forbids the queue it would need; and more interestingly, a job id that

@@ -29,6 +29,18 @@ KERNEL_DIR = pathlib.Path(docdoc.kernel.__file__).parent
 ALLOWED_TOP_LEVEL = frozenset(
     {
         "pydantic",
+        # `pydantic_core` is pydantic's own compiled runtime, not a second
+        # dependency: `pip install pydantic` installs it and pydantic cannot
+        # function without it. Principle I permits "pydantic", and this is
+        # pydantic. It is listed separately only because the AST scan reads
+        # top-level module names and cannot know the two ship together.
+        #
+        # Added in Milestone 7 for `SpanIndex.__get_pydantic_core_schema__`,
+        # which is the documented way to make a non-pydantic class serialisable
+        # and is what lets a `Document` survive a round trip through the artifact
+        # store. Without it the parse stage has no storable artifact and
+        # ADR-0003's central promise stays unkeepable.
+        "pydantic_core",
         "bisect",
         "hashlib",
         "json",

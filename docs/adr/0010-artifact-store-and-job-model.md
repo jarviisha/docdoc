@@ -97,9 +97,10 @@ replacement of an immutable, content-addressed entry is what makes the race beni
 ### 6. A job is a synchronous run, identified by its terminal artifact
 
 The run happens inside the HTTP request. On success the response carries the terminal artifact id —
-ADR-0003's `processing_id` — as the job id. A failed run produces no terminal artifact and therefore
-no job; it returns a typed error in the same response. `GET /v1/jobs/{id}` is a store lookup, with a
-closed status set of `succeeded` and `unavailable` and **no** `pending`.
+ADR-0003's `processing_id` — as the job id, together with the result itself. A failed run produces no
+terminal artifact and therefore no job; it returns a typed error in the same response, carrying the
+stage outcomes and the results the completed stages produced. `GET /v1/jobs/{id}` is a store lookup,
+with a closed status set of `succeeded`, `unavailable`, and `unknown`, and **no** `pending`.
 
 The obvious reading of "job status" is asynchronous, and it is wrong twice. The deferred-technology
 list forbids the queue it would need; and a job id that *is* the terminal artifact id cannot be
@@ -125,3 +126,38 @@ place a worker would write to.
   of roots is computable by walking the store alone.
 - **A stale result now requires a hash collision or an unbumped processor version**, and the second
   has a symptom for the first time.
+
+## Amendment, 2026-08-24 — what a job lookup can honestly answer
+
+**Status**: Accepted. Amends §6 above; nothing else in this ADR changes.
+
+The interface checklist (`specs/007-pipeline-api-cli/checklists/interfaces.md`, CHK019) found §6 and
+the HTTP contract requiring a distinction this store cannot make. As first written, an id that was
+never produced was to be reported `unknown` and one whose artifact had been cleared `unavailable` —
+but the store is content-addressed and append-only, `clear()` leaves no tombstone, and nothing records
+what the store was never asked to hold. Both are the same observation: *not here*. A status set that
+claimed otherwise would have been decided by whoever implemented the endpoint.
+
+Three decisions follow, and the through-line is that each replaces an answer the system would have had
+to invent with one it can actually derive.
+
+1. **`unavailable` covers every well-formed absent id**, cleared or never produced, and says so rather
+   than guessing. **`unknown` is reserved for an id that is not a well-formed artifact identity** — a
+   syntactic judgement, available without any history. The set is closed at three, still with no
+   `pending`.
+
+2. **A run's response carries the result, not only its identity.** §6 as written returned a job id, and
+   a caller then fetched the result from the store. But the store is off unless configured (§1), and a
+   write may degrade without failing the run — so in both cases the run succeeded, the result existed
+   for a moment, and the response threw away the only copy. An identity-only response is a receipt the
+   caller frequently cannot redeem. The job endpoints keep their purpose: retrieval later, by someone
+   holding an id and not a result.
+
+3. **A failed run's response carries the partial results.** ADR-0003's chain gives a failed run no
+   terminal artifact and therefore no job, so there is no later fetch in which the completed stages'
+   output could surface. FR-004 requires those results not be discarded; without this they were
+   discarded at the boundary while the library dutifully preserved them.
+
+**Consequence.** The store gains nothing and loses nothing — no tombstone, no job table, no state.
+What changed is that two response bodies now carry what the store was previously assumed to hold for
+them, which is also what makes the HTTP interface usable with no store at all.

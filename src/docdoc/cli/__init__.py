@@ -20,8 +20,204 @@ carries exactly one JSON document and nothing else; diagnostics go to standard
 error in both forms. And the exit code distinguishes "the document is invalid"
 from "docdoc could not run", because a script that confuses the two will treat a
 wrong invoice as a broken tool.
+
+**Every command returns; none of them prints.** A command hands back a
+:class:`~docdoc.cli.render.Rendering` and :func:`~docdoc.cli.render.emit` writes
+it, which is what makes "exactly one JSON document on stdout" structural rather
+than a rule four modules have to remember.
 """
 
 from __future__ import annotations
 
-__all__: list[str] = []
+import argparse
+import sys
+from typing import TYPE_CHECKING, Any
+
+from docdoc.cli.config import Settings, add_common_arguments
+from docdoc.cli.render import Rendering, emit, warn
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+__all__ = ["main"]
+
+#: The run completed and the document is valid.
+EXIT_OK = 0
+#: The run completed and the document is **invalid** — a real result, not an error.
+EXIT_INVALID = 1
+#: The run could not complete: a typed docdoc error.
+EXIT_COULD_NOT_RUN = 2
+#: The invocation itself was wrong — bad arguments, unreadable file. The value is
+#: ``EX_USAGE`` from ``sysexits.h``, which is what shells and CI runners already
+#: read as "you called this wrong" rather than "this is broken".
+EXIT_BAD_INVOCATION = 64
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """The command set of ``contracts/cli.md`` §1, and nothing beyond it."""
+    parser = argparse.ArgumentParser(
+        prog="docdoc",
+        description="Turn documents into structured, validated, traceable data.",
+    )
+    add_common_arguments(parser)
+    subcommands = parser.add_subparsers(dest="command", metavar="COMMAND")
+
+    parse_command = subcommands.add_parser(
+        "parse", help="route, parse, and report what the parse produced"
+    )
+    parse_command.add_argument("file", metavar="FILE")
+    add_common_arguments(parse_command)
+
+    for name, help_text in (
+        ("extract", "run the whole pipeline and report the result"),
+        ("inspect", "run the whole pipeline and report where every value came from"),
+    ):
+        command = subcommands.add_parser(name, help=help_text)
+        command.add_argument("file", metavar="FILE")
+        command.add_argument(
+            "--schema", required=True, metavar="NAME@V", help="schema identity, e.g. invoice@1"
+        )
+        add_common_arguments(command)
+
+    explain = subcommands.add_parser("explain", help="how an artifact identity was derived")
+    explain.add_argument("artifact_id", metavar="ARTIFACT_ID")
+    explain.add_argument(
+        "--chain", action="store_true", help="walk the derivation back to the source blob"
+    )
+    add_common_arguments(explain)
+
+    evaluate = subcommands.add_parser("eval", help="score a golden set")
+    evaluate.add_argument("manifest", metavar="MANIFEST")
+    evaluate.add_argument("--predictions", required=True, metavar="DIR")
+    add_common_arguments(evaluate)
+
+    store = subcommands.add_parser("store", help="inspect and clear the artifact store")
+    store_actions = store.add_subparsers(dest="action", metavar="ACTION")
+    clear = store_actions.add_parser("clear", help="clear all of it, or one stage")
+    clear.add_argument(
+        "--stage", default=None, metavar="STAGE", help="parse|extract|ground|validate"
+    )
+    add_common_arguments(clear)
+
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Parse arguments, run one command, write one form, return one code.
+
+    The whole error boundary lives here. FR-051 says no untyped exception may
+    escape to a caller, and the way to make that true is to have exactly one
+    place where it could — not four commands each remembering to be careful.
+    """
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if not getattr(args, "command", None):
+        parser.print_help(sys.stderr)
+        return EXIT_BAD_INVOCATION
+
+    settings = Settings.resolve(args)
+
+    try:
+        rendering = _dispatch(args)(args, settings)
+    except Exception as error:
+        # The boundary FR-051 names. Broad on purpose: the requirement is that no
+        # untyped exception reaches a caller, and a narrower clause here would
+        # be a list of the exception types somebody remembered.
+        return emit(_failure(error), as_json=settings.as_json)
+
+    return emit(rendering, as_json=settings.as_json)
+
+
+def _dispatch(args: argparse.Namespace) -> Any:
+    """The command's entry point, imported at call time.
+
+    Deferred deliberately. Importing every command at module scope would drag
+    ``docdoc.ingest`` and its parser registry — and through it PyMuPDF and the
+    Azure SDK — into ``docdoc store clear``, which needs none of them. The base
+    install has to stay usable with no extras at all (FR-053, SC-013).
+    """
+    from docdoc.cli.commands import eval as eval_command
+    from docdoc.cli.commands import explain, extract, inspect, parse, store
+
+    if args.command == "store":
+        if getattr(args, "action", None) != "clear":
+            raise ValueError("usage: docdoc store clear [--stage STAGE]")
+        return store.run
+
+    return {
+        "parse": parse.run,
+        "extract": extract.run,
+        "inspect": inspect.run,
+        "explain": explain.run,
+        "eval": eval_command.run,
+    }[args.command]
+
+
+def _failure(error: Exception) -> Rendering:
+    """Turn any exception into a typed, content-free rendering.
+
+    **The class name, never the message, in the machine form.** An exception
+    message can quote the document it choked on, and the JSON document is what
+    gets pasted into an issue. The human form does carry docdoc's own message
+    because it is going to the person who ran the command and is holding the
+    file already — but a *provider's* message is never repeated in either, since
+    that is the one that may contain the document's text.
+    """
+    from docdoc.kernel.errors import DocdocError
+
+    typed = isinstance(error, DocdocError)
+    code = EXIT_COULD_NOT_RUN if typed else _code_for_untyped(error)
+
+    data = {
+        "error": {
+            "class": type(error).__name__,
+            "typed": typed,
+            "stage": _stage_of(error),
+        }
+    }
+    message = str(error) if typed else _untyped_message(error)
+    warn(message)
+    return Rendering(code=code, data=data, lines=[])
+
+
+def _code_for_untyped(error: Exception) -> int:
+    """An untyped exception is a bad invocation or a bug, and they differ.
+
+    ``OSError`` from an unreadable file and ``ValueError`` from a rejected
+    argument are the user's invocation and earn ``64``; anything else is docdoc's
+    fault and earns ``2``. The distinction matters because a CI job that retries
+    on ``2`` should not retry on a path that will never exist.
+    """
+    if isinstance(error, (OSError, ValueError, KeyError)):
+        return EXIT_BAD_INVOCATION
+    return EXIT_COULD_NOT_RUN
+
+
+def _untyped_message(error: Exception) -> str:
+    if isinstance(error, OSError):
+        return f"cannot read {getattr(error, 'filename', None) or 'the input'}: {error.strerror}"
+    return f"{type(error).__name__}: {error}"
+
+
+def _stage_of(error: Exception) -> str | None:
+    """Which layer declared this error, read off its own module.
+
+    The same rule the pipeline uses (FR-005), applied to errors that never
+    reached the pipeline — a schema that would not resolve, a file that would not
+    open. Attributing by declaring layer rather than by call site is what sends a
+    reader to the right code.
+    """
+    module = type(error).__module__
+    for marker, stage in (
+        (".ingest", "parse"),
+        (".extraction", "extract"),
+        (".grounding", "ground"),
+        (".validation", "validate"),
+        (".artifacts", "store"),
+        (".evaluation", "eval"),
+        (".pipeline", "pipeline"),
+    ):
+        if marker in module:
+            return stage
+    return None

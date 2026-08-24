@@ -9,10 +9,14 @@ overlap, which construction forbids (research.md R2).
 from __future__ import annotations
 
 from bisect import bisect_right
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from pydantic_core import core_schema
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
+
+    from pydantic import GetCoreSchemaHandler
 
     from docdoc.kernel.span import Span
     from docdoc.kernel.token import Token
@@ -57,6 +61,47 @@ class SpanIndex:
 
     def __repr__(self) -> str:
         return f"SpanIndex({len(self._tokens)} tokens)"
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source_type: Any, handler: GetCoreSchemaHandler
+    ) -> core_schema.CoreSchema:
+        """Serialize as the token sequence, and rebuild the index on the way back.
+
+        Without this a ``Document`` cannot be written to JSON at all, which means
+        the parse stage has no artifact and "changing a prompt reuses the parse"
+        stays the text it was for six milestones. This class is the only thing in
+        a ``Document`` pydantic could not already handle.
+
+        The stored form is the tokens and nothing else: ``_starts`` is derived
+        from them in ``__init__``, and persisting a derived index would be a
+        second copy of the same fact that could arrive disagreeing with the
+        first. Rebuilding it costs one pass and cannot be wrong.
+
+        ``pydantic_core`` is pydantic's own runtime rather than a second
+        dependency, so Principle I's "the kernel's only permitted runtime
+        dependency is pydantic" holds. The forbidden-imports contract lists what
+        the kernel may not reach, and this is not on it.
+        """
+        from docdoc.kernel.token import Token
+
+        tokens = handler.generate_schema(tuple[Token, ...])
+        from_tokens = core_schema.no_info_after_validator_function(cls, tokens)
+
+        return core_schema.json_or_python_schema(
+            json_schema=from_tokens,
+            # An existing index passes through untouched; a sequence of tokens is
+            # accepted too, so `Document(tokens=[...])` keeps working exactly as
+            # every caller since Milestone 1 has written it.
+            python_schema=core_schema.union_schema(
+                [core_schema.is_instance_schema(cls), from_tokens]
+            ),
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                lambda index: index.tokens,
+                return_schema=tokens,
+                when_used="always",
+            ),
+        )
 
     def tokens_in(self, span: Span) -> tuple[Token, ...]:
         """Every token intersecting ``span``, in document order.

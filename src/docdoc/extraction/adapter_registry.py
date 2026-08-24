@@ -14,9 +14,16 @@ thing" (FR-028), and the failure would name nothing.
 
 **The echo adapter is never selected automatically.** It returns canned fixture
 responses, so auto-selecting it would turn a missing credential into a stream of
-confident, fabricated extractions -- the worst failure this layer could have. It
-must be constructed and passed explicitly, which is a decision a caller takes
-knowingly.
+confident, fabricated extractions -- the worst failure this layer could have.
+
+*Automatically* is the load-bearing word, and Milestone 7 sharpened it. Echo is
+never a **fallback**: no configuration that merely fails to name a usable adapter
+can land on it, which is the failure above. But configuration that *does* name it
+is a decision, not an accident, and FR-029 requires the offline path to be
+reachable from the command line rather than only from Python. Reaching it takes
+two explicit settings -- ``DOCDOC_MODEL_ADAPTERS=echo`` says *use fabricated
+answers*, ``DOCDOC_ECHO_FIXTURES`` says *these ones* -- and an echo with no
+fixtures answers nothing at all.
 """
 
 from __future__ import annotations
@@ -35,6 +42,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ADAPTERS_ENV",
+    "ECHO_FIXTURES_ENV",
     "AdapterCandidate",
     "AdapterRegistry",
     "default_adapter",
@@ -54,8 +62,15 @@ DEFAULT_PRIORITY: tuple[str, ...] = ("gemini",)
 #: ``priority`` argument still wins.
 ADAPTERS_ENV = "DOCDOC_MODEL_ADAPTERS"
 
+#: Where the ``echo`` adapter reads its canned answers: a directory of
+#: ``<schema-identity>.json``. No default, because a canned answer is written
+#: against a specific schema and docdoc ships none.
+ECHO_FIXTURES_ENV = "DOCDOC_ECHO_FIXTURES"
+
 #: Adapters that answer from fixtures rather than from a model. Registering one is
-#: allowed and useful; *selecting* one implicitly is not.
+#: allowed and useful; *selecting* one implicitly is not. Naming one explicitly —
+#: in ``DOCDOC_MODEL_ADAPTERS`` or in ``priority`` — is not implicit, and
+#: ``select`` honours it.
 _NEVER_AUTO_SELECT = frozenset({"echo"})
 
 
@@ -131,7 +146,13 @@ class AdapterRegistry:
                 without reading docdoc's source (FR-028).
         """
         for candidate in self.candidates():
-            if candidate.id in _NEVER_AUTO_SELECT:
+            if candidate.id in _NEVER_AUTO_SELECT and candidate.id not in self._priority:
+                # "Never selected *automatically*" is not "never selectable". A
+                # fixture adapter must not win a default selection, and naming it
+                # in `DOCDOC_MODEL_ADAPTERS` or in `priority` is not a default —
+                # it is somebody saying which adapter they want. Without this
+                # clause the offline path FR-029 requires cannot be reached from
+                # configuration at all.
                 continue
             if candidate.available and candidate.adapter is not None:
                 return candidate.adapter
@@ -178,7 +199,43 @@ def default_adapter_registry(priority: Sequence[str] | None = None) -> AdapterRe
     else:
         registry.register(GeminiAdapter())
 
+    _register_echo(registry)
     return registry
+
+
+def _register_echo(registry: AdapterRegistry) -> None:
+    """Register the fixture adapter, which answers offline and costs nothing.
+
+    It is in ``_NEVER_AUTO_SELECT``, so registering it cannot make it win a
+    default selection; a caller reaches it by naming it. What registering it does
+    is make the offline path FR-029 requires reachable from configuration —
+    ``DOCDOC_MODEL_ADAPTERS=echo`` — rather than only from Python.
+
+    Its canned answers come from ``DOCDOC_ECHO_FIXTURES``: a directory of
+    ``<schema-identity>.json``, one per schema it can answer for. There is no
+    default location and docdoc ships no fixtures, for the same reason it ships
+    no schemas — a canned answer is written against a specific schema, and
+    guessing one would be inventing an extraction.
+    """
+    from docdoc.extraction.adapters.echo import EchoAdapter
+
+    fixtures = os.environ.get(ECHO_FIXTURES_ENV, "").strip()
+    if not fixtures:
+        # Registered with nothing to say. It reports itself usable and then names
+        # the schema it was asked for and the empty set it holds, which is a far
+        # better error than vanishing from the candidate list would give.
+        registry.register(EchoAdapter())
+        return
+
+    try:
+        registry.register(EchoAdapter.from_fixtures(fixtures))
+    except OSError as error:
+        registry.register_unavailable(
+            "echo",
+            reason=(
+                f"${ECHO_FIXTURES_ENV} is set to {fixtures!r}, which is unreadable: {error}"
+            ),
+        )
 
 
 def default_adapter(priority: Sequence[str] | None = None) -> ModelAdapter:

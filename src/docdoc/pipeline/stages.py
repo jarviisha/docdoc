@@ -32,12 +32,14 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
 __all__ = [
+    "FOLDED_INPUTS",
     "PIPELINE_ID",
     "PIPELINE_VERSION",
     "STAGE_SPECS",
     "Stage",
     "StageSpec",
     "artifact_id_of",
+    "folded_inputs_for",
     "spec_for",
 ]
 
@@ -91,9 +93,55 @@ STAGE_SPECS: dict[Stage, StageSpec] = {
 }
 
 
+#: The **names** of the inputs each stage folds into its options hash, per
+#: ADR-0003's table including its Milestone 5 amendment. Names only, never values
+#: — "prompt_hash" is a name and the prompt is a document (FR-025).
+#:
+#: This is not a second definition of the folded set and must never become one.
+#: Each layer's own ``options_hash_for_*`` decides what is folded; this says what
+#: those inputs are *called*, so that ``docdoc explain`` can answer "what would
+#: have to change to move this identity?" — the question ADR-0003 accepted
+#: unreadable cache keys on the condition of being able to answer (FR-023).
+#: ``tests/unit/test_stage_identity.py`` asserts these names against the
+#: signatures they describe, so a fold added without a name here fails a test.
+FOLDED_INPUTS: dict[Stage, tuple[str, ...]] = {
+    Stage.PARSE: ("blob_id", "parser_id", "parser_version", "parse_options"),
+    Stage.EXTRACT: (
+        "schema_identity",
+        "schema_hash",
+        "prompt_hash",
+        "projection_id",
+        "model_id",
+        "model_version",
+        "max_output_tokens",
+        "temperature",
+        "top_p",
+        "top_k",
+        "seed",
+        "thinking_budget",
+        "input_budget_tokens",
+    ),
+    Stage.GROUND: ("grounding_options",),
+    Stage.VALIDATE: ("validation_options", "enabled_rules"),
+}
+
+
 def spec_for(stage: Stage) -> StageSpec:
     """The spec for one stage."""
     return STAGE_SPECS[stage]
+
+
+def folded_inputs_for(stage: str) -> tuple[str, ...]:
+    """The folded-input names for a stage named as a string.
+
+    Takes a string because its caller reads the stage off a stored envelope,
+    where it is data rather than an enum — and an envelope written by an older
+    docdoc may name a stage this one does not have.
+    """
+    try:
+        return FOLDED_INPUTS[Stage(stage)]
+    except ValueError:
+        return ()
 
 
 def artifact_id_of(stage: Stage, result: BaseModel) -> str:

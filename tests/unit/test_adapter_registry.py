@@ -103,16 +103,37 @@ def test_the_echo_adapter_is_never_selected_automatically() -> None:
     Echo answers from fixtures. If it were selected when no real adapter is
     usable, a missing credential would produce confident, fabricated extractions
     carrying full provenance — not an error, which is far worse than one.
+
+    **Amended in Milestone 7.** The property being defended is that echo never
+    wins a *fallback*: no configuration that merely fails to name a real adapter
+    may land on it. Naming it is a different act, and FR-029 requires the offline
+    path to be reachable from the command line — so `select` now honours an
+    explicit priority. The test therefore asserts the fallback case, which is the
+    dangerous one, rather than the naming case, which is somebody's decision.
     """
-    registry = AdapterRegistry(priority=("echo",))
+    registry = AdapterRegistry(priority=("gemini",))
     registry.register(EchoAdapter.from_fixtures("tests/fixtures/echo"))
     assert len(registry) == 1
-    assert registry.candidates()[0].available is True, "it is usable — just not selectable"
+    assert registry.candidates()[0].available is True, "it is usable — just not a fallback"
 
     with pytest.raises(ModelProviderError) as caught:
         registry.select()
     assert caught.value.reason == "unavailable"
     assert "never selected automatically" in str(caught.value)
+
+
+def test_the_echo_adapter_is_selected_when_configuration_names_it() -> None:
+    """FR-029 — the offline path must be reachable from configuration.
+
+    The counterpart to the test above, and the pair is the whole rule: echo is
+    unreachable by accident and reachable on purpose. Reaching it on purpose
+    takes two explicit settings, because a registered echo with no fixtures
+    answers nothing — `DOCDOC_MODEL_ADAPTERS=echo` says *use fabricated answers*
+    and `DOCDOC_ECHO_FIXTURES` says *these ones*.
+    """
+    registry = AdapterRegistry(priority=("echo",))
+    registry.register(EchoAdapter.from_fixtures("tests/fixtures/echo"))
+    assert registry.select().id == "echo"
 
 
 def test_echo_is_still_usable_when_passed_explicitly() -> None:
@@ -127,8 +148,15 @@ def test_echo_is_still_usable_when_passed_explicitly() -> None:
     assert result.provenance.adapter_id == "echo"
 
 
-def test_a_real_adapter_wins_even_when_echo_is_registered_first() -> None:
-    registry = AdapterRegistry(priority=("echo", "gemini"))
+def test_a_real_adapter_wins_when_configuration_does_not_name_echo() -> None:
+    """Registration order never decides. Configuration does, or the default does.
+
+    Before Milestone 7 this read ``priority=("echo", "gemini")`` and still
+    expected gemini, because echo was unselectable outright. It now names only
+    gemini: a priority that puts echo first is a caller asking for echo, and
+    overriding that would be the registry deciding it knows better.
+    """
+    registry = AdapterRegistry(priority=("gemini",))
     registry.register(EchoAdapter.from_fixtures("tests/fixtures/echo"))
     registry.register(_Stub("gemini"))
     assert registry.select().id == "gemini"
@@ -166,11 +194,22 @@ def test_an_uninstalled_extra_is_recorded_not_omitted() -> None:
 # -- the default registry ----------------------------------------------------
 
 
-def test_the_default_registry_knows_the_real_adapter_and_not_echo() -> None:
+def test_the_default_registry_knows_both_and_still_will_not_fall_back_to_echo() -> None:
+    """Registered is not the same as selectable, and Milestone 7 needs the first.
+
+    Echo has to be a *candidate* for `DOCDOC_MODEL_ADAPTERS=echo` to mean
+    anything — before this it was absent from the default set, so naming it
+    produced "no usable adapter" rather than the offline run FR-029 requires.
+    What must not change is the outcome when nothing names it, which is the
+    assertion below.
+    """
     registry = default_adapter_registry()
     ids = [c.id for c in registry.candidates()]
     assert "gemini" in ids
-    assert "echo" not in ids, "a fixture adapter must not be in the default set at all"
+    assert "echo" in ids
+
+    with pytest.raises(ModelProviderError):
+        registry.select()
 
 
 def test_the_default_registry_reports_the_missing_credential_rather_than_hiding_it() -> None:

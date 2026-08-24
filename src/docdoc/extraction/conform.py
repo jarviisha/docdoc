@@ -30,7 +30,7 @@ from docdoc.extraction.schema import Cardinality, FieldSpec, FieldType, Schema
 from docdoc.extraction.shape import CLAIMED_TEXT_KEY, CONFIDENCE_KEY, VALUE_KEY
 from docdoc.extraction.value import ExtractedValue, ValueTree
 
-__all__ = ["ConformanceReport", "conform"]
+__all__ = ["ConformanceReport", "conform", "retype"]
 
 
 class ConformanceReport:
@@ -286,3 +286,85 @@ def _coerce(raw: Any, field: FieldSpec, *, path: str, context: _Context) -> Any:
             path=path,
         ) from exc
     raise AssertionError(f"unhandled field type {kind}")  # pragma: no cover
+
+
+def retype(values: ValueTree, schema: Schema) -> ValueTree:
+    """Restore the Python types a JSON round trip flattened, using the schema.
+
+    ``ExtractionResult.values`` is typed ``dict[str, Any]``, so a result read
+    back from the artifact store returns ``"1240.00"`` where it was stored as
+    ``Decimal("1240.00")`` and ``"2026-03-01"`` where it was a ``date``. Both are
+    the same string JSON has always written; only the schema knows which one was
+    a decimal.
+
+    This matters beyond tidiness. Validation's cross-field rules compare a total
+    against a sum of line items, and the comparison of two strings is not the
+    comparison of two decimals — so a *reused* extraction would reach a different
+    verdict than the executed one it is required to be indistinguishable from
+    (FR-012). The failure is silent and looks exactly like a model that cannot
+    read numbers.
+
+    **Reusing ``_coerce`` is the point of putting this here.** ``conform`` already
+    decides what a declared ``FieldType`` can carry, and
+    ``evaluation/values.py::carry`` says in its own docstring that the moment two
+    copies of that decision drift is the moment every decimal in a dataset reads
+    as an extraction error. This adds a caller, not a third copy.
+    """
+    context = _Context(
+        schema_identity=schema.identity,
+        document_id=None,
+        adapter_id=None,
+        discarded=[],
+    )
+    return _retype_object(values, schema.fields, path="", context=context)
+
+
+def _retype_object(
+    node: Any, fields: tuple[FieldSpec, ...], *, path: str, context: _Context
+) -> Any:
+    """Walk a stored tree beside the schema that describes it.
+
+    A field the tree does not carry is skipped rather than invented, and a key
+    the schema does not declare is passed through untouched. Neither should
+    happen for a tree this layer wrote, and neither is worth failing a cache read
+    over: the alternative to passing an unrecognised key through is discarding
+    part of a result that was already judged correct.
+    """
+    if not isinstance(node, dict):
+        return node
+
+    by_name = {field.name: field for field in fields}
+    rebuilt: dict[str, Any] = {}
+
+    for name, child in node.items():
+        field = by_name.get(name)
+        here = f"{path}.{name}" if path else name
+        if field is None:
+            rebuilt[name] = child
+        elif field.cardinality is Cardinality.SCALAR:
+            rebuilt[name] = _retype_scalar(child, field, path=here, context=context)
+        elif field.cardinality is Cardinality.GROUP:
+            rebuilt[name] = _retype_object(child, field.fields, path=here, context=context)
+        else:
+            entries = child if isinstance(child, (list, tuple)) else ()
+            rebuilt[name] = tuple(
+                _retype_object(entry, field.fields, path=f"{here}[{index}]", context=context)
+                for index, entry in enumerate(entries)
+            )
+
+    return rebuilt
+
+
+def _retype_scalar(node: Any, field: FieldSpec, *, path: str, context: _Context) -> Any:
+    """One value, retyped in place, with everything else copied through."""
+    if not isinstance(node, ExtractedValue):
+        return node
+    if node.value is None or field.type is None:
+        return node
+
+    coerced = _coerce(node.value, field, path=path, context=context)
+    if coerced == node.value and type(coerced) is type(node.value):
+        # Already the right type. Returning the original rather than a rebuilt
+        # copy keeps this idempotent on a result that never left memory.
+        return node
+    return node.model_copy(update={"value": coerced})

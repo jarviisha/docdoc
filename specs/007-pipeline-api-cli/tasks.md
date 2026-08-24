@@ -110,21 +110,21 @@ and rectangle out the other.
 **Independent Test**: run `docdoc inspect` against a committed fixture PDF and a committed schema
 with no credentials and no network; confirm each field carries value, verdict, page, and bounding box.
 
-- [ ] T038 [US1] Implement `main()` and subcommand dispatch with argparse in `src/docdoc/cli/__init__.py`, with a global `--json` and the shared configuration flags (research R12)
-- [ ] T039 [P] [US1] Implement the `parse` command in `src/docdoc/cli/commands/parse.py`: route, parse, and report what the parse produced including the text-layer verdict
-- [ ] T040 [US1] Implement the `extract` command in `src/docdoc/cli/commands/extract.py`, calling `pipeline.run()` and nothing else (FR-030)
-- [ ] T041 [US1] Implement the `inspect` command in `src/docdoc/cli/commands/inspect.py`: per field, its value, its verdict, its page, and its bounding box — the half of the Definition of Done that answers *where did this come from*
-- [ ] T105 [US1] Implement the `eval` command in `src/docdoc/cli/commands/eval.py`, loading a golden set and a prediction set and rendering the report — the fifth of the five commands FR-026 names, and the one promised as `docdoc eval ./dataset` at the founding. It calls `docdoc.evaluation` and computes nothing of its own (FR-026, FR-030)
-- [ ] T106 [P] [US1] Test in `tests/integration/test_cli_offline.py` that `docdoc eval datasets/mvp/manifest.json --predictions datasets/mvp/predictions` reproduces exactly the numbers `examples/evaluate_golden_set.py` prints today, with no credentials and no network — the CLI is a front end, not a second implementation (FR-026, FR-029, quickstart §8)
-- [ ] T042 [US1] Implement rendering in `src/docdoc/cli/render.py`: a human form and a machine form, with the machine form the **only** thing on standard output and every diagnostic on standard error (FR-027)
-- [ ] T043 [US1] Implement the exit-code contract in `src/docdoc/cli/__init__.py` — `0` valid, `1` invalid, `2` could not run, `64` bad invocation — so a caller never greps text to tell a failed validation from a failed run (FR-028)
-- [ ] T044 [US1] Implement configuration precedence in `src/docdoc/cli/__init__.py`: explicit flag beats environment beats default, with `--schema-path` and `--adapter` mirroring the existing variable names and introducing no second vocabulary (FR-031)
-- [ ] T045 [US1] Make the unresolvable-schema error in `src/docdoc/cli/commands/extract.py` say the registry is **empty** and name the setting that fills it, rather than reporting that the schema does not exist (US1 scenario 5)
+- [X] T038 [US1] Implement `main()` and subcommand dispatch with argparse in `src/docdoc/cli/__init__.py`, with a global `--json` and the shared configuration flags (research R12)
+- [X] T039 [P] [US1] Implement the `parse` command in `src/docdoc/cli/commands/parse.py`: route, parse, and report what the parse produced including the text-layer verdict
+- [X] T040 [US1] Implement the `extract` command in `src/docdoc/cli/commands/extract.py`, calling `pipeline.run()` and nothing else (FR-030)
+- [X] T041 [US1] Implement the `inspect` command in `src/docdoc/cli/commands/inspect.py`: per field, its value, its verdict, its page, and its bounding box — the half of the Definition of Done that answers *where did this come from*
+- [X] T105 [US1] Implement the `eval` command in `src/docdoc/cli/commands/eval.py`, loading a golden set and a prediction set and rendering the report — the fifth of the five commands FR-026 names, and the one promised as `docdoc eval ./dataset` at the founding. It calls `docdoc.evaluation` and computes nothing of its own (FR-026, FR-030)
+- [X] T106 [P] [US1] Test in `tests/integration/test_cli_offline.py` that `docdoc eval datasets/mvp/manifest.json --predictions datasets/mvp/predictions` reproduces exactly the numbers `examples/evaluate_golden_set.py` prints today, with no credentials and no network — the CLI is a front end, not a second implementation (FR-026, FR-029, quickstart §8)
+- [X] T042 [US1] Implement rendering in `src/docdoc/cli/render.py`: a human form and a machine form, with the machine form the **only** thing on standard output and every diagnostic on standard error (FR-027)
+- [X] T043 [US1] Implement the exit-code contract in `src/docdoc/cli/__init__.py` — `0` valid, `1` invalid, `2` could not run, `64` bad invocation — so a caller never greps text to tell a failed validation from a failed run (FR-028)
+- [X] T044 [US1] Implement configuration precedence in `src/docdoc/cli/__init__.py`: explicit flag beats environment beats default, with `--schema-path` and `--adapter` mirroring the existing variable names and introducing no second vocabulary (FR-031)
+- [X] T045 [US1] Make the unresolvable-schema error in `src/docdoc/cli/commands/extract.py` say the registry is **empty** and name the setting that fills it, rather than reporting that the schema does not exist (US1 scenario 5)
 - [ ] T046 [P] [US1] Contract test in `tests/contract/test_cli_contract.py` asserting every claim in `contracts/cli.md`: the command set, the two output forms, the four exit codes, and the stdout/stderr split — and that no untyped exception escapes the command for any failure injected at any stage (FR-051, SC-011)
 - [ ] T047 [P] [US1] Integration test in `tests/integration/test_cli_offline.py` running `parse`, `extract`, and `inspect` over `tests/fixtures/pdf/digital_invoice.pdf` with the echo adapter and `socket` patched to raise, asserting every value carries a page and a bounding box (FR-029, SC-001)
 - [ ] T048 [P] [US1] Test in `tests/integration/test_cli_offline.py` that a document failing validation exits `1` while a document that could not be processed exits `2`, and that the partial results survive in the second case (FR-028, SC-012)
 - [ ] T049 [P] [US1] Test in `tests/contract/test_cli_contract.py` that `--json` writes exactly one parseable JSON document to standard output with a warning emitted concurrently (FR-027)
-- [ ] T050 [US1] Add `examples/run_pipeline.py` demonstrating `pipeline.run()` in-process with no store and no credentials, and reference it from the README's example list (FR-056)
+- [X] T050 [US1] Add `examples/run_pipeline.py` demonstrating `pipeline.run()` in-process with no store and no credentials, and reference it from the README's example list (FR-056)
 
 **Checkpoint**: the Definition of Done is reachable by anyone with a shell. This is a shippable MVP.
 
@@ -137,16 +137,16 @@ with no credentials and no network; confirm each field carries value, verdict, p
 **Independent Test**: run one document twice with per-stage counters; assert the second run executes
 zero stages. Change only the prompt; assert the parse count is still zero while extraction runs.
 
-- [ ] T051 [US2] Split `parse()` in `src/docdoc/ingest/parse.py` into a planning call returning the routed verdict, the selected parser, and the canonical options with their hash, and an execution call that runs it. `parse()` keeps its exact signature and becomes the composition, so no existing caller changes (research R2, plan Complexity Tracking)
+- [X] T051 [US2] Split `parse()` in `src/docdoc/ingest/parse.py` into a planning call returning the routed verdict, the selected parser, and the canonical options with their hash, and an execution call that runs it. `parse()` keeps its exact signature and becomes the composition, so no existing caller changes (research R2, plan Complexity Tracking)
 - [ ] T052 [P] [US2] Test in `tests/unit/test_parse_plan.py` that the planning call yields everything `document_id_for` needs and that `plan` then `execute` produces a `Document` identical to today's `parse()` for every fixture in `tests/fixtures/pdf/`
-- [ ] T053 [US2] Wire the store into `src/docdoc/pipeline/run.py`: compute each stage's identity, look it up, and execute only on a miss, recording `EXECUTED` or `REUSED` per stage (FR-012, FR-004)
-- [ ] T054 [US2] Place the parse-stage lookup **after routing and selection and before the parser executes** in `src/docdoc/pipeline/run.py`, so a reused parse skips the parser — including a billable service-backed one — while the text-layer verdict is still computed and recorded on every run (FR-061, gate 6)
-- [ ] T055 [US2] Implement degradation in `src/docdoc/pipeline/run.py`: an unreadable, unwritable, or full store means the run proceeds without reuse and logs once, and a failed write never fails a run whose stages succeeded (FR-063)
-- [ ] T056 [US2] Implement `run(..., verify=True)` in `src/docdoc/pipeline/run.py` — execute every stage and still write, so FR-062's conflict check fires on results that would otherwise have been read back (FR-064)
+- [X] T053 [US2] Wire the store into `src/docdoc/pipeline/run.py`: compute each stage's identity, look it up, and execute only on a miss, recording `EXECUTED` or `REUSED` per stage (FR-012, FR-004)
+- [X] T054 [US2] Place the parse-stage lookup **after routing and selection and before the parser executes** in `src/docdoc/pipeline/run.py`, so a reused parse skips the parser — including a billable service-backed one — while the text-layer verdict is still computed and recorded on every run (FR-061, gate 6)
+- [X] T055 [US2] Implement degradation in `src/docdoc/pipeline/run.py`: an unreadable, unwritable, or full store means the run proceeds without reuse and logs once, and a failed write never fails a run whose stages succeeded (FR-063)
+- [X] T056 [US2] Implement `run(..., verify=True)` in `src/docdoc/pipeline/run.py` — execute every stage and still write, so FR-062's conflict check fires on results that would otherwise have been read back (FR-064)
 - [ ] T057 [US2] Add the bounded match-view cache to `src/docdoc/grounding/view.py`, keyed on `(document_id, match_view_version)` with least-recently-used eviction, a configurable maximum entry count, and a documented default. No filesystem access, so grounding's forbidden-imports contract still holds (FR-020, research R11)
 - [ ] T058 [P] [US2] Test in `tests/unit/test_match_view_cache.py` that a cached view produces outcomes identical to a freshly built one, that the bound is honoured, and that the cache is never reached when the grounding artifact itself is reused (FR-020)
-- [ ] T059 [US2] Add `--store`, `--no-store`, and `--verify-cache` to `src/docdoc/cli/__init__.py`, with no default store root — the store is opt-in because the artifacts hold extracted values and the blobs hold whole documents (FR-017, FR-044, FR-064)
-- [ ] T060 [US2] Implement `docdoc store clear [--stage STAGE]` in `src/docdoc/cli/commands/store.py`, which is the supported recovery path from a failed integrity check (FR-019)
+- [X] T059 [US2] Add `--store`, `--no-store`, and `--verify-cache` to `src/docdoc/cli/__init__.py`, with no default store root — the store is opt-in because the artifacts hold extracted values and the blobs hold whole documents (FR-017, FR-044, FR-064)
+- [X] T060 [US2] Implement `docdoc store clear [--stage STAGE]` in `src/docdoc/cli/commands/store.py`, which is the supported recovery path from a failed integrity check (FR-019)
 - [ ] T061 [US2] Add per-stage executed/reused counters to `src/docdoc/pipeline/observe.py` and surface them on `PipelineResult`, so the cost of a run is readable off the run (FR-047, SC-004)
 - [ ] T062 [P] [US2] Integration test in `tests/integration/test_reuse.py`: a second identical run executes zero stages and every result field matches the first **except** the per-stage durations and statuses (SC-002)
 - [ ] T063 [P] [US2] Integration test in `tests/integration/test_reuse.py`: after a change confined to the prompt or the schema, the parse executes zero times and every stage from extraction onward executes exactly once, counted from T061's counters and never from a timing. Repeat for a change confined to a validation rule, which must reuse the parse too — partial reuse is per-stage in both directions (FR-013, SC-003)
@@ -167,15 +167,18 @@ library computes for the same inputs.
 
 - [ ] T067 [US3] Implement request and response models in `src/docdoc/api/models.py`, with the submission response carrying `blob_id` and **not** a field named `document_id` — no parse has happened, and a blob id under that name anchors to nothing (research R8, FR-032)
 - [ ] T068 [US3] Implement `POST /v1/documents` and `GET /v1/documents/{blob_id}` in `src/docdoc/api/app.py`, storing bytes idempotently through `BlobStore` (FR-032, FR-021)
-- [ ] T069 [US3] Implement `POST /v1/documents/{blob_id}/extract` in `src/docdoc/api/app.py`, running the pipeline inside the request and returning the terminal artifact id as the job id (FR-033, research R7)
-- [ ] T070 [US3] Implement `GET /v1/jobs/{job_id}` and `GET /v1/jobs/{job_id}/result` in `src/docdoc/api/app.py` as store lookups, with a closed status set of `succeeded` and `unavailable` — **no pending**, and an id never produced reported as unknown rather than pending (FR-035, FR-036)
+- [ ] T069 [US3] Implement `POST /v1/documents/{blob_id}/extract` in `src/docdoc/api/app.py`, running the pipeline inside the request and returning the terminal artifact id as the job id **together with the result in full** — an identity-only response is unredeemable whenever no store is configured, which is the default (FR-033, FR-067, research R7)
+- [ ] T070 [US3] Implement `GET /v1/jobs/{job_id}` and `GET /v1/jobs/{job_id}/result` in `src/docdoc/api/app.py` as store lookups, with a closed status set of `succeeded`, `unavailable`, and `unknown` — **no pending**. `unknown` means the id is not a well-formed artifact identity; `unavailable` covers every well-formed absent id, cleared or never produced, because an append-only store with no tombstones cannot tell those apart (FR-035, FR-036)
 - [ ] T071 [US3] Implement the request-body size cap in `src/docdoc/api/app.py`, enforced while reading and before the body is buffered — the one limit `ingest.Limits` cannot know about (FR-039, research R10)
 - [ ] T072 [US3] Thread `ingest.Limits` through the API for document size and the media-type allowlist rather than introducing a second limits vocabulary, and ensure temporary files are removed on completion, failure, and abort (FR-039, FR-040, FR-041)
 - [ ] T073 [US3] Implement the error-to-status mapping in `src/docdoc/api/errors.py` per `contracts/http-api.md` §6, carrying docdoc's own message and never a provider's, which may quote the document (FR-037)
 - [ ] T074 [P] [US3] Contract test in `tests/contract/test_http_contract.py` asserting every endpoint, every status in the mapping table, and that a document failing validation is a `200` with an invalid verdict rather than an error — and that no untyped exception escapes any endpoint, every failure arriving as a status in that table (FR-051, SC-011)
 - [ ] T075 [P] [US3] Integration test in `tests/integration/test_http_parity.py` running the same inputs in-process and over HTTP and comparing every value, verdict, location, and identity (FR-034, SC-010)
 - [ ] T076 [P] [US3] Integration test in `tests/integration/test_http_limits.py` that an oversized or disallowed submission is refused with zero parses, zero provider calls, and zero surviving temporary files (SC-009)
-- [ ] T077 [P] [US3] Test in `tests/contract/test_http_contract.py` that a well-formed but never-produced job id is reported unknown, and that a result whose artifacts were cleared is reported unavailable and **not** silently recomputed (FR-035, FR-036)
+- [ ] T077 [P] [US3] Test in `tests/contract/test_http_contract.py` that a malformed job id is reported `unknown`, that a well-formed one — never produced or cleared alike — is reported `unavailable` and **not** silently recomputed, and that no input produces `pending` (FR-035, FR-036)
+- [ ] T108 [US3] Implement the partial-result error body in `src/docdoc/api/errors.py`: a mid-run failure returns the typed error **and** the per-stage outcomes and completed stages' results, so FR-004 survives the boundary. A failed run has no terminal artifact and therefore no job to fetch later, which makes this response the only place a partial result can appear (FR-066, FR-004)
+- [ ] T109 [P] [US3] Test in `tests/contract/test_http_contract.py` that a failure injected at each of stages 2, 3, and 4 returns the preceding stages' results in the error body, and that the same failure over the CLI and over HTTP agree on the stage, the error class, and which results survive (FR-066, SC-012, spec §Edge Cases)
+- [ ] T110 [US3] Refuse `POST /v1/documents` with an explicit error naming the missing setting when no store is configured, rather than accepting bytes that cannot be kept and returning an identity that will never resolve (FR-068, FR-021)
 - [ ] T078 [US3] Add `examples/serve_api.md` or a README section showing the service started behind the `docdoc[api]` extra, with a note that authentication is the deployment's responsibility (FR-056, spec Assumptions)
 
 **Checkpoint**: the pipeline is reachable over the network and provably returns the same results.
@@ -189,9 +192,9 @@ library computes for the same inputs.
 **Independent Test**: take an identity produced by a run and ask for its derivation; confirm it names
 the stage, the input id, the processor and version, and the folded input names, with no content.
 
-- [ ] T079 [US4] Implement `docdoc explain ARTIFACT_ID [--chain]` in `src/docdoc/cli/commands/explain.py`, reading `store.derivation()` (FR-023)
-- [ ] T080 [US4] Implement chain walking in `src/docdoc/cli/commands/explain.py`, following `input_artifact_id` back to the source `blob_id` (FR-024)
-- [ ] T081 [US4] Make an identity with no stored record say so plainly rather than reconstructing a derivation — a run with no store configured produces identities that were never recorded (FR-023, FR-017)
+- [X] T079 [US4] Implement `docdoc explain ARTIFACT_ID [--chain]` in `src/docdoc/cli/commands/explain.py`, reading `store.derivation()` (FR-023)
+- [X] T080 [US4] Implement chain walking in `src/docdoc/cli/commands/explain.py`, following `input_artifact_id` back to the source `blob_id` (FR-024)
+- [X] T081 [US4] Make an identity with no stored record say so plainly rather than reconstructing a derivation — a run with no store configured produces identities that were never recorded (FR-023, FR-017)
 - [ ] T082 [P] [US4] Test in `tests/unit/test_explain.py` that the output contains no document content, no extracted value, no prompt body, and no credential, using a fixture whose document holds a distinctive string (FR-025, SC-007)
 - [ ] T083 [P] [US4] Test in `tests/unit/test_explain.py` that the chain from a terminal identity reaches the source `blob_id` in four hops (FR-024)
 
@@ -252,8 +255,10 @@ credential appears anywhere in the logs, while every required field does.
 
 ### Numbering
 
-Append-only. T105–T107 were added by the cross-artifact analysis pass and are placed in the phases
-they belong to rather than at the end, so every pre-existing T-id still points at the same task.
+Append-only. T105–T107 were added by the cross-artifact analysis pass and T108–T110 by the interface
+checklist pass (2026-08-24), and both are placed in the phases they belong to rather than at the end,
+so every pre-existing T-id still points at the same task. T069, T070, and T077 were *rewritten* rather
+than supplemented, because the contract they cited changed under them.
 
 ### Within Each User Story
 

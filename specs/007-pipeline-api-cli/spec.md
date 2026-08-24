@@ -269,10 +269,16 @@ Delivers operability without creating a second copy of the documents in the log 
 ### Functional Requirements
 
 <!--
-  Numbering is append-only. FR-058 onward were added by the caching checklist pass
-  (checklists/caching.md, 2026-08-22) and are placed beside the requirements they
-  refine rather than at the end, so a reader finds them in context while every
-  existing number keeps pointing at the same sentence.
+  Numbering is append-only. FR-058..FR-065 were added by the caching checklist pass
+  (checklists/caching.md, 2026-08-22) and FR-066..FR-068 by the interface checklist
+  pass (checklists/interfaces.md, 2026-08-24). Both are placed beside the
+  requirements they refine rather than at the end, so a reader finds them in
+  context while every existing number keeps pointing at the same sentence.
+
+  FR-035 and FR-036 were also *amended* on 2026-08-24 rather than supplemented,
+  because the interface pass found them requiring a distinction no append-only
+  store can make. An amendment is right where a requirement was not merely
+  incomplete but unsatisfiable.
 -->
 
 **The pipeline as an explicit stage machine**
@@ -435,15 +441,46 @@ Delivers operability without creating a second copy of the documents in the log 
 - **FR-034**: A result retrieved over HTTP MUST carry the same values, verdicts, locations, and
   identities as the same run performed in-process. The interface serialises a result; it does not
   produce a different one.
-- **FR-035**: A job identity that was never produced MUST be reported as unknown. The interface MUST
-  NOT report it as pending.
+- **FR-035**: A job identity the interface cannot answer for MUST NOT be reported as pending, ever.
+  The two answers it may give are fixed by what an append-only store can actually know:
+  - **unknown** — the identity is not a well-formed artifact identity. No run could have produced it,
+    and saying so costs nothing because the judgement is syntactic.
+  - **unavailable** — the identity is well-formed and is not in the store.
+  - `unavailable` deliberately does **not** distinguish *never produced* from *produced and since
+    cleared*. A content-addressed, append-only store keeps no record of what it was never asked to
+    hold, and FR-019's clear leaves no tombstone behind, so the two conditions are one observation.
+    The interface MUST report what it knows rather than choose between them. A status whose value
+    depended on history the store does not keep would be fabricated in exactly the way `pending` would
+    be, which is the thing this requirement exists to forbid.
 - **FR-036**: A result whose stored artifacts are no longer available MUST be reported as
-  unavailable, and MUST NOT be silently recomputed under inputs that may since have changed.
+  unavailable, and MUST NOT be silently recomputed under inputs that may since have changed. This is
+  the same `unavailable` FR-035 defines and not a second one: "cleared since" and "never stored here"
+  are indistinguishable to the store and MUST NOT be given distinguishable answers.
 - **FR-037**: Every error MUST be returned as a stable, provider-neutral, typed error naming the
   stage at fault, and MUST NOT include document content, extracted values, prompt bodies, or
   provider error text that may quote either.
 - **FR-038**: The HTTP interface MUST NOT be required to use the library, and its dependencies MUST
   NOT enter the base install.
+- **FR-066**: Every interface MUST return a failed run's **preceding stage results**, not merely name
+  the stage that failed. FR-004 makes this true of the pipeline; this makes it true of the surfaces,
+  which is where the Edge Cases require the command line, the HTTP interface, and the recorder to
+  agree. Over HTTP the error response MUST carry the per-stage outcomes and the results the completed
+  stages produced, alongside the typed error of FR-037. A failed run produces no terminal artifact and
+  therefore no retrievable job, so if that response does not carry the partial result then nothing
+  else can, and FR-004 would be honoured in the library and defeated one layer out.
+- **FR-067**: A response to a request that **runs** the pipeline MUST carry the run's result in full,
+  not only its identity. A caller that has just paid for a run MUST NOT need a second request to read
+  what it bought, and MUST NOT be unable to read it at all — which is the case today whenever no store
+  is configured (FR-017) or a write degraded (FR-063), because then the terminal artifact is not there
+  to fetch and an identity-only response is a receipt for a result the caller can never redeem. The
+  job endpoints exist for *later* retrieval; a later retrieval answering `unavailable` under those
+  conditions is correct rather than a failure.
+- **FR-068**: The interface MUST state which of its behaviours require a configured store. Submitting
+  a document for later processing (FR-021) and retrieving a job by identity (FR-032) both do; running
+  an extraction and reading its result do not, because FR-067 returns that result inline. With no
+  store configured, a submission MUST be refused with an explicit error naming the missing
+  configuration, rather than accepting bytes the system cannot keep and returning an identity that
+  will never resolve.
 
 **Limits, security, and data handling**
 
