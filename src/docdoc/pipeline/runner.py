@@ -216,8 +216,40 @@ def run(
             is not raised — it is recorded on the result (FR-004).
     """
     from docdoc.artifacts import NullArtifactStore
+    from docdoc.pipeline.observe import correlation
 
-    reuse = _Reuse(store or NullArtifactStore(), verify=verify)
+    with correlation(request_id=request_id):
+        return _run(
+            source,
+            schema=schema,
+            registry=registry,
+            adapter=adapter,
+            reuse=_Reuse(store or NullArtifactStore(), verify=verify),
+            document=document,
+            limits=limits,
+            options=options,
+            request_id=request_id,
+        )
+
+
+def _run(
+    source: SourceFile | bytes,
+    *,
+    schema: str,
+    registry: Any,
+    adapter: Any,
+    reuse: _Reuse,
+    document: Document | None,
+    limits: Limits | None,
+    options: Mapping[str, Any] | None,
+    request_id: str | None,
+) -> PipelineResult:
+    """The run itself, inside the correlation scope ``run`` established.
+
+    Split out so that ``run``'s ``with`` block is one statement rather than the
+    whole body — the correlation must cover every stage event, and a
+    hundred-line indented block is how a later edit ends up outside it.
+    """
 
     outcomes: list[StageOutcome] = []
     processors: dict[str, dict[str, str]] = {}
@@ -356,6 +388,18 @@ def run(
         # Sequencing itself failed. Not a stage's error, and not something to
         # record as one.
         raise
+    except ArtifactError:
+        # The store is corrupt or refused a divergent write. Neither is a *stage*
+        # failure, so neither is recorded as one: the document is fine and the
+        # stages did nothing wrong. Recording it as a stage failure would report
+        # "extraction failed" for a bad disk, sending whoever reads the result to
+        # the wrong code — and would let a run whose store is lying return a
+        # partial result as though it had merely hit a bad document.
+        #
+        # `contracts/pipeline-api.md` §1 says this layer raises the typed errors
+        # of the layers below, and §6 says a `content_id` mismatch raises rather
+        # than executing (FR-014). Clearing is the supported recovery (FR-019).
+        raise
     except Exception as error:
         failed_stage = _stage_of(error)
         outcomes.append(
@@ -369,6 +413,8 @@ def run(
             )
         )
         outcomes.extend(_skipped_after(failed_stage))
+
+    _emit(outcomes, extraction=extraction, terminal=None if validation is None else validation)
 
     return PipelineResult(
         outcomes=tuple(outcomes),
@@ -471,6 +517,46 @@ def _reused(stage: Stage, artifact_id: str, clock: _Clock) -> StageOutcome:
 def _format(stage: Stage) -> int:
     """The artifact-format version of what this stage stores (ADR-0010 §3)."""
     return spec_for(stage).artifact_format_version
+
+
+def _emit(
+    outcomes: list[StageOutcome],
+    *,
+    extraction: ExtractionResult | None,
+    terminal: ValidationResult | None,
+) -> None:
+    """One structured event per stage, at the end of the run (FR-045).
+
+    At the end rather than as each stage finishes, for one reason: the
+    ``processing_id`` a stage event carries is the terminal artifact id, and it
+    does not exist until the last stage has produced it. Emitting as we went
+    would mean four events of which three could not name the run they belong to.
+
+    The provider, the model, and the token usage come from the extraction
+    result's own provenance — the layer that made the call is the one that knows
+    what answered, and re-deriving them here would be a second opinion about a
+    fact that is already recorded (research R9). A *reused* extraction still
+    carries them, and reporting them is right: they describe the call that
+    produced the artifact, which is the call this run is charging nothing for.
+    """
+    from docdoc.pipeline import observe
+
+    processing_id = None if terminal is None else terminal.artifact_id
+
+    for outcome in outcomes:
+        provider = model = usage = None
+        if outcome.stage is Stage.EXTRACT and extraction is not None:
+            provenance = extraction.provenance
+            provider = provenance.adapter_id
+            model = f"{provenance.model_id}@{provenance.model_version}"
+            usage = provenance.usage
+        observe.log_stage(
+            outcome,
+            processing_id=processing_id,
+            provider=provider,
+            model=model,
+            usage=usage,
+        )
 
 
 def _retyped(extraction: ExtractionResult, *, schema: str, registry: Any) -> ExtractionResult:
