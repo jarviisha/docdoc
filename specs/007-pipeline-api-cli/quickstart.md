@@ -139,21 +139,46 @@ PDF), exit `2`, zero parses, zero provider calls, and no temporary file left beh
 **Proves**: SC-010, US3. The only scenario needing the `docdoc[api]` extra.
 
 ```bash
-DOCDOC_STORE_ROOT="$DOCDOC_STORE_ROOT" uvicorn docdoc.api:app --port 8000 &
-blob=$(curl -sF file=@tests/fixtures/pdf/digital_invoice.pdf \
+uvicorn --factory docdoc.api.app:create_app --port 8000 &
+blob=$(curl -sS --data-binary @tests/fixtures/pdf/digital_invoice.pdf \
   localhost:8000/v1/documents | jq -r .blob_id)
-job=$(curl -s -XPOST localhost:8000/v1/documents/$blob/extract \
-  -d '{"schema":"invoice@1"}' -H 'content-type: application/json' | jq -r .job_id)
-curl -s localhost:8000/v1/jobs/$job/result | jq .processing_id
+job=$(curl -sS -XPOST "localhost:8000/v1/documents/$blob/extract?schema=invoice@1" | jq -r .job_id)
+curl -sS localhost:8000/v1/jobs/$job/result | jq .job_id
 ```
 
 Expected: `job_id` equals `processing_id` equals the value scenario 1 printed for the same inputs.
 
+> **Three corrections, made when this scenario was first run end to end.** It had
+> been written before the interface existed and did not run as drafted.
+>
+> `--factory docdoc.api.app:create_app`, not `docdoc.api:app`. There is no
+> module-level application on purpose: building one at import time would make
+> merely importing `docdoc.api.app` — to read the error table, say — read the
+> environment and construct a deployment as a side effect.
+>
+> `--data-binary @file`, not `-F file=@file`. Submission takes the raw body.
+> Multipart would put the identity of the *envelope* in `blob_id` rather than of
+> the PDF, and accepting it would add `python-multipart` to the `api` extra for a
+> second way to say the same thing.
+>
+> `?schema=invoice@1` as a query parameter, not a JSON body. One required scalar
+> does not need a document wrapped around it, and a JSON body would have been a
+> second request shape for the endpoint to validate.
+
+The extract call returns the result as well as the identity (FR-067), so that last
+fetch is a *re-read* rather than the only way to see the answer. Its `job_id` is
+the same value, which is the point of the identity.
+
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' localhost:8000/v1/jobs/sha256:$(printf '0%.0s' {1..64})
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  "localhost:8000/v1/jobs/sha256:$(printf '0%.0s' {1..64})/result"
+curl -sS "localhost:8000/v1/jobs/not-an-identity" | jq -r .status
 ```
 
-Expected: `404` — unknown, never pending.
+Expected: `404` for the well-formed-but-absent identity, and `unknown` for the
+malformed one — never `pending`. The status endpoint answers `200` with a status
+body; only `/result` 404s, because there a caller asked for a thing and there is
+no thing.
 
 ---
 

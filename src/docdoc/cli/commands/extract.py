@@ -50,12 +50,127 @@ def run(args: argparse.Namespace, settings: Settings) -> Rendering:
 
 
 def inspect(args: argparse.Namespace, settings: Settings) -> Rendering:
-    """``docdoc inspect`` — every value, its verdict, its page, its rectangle."""
+    """``docdoc inspect`` — every value, its verdict, its page, its rectangle.
+
+    Two forms. Given a file, it runs the pipeline. Given ``--result ID``, it reads
+    a stored result back out of the store — which is what FR-026's "inspect a
+    result's values and their locations" asks for, and what the HTTP interface
+    has always been able to do through ``GET /v1/jobs/{id}/result``.
+
+    Somebody holding a ``processing_id`` from a log had an HTTP path and no
+    command-line one; `checklists/interfaces.md` CHK024 raised the asymmetry and
+    this closes it.
+    """
+    if getattr(args, "result", None):
+        return _stored(args.result, settings)
+
     result = _pipeline_run(args, settings)
     data = _result_data(result)
     rows = data["fields"]
     lines = [*render_rows(rows), "", *_summary_lines(result, data)]
     return Rendering(code=_exit_code(result), data=data, lines=lines)
+
+
+def _stored(processing_id: str, settings: Settings) -> Rendering:
+    """Read a completed run back from the store by its terminal identity.
+
+    Walks the chain the way the HTTP interface does: the validation artifact
+    records its grounding input, which records its extraction input, so the whole
+    result is reachable from the terminal id alone. That reachability is the one
+    thing FR-022 asks this milestone to guarantee for a future collector, and it
+    is what makes this command three lookups rather than a re-run.
+
+    **Never recomputed.** A result that is not in the store is reported absent,
+    for FR-036's reason: the inputs may have moved since, and producing a
+    different result under the same identity would break the one promise that
+    identity makes.
+    """
+    from docdoc.extraction.extract import ExtractionResult
+    from docdoc.grounding.result import GroundingResult
+    from docdoc.pipeline.stages import Stage, spec_for
+    from docdoc.validation.result import ValidationResult
+
+    if not settings.has_store:
+        return _absent(
+            processing_id,
+            "no store is configured, so no result was ever recorded. "
+            "Pass --store DIR or set DOCDOC_STORE_ROOT.",
+            reason="no_store",
+        )
+
+    store = settings.store()
+
+    def load(artifact_id: str | None, model: Any, stage: Stage) -> Any:
+        if artifact_id is None:
+            return None
+        return store.get(
+            artifact_id,
+            model=model,
+            artifact_format_version=spec_for(stage).artifact_format_version,
+        )
+
+    validation = load(processing_id, ValidationResult, Stage.VALIDATE)
+    if validation is None:
+        return _absent(
+            processing_id,
+            f"{processing_id} is not in this store. It was produced elsewhere, "
+            "produced with no store, or cleared — and it is not recomputed, "
+            "because the inputs may have moved since.",
+            reason="not_in_store",
+        )
+
+    provenance = validation.provenance
+    grounding = load(provenance.grounding_artifact_id, GroundingResult, Stage.GROUND)
+    extraction = load(provenance.extraction_artifact_id, ExtractionResult, Stage.EXTRACT)
+
+    rows = field_rows(extraction, grounding, validation)
+    data: dict[str, Any] = {
+        "processing_id": processing_id,
+        "document_id": provenance.document_id,
+        "schema": provenance.schema_identity,
+        "verdict": validation.verdict.value,
+        "fields": rows,
+        # No outcomes: this is a retrieval, not a run. Reporting stage statuses
+        # for work this invocation did not do would be fiction.
+        "outcomes": [],
+        "failed_stage": None,
+        "counts": validation.counts.model_dump(mode="json"),
+        "source": "store",
+    }
+    lines = [
+        f"schema     {provenance.schema_identity}",
+        f"document   {provenance.document_id}",
+        f"verdict    {validation.verdict.value}",
+        "",
+        *render_rows(rows),
+        "",
+        f"processing {processing_id}",
+        "           read from the store; no stage was executed",
+    ]
+    verdict_code = EXIT_OK if validation.verdict is _valid() else EXIT_INVALID
+    return Rendering(code=verdict_code, data=data, lines=lines)
+
+
+def _valid() -> Any:
+    from docdoc.validation.result import Verdict
+
+    return Verdict.VALID
+
+
+def _absent(processing_id: str, message: str, *, reason: str) -> Rendering:
+    """Say so plainly, and do not guess.
+
+    Exit zero: being asked about an identity this store does not hold is not a
+    failure of the command. It answered correctly.
+    """
+    from docdoc.cli.render import warn
+
+    warn(message)
+    return Rendering(
+        code=EXIT_OK,
+        data={"processing_id": processing_id, "result": None, "reason": reason},
+        lines=[],
+    )
 
 
 def _pipeline_run(args: argparse.Namespace, settings: Settings) -> PipelineResult:

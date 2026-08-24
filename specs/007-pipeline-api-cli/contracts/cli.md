@@ -11,6 +11,7 @@ Built on `argparse`, so the base install acquires no dependency and everyone who
 docdoc parse   FILE                       # route, parse, report what the parse produced
 docdoc extract FILE --schema invoice@1    # the whole pipeline: parse, extract, ground, validate
 docdoc inspect FILE --schema invoice@1    # every value, its verdict, its page, its rectangle
+docdoc inspect --result PROCESSING_ID     # the same, read back from the store
 docdoc explain ARTIFACT_ID                # how this identity was derived, and its chain
 docdoc eval    MANIFEST --predictions DIR # score a golden set
 docdoc store   clear [--stage STAGE]      # all of it, or one stage (FR-019)
@@ -19,6 +20,17 @@ docdoc store   clear [--stage STAGE]      # all of it, or one stage (FR-019)
 `extract` and `inspect` are the same run with two renderings: `extract` reports the result,
 `inspect` reports where every value came from. Both are the Definition of Done; `inspect` is the half
 of it that answers *where did this come from*.
+
+**`inspect` takes a file or an identity, and exactly one of them.** With `--result`, it reads a
+completed run out of the store rather than performing one — three lookups, walking the chain the way
+`GET /v1/jobs/{id}/result` does, because each artifact records the identity of its input. FR-026 asks
+for a command that inspects *a result*, and until this existed somebody holding a `processing_id` from
+a log had an HTTP path to it and no command-line one.
+
+A result that is not in the store is reported absent and **never recomputed** (FR-036): the inputs may
+have moved since, and producing a different result under the same identity would break the one promise
+that identity makes. That is not a failure — the command was asked a question and answered it — so it
+exits `0`.
 
 ## 2. Output
 

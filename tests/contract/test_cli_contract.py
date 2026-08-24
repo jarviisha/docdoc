@@ -225,3 +225,81 @@ def test_an_empty_registry_says_so_and_names_the_setting(
     assert code == EXIT_COULD_NOT_RUN
     assert "registry is empty" in err
     assert "DOCDOC_SCHEMA_PATHS" in err
+
+
+# -- FR-026: inspecting a *result*, not only a file --------------------------
+
+
+def test_inspect_reads_a_stored_result_by_its_identity(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """FR-026 and CHK024 — the asymmetry with `GET /v1/jobs/{id}/result`, closed.
+
+    Somebody holding a `processing_id` from a log had an HTTP path to the result
+    and no command-line one, because `inspect` took a file and re-ran the
+    pipeline. Reading the stored run must produce the same values, verdicts, and
+    locations — and must execute nothing.
+    """
+    pytest.importorskip("pymupdf")
+    store = str(tmp_path)
+
+    code, out, _ = run(
+        ["extract", FIXTURE, "--schema", SCHEMA, "--store", store, "--json"], capsys
+    )
+    assert code == EXIT_OK
+    produced = json.loads(out)
+
+    code, out, _ = run(["inspect", "--result", produced["processing_id"], "--store", store,
+                        "--json"], capsys)
+    assert code == EXIT_OK
+
+    read_back = json.loads(out)
+    assert read_back["source"] == "store"
+    assert read_back["processing_id"] == produced["processing_id"]
+    assert read_back["verdict"] == produced["verdict"]
+    assert read_back["fields"] == produced["fields"]
+    assert read_back["outcomes"] == [], (
+        "a retrieval must not report stage statuses for work it did not do"
+    )
+
+
+def test_inspect_does_not_recompute_a_result_it_cannot_find(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """FR-036 — the inputs may have moved, and a different result under the same
+    identity would break the one promise that identity makes."""
+    absent = "sha256:" + "0" * 64
+    code, out, err = run(
+        ["inspect", "--result", absent, "--store", str(tmp_path), "--json"], capsys
+    )
+
+    assert code == EXIT_OK, "being asked about an unknown identity is not a failure"
+    assert json.loads(out)["result"] is None
+    assert json.loads(out)["reason"] == "not_in_store"
+    assert "not recomputed" in err
+
+
+def test_inspect_with_no_store_says_so_rather_than_running(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    argv = ["inspect", "--result", "sha256:" + "0" * 64, "--no-store", "--json"]
+    code, out, err = run(argv, capsys)
+    assert code == EXIT_OK
+    assert json.loads(out)["reason"] == "no_store"
+    assert "DOCDOC_STORE_ROOT" in err
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["inspect"],
+        ["inspect", FIXTURE],
+        ["inspect", "--result", "sha256:" + "0" * 64, FIXTURE],
+    ],
+)
+def test_inspect_refuses_an_ambiguous_or_incomplete_invocation(
+    argv: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """One of FILE or --result, and FILE needs --schema. Exit 64, not a traceback."""
+    code, _, _ = run(argv, capsys)
+    assert code == EXIT_BAD_INVOCATION

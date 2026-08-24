@@ -68,16 +68,34 @@ def build_parser() -> argparse.ArgumentParser:
     parse_command.add_argument("file", metavar="FILE")
     add_common_arguments(parse_command)
 
-    for name, help_text in (
-        ("extract", "run the whole pipeline and report the result"),
-        ("inspect", "run the whole pipeline and report where every value came from"),
-    ):
-        command = subcommands.add_parser(name, help=help_text)
-        command.add_argument("file", metavar="FILE")
-        command.add_argument(
-            "--schema", required=True, metavar="NAME@V", help="schema identity, e.g. invoice@1"
-        )
-        add_common_arguments(command)
+    extract_command = subcommands.add_parser(
+        "extract", help="run the whole pipeline and report the result"
+    )
+    extract_command.add_argument("file", metavar="FILE")
+    extract_command.add_argument(
+        "--schema", required=True, metavar="NAME@V", help="schema identity, e.g. invoice@1"
+    )
+    add_common_arguments(extract_command)
+
+    # `inspect` takes a file *or* a stored identity, so neither can be
+    # unconditionally required — argparse cannot express "exactly one of these"
+    # for a positional and an option together, so `main` checks it and reports a
+    # usage error. FR-026 asks for a command that inspects "a result", and a
+    # result that only exists as a file to re-run is not one.
+    inspect_command = subcommands.add_parser(
+        "inspect", help="report where every value came from, from a file or a stored identity"
+    )
+    inspect_command.add_argument("file", metavar="FILE", nargs="?", default=None)
+    inspect_command.add_argument(
+        "--schema", metavar="NAME@V", help="schema identity, e.g. invoice@1 (with FILE)"
+    )
+    inspect_command.add_argument(
+        "--result",
+        metavar="PROCESSING_ID",
+        default=None,
+        help="read a completed run back from the store instead of running one",
+    )
+    add_common_arguments(inspect_command)
 
     explain = subcommands.add_parser("explain", help="how an artifact identity was derived")
     explain.add_argument("artifact_id", metavar="ARTIFACT_ID")
@@ -116,6 +134,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.print_help(sys.stderr)
         return EXIT_BAD_INVOCATION
 
+    usage = _usage_error(args)
+    if usage is not None:
+        warn(usage)
+        return EXIT_BAD_INVOCATION
+
     settings = Settings.resolve(args)
 
     try:
@@ -127,6 +150,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         return emit(_failure(error), as_json=settings.as_json)
 
     return emit(rendering, as_json=settings.as_json)
+
+
+def _usage_error(args: argparse.Namespace) -> str | None:
+    """The one constraint argparse cannot express, checked in one place.
+
+    ``docdoc inspect`` takes a file *or* a stored identity, and argparse has no
+    way to require exactly one of a positional and an option. Rather than make
+    both optional and let a command discover the problem halfway through, the
+    check lives here beside the other invocation errors and earns the same
+    exit code.
+    """
+    if args.command != "inspect":
+        return None
+
+    if args.result and args.file:
+        return "inspect takes either FILE or --result, not both"
+    if args.result:
+        return None
+    if not args.file:
+        return "inspect needs a FILE, or --result PROCESSING_ID to read a stored run"
+    if not args.schema:
+        return "inspect FILE needs --schema NAME@V"
+    return None
 
 
 def _dispatch(args: argparse.Namespace) -> Any:
