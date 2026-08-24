@@ -146,7 +146,14 @@ def test_an_unknown_stage_is_an_invocation_error(capsys: pytest.CaptureFixture[s
 def test_a_failed_run_still_reports_the_stages_that_succeeded(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """§3's last line, and FR-004 at the boundary rather than in the library."""
+    """§3's last line, and FR-004 at the boundary rather than in the library.
+
+    Needs a native PDF reader, unlike the rest of this module: the assertion is
+    that the parse *succeeded* and was reported, and on a base install with no
+    reader the parse is what fails. Guarded here rather than at module scope so
+    the exit codes and output forms — which need no reader — still run there.
+    """
+    pytest.importorskip("pymupdf")
     code, out, _ = run(
         ["extract", FIXTURE, "--schema", "no-such-schema@1", "--json"], capsys
     )

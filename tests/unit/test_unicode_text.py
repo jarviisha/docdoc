@@ -57,6 +57,12 @@ def text_of(lines: list[list[str]]) -> object:
     )
 
 
+@pytest.fixture
+def _needs_native_reader() -> None:
+    """SC-013 — the base install has no native PDF reader, and these need one."""
+    pytest.importorskip("pymupdf")
+
+
 class TestThroughARealPdf:
     """End-to-end, with the multi-byte text the toolchain can actually embed."""
 

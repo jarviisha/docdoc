@@ -25,6 +25,11 @@ from docdoc.extraction import SchemaRegistry
 from docdoc.extraction.adapters.echo import EchoAdapter
 from docdoc.pipeline import run
 
+# SC-013: the offline suite must pass on a base install, which has no native PDF
+# reader. Every test in this module reaches a real parse through the `stored`
+# fixture, so the whole module skips rather than each test guarding itself.
+pytest.importorskip("pymupdf")
+
 FIXTURE = Path("tests/fixtures/pdf/digital_invoice.pdf")
 SCHEMA = "invoice@1"
 
