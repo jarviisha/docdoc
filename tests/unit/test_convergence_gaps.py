@@ -13,6 +13,14 @@ from typing import Any, ClassVar
 
 import pytest
 
+# Constitution XII: "Provider adapters MUST have integration tests; those tests
+# MUST NOT be required to run the unit and property suites." This module reaches a
+# provider library at import time, so without this guard the whole file fails
+# *collection* on a base install — and SC-013 requires the offline suite to pass
+# there. `importorskip` is the mechanism that makes the requirement structural
+# rather than a convention every new test file has to remember.
+pytest.importorskip("pymupdf")
+
 from docdoc.ingest import parse
 from docdoc.ingest.assess import TextLayerRule
 from docdoc.ingest.capabilities import ParserCapabilities
