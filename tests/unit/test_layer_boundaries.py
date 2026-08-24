@@ -149,3 +149,79 @@ def test_the_http_interface_stays_behind_an_extra() -> None:
     assert any("fastapi" in entry for entry in extras["api"])
     base = _config()["project"]["dependencies"]  # type: ignore[index]
     assert not any("fastapi" in entry for entry in base)
+
+
+# -- FR-030: the command line contains no stage logic ------------------------
+
+#: The three stage entry points the CLI must reach only through the pipeline.
+#: Names rather than modules, because a module-level ban would be wrong: the CLI
+#: legitimately imports ``ExtractionResult``, ``GroundingResult``, and
+#: ``ValidationResult`` from these same modules to *render* a result, which is
+#: precisely what FR-030 permits — "it parses arguments, calls the pipeline, and
+#: formats a result".
+_STAGE_ENTRY_POINTS = {
+    "docdoc.extraction.extract": {"extract"},
+    "docdoc.grounding": {"ground"},
+    "docdoc.grounding.ground": {"ground"},
+    "docdoc.validation": {"validate"},
+}
+
+#: ``docdoc.ingest.parse`` is deliberately absent from the set above. ``docdoc
+#: parse FILE`` is one of the six commands FR-026 names, and there is no pipeline
+#: entry point for a bare parse — the pipeline runs four stages or none. So the
+#: parse command calls ``ingest.parse`` directly, and that is the front end doing
+#: its job rather than containing a stage's logic.
+_PARSE_IS_A_COMMAND = "docdoc.ingest"
+
+
+def _cli_modules() -> list[Path]:
+    root = Path("src/docdoc/cli")
+    return sorted(p for p in root.rglob("*.py") if "__pycache__" not in p.parts)
+
+
+@pytest.mark.parametrize("path", _cli_modules(), ids=lambda p: p.name)
+def test_the_command_line_reaches_no_stage_except_through_the_pipeline(path: Path) -> None:
+    """FR-030, machine-checked instead of asserted in prose.
+
+    ``contracts/cli.md`` §6 says "a behaviour reachable only through the command
+    line is a bug", and until now nothing checked it. The danger is not
+    hypothetical: a command that called ``extract()`` and then ``ground()``
+    itself would be a *second* definition of the stage order, which is the exact
+    condition FR-009 exists to prevent and which SC-014 asserts is expressed in
+    exactly one place.
+
+    An ``import-linter`` contract cannot say this, because it works at module
+    granularity and the CLI must keep importing result models from the same
+    modules. So this reads the imports by name, the way
+    ``test_kernel_purity.py`` reads the kernel's.
+    """
+    import ast
+
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom) or node.level or not node.module:
+            continue
+        forbidden = _STAGE_ENTRY_POINTS.get(node.module, set())
+        imported = {alias.name for alias in node.names}
+        overlap = forbidden & imported
+        assert not overlap, (
+            f"{path} imports {sorted(overlap)} from {node.module}. The command "
+            "line must reach a stage only through docdoc.pipeline (FR-030) — "
+            "otherwise the stage order has a second definition, which is what "
+            "FR-009 and SC-014 exist to prevent. Importing a *result model* from "
+            "the same module is fine and is what formatting a result needs."
+        )
+
+
+def test_the_parse_command_may_call_ingest_directly() -> None:
+    """The deliberate exception, asserted so it stays deliberate.
+
+    ``docdoc parse`` is one of the six commands FR-026 names and the pipeline has
+    no entry point for a bare parse — it runs four stages or none. If this ever
+    fails because the exception was removed, the parse command needs somewhere
+    else to go before the rule above tightens.
+    """
+    assert _PARSE_IS_A_COMMAND not in _STAGE_ENTRY_POINTS
+    parse_command = Path("src/docdoc/cli/commands/parse.py")
+    assert "from docdoc.ingest import parse" in parse_command.read_text(encoding="utf-8")

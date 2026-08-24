@@ -229,3 +229,83 @@ def test_an_observer_that_raises_does_not_fail_the_run(
 
     assert result.failed_stage is None
     assert result.validation is not None
+
+
+# -- FR-045 on the path that raises ------------------------------------------
+
+
+def test_a_run_that_raises_still_emits_events_for_the_stages_that_ran(
+    captured: pytest.LogCaptureFixture, tmp_path: Path
+) -> None:
+    """FR-045 — one event per stage *execution*, including a run that never returns.
+
+    This regressed silently for a whole milestone. ``_emit`` sat only on the
+    return path, so a ``PipelineError`` or ``ArtifactError`` propagating produced
+    **zero** ``pipeline.stage`` events even though earlier stages had executed —
+    and the runs most worth having events for are disproportionately the ones
+    that failed. An operator whose store has gone bad wants to know how far the
+    run got before it noticed.
+
+    Provoked with a corrupted stored payload, which is the real way this happens:
+    the store raises rather than degrading, because a `content_id` mismatch is
+    corruption and recomputing over it would hide a failing disk behind a slower
+    run (FR-014).
+    """
+    from docdoc.artifacts import ArtifactError
+    from docdoc.pipeline import Stage
+
+    store = FileArtifactStore(tmp_path)
+    first = _run(store=store)
+    assert first.failed_stage is None, "the fixture must succeed before it is corrupted"
+
+    entry = next((tmp_path / "artifacts").glob("*/*.json"))
+    stored = json.loads(entry.read_text())
+    stored["payload"]["__corrupted_by_this_test__"] = True
+    entry.write_text(json.dumps(stored))
+
+    events: list[dict[str, Any]] = []
+    observe.set_observer(events.append)
+    try:
+        with pytest.raises(ArtifactError):
+            _run(store=store)
+    finally:
+        observe.set_observer(None)
+
+    assert events, (
+        "a run that raised emitted no stage events at all. The stages before the "
+        "failure did execute, and FR-045 asks for one event each."
+    )
+    for event in events:
+        assert event["step_id"] in {stage.value for stage in Stage}
+        assert event["duration_ms"] >= 0
+        # No terminal artifact exists, so there is no processing id to carry.
+        # Recorded as absent rather than as a placeholder: a reader can tell
+        # "not yet" from "not applicable", and a synthesised value would be a
+        # second run identifier (FR-007).
+        assert event["processing_id"] is None
+
+    steps = [event["step_id"] for event in events]
+    assert steps == sorted(set(steps), key=steps.index), "a stage was reported twice"
+    assert len(steps) < 4, "the run raised, so it cannot have completed every stage"
+
+
+def test_a_raising_run_leaks_nothing_through_its_events(
+    captured: pytest.LogCaptureFixture, tmp_path: Path
+) -> None:
+    """The events added above must obey the same prohibition as the rest."""
+    from docdoc.artifacts import ArtifactError
+
+    store = FileArtifactStore(tmp_path)
+    _run(store=store)
+
+    entry = next((tmp_path / "artifacts").glob("*/*.json"))
+    stored = json.loads(entry.read_text())
+    stored["payload"]["__corrupted_by_this_test__"] = True
+    entry.write_text(json.dumps(stored))
+
+    with pytest.raises(ArtifactError):
+        _run(store=store)
+
+    logged = _everything_logged(captured)
+    for needle in (*FROM_THE_DOCUMENT, *EXTRACTED, CREDENTIAL):
+        assert needle not in logged
