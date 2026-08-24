@@ -14,16 +14,25 @@ with its stage and the typed error's **class name**, never a value: an exception
 message can quote the content it choked on, and this field travels into reports
 and logs where FR-057 forbids that.
 
-**Known limitation: there is no ``ArtifactStore``, so every run re-parses every
-document.** ADR-0003's whole point is that changing a prompt invalidates the
-extraction artifact and *reuses* the parse; with no store it cannot, and
-:mod:`docdoc.grounding` rebuilds its match view per call although ADR-0006 says
-the view is cached by ``document_id`` + ``match_view_version``. On the public
-tier, which uses the ``echo`` adapter, that costs nothing. On a restricted tier
-reached through a real provider it is a repeated, billable cost every time
-predictions are refreshed. Recorded here so it is known rather than discovered on
-an invoice; persistence is out of scope for Milestone 6 by that milestone's own
-specification.
+**This module no longer sequences the stages.** It calls
+:func:`docdoc.pipeline.run`, which is the only place parse → extract → ground →
+validate is written down (FR-009, SC-014). Until Milestone 7 the order lived
+*here* — inside one private function of a package that exists to serve
+evaluation — so the order in which docdoc processes a document lived in the
+module least likely to be read by somebody asking what the order is. Two
+definitions of it in one repository is the condition FR-009 exists to prevent,
+and this is the half that was deleted rather than the half that was added.
+
+**The recorder runs with no store by default**, and that is a deliberate choice
+rather than an oversight. A committed prediction set is the product of full
+execution, every time — so a stale artifact can never quietly move a published
+metric. The store is a cost optimisation a caller may opt into for a corpus
+sweep; it is never an input to the numbers of record.
+
+The known limitation this docstring carried for a milestone — no ``ArtifactStore``,
+so every run re-parsed every document — is closed. Milestone 7 built the store,
+and :mod:`docdoc.grounding` now caches its match view by
+``document_id`` + ``match_view_version`` as ADR-0006 always specified.
 """
 
 from __future__ import annotations
@@ -176,40 +185,42 @@ def _record_one(
     documents: Mapping[str, Document] | Callable[[GoldenDocument], Document] | None,
     root: str | Path | None,
 ) -> DocumentPrediction:
-    """One document's four stages, with whatever it reached recorded.
+    """One document through the pipeline, with whatever it reached recorded.
 
-    Each stage is attempted only if the one before it succeeded, and a failure
-    keeps everything already produced: a document that fails at ``VALIDATE`` is
-    recorded with its extraction and its grounding, because those are real
-    results and discarding them would lose the evidence of what went wrong.
+    The stage sequence is :mod:`docdoc.pipeline`'s and is not restated here
+    (FR-009). What this function still owns is the *recording* rule, which is
+    evaluation's rather than the pipeline's: a document that fails is recorded,
+    never dropped. Dropping it is the obvious implementation — it reads as
+    robustness, the loop keeps going, nothing is lost that anyone can see — and
+    what it does is remove that document from every denominator, so the pipeline's
+    score rises for having crashed on it.
+
+    A failure keeps everything already produced, which the pipeline guarantees
+    (FR-004): a document that fails at ``VALIDATE`` is recorded with its
+    extraction and its grounding, because those are real results and discarding
+    them would lose the evidence of what went wrong.
     """
-    from docdoc.extraction.extract import extract
-    from docdoc.grounding import ground
-    from docdoc.validation import validate
+    from docdoc.pipeline import run
 
     parsed: Document | None = None
-    extraction = grounding = validation = None
 
     try:
         parsed = _resolve_document(document, documents, root)
-        extraction = extract(
+        result = run(
             parsed,
             schema=document.schema_identity,
             registry=registry,
-            adapter=adapter,  # type: ignore[arg-type]
+            adapter=adapter,
+            # No store. A committed prediction set is the product of full
+            # execution, so a stale artifact can never move a published metric.
+            document=parsed,
         )
-        grounding = ground(parsed, extraction)
-        validation = validate(
-            extraction, grounding, registry.resolve(document.schema_identity).schema
-        )
-    # Every failure is recorded and none is re-raised, which is the whole point:
-    # a dropped failure becomes an accuracy improvement (FR-037, EVA-9a).
+    # Resolving the document can still raise — the pipeline never sees a file it
+    # was not given. Every other failure is *recorded* by the pipeline rather
+    # than raised, and is read off the result below.
     except Exception as error:
         return DocumentPrediction(
             document_id=document.document_id,
-            extraction=extraction,
-            grounding=grounding,
-            validation=validation,
             failed_stage=_stage_of(error),
             # The class name, never the message. An exception message can quote
             # the content it choked on, and this field reaches reports and logs.
@@ -220,12 +231,34 @@ def _record_one(
 
     return DocumentPrediction(
         document_id=document.document_id,
-        extraction=extraction,
-        grounding=grounding,
-        validation=validation,
+        extraction=result.extraction,
+        grounding=result.grounding,
+        validation=result.validation,
+        failed_stage=_recording_stage(result),
+        failure_reason=_failure_reason(result),
         parser_id=parsed.provenance.parser_id,
         parser_version=parsed.provenance.parser_version,
     )
+
+
+def _recording_stage(result: Any) -> Stage | None:
+    """The failed stage, translated into evaluation's own ``Stage``.
+
+    Two same-named enums with the same four members, deliberately not merged:
+    evaluation's is folded into ``prediction_set_id``, so unifying them would
+    move the identity of the committed public tier and invalidate a dataset for a
+    tidiness gain. This is the one place they meet, and it is three lines.
+    """
+    if result.failed_stage is None:
+        return None
+    return Stage(result.failed_stage.value)
+
+
+def _failure_reason(result: Any) -> str | None:
+    if result.failed_stage is None:
+        return None
+    outcome = result.outcome_for(result.failed_stage)
+    return None if outcome is None else outcome.failure_class
 
 
 def write_prediction_set(predictions: PredictionSet, root: str | Path) -> Path:

@@ -143,15 +143,66 @@ uv run python examples/ground_invoice.py                       # grounding, offl
 uv run python examples/validate_invoice.py                     # validation, offline
 uv run python examples/evaluate_golden_set.py                  # evaluation, offline
 uv run python examples/compare_reports.py                      # regression detection, offline
+uv run python examples/run_pipeline.py                         # all four stages plus reuse, offline
 ```
+
+[`examples/serve_api.md`](examples/serve_api.md) covers running the HTTP interface.
+
+### From the command line
+
+Everything above, without writing a script. `pip install docdoc` gives you the command — the CLI is
+`argparse`, so it costs no dependency.
+
+```bash
+docdoc parse    invoice.pdf                        # route, parse, report what came back
+docdoc extract  invoice.pdf --schema invoice@1     # the whole pipeline
+docdoc inspect  invoice.pdf --schema invoice@1     # every value, its verdict, its page, its rectangle
+docdoc explain  sha256:3a1e… --chain               # why an identity is that value
+docdoc eval     manifest.json --predictions ./p    # score a golden set
+docdoc store    clear --stage extract              # all of it, or one stage
+```
+
+Two rules make up most of the contract. With `--json`, standard output carries **exactly one** JSON
+document and nothing else; diagnostics go to standard error in both forms. And the exit code
+distinguishes the two things a single non-zero code confuses:
+
+| Code | Meaning |
+|---|---|
+| `0` | the run completed and the document is valid |
+| `1` | the run completed and the document is **invalid** — a real result, not an error |
+| `2` | the run could not complete: a typed docdoc error |
+| `64` | the invocation itself was wrong |
+
+A script that treats "this invoice is wrong" as "docdoc is broken" is the outcome a single non-zero
+code guarantees.
+
+### Over HTTP
+
+```bash
+pip install docdoc[api]
+uvicorn --factory docdoc.api.app:create_app
+```
+
+```text
+POST /v1/documents                        → the blob identity
+GET  /v1/documents/{blob_id}              → its size and media type
+POST /v1/documents/{blob_id}/extract      → the job identity, and the result
+GET  /v1/jobs/{job_id}                    → succeeded | unavailable | unknown
+GET  /v1/jobs/{job_id}/result             → the stored result
+```
+
+Single node, synchronous, no queue and no database. A result fetched over HTTP and the same run
+performed in-process agree on every value, verdict, location, and identity — asserted by a contract
+test that runs both and compares. There is no authentication: put docdoc behind your own gateway.
 
 ### Installing
 
 ```bash
-pip install docdoc          # every deterministic layer, no provider SDK; pydantic + rapidfuzz
+pip install docdoc          # every deterministic layer and the CLI, no provider SDK
 pip install docdoc[pdf]     # native PDF text path
 pip install docdoc[azure]   # geometry-capable cloud path, for scans and images
 pip install docdoc[google]  # the LLM adapter for extraction
+pip install docdoc[api]     # the HTTP interface
 ```
 
 ### Configuration
@@ -164,7 +215,30 @@ export DOCDOC_SCHEMA_PATHS=/etc/docdoc/schemas   # where default_registry() look
 export DOCDOC_MODEL_ADAPTERS=gemini              # adapter preference order, comma-separated
 export DOCDOC_GEMINI_MODEL=gemini-3.5-flash      # which model answers
 export GEMINI_API_KEY=...                        # or GOOGLE_API_KEY
+export DOCDOC_STORE_ROOT=/var/lib/docdoc         # where artifacts and blobs land — no default
 ```
+
+Three more exist and are rarely worth touching:
+
+```sh
+export DOCDOC_ECHO_FIXTURES=./fixtures    # canned answers for the offline `echo` adapter
+export DOCDOC_MATCH_VIEW_CACHE=8          # folded views held in memory; LRU, default 8
+export DOCDOC_MAX_REQUEST_BYTES=33554432  # HTTP request body cap, applied while reading
+```
+
+`DOCDOC_ECHO_FIXTURES` is the one to know about: with `DOCDOC_MODEL_ADAPTERS=echo` it makes the whole
+pipeline runnable offline against committed answers. The echo adapter is **never** selected
+automatically — no configuration that merely fails to name a usable adapter can land on it — because
+auto-selecting a fixture adapter would turn a missing credential into a stream of confident,
+fabricated extractions.
+
+Every setting gains a flag of the same meaning on the command line — `--schema-path`, `--adapter`,
+`--store` — so there is no second vocabulary to learn.
+
+`DOCDOC_STORE_ROOT` has **no default**, and that is deliberate. Artifacts hold extracted values and
+blobs hold whole source documents, so where they accumulate is your decision rather than ours. With
+none set, every run recomputes every stage and produces identical results; with one set, changing a
+prompt reuses the parse instead of paying the cloud parser again.
 
 Every one has a sensible default and every one can be overridden by an explicit argument — configuration
 is the default, not a cage. `DOCDOC_SCHEMA_PATHS` is the exception worth knowing: with neither it nor an
@@ -201,11 +275,20 @@ governs every specification, plan, and code change in this repository.
 Dependencies flow strictly downward, and the rule is machine-checked in CI:
 
 ```text
-Recording → Evaluation → Validation → Grounding → Extraction → Ingest → Kernel
+API, CLI → Recording → Evaluation → Pipeline → Validation → Grounding
+         → Extraction → Ingest → Artifacts → Kernel
 ```
 
-Pipeline and API land at Milestone 7. The chain above is the one `pyproject.toml` enforces, which is
-the only one worth writing down. **`Recording` sits above `Evaluation` deliberately**: the recorder
+The chain above is the one `pyproject.toml` enforces, which is the only one worth writing down. Two
+positions are not the ones a reader would guess, and both are deliberate. **`Artifacts` sits directly
+above the kernel**, because it stores whole result models without importing one — the caller names
+the model — so it depends on `pydantic` and two kernel helpers and nothing else. **`Pipeline` sits
+directly above `Validation`**, the highest stage it drives, which yields `Recording → Pipeline`: the
+recorder *calls* the pipeline rather than holding a second copy of the stage order. **`API` and `CLI`
+are siblings, not a stack** — neither may import the other, which an ordered position cannot express,
+so an `independence` contract states it instead.
+
+**`Recording` sits above `Evaluation` deliberately**: the recorder
 produces a prediction set and the scorer consumes one, so the data flows one way and the layers do
 too — which is what makes `evaluation → recording` a build failure rather than a sentence in a
 specification. Producing a prediction set needs a provider; scoring one must not.
@@ -261,12 +344,12 @@ higher-layer work merges while that property is failing or absent.
 | 4 | Deterministic grounding: exact → fuzzy → ungrounded | **Done** |
 | 5 | Validation: schema, field, and cross-field rules | **Done** |
 | 6 | Evaluation: golden dataset, field accuracy, grounding rate | **Done** |
-| 7 | API and CLI | Planned |
+| 7 | Pipeline, artifact store, CLI, and HTTP API | **Done** |
 
 ## Documentation
 
 - [Constitution](.specify/memory/constitution.md) — the governing principles
-- [Architecture decisions](docs/adr/) — nine accepted ADRs
+- [Architecture decisions](docs/adr/) — eleven accepted ADRs, and no open constitutional decisions
 - [Document concepts](docs/concepts/document.md)
 - [Identity model](docs/concepts/identity.md)
 - [Kernel API contract](specs/001-kernel-document-ir/contracts/kernel-api.md)
@@ -276,9 +359,14 @@ higher-layer work merges while that property is failing or absent.
 - [How grounding works](docs/concepts/grounding.md) — the three states, the match view, and why the two scores are not comparable
 - [How validation works](docs/concepts/validation.md) — the three verdicts, rules as data, and why docdoc has its own regex dialect
 - [How evaluation works](docs/concepts/evaluation.md) — the six outcomes, the denominators, the two tiers, and how to add a document to the golden set
+- [The pipeline](docs/concepts/pipeline.md) — the four stages, the reuse decision, what a cached parse still pays for, and why a job needs no queue
+- [Artifacts](docs/concepts/artifacts.md) — the chain, the two hashes, which misses are errors, and the one symptom of a missed version bump
 - [Grounding API contract](specs/004-deterministic-grounding/contracts/grounding-api.md)
 - [Validation API contract](specs/005-deterministic-validation/contracts/validation-api.md)
 - [Extraction API contract](specs/003-schema-driven-extraction/contracts/extraction-api.md)
+- [Pipeline and store API contract](specs/007-pipeline-api-cli/contracts/pipeline-api.md)
+- [CLI contract](specs/007-pipeline-api-cli/contracts/cli.md) — commands, output forms, exit codes
+- [HTTP API contract](specs/007-pipeline-api-cli/contracts/http-api.md) — endpoints, statuses, error shapes
 - [Contributing](CONTRIBUTING.md)
 
 ## License

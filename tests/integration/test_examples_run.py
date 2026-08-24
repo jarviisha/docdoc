@@ -304,6 +304,33 @@ def test_the_comparison_example_shows_an_attributable_regression() -> None:
     assert "decides nothing" in out
 
 
+def test_the_pipeline_example_runs_with_no_credentials() -> None:
+    """The Milestone 7 example: all four stages, plus reuse, offline."""
+    result = _run(str(EXAMPLES / "run_pipeline.py"))
+    _assert_ran(result, "run_pipeline.py")
+
+
+def test_the_pipeline_example_demonstrates_reuse_rather_than_asserting_it() -> None:
+    """An example that claimed reuse without showing it would teach nothing.
+
+    The second run must report four reused stages and a result equal to the
+    first's — which is the whole of ADR-0003's promise, printed rather than
+    described.
+    """
+    result = _run(str(EXAMPLES / "run_pipeline.py"))
+    _assert_ran(result, "run_pipeline.py")
+
+    assert "0 executed, 4 reused" in result.stdout, (
+        "the example no longer shows a fully reused second run"
+    )
+    assert "3 executed, 1 reused" in result.stdout, (
+        "the example no longer shows the parse surviving a schema change"
+    )
+    assert result.stdout.count("True") >= 3, (
+        "the example no longer shows the reused result equalling the executed one"
+    )
+
+
 def test_every_committed_example_is_covered_here() -> None:
     """The assertion that keeps this file honest as examples are added.
 
@@ -320,6 +347,7 @@ def test_every_committed_example_is_covered_here() -> None:
         "validate_invoice.py",
         "evaluate_golden_set.py",
         "compare_reports.py",
+        "run_pipeline.py",
     }
     assert shipped <= covered, (
         f"these examples ship but nothing executes them: {sorted(shipped - covered)}"

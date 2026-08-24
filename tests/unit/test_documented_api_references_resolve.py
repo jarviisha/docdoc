@@ -235,9 +235,12 @@ def test_each_documented_attribute_appears_in_a_document(name: str) -> None:
 #: repo-wide and a check that covered one layer would go stale at the boundary.
 CONFIG_MODULES = {
     "docdoc.extraction.registry": ("SCHEMA_PATHS_ENV",),
-    "docdoc.extraction.adapter_registry": ("ADAPTERS_ENV",),
+    "docdoc.extraction.adapter_registry": ("ADAPTERS_ENV", "ECHO_FIXTURES_ENV"),
     "docdoc.extraction.adapters.gemini": ("MODEL_ENV",),
     "docdoc.ingest.parsers.azure_di": ("ENDPOINT_ENV", "KEY_ENV"),
+    "docdoc.cli.config": ("STORE_ROOT_ENV",),
+    "docdoc.grounding.view": ("MATCH_VIEW_CACHE_ENV",),
+    "docdoc.api.app": ("REQUEST_BYTES_ENV",),
 }
 
 #: Wider than DOCUMENTS: configuration is described in places that carry no python

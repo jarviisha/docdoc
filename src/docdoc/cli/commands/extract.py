@@ -157,5 +157,9 @@ def _summary_lines(result: PipelineResult, data: dict[str, Any]) -> list[str]:
         # The class name, never the message: a message can quote the document,
         # and this line reaches terminals, CI logs, and issue reports.
         lines.append(f"FAILED     at {result.failed_stage.value}: {failure}")
-        lines.append("           results from the preceding stages are above (FR-004)")
+        # Only when there are any. A run that failed at the *first* stage has no
+        # preceding results, and saying they are above when nothing is above
+        # sends a reader looking for output that was never produced.
+        if data["fields"] or result.extraction is not None:
+            lines.append("           results from the preceding stages are above (FR-004)")
     return lines

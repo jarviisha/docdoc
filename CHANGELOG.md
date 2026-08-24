@@ -9,6 +9,68 @@ API may change in any release. `document_id` derivation is versioned separately 
 
 ## [Unreleased]
 
+Milestone 7: the pipeline, the artifact store, the command line, and the HTTP interface. **The
+Definition of Done stated at the project's founding is reachable**: a PDF goes in one end of a
+command, and a human can ask any extracted value which page and which rectangle it came from. And
+ADR-0003's central promise — change a prompt, reuse the parse — executes for the first time, having
+been text for five milestones.
+
+### Added
+
+- **`docdoc.pipeline`** — `run()` sequences parse → extract → ground → validate for one document and
+  returns one `PipelineResult`. The sequence now exists in exactly one place: `docdoc.recording`
+  used to hold it inside a private function, and calls this instead. Synchronous, in-process, and
+  usable with no service, no database, and no object store.
+- **`docdoc.artifacts`** — an append-only, content-addressed store implementing ADR-0003's chain,
+  plus a `BlobStore` for submitted source bytes. Optional and **off unless configured**: there is no
+  default location, because artifacts hold extracted values and blobs hold whole documents.
+- **Partial, per-stage reuse.** Change the prompt or the schema and the parse is reused while
+  everything downstream is recomputed; change a validation rule and the parse, extraction, and
+  grounding are all reused. Nothing is deleted or marked stale — invalidation is a consequence of a
+  new identity rather than an act performed on an old one.
+- **The `docdoc` command** — `parse`, `extract`, `inspect`, `explain`, `eval`, and `store clear`,
+  built on `argparse` so the base install acquires no dependency. `--json` writes exactly one
+  document to standard output; exit codes distinguish "the document is invalid" (`1`) from "docdoc
+  could not run" (`2`).
+- **`docdoc explain ARTIFACT_ID`** — the tool ADR-0003 accepted unreadable cache keys on the
+  condition of. Names the stage, the input identity, the processor and its version, and the names of
+  the folded inputs, walking back to the source blob. It explains identities, never documents.
+- **The HTTP interface**, behind `docdoc[api]`. Five endpoints, single node, synchronous, no queue
+  and no database. A job is identified by the run's terminal artifact id, and a result fetched over
+  HTTP agrees with the same run in-process on every value, verdict, location, and identity.
+- **`PipelineError` and `ArtifactError`** — the last two typed errors the constitution's error model
+  named and no code defined.
+- **One structured event per stage**, carrying the request id, the processing id, the step id, the
+  duration, the outcome, and whether the stage was reused — plus the provider, model, and token usage
+  where one answered. Content, values, credentials, and prompt bodies never appear.
+- **The match-view cache** ADR-0006 specified and grounding did not have, bounded and LRU.
+- **ADR-0010** (store layout, format versioning, the job model) and **ADR-0011** (the pre-1.0
+  versioning policy). The constitution now lists **zero** open decisions.
+
+### Changed
+
+- **`SpanIndex` is serialisable**, so a `Document` survives a round trip through the store. Without
+  it the parse stage had no artifact and the whole reuse promise was unreachable. `pydantic_core`
+  joins the kernel's import allowlist as what it is — pydantic's own runtime, not a second
+  dependency.
+- **`ingest.parse()` splits into `plan_parse` and `execute_plan`.** `parse()` keeps its exact
+  signature and becomes the composition, so no existing caller changes. The split is what lets a
+  cached parse skip the parser while still computing the text-layer verdict on every run.
+- **The echo adapter is selectable when configuration names it.** It is still never a *fallback* —
+  no configuration that merely fails to name a usable adapter can land on it — but
+  `DOCDOC_MODEL_ADAPTERS=echo` with `DOCDOC_ECHO_FIXTURES` set is a decision, and the offline path
+  has to be reachable from the command line.
+- **`ExtractionResult` rebuilds its value tree on load**, and a reused extraction is retyped against
+  its schema. A stored `Decimal` came back a string, which would have made validation compare a total
+  against a sum of strings and reach a different verdict than the run that produced the artifact.
+
+### Fixed
+
+- **`docdoc.recording`'s known limitation is closed.** Its module docstring recorded that every run
+  re-parsed every document because nothing stored an artifact. Something does now.
+
+---
+
 Milestone 6: golden-set evaluation. **Every quality claim in this repository stops being an
 assertion.** Milestone 4 made the grounding rate computable and set no target; Milestone 5 did the
 same for validation. Both deferred the same question here, and it is now answered: docdoc scores a

@@ -213,6 +213,32 @@ Templates: no changes required — the plan-template gate table references
 principles by number and remains accurate. Note that gate 11's parenthetical in
 `plan-template.md` still quotes the pre-1.4.0 chain and should be corrected when
 that template is next touched; it is advisory text, not the enforced contract.
+
+---
+AMENDMENT 1.5.0 → 1.5.1 (2026-08-24)
+Bump rationale: PATCH — the last open decision moves to Resolved. No principle is
+added, removed, or redefined, and no previously compliant work becomes
+non-compliant; the policy recorded describes what the project already did.
+
+  - TODO(PRE_1_0_VERSIONING) resolved (ADR-0011). While the major version is `0`,
+    a minor bump may break any public API and a patch bump may not, and every
+    breaking change ships a changelog entry naming what moved and what to do
+    about it. Two surfaces get a deprecation path instead of a silent break —
+    the kernel's identity derivations and the on-disk artifact format — because a
+    change to either invalidates data that already exists on somebody else's
+    disk, which is the one class of breakage upgrading cannot repair. Nothing
+    else is promised stable before `1.0.0`.
+
+  - The mechanism that path relies on already runs: `FileArtifactStore.get`
+    treats an incompatible `artifact_format_version` as a logged miss, so an
+    artifact written under an older format is recomputed rather than misread.
+
+Sections amended: Open Constitutional Decisions (PRE_1_0_VERSIONING moved to
+Resolved; the "Still open" list is now empty and says so). Principle XII is
+untouched — ADR-0011 states what "follows semantic versioning" means below
+`1.0.0` rather than changing the requirement.
+
+Templates: no changes required.
 -->
 
 # docdoc Constitution
@@ -620,12 +646,15 @@ on 2026-08-14:
 | `LICENSE` | Apache-2.0, chosen for its explicit patent grant | [0007](../../docs/adr/0007-apache-2-license.md) |
 | `SCHEMA_EVOLUTION_POLICY` | Major `schema_version` for contract breaks, derived `schema_hash` for cache invalidation; concurrent majors allowed; no `latest` in the core (2026-08-17) | [0008](../../docs/adr/0008-schema-evolution-policy.md) |
 | `GOLDEN_DATASET_LICENSING` | Two tiers: a vendored public tier sufficient on its own for a complete report, plus an optional hash-referenced restricted tier whose absence makes a report partial; gate 5's target size stated (2026-08-20) | [0009](../../docs/adr/0009-golden-dataset-licensing.md) |
+| `PRE_1_0_VERSIONING` | While the major is `0`, a minor may break any public API and a patch may not; the kernel's identity derivations and the on-disk artifact format get a deprecation path rather than a silent break, because a change to either invalidates data on somebody else's disk; nothing else is promised stable before `1.0.0` (2026-08-24) | [0011](../../docs/adr/0011-pre-1.0-versioning.md) |
 
-**Still open:**
+**Still open:** none.
 
-- **TODO(PRE_1_0_VERSIONING)** — before first public release. Principle XII mandates semantic
-  versioning while the kernel API is expected to churn. Confirm the `0.x` policy and what
-  stability, if any, is promised before `1.0.0`.
+Every decision this document has ever raised is resolved and points at an accepted ADR. That is a
+statement about *this* list, not a claim that no decision will ever be needed again — a later
+question is raised here, decided, and recorded, exactly as these were. What it does mean is that no
+implementer is currently working around an unresolved constitutional question, which is the
+condition the precedence rule below exists to keep true.
 
 ## Governance
 
@@ -654,4 +683,4 @@ insufficient. Unjustified violations are rejected regardless of the code's quali
 **Precedence for unresolved items.** Where an "Open Constitutional Decision" is unresolved,
 implementers MUST NOT resolve it silently in code. Raise it, decide it, record it.
 
-**Version**: 1.5.0 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-08-22
+**Version**: 1.5.1 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-08-24
