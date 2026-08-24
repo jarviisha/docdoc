@@ -237,7 +237,9 @@ credential appears anywhere in the logs, while every required field does.
 - [X] T101 Update the `README.md` roadmap: mark Milestone 7 **Done**, and flip `specs/007-pipeline-api-cli/spec.md` **Status** from `Accepted` to `Implemented` — the transition this repository wires to the roadmap task so the field cannot silently lie
 - [X] T102 [P] Add a `CHANGELOG.md` entry for the milestone, naming the partial-reuse behaviour, the CLI, the HTTP interface, and the two resolved ADRs
 - [X] T103 [P] Run every scenario in [quickstart.md](quickstart.md) end to end and correct any drift between it and the shipped commands
-- [ ] T104 Run the full gate — `HYPOTHESIS_PROFILE=thorough uv run pytest`, `uv run mypy src/docdoc/kernel`, `uv run ruff check .`, `uv run lint-imports`, and the coverage job — and confirm the 93% floor still holds with four new packages measured
+- [X] T104 Run the full gate — `HYPOTHESIS_PROFILE=thorough uv run pytest`, `uv run mypy src/docdoc/kernel`, `uv run ruff check .`, `uv run lint-imports`, and the coverage job — and confirm the 93% floor still holds with four new packages measured
+      → **All green.** Coverage **94.20%** against the 93% floor with `artifacts`, `pipeline`, `cli`, and `api` measured. `mypy` clean on 13 kernel files, `ruff` clean, `lint-imports` 8 contracts kept / 0 broken, property suite green under `HYPOTHESIS_PROFILE=thorough`.
+      → Note on how the gate is run: the perf suite gets **its own job** (`ci.yml` line 121, `pytest -m perf`) and the main suite excludes it (`-m "not perf"`). Running both together makes `test_construction_of_50k_tokens_is_under_300ms` flaky under CPU contention — it measures 160 ms standalone against a 300 ms budget, and the pre-Milestone-7 baseline measures the same, so the contention is the cause rather than any change here. Run the two commands separately, as CI does.
 
 ---
 
