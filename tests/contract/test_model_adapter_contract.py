@@ -41,6 +41,12 @@ from docdoc.extraction.adapters.gemini import GeminiAdapter
 from docdoc.extraction.conform import conform
 from docdoc.extraction.prompt import ModelRequest, build_request
 
+# SC-013: the offline suite must pass on a base install — one with no provider
+# SDK at all. Constitution XII: "Provider adapters MUST have integration tests;
+# those tests MUST NOT be required to run the unit and property suites." These
+# tests exercise the shipped model adapters, so they skip rather than fail when it is absent.
+pytest.importorskip("google.genai")
+
 SCHEMAS = pathlib.Path("schemas")
 
 

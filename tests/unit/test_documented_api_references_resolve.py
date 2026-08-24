@@ -240,7 +240,9 @@ CONFIG_MODULES = {
     "docdoc.ingest.parsers.azure_di": ("ENDPOINT_ENV", "KEY_ENV"),
     "docdoc.cli.config": ("STORE_ROOT_ENV",),
     "docdoc.grounding.view": ("MATCH_VIEW_CACHE_ENV",),
-    "docdoc.api.app": ("REQUEST_BYTES_ENV",),
+    # `settings`, not `app`: `app` imports FastAPI, and this check runs on a
+    # base install that has no extras.
+    "docdoc.api.settings": ("REQUEST_BYTES_ENV",),
     "docdoc.ingest.source": ("MAX_DOCUMENT_BYTES_ENV", "MAX_PAGES_ENV"),
 }
 

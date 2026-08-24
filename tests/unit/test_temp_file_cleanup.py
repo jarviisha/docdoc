@@ -20,6 +20,12 @@ import pytest
 from docdoc.ingest import parse
 from docdoc.ingest.errors import IngestError
 
+# SC-013: the offline suite must pass on a base install — one with no provider
+# SDK at all. Constitution XII: "Provider adapters MUST have integration tests;
+# those tests MUST NOT be required to run the unit and property suites." These
+# tests exercise a real parse's temporary files, so they skip rather than fail when it is absent.
+pytest.importorskip("pymupdf")
+
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 
 

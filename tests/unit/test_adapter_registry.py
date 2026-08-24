@@ -213,12 +213,14 @@ def test_the_default_registry_knows_both_and_still_will_not_fall_back_to_echo() 
 
 
 def test_the_default_registry_reports_the_missing_credential_rather_than_hiding_it() -> None:
+    pytest.importorskip("google.genai")  # SC-013: skips on a base install
     candidate = next(c for c in default_adapter_registry().candidates() if c.id == "gemini")
     assert candidate.available is False
     assert "API key" in (candidate.reason or "")
 
 
 def test_default_adapter_raises_with_the_reason_when_nothing_is_usable() -> None:
+    pytest.importorskip("google.genai")  # SC-013: skips on a base install
     with pytest.raises(ModelProviderError) as caught:
         default_adapter()
     assert "GEMINI_API_KEY" in str(caught.value)
@@ -227,6 +229,7 @@ def test_default_adapter_raises_with_the_reason_when_nothing_is_usable() -> None
 def test_default_adapter_selects_when_a_credential_is_present(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    pytest.importorskip("google.genai")  # SC-013: skips on a base install
     monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-used-for-a-call")
     adapter = default_adapter()
     assert adapter.id == "gemini"
@@ -244,6 +247,7 @@ def test_application_code_can_extract_without_naming_a_provider(
     contains a provider name. Swapping providers changes what is installed and the
     priority order, not this code.
     """
+    pytest.importorskip("google.genai")  # SC-013: skips on a base install
     monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-used-for-a-call")
 
     source = """
@@ -302,6 +306,7 @@ def test_the_selected_adapter_carries_the_configured_model(
     constructor honours but the registry bypasses would leave the requirement
     unmet along the only path application code actually takes.
     """
+    pytest.importorskip("google.genai")  # SC-013: skips on a base install
     monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-used-for-a-call")
     monkeypatch.setenv(MODEL_ENV, "gemini-3.5-pro")
     assert default_adapter().model_id == "gemini-3.5-pro"  # type: ignore[attr-defined]

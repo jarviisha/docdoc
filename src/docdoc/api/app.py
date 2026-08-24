@@ -38,22 +38,18 @@ from docdoc.api.models import (
     StageOutcomeView,
     SubmissionResponse,
 )
+from docdoc.api.settings import (
+    DEFAULT_MAX_REQUEST_BYTES,
+    REQUEST_BYTES_ENV,
+    SCHEMA_PATHS_ENV,
+    STORE_ROOT_ENV,
+)
 
 if TYPE_CHECKING:
     from docdoc.artifacts import ArtifactStore, BlobStore
     from docdoc.pipeline import PipelineResult
 
 __all__ = ["build_app", "create_app"]
-
-#: The same setting the CLI reads. One vocabulary, not two (FR-031).
-STORE_ROOT_ENV = "DOCDOC_STORE_ROOT"
-SCHEMA_PATHS_ENV = "DOCDOC_SCHEMA_PATHS"
-
-#: The request body cap, in bytes, applied while reading. Distinct from the
-#: document size limit: this one bounds what the *process* will hold, and it has
-#: to fire before ``ingest`` can be consulted at all.
-REQUEST_BYTES_ENV = "DOCDOC_MAX_REQUEST_BYTES"
-DEFAULT_MAX_REQUEST_BYTES = 32 * 1024 * 1024
 
 
 class _Deployment:

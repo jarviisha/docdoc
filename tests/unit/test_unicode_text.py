@@ -16,6 +16,7 @@ accents and CJK, both verified to round-trip.
 
 from __future__ import annotations
 
+import importlib.util
 import unicodedata
 from pathlib import Path
 
@@ -180,6 +181,13 @@ class TestZeroPageDocument:
     ("cannot save with zero pages"), so the only way to have one is to author the
     bytes.
     """
+
+    # SC-013: refusing a zero-page PDF still requires opening it, so this class
+    # needs the native reader that a base install does not have.
+    pytestmark = pytest.mark.skipif(
+        importlib.util.find_spec("pymupdf") is None,
+        reason="needs the native PDF reader (docdoc[pdf])",
+    )
 
     def test_it_is_refused_as_unreadable_rather_than_routed(self) -> None:
         # Left to the text-layer rule this would come out "not usable" and the

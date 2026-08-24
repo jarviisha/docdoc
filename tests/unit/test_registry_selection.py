@@ -20,6 +20,13 @@ from docdoc.ingest.registry import ParserRegistry, default_registry
 from docdoc.ingest.source import PDF, PNG, SourceFile
 from docdoc.kernel import Document
 
+# SC-013: the offline suite must pass on a base install — one with no provider
+# SDK at all. Constitution XII: "Provider adapters MUST have integration tests;
+# those tests MUST NOT be required to run the unit and property suites." These
+# tests exercise parser selection over the installed registry, so they skip
+# rather than fail when it is absent.
+pytest.importorskip("pymupdf")
+
 PDF_TEXT = CapabilityRequest(media_type=PDF, text=True)
 PDF_GEOMETRY = CapabilityRequest(media_type=PDF, text=True, geometry=True)
 PDF_TABLES = CapabilityRequest(media_type=PDF, text=True, tables=True)

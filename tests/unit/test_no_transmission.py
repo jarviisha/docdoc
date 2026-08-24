@@ -26,6 +26,13 @@ from docdoc.extraction import (
 from docdoc.extraction.adapters.gemini import GeminiAdapter
 from tests.support import make_document
 
+# SC-013: the offline suite must pass on a base install — one with no provider
+# SDK at all. Constitution XII: "Provider adapters MUST have integration tests;
+# those tests MUST NOT be required to run the unit and property suites." These
+# tests exercise what a provider adapter does and does not send, so they skip
+# rather than fail when it is absent.
+pytest.importorskip("google.genai")
+
 DOCUMENT_TEXT = "ACME LTD\nINV-001\nTotal 1,240.00\n"
 
 
