@@ -74,7 +74,20 @@ secrets.toml
 # ---------------------------------------------------------------------------
 # Local content-addressed artifact store (ADR-0003). Artifacts are immutable
 # and reproducible from the pipeline; they are regenerated, never versioned.
-artifacts/
+#
+# ANCHORED, and it must stay anchored. Written as a bare `artifacts/`, this rule
+# also matched `src/docdoc/artifacts/` — so the entire artifacts *layer* was
+# untracked, `import docdoc.pipeline` raised ModuleNotFoundError on a fresh
+# clone, and the commit whose message announced that layer contained its tests
+# and none of its source. A full green gate did not notice, because every check
+# reads the working tree.
+#
+# A store lives wherever DOCDOC_STORE_ROOT points, which is an operator's
+# directory rather than a path in this repository; `/artifacts/` and the two
+# rules below cover the ones that could appear here. `tests/unit/test_packaging.py`
+# now fails if any `src/docdoc/*` package goes missing from a built wheel, which
+# is the check that would have caught this in seconds.
+/artifacts/
 .docdoc/
 *.docdoc-cache
 
