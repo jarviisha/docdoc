@@ -63,8 +63,13 @@ the id exists, the cloud parser has been billed and the model has answered. So:
 |---|---|---|---|---|
 | nothing | reused | reused | reused | reused |
 | the prompt, or the schema | reused | executed | executed | executed |
-| the model | reused | executed | executed | executed |
-| a validation rule | reused | reused | reused | executed |
+| the model, or a decoding parameter | reused | executed | executed | executed |
+| a grounding threshold | reused | reused | executed | executed |
+| a grounding policy, or the enabled rules | reused | reused | reused | executed |
+
+The last two rows need the per-stage options — `run(..., grounding_options=…,
+validation_options=…)`. Without them the bottom two stages have no reachable input that invalidates
+them alone, which is how they came to be added.
 
 Nothing is ever deleted or marked stale. The store is append-only, and invalidation is a consequence
 of a **new identity** rather than an act performed on an old one — which is why running an old schema

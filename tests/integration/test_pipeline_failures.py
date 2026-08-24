@@ -161,10 +161,14 @@ def test_a_run_that_fails_at_ground_keeps_the_parse_and_the_extraction(
 
     foreign = _foreign_extraction()
 
-    def _ground_a_foreign_extraction(document: Any, extraction: Any) -> Any:
+    def _ground_a_foreign_extraction(document: Any, extraction: Any, **kwargs: Any) -> Any:
         from docdoc.grounding import ground
 
-        return ground(document, foreign)
+        # `**kwargs` forwards whatever the runner passes — `options` today. A
+        # double with a frozen signature turns a *signature* change into a
+        # TypeError the pipeline attributes to the wrong stage, which is exactly
+        # what happened when per-stage options were threaded through.
+        return ground(document, foreign, **kwargs)
 
     monkeypatch.setattr("docdoc.pipeline.runner._ground", _ground_a_foreign_extraction)
     result = _run()
@@ -198,11 +202,11 @@ def test_a_run_that_fails_at_validate_keeps_the_first_three(
     foreign = _foreign_extraction()
 
     def _validate_against_a_foreign_extraction(
-        extraction: Any, grounding: Any, *, registry: Any, schema: str
+        extraction: Any, grounding: Any, *, registry: Any, schema: str, **kwargs: Any
     ) -> Any:
         from docdoc.validation import validate
 
-        return validate(foreign, grounding, registry.resolve(schema).schema)
+        return validate(foreign, grounding, registry.resolve(schema).schema, **kwargs)
 
     monkeypatch.setattr(
         "docdoc.pipeline.runner._validate", _validate_against_a_foreign_extraction

@@ -371,3 +371,143 @@ def test_clearing_one_stage_keeps_the_expensive_one(
     assert statuses(after)["extract"] == "reused"
     assert statuses(after)["ground"] == "reused"
     assert statuses(after)["validate"] == "executed"
+
+
+# -- FR-013 for the two stages that had no reachable lever -------------------
+#
+# `run()` accepted parse options only until Phase 11, so `ExtractionOptions`,
+# `GroundingOptions` and `ValidationOptions` could not be supplied — and those
+# are the only inputs that invalidate their stage *alone*. FR-013's "reuse is
+# partial and per-stage" was demonstrable in one direction (edit the schema or
+# the model, the parse is reused) and unreachable in the other. Three of the four
+# stages had no lever; these are the tests that would have failed.
+
+
+def test_a_validation_option_recomputes_validate_and_nothing_else(
+    source: bytes, registry: SchemaRegistry, adapter: EchoAdapter, store: FileArtifactStore
+) -> None:
+    """The narrowest invalidation the chain can express, and the proof it works.
+
+    A stricter grounding policy changes what validation *means* without changing
+    a single value: the parse, the extraction, and the grounding are all still
+    exactly right, and only the verdict moves. That is precisely the case
+    ADR-0003's per-stage chain exists for, and until the option could be supplied
+    there was no way to reach it.
+    """
+    from docdoc.validation.options import GroundingPolicy, ValidationOptions
+    from docdoc.validation.severity import Severity
+
+    first = run(source, schema=SCHEMA, registry=registry, adapter=adapter, store=store)
+    assert first.validation is not None
+
+    strict = ValidationOptions(grounding_policy=GroundingPolicy(ungrounded=Severity.ERROR))
+    second = run(
+        source,
+        schema=SCHEMA,
+        registry=registry,
+        adapter=adapter,
+        store=store,
+        validation_options=strict,
+    )
+
+    assert statuses(second) == {
+        "parse": "reused",
+        "extract": "reused",
+        "ground": "reused",
+        "validate": "executed",
+    }
+
+    assert second.validation is not None
+    assert second.validation.verdict is not first.validation.verdict, (
+        "if the verdict did not move, the option changed nothing and this test "
+        "would pass on a pipeline that ignored it entirely"
+    )
+    assert second.extraction == first.extraction, "the reused stages are unchanged"
+    assert second.grounding == first.grounding
+
+
+def test_a_grounding_option_recomputes_ground_and_validate(
+    source: bytes, registry: SchemaRegistry, adapter: EchoAdapter, store: FileArtifactStore
+) -> None:
+    """Ground is invalidated, and validate follows because its input moved.
+
+    Downstream invalidation is not an act performed on the validate artifact —
+    it is a consequence of grounding producing a different identity, which gives
+    validate a different input and therefore a different identity of its own.
+    """
+    from docdoc.grounding.options import GroundingOptions
+
+    run(source, schema=SCHEMA, registry=registry, adapter=adapter, store=store)
+    second = run(
+        source,
+        schema=SCHEMA,
+        registry=registry,
+        adapter=adapter,
+        store=store,
+        grounding_options=GroundingOptions(threshold=0.95),
+    )
+
+    assert statuses(second) == {
+        "parse": "reused",
+        "extract": "reused",
+        "ground": "executed",
+        "validate": "executed",
+    }
+
+
+def test_an_extraction_option_recomputes_everything_below_the_parse(
+    source: bytes, registry: SchemaRegistry, adapter: EchoAdapter, store: FileArtifactStore
+) -> None:
+    """Decoding parameters change results, and are folded for that reason.
+
+    A caller wanting a different temperature had to bypass the pipeline
+    altogether before this, which meant giving up reuse to change a setting whose
+    whole purpose is to be changed while iterating.
+    """
+    from docdoc.extraction.adapter import ExtractionOptions
+
+    run(source, schema=SCHEMA, registry=registry, adapter=adapter, store=store)
+    second = run(
+        source,
+        schema=SCHEMA,
+        registry=registry,
+        adapter=adapter,
+        store=store,
+        extraction_options=ExtractionOptions(temperature=0.7),
+    )
+
+    assert statuses(second)["parse"] == "reused", "the expensive stage is still reused"
+    assert statuses(second)["extract"] == "executed"
+    assert statuses(second)["ground"] == "executed"
+    assert statuses(second)["validate"] == "executed"
+
+
+def test_the_same_options_twice_reuse_everything(
+    source: bytes, registry: SchemaRegistry, adapter: EchoAdapter, store: FileArtifactStore
+) -> None:
+    """The other half: an option that is *supplied* must still be reusable.
+
+    Threading options to the stage call and not to its identity computation —
+    or the reverse — would give a run whose stored identity does not describe
+    what it stored, and every run would miss forever. This is the assertion that
+    the two agree.
+    """
+    from docdoc.grounding.options import GroundingOptions
+    from docdoc.validation.options import ValidationOptions
+
+    kwargs = {
+        "schema": SCHEMA,
+        "registry": registry,
+        "adapter": adapter,
+        "store": store,
+        "grounding_options": GroundingOptions(threshold=0.95),
+        "validation_options": ValidationOptions(),
+    }
+
+    run(source, **kwargs)  # type: ignore[arg-type]
+    second = run(source, **kwargs)  # type: ignore[arg-type]
+
+    assert second.executed_count == 0, (
+        "a run with explicit options did not reuse itself, so the identity the "
+        "pipeline computed does not match what the stage produced"
+    )

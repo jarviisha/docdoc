@@ -18,6 +18,9 @@ result = run(
     store=store,               # ArtifactStore; defaults to NullArtifactStore
     limits=None,               # ingest.Limits; defaults as ingest defaults
     options=None,              # parse options, folded into document_id
+    extraction_options=None,   # ExtractionOptions; decoding params, folded into the extract id
+    grounding_options=None,    # GroundingOptions; threshold and budget
+    validation_options=None,   # ValidationOptions; grounding policy and enabled rules
     request_id=None,           # correlation only; never enters an identity
 )
 ```
@@ -27,6 +30,19 @@ never an untyped exception (FR-051).
 
 Synchronous, in-process, and usable with no store, no service, no database, and no network beyond
 whatever the configured adapter and parser themselves need (FR-008).
+
+**Each stage takes its own options, and each is folded into that stage's identity.** They were
+absent until a convergence pass noticed what that cost: the per-stage options are the only inputs
+that invalidate their stage *alone*, so with only parse options reachable, FR-013's "reuse is partial
+and per-stage" held in one direction — edit the schema or the model and the parse is reused — and was
+unreachable in the other. A stricter grounding policy now recomputes validate and nothing else; a
+different fuzzy threshold recomputes ground and validate; a different temperature recomputes
+everything below the parse.
+
+An option supplied to a stage and an option folded into that stage's identity must be the same value.
+If they ever diverge the run stores a result under an identity that does not describe it, and every
+subsequent run misses forever — which is why `tests/integration/test_reuse.py` asserts that a run
+with explicit options reuses *itself*.
 
 ## 2. The stages are four, named, and versioned
 

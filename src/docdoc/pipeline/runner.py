@@ -180,6 +180,9 @@ def run(
     document: Document | None = None,
     limits: Limits | None = None,
     options: Mapping[str, Any] | None = None,
+    extraction_options: Any = None,
+    grounding_options: Any = None,
+    validation_options: Any = None,
     request_id: str | None = None,
     verify: bool = False,
 ) -> PipelineResult:
@@ -228,6 +231,9 @@ def run(
             document=document,
             limits=limits,
             options=options,
+            extraction_options=extraction_options,
+            grounding_options=grounding_options,
+            validation_options=validation_options,
             request_id=request_id,
         )
 
@@ -242,6 +248,9 @@ def _run(
     document: Document | None,
     limits: Limits | None,
     options: Mapping[str, Any] | None,
+    extraction_options: Any,
+    grounding_options: Any,
+    validation_options: Any,
     request_id: str | None,
 ) -> PipelineResult:
     """The run itself, inside the correlation scope ``run`` established.
@@ -309,14 +318,24 @@ def _run(
         # the model that answered, so this is a prediction rather than a
         # derivation, and the write below only happens when it came true.
         expected = extract_artifact_id(
-            parsed.id, schema=schema, registry=registry, adapter=adapter
+            parsed.id,
+            schema=schema,
+            registry=registry,
+            adapter=adapter,
+            options=extraction_options,
         )
         cached = reuse.get(expected, ExtractionResult, _format(Stage.EXTRACT))
         if cached is not None:
             extraction = _retyped(cached, schema=schema, registry=registry)
             outcomes.append(_reused(Stage.EXTRACT, expected, clock))
         else:
-            extraction = _extract(parsed, schema=schema, registry=registry, adapter=adapter)
+            extraction = _extract(
+                parsed,
+                schema=schema,
+                registry=registry,
+                adapter=adapter,
+                options=extraction_options,
+            )
             if extraction.artifact_id == expected:
                 reuse.put(
                     expected,
@@ -345,13 +364,15 @@ def _run(
         processors[Stage.EXTRACT.value] = _processor_record(Stage.EXTRACT, extraction)
 
         clock = _Clock()
-        expected = ground_artifact_id(extraction.artifact_id)
+        expected = ground_artifact_id(
+            extraction.artifact_id, options=grounding_options
+        )
         cached = reuse.get(expected, GroundingResult, _format(Stage.GROUND))
         if cached is not None:
             grounding = cached
             outcomes.append(_reused(Stage.GROUND, expected, clock))
         else:
-            grounding = _ground(parsed, extraction)
+            grounding = _ground(parsed, extraction, options=grounding_options)
             reuse.put(
                 grounding.artifact_id,
                 grounding,
@@ -365,14 +386,23 @@ def _run(
 
         clock = _Clock()
         expected = validate_artifact_id(
-            grounding.artifact_id, schema=schema, registry=registry
+            grounding.artifact_id,
+            schema=schema,
+            registry=registry,
+            options=validation_options,
         )
         cached = reuse.get(expected, ValidationResult, _format(Stage.VALIDATE))
         if cached is not None:
             validation = cached
             outcomes.append(_reused(Stage.VALIDATE, expected, clock))
         else:
-            validation = _validate(extraction, grounding, registry=registry, schema=schema)
+            validation = _validate(
+                extraction,
+                grounding,
+                registry=registry,
+                schema=schema,
+                options=validation_options,
+            )
             reuse.put(
                 validation.artifact_id,
                 validation,
@@ -644,19 +674,27 @@ def _execute_parse(plan: Any) -> Document:
     return execute_plan(plan)
 
 
-def _extract(document: Document, *, schema: str, registry: Any, adapter: Any) -> Any:
+def _extract(
+    document: Document, *, schema: str, registry: Any, adapter: Any, options: Any = None
+) -> Any:
     from docdoc.extraction.extract import extract
 
-    return extract(document, schema=schema, registry=registry, adapter=adapter)
+    return extract(
+        document, schema=schema, registry=registry, adapter=adapter, options=options
+    )
 
 
-def _ground(document: Document, extraction: Any) -> Any:
+def _ground(document: Document, extraction: Any, *, options: Any = None) -> Any:
     from docdoc.grounding import ground
 
-    return ground(document, extraction)
+    return ground(document, extraction, options=options)
 
 
-def _validate(extraction: Any, grounding: Any, *, registry: Any, schema: str) -> Any:
+def _validate(
+    extraction: Any, grounding: Any, *, registry: Any, schema: str, options: Any = None
+) -> Any:
     from docdoc.validation import validate
 
-    return validate(extraction, grounding, registry.resolve(schema).schema)
+    return validate(
+        extraction, grounding, registry.resolve(schema).schema, options=options
+    )

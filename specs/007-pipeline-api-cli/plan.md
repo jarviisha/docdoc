@@ -203,6 +203,7 @@ tests/
     ├── test_cli_offline.py           # SC-001, no credentials and no network
     ├── test_reuse.py                 # SC-002, SC-003, SC-005, FR-059, FR-061
     ├── test_no_leak.py               # SC-008, FR-042's surfaces, FR-045 on the raise path
+    ├── test_failure_surfaces_agree.py # the Edge Case: CLI, HTTP and recorder agree
     ├── test_recorder_parity.py       # SC-014
     └── test_eval_cost.py             # SC-015
 ```
