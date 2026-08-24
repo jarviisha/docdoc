@@ -11,6 +11,7 @@ Two rules shape this module:
 
 from __future__ import annotations
 
+import os
 from typing import Final
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -18,7 +19,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from docdoc.ingest.errors import UnsupportedDocumentError
 from docdoc.kernel import BlobRef, blob_id_for
 
-__all__ = ["Limits", "SourceFile", "detect_media_type"]
+__all__ = [
+    "MAX_DOCUMENT_BYTES_ENV",
+    "MAX_PAGES_ENV",
+    "Limits",
+    "SourceFile",
+    "detect_media_type",
+]
 
 PDF: Final = "application/pdf"
 JPEG: Final = "image/jpeg"
@@ -46,10 +53,43 @@ def detect_media_type(data: bytes) -> str | None:
     return None
 
 
+#: The document size limit, as configuration rather than only as a constructor
+#: argument. FR-039 requires "a configurable maximum document size", and until
+#: Milestone 7's convergence pass it was configurable only by a caller importing
+#: the library — so an operator running the command line or the service could set
+#: the request cap and not this. Named in the style of every other docdoc setting
+#: so there is no second vocabulary (FR-031).
+MAX_DOCUMENT_BYTES_ENV = "DOCDOC_MAX_DOCUMENT_BYTES"
+MAX_PAGES_ENV = "DOCDOC_MAX_PAGES"
+
+DEFAULT_MAX_SIZE_BYTES = 50 * 1024 * 1024
+DEFAULT_MAX_PAGES = 1000
+
+
+def _from_env(name: str, default: int) -> int:
+    """A positive integer from the environment, or the documented default.
+
+    An unparseable or non-positive value falls back rather than raising. A typo
+    in a size limit should not stop a document being processed, and the default
+    is always a safe answer — it is the value the deployment had yesterday.
+    """
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        parsed = int(raw)
+    except ValueError:
+        return default
+    return parsed if parsed > 0 else default
+
+
 class Limits(BaseModel):
     """What this deployment is willing to accept.
 
-    Defaults are a starting point, tunable per deployment.
+    Defaults are a starting point, tunable per deployment — by construction for a
+    caller holding the library, and by ``DOCDOC_MAX_DOCUMENT_BYTES`` and
+    ``DOCDOC_MAX_PAGES`` for one running the command or the service. An explicit
+    argument still wins, which is the precedence every other setting uses.
 
     ``image/tiff`` is deliberately absent: multi-page TIFF is common, and
     supporting it would need the page-splitting semantics this milestone puts
@@ -59,8 +99,12 @@ class Limits(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    max_size_bytes: int = Field(default=50 * 1024 * 1024, gt=0)
-    max_pages: int = Field(default=1000, gt=0)
+    max_size_bytes: int = Field(default_factory=lambda: _from_env(
+        MAX_DOCUMENT_BYTES_ENV, DEFAULT_MAX_SIZE_BYTES
+    ), gt=0)
+    max_pages: int = Field(default_factory=lambda: _from_env(
+        MAX_PAGES_ENV, DEFAULT_MAX_PAGES
+    ), gt=0)
     allowed_media_types: frozenset[str] = frozenset({PDF, JPEG, PNG})
 
 

@@ -224,6 +224,8 @@ Three more exist and are rarely worth touching:
 export DOCDOC_ECHO_FIXTURES=./fixtures    # canned answers for the offline `echo` adapter
 export DOCDOC_MATCH_VIEW_CACHE=8          # folded views held in memory; LRU, default 8
 export DOCDOC_MAX_REQUEST_BYTES=33554432  # HTTP request body cap, applied while reading
+export DOCDOC_MAX_DOCUMENT_BYTES=52428800 # largest document accepted, before any parse
+export DOCDOC_MAX_PAGES=1000              # page-count limit, checked as soon as it is known
 ```
 
 `DOCDOC_ECHO_FIXTURES` is the one to know about: with `DOCDOC_MODEL_ADAPTERS=echo` it makes the whole

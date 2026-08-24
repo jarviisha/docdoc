@@ -241,6 +241,7 @@ CONFIG_MODULES = {
     "docdoc.cli.config": ("STORE_ROOT_ENV",),
     "docdoc.grounding.view": ("MATCH_VIEW_CACHE_ENV",),
     "docdoc.api.app": ("REQUEST_BYTES_ENV",),
+    "docdoc.ingest.source": ("MAX_DOCUMENT_BYTES_ENV", "MAX_PAGES_ENV"),
 }
 
 #: Wider than DOCUMENTS: configuration is described in places that carry no python
