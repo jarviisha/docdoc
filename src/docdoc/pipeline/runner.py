@@ -387,6 +387,14 @@ def _run(
     except PipelineError:
         # Sequencing itself failed. Not a stage's error, and not something to
         # record as one.
+        #
+        # The events for the stages that *did* run are emitted before re-raising
+        # (FR-045). They were emitted nowhere at all until Milestone 7's
+        # convergence pass measured it: a run that raised produced zero
+        # `pipeline.stage` events, because `_emit` sat only on the return path.
+        # The runs most worth having events for are disproportionately the ones
+        # that failed.
+        _emit(outcomes, extraction=extraction, terminal=None)
         raise
     except ArtifactError:
         # The store is corrupt or refused a divergent write. Neither is a *stage*
@@ -399,6 +407,11 @@ def _run(
         # `contracts/pipeline-api.md` §1 says this layer raises the typed errors
         # of the layers below, and §6 says a `content_id` mismatch raises rather
         # than executing (FR-014). Clearing is the supported recovery (FR-019).
+        #
+        # Same reason as above: the stages that ran get their events, and this is
+        # the case where they matter most. An operator whose store has gone bad
+        # wants to know how far the run got before it noticed.
+        _emit(outcomes, extraction=extraction, terminal=None)
         raise
     except Exception as error:
         failed_stage = _stage_of(error)

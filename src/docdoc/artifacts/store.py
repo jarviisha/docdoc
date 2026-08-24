@@ -39,6 +39,8 @@ from pydantic import BaseModel, ValidationError
 
 from docdoc.artifacts.envelope import ArtifactEnvelope, content_id_of
 from docdoc.artifacts.errors import ArtifactError
+from docdoc.artifacts.paths import FILE_MODE as _FILE_MODE
+from docdoc.artifacts.paths import secure_mkdir
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -63,12 +65,6 @@ class _Write(Enum):
     EXISTS = "exists"
     #: The store could not be written to at all. Degrade, do not raise (FR-063).
     FAILED = "failed"
-
-
-#: Owner-only, on both the directories and the files. FR-044: these hold
-#: extracted values, and the blobs beside them hold whole documents.
-_DIR_MODE = 0o700
-_FILE_MODE = 0o600
 
 
 class ArtifactStore(Protocol):
@@ -358,7 +354,7 @@ class FileArtifactStore:
         """
         temporary: str | None = None
         try:
-            path.parent.mkdir(parents=True, exist_ok=True, mode=_DIR_MODE)
+            secure_mkdir(path.parent, below=self.root)
             handle, temporary = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
             with os.fdopen(handle, "w", encoding="utf-8") as stream:
                 stream.write(text)

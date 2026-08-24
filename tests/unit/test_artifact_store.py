@@ -335,3 +335,63 @@ def test_the_null_store_misses_and_drops() -> None:
     assert store.get(ID, model=_Result, artifact_format_version=1) is None
     assert store.envelope(ID) is None
     assert store.clear() == 0
+
+
+# -- the blob store (FR-021, FR-044) ----------------------------------------
+
+
+def test_blobs_are_stored_once_per_content(tmp_path: Path) -> None:
+    """FR-021 — identical bytes hash to one identity and one stored copy."""
+    from docdoc.artifacts import BlobStore
+
+    blobs = BlobStore(tmp_path)
+    data = b"%PDF-1.4\nthe same document twice\n"
+
+    first = blobs.put(data)
+    second = blobs.put(data)
+
+    assert first == second
+    assert len(list((tmp_path / "blobs").glob("*/*"))) == 1
+    assert blobs.get(first) == data
+    assert blobs.size_of(first) == len(data)
+
+
+def test_blobs_are_not_group_or_world_readable(tmp_path: Path) -> None:
+    """FR-044, on the store the requirement names explicitly — and why.
+
+    An artifact holds the values extracted from a document. A blob holds *the
+    document*. FR-044 calls blobs out by name because they are the more sensitive
+    of the two and the easier to overlook, and the artifact store's own
+    permissions test above is what made this omission easy to miss: the property
+    was asserted for one store and merely implemented for the other.
+    """
+    from docdoc.artifacts import BlobStore
+
+    blobs = BlobStore(tmp_path)
+    blob_id = blobs.put(b"%PDF-1.4\nsomething confidential\n")
+
+    path = next((tmp_path / "blobs").glob("*/*"))
+    assert stat.S_IMODE(path.stat().st_mode) & 0o077 == 0, "the blob is readable by others"
+    assert stat.S_IMODE(path.parent.stat().st_mode) & 0o077 == 0, "its fan-out directory is"
+    assert stat.S_IMODE((tmp_path / "blobs").stat().st_mode) & 0o077 == 0, "the blob root is"
+    assert blobs.get(blob_id) is not None, "and it is still readable by its owner"
+
+
+def test_a_malformed_blob_id_is_refused_rather_than_resolved(tmp_path: Path) -> None:
+    """An identity is a filename here, so a separator would escape the root."""
+    from docdoc.artifacts import ArtifactError, BlobStore
+
+    blobs = BlobStore(tmp_path)
+    for bad in ("../../etc/passwd", "sha256:not-hex", "", "sha256:"):
+        with pytest.raises(ArtifactError):
+            blobs.get(bad)
+
+
+def test_an_absent_blob_is_a_miss_and_not_an_error(tmp_path: Path) -> None:
+    from docdoc.artifacts import BlobStore
+
+    blobs = BlobStore(tmp_path)
+    absent = "sha256:" + "0" * 64
+
+    assert blobs.get(absent) is None
+    assert blobs.size_of(absent) is None

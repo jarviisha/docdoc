@@ -308,9 +308,42 @@ def test_an_oversized_request_is_refused_before_anything_is_parsed(
     )
     client = TestClient(build_app(deployment))
 
+    before = _temporary_files(tmp_path)
     response = client.post("/v1/documents", content=source)
+
     assert response.status_code == 413
     assert not list((tmp_path / "blobs").glob("*/*")), "nothing may be stored"
+    assert _temporary_files(tmp_path) == before, (
+        "a refused submission left a temporary file behind (SC-009, FR-041)"
+    )
+
+
+def _temporary_files(root: Path) -> set[Path]:
+    """Every scratch file under a store root.
+
+    Both stores write through `mkstemp` and link or replace into place, so a
+    surviving `.tmp` means a path that unlinked nothing — which accumulates
+    silently across runs, which is precisely what FR-041 forbids.
+    """
+    return set(root.rglob("*.tmp"))
+
+
+def test_a_completed_run_leaves_no_temporary_file(
+    client: TestClient, source: bytes, tmp_path: Path
+) -> None:
+    """The success path, which is the one nobody thinks to check.
+
+    A failure that leaks a temp file gets noticed when the disk fills; a
+    *success* that leaks one fills the disk quietly, at a rate proportional to
+    how well the deployment is working.
+    """
+    blob_id = submit(client, source)
+    extract(client, blob_id)
+    client.get(f"/v1/documents/{blob_id}")
+
+    assert not _temporary_files(tmp_path), (
+        f"a completed run left scratch files behind: {sorted(_temporary_files(tmp_path))}"
+    )
 
 
 def test_a_disallowed_media_type_is_refused(client: TestClient, tmp_path: Path) -> None:

@@ -22,15 +22,13 @@ import tempfile
 from pathlib import Path
 
 from docdoc.artifacts.errors import ArtifactError
+from docdoc.artifacts.paths import FILE_MODE as _FILE_MODE
+from docdoc.artifacts.paths import secure_mkdir
 from docdoc.kernel import blob_id_for
 
 __all__ = ["BlobStore"]
 
 _logger = logging.getLogger("docdoc.artifacts")
-
-_DIR_MODE = 0o700
-_FILE_MODE = 0o600
-
 
 class BlobStore:
     """Source bytes on a filesystem, keyed by their own content."""
@@ -58,7 +56,7 @@ class BlobStore:
             # bytes. There is nothing to compare and nothing to overwrite.
             return blob_id
 
-        path.parent.mkdir(parents=True, exist_ok=True, mode=_DIR_MODE)
+        secure_mkdir(path.parent, below=self.root)
         handle, temporary = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
         try:
             with os.fdopen(handle, "wb") as stream:
