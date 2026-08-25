@@ -73,12 +73,14 @@ def test_no_new_optional_extra_was_added_for_evaluation() -> None:
     extras = set(_config()["project"].get("optional-dependencies", {}))
 
     # `api` was added by Milestone 7 for the HTTP interface, which is genuinely
-    # optional — the library and the command line are complete without it. The
-    # claim this test makes is unchanged and still holds: there is no
+    # optional — the library and the command line are complete without it. `gcv`
+    # was added with the Cloud Vision parser, and is optional for the reason every
+    # provider extra is: Principle IV forbids the base install pulling in an OCR
+    # engine. The claim this test makes is unchanged and still holds: there is no
     # `evaluation` extra, and none of the others gates scoring. Note also the
     # absence of a `cli` extra, which is not an oversight: the command line is
     # argparse, so there is nothing to keep out of the base install.
-    assert extras == {"pdf", "azure", "google", "api", "dev"}, (
+    assert extras == {"pdf", "azure", "google", "gcv", "api", "dev"}, (
         f"the extras are now {sorted(extras)}; evaluation must need none of its own"
     )
 

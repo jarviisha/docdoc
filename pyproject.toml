@@ -48,6 +48,10 @@ azure = ["azure-ai-documentintelligence>=1.0"]
 # `google-genai` SDK, not the legacy `google-generativeai`. Apache-2.0, so no
 # licence caveat like the pdf extra's.
 google = ["google-genai>=1.0"]
+# The image OCR recognition path. A separate extra from `google` despite the
+# shared vendor: they are different SDKs serving different layers -- extraction
+# and ingest -- and a deployment wanting one has no reason to install the other.
+gcv = ["google-cloud-vision>=3.4"]
 # The HTTP interface of Milestone 7, confined to `docdoc.api` and enforced there
 # by the forbidden-imports contracts below, which name `fastapi` for every
 # deterministic layer. An extra rather than a base dependency for the same reason
@@ -139,6 +143,18 @@ strict = false
 [[tool.mypy.overrides]]
 module = "docdoc.ingest.parsers.pdf_text"
 disallow_untyped_calls = false
+
+# google-cloud-vision and its api_core/auth dependencies ship no py.typed marker,
+# so every symbol imported from them is untyped. Same reasoning as the PyMuPDF
+# override above and confined the same way: to the one module whose job is to
+# talk to that library. Everything the adapter hands onward is annotated.
+[[tool.mypy.overrides]]
+module = "docdoc.ingest.parsers.gcv"
+disallow_untyped_calls = false
+
+[[tool.mypy.overrides]]
+module = ["google.*"]
+ignore_missing_imports = true
 
 # ---------------------------------------------------------------------------
 # pytest
@@ -389,12 +405,14 @@ forbidden_modules = [
     "pymupdf",
     "fitz",
     "azure",
+    "google",
 ]
 ignore_imports = [
     "docdoc.ingest.parsers.pdf_text -> pymupdf",
     "docdoc.ingest.parsers.pdf_text -> fitz",
     "docdoc.ingest.parsers.azure_di -> azure",
     "docdoc.ingest.parsers.azure_di -> httpx",
+    "docdoc.ingest.parsers.gcv -> google",
 ]
 # The adapters arrive task by task; an ignore naming a module that does not
 # exist yet is expected, not a misconfiguration.

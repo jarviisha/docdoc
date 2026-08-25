@@ -123,7 +123,7 @@ def test_the_adapter_directory_is_the_only_exception_and_is_small() -> None:
     """
     adapters = {path.name for path in ADAPTER_DIR.glob("*.py")} - {"__init__.py"}
 
-    assert adapters <= {"pdf_text.py", "azure_di.py"}, (
+    assert adapters <= {"pdf_text.py", "azure_di.py", "gcv.py"}, (
         f"unexpected adapter modules {sorted(adapters)}; add them to the "
         "import-linter ignore list in pyproject.toml in the same change"
     )

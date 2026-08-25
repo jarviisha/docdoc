@@ -16,6 +16,7 @@ survive, hyphenated line breaks are not rejoined, and no table is linearized
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from docdoc.kernel import (
     BBox,
@@ -29,7 +30,10 @@ from docdoc.kernel import (
     Token,
 )
 
-__all__ = ["DocumentBuilder", "PageFrame", "normalize_bbox"]
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+__all__ = ["DocumentBuilder", "PageFrame", "Word", "normalize_bbox"]
 
 #: How far outside the page a box may sit before it stops being rendering slop
 #: and starts being a bug, as a fraction of the page dimension.
@@ -114,6 +118,12 @@ def _clamp_or_raise(
     )
 
 
+#: One word as an adapter hands it over: its text, its box, and the provider's
+#: own confidence if it reported one. A plain 2-tuple is still accepted, because
+#: an offline parser has no confidence to report and should not have to say so.
+Word = tuple[str, "BBox | None"] | tuple[str, "BBox | None", float | None]
+
+
 @dataclass(slots=True)
 class PageFrame:
     """One page under construction."""
@@ -123,7 +133,7 @@ class PageFrame:
     height: float
     rotation: int
     start: int
-    lines: list[list[tuple[str, BBox | None]]] = field(default_factory=list)
+    lines: list[list[tuple[str, BBox | None, float | None]]] = field(default_factory=list)
 
 
 class DocumentBuilder:
@@ -155,11 +165,16 @@ class DocumentBuilder:
             )
         )
 
-    def add_line(self, words: list[tuple[str, BBox | None]]) -> None:
-        """Add one line of words to the page opened most recently."""
+    def add_line(self, words: Sequence[Word]) -> None:
+        """Add one line of words to the page opened most recently.
+
+        A word is ``(text, bbox)`` or ``(text, bbox, confidence)``. Confidence is
+        the provider's own number, carried through untouched and never
+        interpreted here (ADR-0004).
+        """
         if not self._pages:
             raise ValueError("start_page() must be called before add_line()")
-        kept = [(text, box) for text, box in words if text]
+        kept = [(word[0], word[1], word[2] if len(word) > 2 else None) for word in words if word[0]]
         if kept:
             self._pages[-1].lines.append(kept)
 
@@ -182,7 +197,7 @@ class DocumentBuilder:
         for frame in self._pages:
             page_start = cursor
             for line in frame.lines:
-                for position, (word, box) in enumerate(line):
+                for position, (word, box, confidence) in enumerate(line):
                     if position:
                         chunks.append(" ")
                         cursor += 1
@@ -197,6 +212,7 @@ class DocumentBuilder:
                                 if self._geometry and box is not None
                                 else None
                             ),
+                            source_confidence=confidence,
                         )
                     )
                 # Line break. Part of the page's own span, so pages still tile.

@@ -202,6 +202,7 @@ test that runs both and compares. There is no authentication: put docdoc behind 
 pip install docdoc          # every deterministic layer and the CLI, no provider SDK
 pip install docdoc[pdf]     # native PDF text path
 pip install docdoc[azure]   # geometry-capable cloud path, for scans and images
+pip install docdoc[gcv]     # image OCR for JPEG and PNG — no tables, no PDFs
 pip install docdoc[google]  # the LLM adapter for extraction
 pip install docdoc[api]     # the HTTP interface
 ```

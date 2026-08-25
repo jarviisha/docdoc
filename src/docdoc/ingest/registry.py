@@ -17,6 +17,7 @@ useful thing to be told (FR-018).
 
 from __future__ import annotations
 
+import importlib.util
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -32,7 +33,14 @@ __all__ = ["DEFAULT_PRIORITY", "ParserRegistry", "RegistryEntry", "default_regis
 
 #: Offline before service-backed. A deployment reorders this; nothing in the
 #: code privileges one adapter over the other.
-DEFAULT_PRIORITY: tuple[str, ...] = ("pdf-text", "azure-di")
+#:
+#: Among the two recognition parsers, ``azure-di`` leads because it declares
+#: strictly more: it is the only one that supplies tables, so a deployment with
+#: both installed gets the richer result by default and reorders this list to
+#: prefer the cheaper one. For an image with no table requested the two are
+#: interchangeable, which is exactly when a stable order matters -- selection
+#: must not depend on which adapter happened to import first (R11, FR-016).
+DEFAULT_PRIORITY: tuple[str, ...] = ("pdf-text", "azure-di", "gcv")
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,6 +161,50 @@ class ParserRegistry:
         return position, entry.id
 
 
+def _sdk_installed(module: str) -> bool:
+    """Whether an adapter's provider SDK is importable.
+
+    An adapter module imports its SDK lazily, inside the method that reaches the
+    network, so that the mapping half stays testable on a base install. The
+    consequence is that importing the adapter *succeeds* with the extra missing,
+    and an `except ImportError` around that import therefore never fires. Left
+    unchecked, a deployment with credentials set but no extra installed selects
+    the parser and dies on a bare ImportError from inside `parse` -- a provider
+    failure crossing the public API, which the error model forbids outright
+    (FR-025). Probing the spec asks the question the import no longer answers.
+
+    `find_spec` raises rather than returning None when a *parent* package is
+    absent, and both outcomes mean the same thing here.
+    """
+    try:
+        return importlib.util.find_spec(module) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def _register_service_parser(
+    registry: ParserRegistry,
+    parser: Parser,
+    *,
+    sdk_module: str,
+    configured: bool,
+) -> None:
+    """Record a service-backed parser with the reason it cannot be used, if any.
+
+    The three states are distinct and a caller acts differently on each: install
+    the extra, configure the credentials, or use it. Collapsing the first two
+    into "unavailable" is the failure FR-018 exists to prevent.
+    """
+    if not _sdk_installed(sdk_module):
+        registry.register_unavailable(parser.id, parser.capabilities, reason="extra_not_installed")
+        return
+    registry.register(
+        parser,
+        available=configured,
+        reason=None if configured else "credentials_not_configured",
+    )
+
+
 def default_registry(priority: Sequence[str] | None = None) -> ParserRegistry:
     """A registry holding whichever adapters this installation can use.
 
@@ -174,34 +226,23 @@ def default_registry(priority: Sequence[str] | None = None) -> ParserRegistry:
             reason="extra_not_installed",
         )
     else:
+        # The native reader is the one adapter that does import its library at
+        # module scope, so the ImportError above is a real signal for it.
         registry.register(PdfTextParser())
 
-    try:
-        from docdoc.ingest.parsers.azure_di import (
-            AzureDocumentIntelligenceParser,
-            credentials_available,
-        )
-    except ImportError:
-        from docdoc.ingest.source import JPEG, PDF, PNG
+    from docdoc.ingest.parsers import azure_di, gcv
 
-        registry.register_unavailable(
-            "azure-di",
-            ParserCapabilities(
-                text=True,
-                geometry=True,
-                tables=True,
-                handwriting=True,
-                media_types=frozenset({PDF, JPEG, PNG}),
-                requires_network=True,
-            ),
-            reason="extra_not_installed",
-        )
-    else:
-        configured = credentials_available()
-        registry.register(
-            AzureDocumentIntelligenceParser(),
-            available=configured,
-            reason=None if configured else "credentials_not_configured",
-        )
+    _register_service_parser(
+        registry,
+        azure_di.AzureDocumentIntelligenceParser(),
+        sdk_module="azure.ai.documentintelligence",
+        configured=azure_di.credentials_available(),
+    )
+    _register_service_parser(
+        registry,
+        gcv.GoogleCloudVisionParser(),
+        sdk_module="google.cloud.vision",
+        configured=gcv.credentials_available(),
+    )
 
     return registry

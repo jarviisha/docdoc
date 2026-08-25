@@ -24,14 +24,13 @@ only for some documents, which is the worst kind of drift.
 from __future__ import annotations
 
 import os
-import random
-import time
 from typing import TYPE_CHECKING, Any, Final
 
 from docdoc.ingest.capabilities import ParserCapabilities
 from docdoc.ingest.errors import ParserError, ProviderError, UnsupportedDocumentError
 from docdoc.ingest.normalize import normalize_bbox
 from docdoc.ingest.options import options_fingerprint
+from docdoc.ingest.retry import analyze_with_retries
 from docdoc.ingest.source import JPEG, PDF, PNG
 from docdoc.kernel import (
     DocdocError,
@@ -453,81 +452,13 @@ class AzureDocumentIntelligenceParser:
     def _with_retries(self, source: SourceFile, transport: TransportSettings) -> Mapping[str, Any]:
         """At most ``max_attempts`` tries, bounded by an overall deadline.
 
-        Only transient failures are retried. A rejected credential or an
-        unsupported document fails on the first attempt, because trying again
-        cannot change the answer and doing so would just spend the deadline
-        (ING-21).
+        The policy itself lives in ``docdoc.ingest.retry``, shared with every
+        other service-backed parser. This method stays so ``self._analyze``
+        remains the single injection point the tests drive.
         """
-        deadline = transport.start()
-        last: ProviderError | None = None
-
-        for attempt in range(1, transport.max_attempts + 1):
-            if deadline.expired:
-                raise ProviderError(
-                    "the overall deadline expired before the parse completed",
-                    reason="deadline",
-                    parser_id=self.id,
-                    blob_id=source.blob_id,
-                    attempts=attempt - 1,
-                ) from last
-
-            try:
-                return self._analyze(source, transport, deadline)
-            except ProviderError as error:
-                error.attempts = attempt
-                if not error.transient or attempt == transport.max_attempts:
-                    raise
-                last = error
-                if not self._sleep_before_retry(attempt, transport, deadline, error):
-                    raise ProviderError(
-                        "the overall deadline left no room for another attempt",
-                        reason="deadline",
-                        parser_id=self.id,
-                        blob_id=source.blob_id,
-                        attempts=attempt,
-                    ) from error
-
-        raise ProviderError(  # pragma: no cover - loop always returns or raises
-            "exhausted every attempt",
-            reason="service",
-            parser_id=self.id,
-            blob_id=source.blob_id,
-            attempts=transport.max_attempts,
+        return analyze_with_retries(
+            self._analyze, source=source, transport=transport, parser_id=self.id
         )
-
-    def _sleep_before_retry(
-        self,
-        attempt: int,
-        transport: TransportSettings,
-        deadline: Deadline,
-        error: ProviderError,
-    ) -> bool:
-        """Wait before the next attempt. False if the deadline forbids it.
-
-        A service-supplied interval is a **floor**, not a suggestion. Jitter may
-        extend it and must never shorten it: coming back early to a service that
-        has just rate-limited you is how the next 429 is earned, and FR-038 says
-        *honour* the interval, which 17 seconds is not when 30 were asked for.
-
-        docdoc's own backoff is jittered in both directions, which is the usual
-        defence against a fleet of clients retrying in lockstep. That reasoning
-        does not transfer to an interval the server chose.
-
-        A service that asks for longer than the budget allows does not get it:
-        the parse fails on the deadline rather than sleeping past it.
-        """
-        requested = error.retry_after_s
-        if requested is not None:
-            wait = requested * (1.0 + random.random() * 0.25) if transport.jitter else requested
-        else:
-            wait = transport.backoff_for(attempt)
-            if transport.jitter:
-                wait *= 0.5 + random.random()
-
-        if not deadline.allows(wait):
-            return False
-        time.sleep(wait)
-        return True
 
     # -- the wire ----------------------------------------------------------
 

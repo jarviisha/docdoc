@@ -52,6 +52,24 @@ executes for the first time, having been text for five milestones.
 - **The match-view cache** ADR-0006 specified and grounding did not have, bounded and LRU.
 - **ADR-0010** (store layout, format versioning, the job model) and **ADR-0011** (the pre-1.0
   versioning policy). The constitution now lists **zero** open decisions.
+- **A third parser, `gcv`** — image OCR over Google Cloud Vision, behind `docdoc[gcv]`. It is the
+  first test of the claim the `Parser` protocol has been making since Milestone 2: adding a parser
+  is implementing the protocol and registering it, with no engine change. It declares JPEG and PNG,
+  `tables=False`, and `handwriting=True`, so it does **not** replace `azure-di` — a request for
+  tables will not select it, and a PDF cannot reach it at all. That is deliberate: the synchronous
+  Vision API takes no PDF, and the asynchronous one requires Cloud Storage buckets for input and
+  output, which is a storage dependency and a place for document content to come to rest outside the
+  process.
+
+  Unlike Azure, Vision supplies no offsets into the text it returns, so this adapter ignores that
+  string and assembles the text from the words — the correspondence is exact by construction rather
+  than recovered by searching (research.md R6). Line breaks come from the per-symbol break markers
+  the service does supply, so the layout remains the service's.
+- **`docdoc.ingest.retry`** — the transport retry policy, extracted from the Azure adapter now that a
+  second service-backed parser exists. Behaviour is unchanged, including that a service-requested
+  interval is a floor jitter may extend and never shorten. `docdoc.extraction.retry` stays separate:
+  it raises a different error type and treats a requested wait as exact, and the layering forbids
+  ingest importing extraction.
 
 ### Changed
 
@@ -74,6 +92,14 @@ executes for the first time, having been text for five milestones.
 
 - **`docdoc.recording`'s known limitation is closed.** Its module docstring recorded that every run
   re-parsed every document because nothing stored an artifact. Something does now.
+- **A service parser with credentials but no extra installed no longer reports itself usable.** An
+  adapter imports its SDK lazily, inside the method that reaches the network, so the `except
+  ImportError` guarding the adapter import in `default_registry` never fired — the registry answered
+  `credentials_not_configured` on an install that had no SDK at all, and with credentials set it
+  answered *available*, selected the parser, and died on a bare `ImportError` from inside `parse`.
+  That is a provider failure crossing the public API, which FR-025 forbids. The registry now probes
+  the SDK's module spec, which asks the question the import stopped answering. Found while adding
+  `gcv`, which inherited the same shape; both adapters are fixed.
 
 ---
 

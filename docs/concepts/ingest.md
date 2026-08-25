@@ -8,16 +8,32 @@ not persist, cache, extract, or ground.
 
 | | Native text path | Recognition path |
 |---|---|---|
-| Parser id | `pdf-text` | `azure-di` |
-| Extra | `docdoc[pdf]` | `docdoc[azure]` |
+| Parser id | `pdf-text` | `azure-di`, `gcv` |
+| Extra | `docdoc[pdf]` | `docdoc[azure]`, `docdoc[gcv]` |
 | For | PDFs with a usable text layer | Scans, photographs, anything without one |
 | Needs | nothing — offline, free | credentials, network, money |
 | Geometry | native, exact | recognized |
 
-Both satisfy the same `Parser` protocol and produce documents of the same shape.
-Downstream code cannot tell which one ran, except by reading provenance — which
-is the point. Adding a third parser means implementing the protocol and
-registering it; nothing in docdoc privileges either of the two that ship.
+All of them satisfy the same `Parser` protocol and produce documents of the same
+shape. Downstream code cannot tell which one ran, except by reading provenance —
+which is the point. Adding a fourth parser means implementing the protocol and
+registering it; nothing in docdoc privileges any of the three that ship.
+
+The two recognition parsers are not interchangeable, and the capability
+declaration is what says so:
+
+| | `azure-di` | `gcv` |
+|---|---|---|
+| Media types | `application/pdf`, `image/jpeg`, `image/png` | `image/jpeg`, `image/png` |
+| Tables | yes | no |
+| Handwriting | yes | yes |
+
+`gcv` is image OCR: it returns words and boxes, not cell structure. Ask for
+`tables=True` and selection will not offer it — which is the selection layer
+working, not a gap. It declares no PDF support because the synchronous Vision API
+takes none; the asynchronous one requires Cloud Storage buckets for both input
+and output, which is a storage dependency and a place for document content to
+come to rest outside the process, so this adapter does not use it.
 
 ## The text-layer decision
 
@@ -93,6 +109,25 @@ When nothing available satisfies the request, the error names the capability and
 lists every candidate with its availability and reason — so "you have no
 credentials configured" never arrives disguised as "no parser can do that".
 
+Those reasons are specific, because a caller acts differently on each:
+
+| Reason | What to do |
+|---|---|
+| `extra_not_installed` | `pip install docdoc[...]` |
+| `credentials_not_configured` | set the adapter's environment variables |
+
+| Parser | Credentials |
+|---|---|
+| `azure-di` | `DOCDOC_AZURE_DI_ENDPOINT`, `DOCDOC_AZURE_DI_KEY` |
+| `gcv` | `GOOGLE_APPLICATION_CREDENTIALS` |
+
+A deployment whose Application Default Credentials come from `gcloud auth` or a
+metadata server has nothing in the environment to detect, so it sets
+`DOCDOC_GCV_CREDENTIALS` to any non-empty value to say the credentials exist.
+docdoc will not assume they probably do: that would turn a missing configuration
+into a failed parse rather than an unavailable parser, and telling those two apart
+is the whole job of this list.
+
 There is **no fallback**. A failed parse surfaces; it does not quietly become
 another parser's problem, because a scan silently retried on the native reader
 would produce a near-empty document that looks like a success.
@@ -107,6 +142,17 @@ declares what it does:
   to sort by vertical position across the whole page, interleaving columns, so it
   is not used. docdoc performs no layout analysis and claims none.
 - `azure-di` declares `azure-di-service@1` — the service's own ordering.
+- `gcv` declares `gcv-block-order@1` — the order the service emits blocks, then
+  paragraphs, then words. Nothing is reconstructed on top of it.
+
+The two service adapters also differ in where the *text* comes from, and it is
+worth knowing which you are reading. Azure returns a text string with offsets for
+every word, so the adapter adopts both and the correspondence is the service's.
+Vision returns no offsets, so `gcv` assembles the text from the words themselves
+and ignores the `fullTextAnnotation.text` the service sends — the correspondence
+is then exact by construction rather than recovered by searching that string for
+each token. Line breaks come from the per-symbol break markers the service does
+supply, so the layout is still the service's and not a guess.
 
 Geometry is normalized in the adapter: `0..1`, top-left origin, one page per box.
 No provider's coordinate system reaches a `Document`. A box sitting up to 1%

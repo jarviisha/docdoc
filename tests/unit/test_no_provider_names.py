@@ -22,7 +22,7 @@ EXAMPLES = SOURCE_ROOT.parent.parent / "examples"
 
 #: The registry is the one module whose job is to know these names, and the
 #: adapters are the implementations themselves.
-ALLOWED = {"registry.py", "pdf_text.py", "azure_di.py"}
+ALLOWED = {"registry.py", "pdf_text.py", "azure_di.py", "gcv.py"}
 
 #: ``assess.py`` may name the native reader in an *error message*, and only
 #: there. The coupling is inherent rather than incidental: the text-layer
@@ -32,8 +32,12 @@ ALLOWED = {"registry.py", "pdf_text.py", "azure_di.py"}
 #: still not import a parser class, and it performs no selection.
 ALLOWED_TO_NAME_IN_MESSAGES = {"assess.py"}
 
-CONCRETE_PARSER_NAMES = ("PdfTextParser", "AzureDocumentIntelligenceParser")
-PARSER_IDS = ("pdf-text", "azure-di")
+CONCRETE_PARSER_NAMES = (
+    "PdfTextParser",
+    "AzureDocumentIntelligenceParser",
+    "GoogleCloudVisionParser",
+)
+PARSER_IDS = ("pdf-text", "azure-di", "gcv")
 
 
 def library_modules() -> list[pathlib.Path]:

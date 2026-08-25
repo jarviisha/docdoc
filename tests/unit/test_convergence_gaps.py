@@ -469,7 +469,7 @@ class TestRetryAfterIsADeclaredField:
     ) -> list[float]:
         """Every interval the retry loop slept for, without actually sleeping."""
         waits: list[float] = []
-        monkeypatch.setattr("docdoc.ingest.parsers.azure_di.time.sleep", waits.append)
+        monkeypatch.setattr("docdoc.ingest.retry.time.sleep", waits.append)
 
         def refuse(source: Any, transport: Any, deadline: Any) -> Any:
             raise ProviderError(
@@ -559,7 +559,7 @@ class TestAServiceSuppliedWaitIsAFloor:
         # The one case where docdoc declines to wait: it fails on the deadline
         # rather than splitting the difference.
         waits: list[float] = []
-        monkeypatch.setattr("docdoc.ingest.parsers.azure_di.time.sleep", waits.append)
+        monkeypatch.setattr("docdoc.ingest.retry.time.sleep", waits.append)
 
         def refuse(source: Any, transport: Any, deadline: Any) -> Any:
             raise ProviderError(
