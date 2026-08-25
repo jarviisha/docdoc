@@ -156,7 +156,7 @@ Everything above, without writing a script. `pip install docdoc` gives you the c
 ```bash
 docdoc parse    invoice.pdf                        # route, parse, report what came back
 docdoc extract  invoice.pdf --schema invoice@1     # the whole pipeline
-docdoc inspect  invoice.pdf --schema invoice@1     # every value, its verdict, its page, its rectangle
+docdoc inspect  invoice.pdf --schema invoice@1     # every value, its verdict, and where it was found
 docdoc inspect  --result sha256:3a1e…              # the same, read back from the store
 docdoc explain  sha256:3a1e… --chain               # why an identity is that value
 docdoc eval     manifest.json --predictions ./p    # score a golden set
@@ -219,7 +219,7 @@ export GEMINI_API_KEY=...                        # or GOOGLE_API_KEY
 export DOCDOC_STORE_ROOT=/var/lib/docdoc         # where artifacts and blobs land — no default
 ```
 
-Three more exist and are rarely worth touching:
+Five more exist and are rarely worth touching:
 
 ```sh
 export DOCDOC_ECHO_FIXTURES=./fixtures    # canned answers for the offline `echo` adapter
@@ -235,8 +235,15 @@ automatically — no configuration that merely fails to name a usable adapter ca
 auto-selecting a fixture adapter would turn a missing credential into a stream of confident,
 fabricated extractions.
 
-Every setting gains a flag of the same meaning on the command line — `--schema-path`, `--adapter`,
-`--store` — so there is no second vocabulary to learn.
+Every setting that can change what a command does gains a flag of the same meaning — `--schema-path`,
+`--adapter`, `--echo-fixtures`, `--store`, `--max-document-bytes`, `--max-pages` — so there is no
+second vocabulary to learn. An explicit flag beats the environment, which beats the default, per
+setting.
+
+Three have no flag on purpose: `DOCDOC_MAX_REQUEST_BYTES` caps an HTTP request body and the command
+line reads none; `DOCDOC_MATCH_VIEW_CACHE` bounds a per-process cache that a single run fills with
+one entry; and `DOCDOC_GEMINI_MODEL` and the credentials are per-provider — a credential especially,
+since `argv` is readable by every process on the host.
 
 `DOCDOC_STORE_ROOT` has **no default**, and that is deliberate. Artifacts hold extracted values and
 blobs hold whole source documents, so where they accumulate is your decision rather than ours. With

@@ -75,10 +75,16 @@ def test_every_value_carries_a_page_and_a_rectangle(
 ) -> None:
     """SC-001, and the half of the Definition of Done that says *where*.
 
-    Asserted over grounded values only, and that is the honest scope: a value the
-    grounder could not locate has no page to carry, and SC-001's "where geometry
-    exists" is exactly that qualification. Claiming a rectangle for an ungrounded
-    value is the failure Principle II exists to prevent.
+    **Both halves of the criterion, which is what it asks for as amended.** A
+    located value carries a page and a rectangle; an unlocated one carries
+    neither. Stated together because each alone is trivially satisfiable in the
+    wrong direction: count only grounded values and locating nothing passes, and
+    demand a page for every extracted value and only fabricating one passes.
+
+    This test used to assert the first half and argue the scoping here, in a
+    docstring, while SC-001 said something stronger that no implementation could
+    honestly meet. The spec now carries the argument, so this carries only the
+    assertion (amended 2026-08-25).
     """
     code, out = run(["inspect", FIXTURE, "--schema", SCHEMA, "--json"], capsys)
     assert code == EXIT_OK
@@ -87,11 +93,22 @@ def test_every_value_carries_a_page_and_a_rectangle(
     assert fields, "the schema declares fields; none reached the output"
 
     grounded = [row for row in fields if row["grounding"] in {"exact", "fuzzy"}]
-    assert grounded, "nothing grounded, so this asserts nothing"
+    ungrounded = [row for row in fields if row["grounding"] == "ungrounded"]
+    assert grounded, "nothing grounded, so the first half asserts nothing"
+    assert ungrounded, (
+        "nothing ungrounded on this fixture, so the second half asserts nothing. If the "
+        "fixture or the grounder changed so that everything now locates, this test needs a "
+        "case that does not — the guarantee is about the absence, not only the presence"
+    )
+
     for row in grounded:
         assert row["page"] is not None, f"{row['field']} is grounded with no page"
         assert row["bbox"] is not None, f"{row['field']} is grounded with no rectangle"
         assert len(row["bbox"]) == 4
+
+    for row in ungrounded:
+        assert row["page"] is None, f"{row['field']} is ungrounded and still carries a page"
+        assert row["bbox"] is None, f"{row['field']} is ungrounded and still carries a rectangle"
 
 
 def test_ungrounded_values_stay_machine_distinguishable(
@@ -103,6 +120,27 @@ def test_ungrounded_values_stay_machine_distinguishable(
         assert row["grounding"] in {"exact", "fuzzy", "ungrounded", "not_applicable"}
         if row["grounding"] == "ungrounded":
             assert row["bbox"] is None
+
+
+def test_an_ungrounded_value_is_still_a_value(
+    no_network: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The other thing SC-001's amendment has to keep true.
+
+    "Carries neither a page nor a rectangle" must not quietly become "was
+    dropped". An ungrounded value is a real extraction the grounder could not
+    place, and the whole point of reporting it as such — rather than omitting it —
+    is that a reader can see what was extracted and decide for themselves. A run
+    that improved its grounding rate by discarding the hard fields would satisfy
+    every other assertion in this file.
+    """
+    _, out = run(["inspect", FIXTURE, "--schema", SCHEMA, "--json"], capsys)
+    ungrounded = [
+        row for row in json.loads(out)["fields"] if row["grounding"] == "ungrounded"
+    ]
+    assert ungrounded
+    for row in ungrounded:
+        assert row["value"] not in (None, ""), f"{row['field']} was reported without its value"
 
 
 def test_extract_and_inspect_are_one_run_with_two_renderings(

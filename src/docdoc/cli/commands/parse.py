@@ -26,7 +26,7 @@ def run(args: argparse.Namespace, settings: Settings) -> Rendering:
     """Parse one file and report the document it produced."""
     from docdoc.ingest import parse
 
-    document = parse(Path(args.file).read_bytes())
+    document = parse(Path(args.file).read_bytes(), limits=settings.limits())
     provenance = document.provenance
 
     data: dict[str, Any] = {

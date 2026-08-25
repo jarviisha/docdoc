@@ -197,6 +197,7 @@ def _pipeline_run(args: argparse.Namespace, settings: Settings) -> PipelineResul
         registry=registry,
         adapter=settings.adapter(),
         store=settings.store(),
+        limits=settings.limits(),
         verify=settings.verify_cache,
     )
 

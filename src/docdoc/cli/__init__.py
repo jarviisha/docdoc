@@ -109,7 +109,12 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--predictions", required=True, metavar="DIR")
     add_common_arguments(evaluate)
 
-    store = subcommands.add_parser("store", help="inspect and clear the artifact store")
+    # "clear", not "inspect and clear". There is no inspect action and the
+    # contract grants none: FR-019 allows two subsets and no query language, so a
+    # store you can interrogate is the thing it deliberately withholds. Help text
+    # is the one piece of documentation that ships inside the program, and it
+    # promised a command for a milestone before anybody typed it.
+    store = subcommands.add_parser("store", help="clear the artifact store, all of it or one stage")
     store_actions = store.add_subparsers(dest="action", metavar="ACTION")
     clear = store_actions.add_parser("clear", help="clear all of it, or one stage")
     clear.add_argument(
@@ -153,14 +158,23 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _usage_error(args: argparse.Namespace) -> str | None:
-    """The one constraint argparse cannot express, checked in one place.
+    """The constraints argparse cannot express, checked in one place.
 
     ``docdoc inspect`` takes a file *or* a stored identity, and argparse has no
     way to require exactly one of a positional and an option. Rather than make
     both optional and let a command discover the problem halfway through, the
     check lives here beside the other invocation errors and earns the same
     exit code.
+
+    The limit flags are here for a related reason. ``Limits`` rejects a
+    non-positive bound with a ``ValidationError``, which would surface as a
+    pydantic dump naming a field the user never typed; caught here it earns the
+    same ``64`` and a sentence naming the flag they did type.
     """
+    limit_error = _limit_usage_error(args)
+    if limit_error is not None:
+        return limit_error
+
     if args.command != "inspect":
         return None
 
@@ -172,6 +186,21 @@ def _usage_error(args: argparse.Namespace) -> str | None:
         return "inspect needs a FILE, or --result PROCESSING_ID to read a stored run"
     if not args.schema:
         return "inspect FILE needs --schema NAME@V"
+    return None
+
+
+def _limit_usage_error(args: argparse.Namespace) -> str | None:
+    """A size limit of zero or less is an invocation error, not a run failure.
+
+    Checked for every command that carries the flags rather than only the two
+    that consult them, because ``docdoc explain --max-pages 0`` is just as wrong
+    and telling the user so costs nothing.
+    """
+    flags = (("--max-document-bytes", "max_document_bytes"), ("--max-pages", "max_pages"))
+    for flag, attribute in flags:
+        value = getattr(args, attribute, None)
+        if value is not None and value <= 0:
+            return f"{flag} must be a positive integer, not {value}"
     return None
 
 

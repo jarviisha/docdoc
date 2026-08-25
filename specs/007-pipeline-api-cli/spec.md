@@ -48,8 +48,17 @@ errors the constitution's error model names and no code defines — `PipelineErr
 `ArtifactError`.
 
 This is the last milestone. What it must produce is the Definition of Done stated at the founding of
-the project: a PDF goes in one end of a command, and a human can ask any extracted value which page
-and which rectangle it came from.
+the project: a PDF goes in one end of a command, and a human can ask an extracted value which page
+and which rectangle it came from — receiving the location for every value the grounder placed, and
+an explicit *ungrounded* for every value it could not.
+
+That second half is the Definition of Done rather than a shortfall against it, and the sentence was
+amended on 2026-08-25 to stop reading as though it were. "Any extracted value" promised a location
+for all of them, which no honest implementation can supply and which Principle II forbids
+manufacturing — see SC-001's amendment for the measurement. The promise the project keeps is
+**provenance for every located value, and honesty about the rest**, and it is the stronger of the
+two: a system that always answers is a system that is sometimes wrong, and this one is built so a
+reader can tell which answers to trust.
 
 ## Clarifications
 
@@ -82,14 +91,20 @@ through Python. A developer evaluating an IDP engine will not write a script to 
 keep reading.
 
 **Independent Test**: Run the command against a committed fixture PDF and a committed schema with no
-credentials and no network, and confirm the output names each field's value, its verdict, its page,
-and its bounding box. Delivers the whole product to anyone with a shell.
+credentials and no network, and confirm the output names each field's value, its verdict, and its
+grounding status — with a page and a bounding box on every value the grounder located, and neither
+on one it did not. Delivers the whole product to anyone with a shell.
 
 **Acceptance Scenarios**:
 
 1. **Given** a digital PDF, a schema on the configured search path, and an offline adapter, **When**
    the user runs the extract command, **Then** the output contains one entry per schema field with
-   its value, its grounding status, its page, and its bounding box, and the process exits zero.
+   its value and its grounding status, carrying a page and a bounding box for every value the
+   grounder located and neither for one it did not, and the process exits zero.
+   - Amended 2026-08-25 alongside SC-001, which this scenario is the story-level statement of. It
+     read as requiring a page and a box on every entry, which no honest implementation can supply —
+     see SC-001's amendment. The grounding status is what tells the two apart, which is why it is
+     named here and why Principle II makes it non-optional.
 2. **Given** the same inputs, **When** the user asks for machine-readable output, **Then** the
    result is a single structured document containing the same facts plus the run's identities, and
    nothing else is written to standard output.
@@ -427,9 +442,29 @@ Delivers operability without creating a second copy of the documents in the log 
   evaluation — MUST be runnable from the command line with no credentials and no network.
 - **FR-030**: The command line MUST NOT contain extraction, grounding, or validation logic. It
   parses arguments, calls the pipeline, and formats a result.
-- **FR-031**: Where configuration is already environment-driven, the command line MUST accept the
-  same settings as explicit arguments and MUST NOT introduce a second, differently-named
-  configuration vocabulary.
+- **FR-031**: Where configuration is already environment-driven **and can change what one
+  command-line invocation does**, the command line MUST accept the same setting as an explicit
+  argument, under a name that is the variable's own. It MUST NOT introduce a second,
+  differently-named configuration vocabulary.
+  - **Amended 2026-08-25**, because as first written it required a flag for *every* environment
+    setting, and three settings could not sensibly have one. The amendment narrows the rule to the
+    settings that can move an invocation's outcome and requires every exclusion to be **recorded with
+    its reason** — in `docdoc.cli.config.ENVIRONMENT_ONLY`, checked by
+    `tests/unit/test_cli_config_vocabulary.py`. An exclusion nobody wrote down is indistinguishable
+    from an oversight, which is precisely how `DOCDOC_MAX_DOCUMENT_BYTES` and `DOCDOC_MAX_PAGES` came
+    to be described in two documents as having flags they did not have.
+  - The three excluded, and why each is excluded rather than merely missing:
+    **`DOCDOC_MAX_REQUEST_BYTES`** caps an HTTP request body while it is read; the command line reads
+    none, so a flag would name a limit never consulted. **`DOCDOC_MATCH_VIEW_CACHE`** bounds how many
+    folded match views one *process* holds, and a command-line run grounds one document once — every
+    bound above zero behaves identically. **`DOCDOC_GEMINI_MODEL`** and the provider credentials are
+    per-provider: a `--gemini-model` flag would put one vendor's vocabulary on a provider-agnostic
+    command line (Principle IV), and a credential MUST NOT be passable as an argument at all, because
+    `argv` is readable by every process on the host — a worse exposure than the variable it would
+    replace, and squarely against FR-042.
+  - The half that did *not* need narrowing is the half the requirement exists for: **no second
+    vocabulary.** A setting that has a flag is spelled on the command line the way it is spelled in
+    the environment, and the same test asserts that too.
 
 **The HTTP interface**
 
@@ -601,7 +636,22 @@ requirement backwards. They are fixed as:
 ### Measurable Outcomes
 
 - **SC-001**: From a fresh checkout with no credentials and no network, one command produces a result
-  in which 100% of extracted values carry a page and, where geometry exists, a bounding box.
+  in which **100% of grounded values carry a page and a bounding box, and 100% of ungrounded values
+  carry neither** — both halves, counted together.
+  - **Amended 2026-08-25**, because as first written it was unsatisfiable without violating the
+    constitution. It read "100% of extracted values carry a page and, where geometry exists, a
+    bounding box", and the qualification attaches to the bounding box — so the literal claim was that
+    *every* extracted value carries a page. On the committed fixture the offline path returns 13
+    values of which 5 do; the other 8 are `ungrounded`, and Principle II forbids emitting a location
+    for a value the grounder could not find. The only way to reach 100% under the old wording was to
+    invent a page, which is the precise failure that principle exists to prevent.
+  - **Why both halves.** A criterion counting only located values is satisfied by locating nothing,
+    and one demanding a page for every extracted value is satisfied only by fabricating one. Stated
+    together they are the guarantee the product actually makes and the one worth making: a location
+    is present exactly when it is real, and its absence is reported rather than filled in.
+  - The grounding *rate* is not fixed here. It is a property of the document, the schema, and the
+    extraction — measured by the golden set under Principle IX (Milestone 6's `grounding_rate`), not
+    asserted by this milestone, which changes no grounding behaviour at all.
 - **SC-002**: A second identical run of the same document executes zero stages, and every field of
   its result equals the first run's **except the per-stage durations and the executed/reused
   statuses**, which necessarily differ and are the only fields permitted to. Stating the exception

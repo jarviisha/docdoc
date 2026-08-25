@@ -37,6 +37,14 @@ EXIT_NO_STORE = 0
 
 def run(args: argparse.Namespace, settings: Settings) -> Rendering:
     """Clear the store, or one stage of it."""
+    # Validated first, and deliberately before the store check. An argument is
+    # well-formed or it is not, and that judgement owes nothing to whether a
+    # store happens to be configured. With the order reversed, `--stage extrat
+    # --no-store` exited 0 reporting only that there was nothing to clear, so the
+    # typo went unmentioned — and the reader most likely to have mistyped a stage
+    # is the one who also has not set the store yet.
+    stage = _stage(args.stage)
+
     if not settings.has_store:
         message = (
             "no store is configured, so there is nothing to clear. "
@@ -44,11 +52,10 @@ def run(args: argparse.Namespace, settings: Settings) -> Rendering:
         )
         return Rendering(
             code=EXIT_NO_STORE,
-            data={"cleared": 0, "stage": args.stage, "reason": "no_store"},
+            data={"cleared": 0, "stage": stage, "reason": "no_store"},
             lines=[f"docdoc: {message}"],
         )
 
-    stage = _stage(args.stage)
     removed = settings.store().clear(stage=stage)
 
     scope = f"stage {stage}" if stage else "every stage"
@@ -66,6 +73,10 @@ def _stage(name: str | None) -> str | None:
     removes nothing and reports success — a typo that reads as a completed
     teardown is exactly the kind of silence that makes a later cache incident
     inexplicable.
+
+    Called before the store check for the same reason, which is a correction: the
+    argument is judged on its own terms, so the answer to "did I spell that
+    right?" does not depend on whether a store was configured.
     """
     if name is None:
         return None

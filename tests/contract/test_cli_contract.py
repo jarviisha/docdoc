@@ -137,14 +137,65 @@ def test_no_subcommand_exits_sixty_four(capsys: pytest.CaptureFixture[str]) -> N
     assert out == "", "usage belongs on stderr; stdout is for results"
 
 
-def test_an_unknown_stage_is_an_invocation_error(capsys: pytest.CaptureFixture[str]) -> None:
+@pytest.mark.parametrize(
+    "store_argv",
+    [
+        pytest.param(["--store", "/tmp/x"], id="store-configured"),
+        pytest.param(["--no-store"], id="no-store"),
+        pytest.param([], id="store-unset"),
+    ],
+)
+def test_an_unknown_stage_is_an_invocation_error(
+    store_argv: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
     """``clear(stage="extarct")`` would remove nothing and report success.
 
     A typo that reads as a completed teardown is the kind of silence that makes a
     later cache incident inexplicable, so the stage name is checked.
+
+    **Under every store state**, which is the part this test did not cover until
+    2026-08-25. The check sat behind the "is a store configured?" branch, so
+    `--stage extarct --no-store` exited 0 saying only that there was nothing to
+    clear — and the reader most likely to mistype a stage is the one who has not
+    set the store up yet. An argument is well-formed or it is not, and that
+    judgement owes nothing to configuration elsewhere.
     """
-    code, _, _ = run(["store", "clear", "--stage", "extarct", "--store", "/tmp/x"], capsys)
+    code, _, _ = run(["store", "clear", "--stage", "extarct", *store_argv], capsys)
     assert code == EXIT_BAD_INVOCATION
+
+
+def test_a_valid_stage_with_no_store_is_not_an_error(capsys: pytest.CaptureFixture[str]) -> None:
+    """Guards the guard above: the refusal must be the typo, not the missing store.
+
+    "Nothing to clear" is a correct answer and exit 0, which is what keeps
+    `docdoc store clear` usable in a teardown script that runs whether or not a
+    store was ever configured.
+    """
+    code, _, _ = run(["store", "clear", "--stage", "extract", "--no-store"], capsys)
+    assert code == EXIT_OK
+
+
+def test_the_store_command_advertises_only_the_action_it_has(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """§1 grants `clear` and nothing else, and the help text must say so.
+
+    It read "inspect and clear the artifact store" for a milestone, and there is
+    no inspect action — FR-019 deliberately grants two subsets and no query
+    language, so a store you can interrogate is precisely what it withholds.
+    Help output is the one piece of documentation that ships inside the program,
+    which makes it the last place a promise should outrun the code.
+    """
+    subcommands = next(
+        action
+        for action in build_parser()._actions
+        if hasattr(action, "choices") and action.choices
+    )
+    assert "inspect" not in subcommands.choices["store"].format_help()
+
+    store_help = subcommands._get_subactions()
+    summary = next(item.help or "" for item in store_help if item.dest == "store")
+    assert "inspect" not in summary, f"the store command still advertises inspect: {summary!r}"
 
 
 def test_a_failed_run_still_reports_the_stages_that_succeeded(

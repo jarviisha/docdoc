@@ -189,6 +189,38 @@ def test_a_duration_cannot_be_folded_into_an_identity() -> None:
         assert not (names & forbidden), f"{function.__name__} accepts a non-identity input"
 
 
+def test_a_limit_cannot_be_folded_into_an_identity() -> None:
+    """The same shape test, for the lever T137 opened.
+
+    ``Limits`` says what this deployment is *willing to accept*; it never changes
+    what a parse produces from a document it did accept. So it belongs with the
+    durations and the transport settings on the wrong side of FR-060, and it was
+    not on that list until the command line grew ``--max-document-bytes`` and
+    ``--max-pages`` — because until then no caller outside the library could move
+    one.
+
+    The failure this forbids is quiet and total. A limit folded into the parse
+    options hash would give every deployment running a different cap a disjoint
+    store: no shared reuse, every artifact recomputed, and each installation
+    looking perfectly correct from the inside. Nothing in a result would say so.
+    """
+    import inspect
+
+    forbidden = {"limits", "max_pages", "max_size_bytes", "max_document_bytes",
+                 "allowed_media_types", "max_request_bytes"}
+    for function in (
+        options_hash_for_extraction,
+        options_hash_for_grounding,
+        options_hash_for_validation,
+        document_id_for,
+    ):
+        names = set(inspect.signature(function).parameters)
+        assert not (names & forbidden), (
+            f"{function.__name__} accepts {sorted(names & forbidden)}; a limit is a policy "
+            f"about what is accepted, not an input to what is produced (FR-060)"
+        )
+
+
 def test_decimal_values_are_not_silently_accepted_as_floats() -> None:
     """Guards the canonical encoder's contract, which every hash here depends on."""
     with pytest.raises(Exception, match=r"encode|JSON|serial"):

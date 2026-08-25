@@ -25,8 +25,20 @@ export DOCDOC_STORE_ROOT="$(mktemp -d)"    # a throwaway store
 docdoc inspect tests/fixtures/pdf/digital_invoice.pdf --schema invoice@1
 ```
 
-Expected: one line per schema field carrying its value, its verdict, its page, and its bounding box.
-Exit code `0` if the document validates, `1` if it does not — both are successful runs.
+Expected: one line per schema field carrying its value, its verdict, and its grounding status — with
+a page and a bounding box on every value the grounder located, and `-` in the page column for every
+one it did not. Exit code `0` if the document validates, `1` if it does not — both are successful
+runs.
+
+> **On this fixture, 5 of the 13 values ground and 8 do not, and that is the expected output rather
+> than a failure.** The eight are real extracted values the grounder could not locate in the
+> document's text — `1240.00` against a page that renders `1,240.00`, and so on. Principle II forbids
+> printing a page for them, so they are reported `ungrounded` with the location left empty. A run
+> that showed a rectangle for all thirteen would be the bug.
+>
+> This paragraph exists because the line above used to promise a page and a box on every field, and
+> anyone running the scenario would have read the eight empty rows as a failed scenario. SC-001 was
+> amended the same day for the same reason.
 
 ```bash
 docdoc extract tests/fixtures/pdf/digital_invoice.pdf --schema invoice@1 --json | jq .processing_id

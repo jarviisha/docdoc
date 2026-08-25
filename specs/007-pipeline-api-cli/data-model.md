@@ -221,3 +221,16 @@ before it is a computation.
 - **A user, a tenant, a quota, an API key.** Out of scope by the spec's Assumptions.
 - **A second `Stage` enum, a second limits type, a second logging payload shape.** Each already
   exists one layer down and is reused (research R9, R10).
+- **`ArtifactRef` as a type of its own.** The spec's Key Entities names it — "an artifact's identity
+  together with the stage that produced it and the identity of its input — the edge of the chain,
+  which is what makes a derivation explainable" — and it is **subsumed into `ArtifactEnvelope`**,
+  whose `artifact_id`, `stage`, and `input_artifact_id` are exactly those three fields with exactly
+  that meaning. Recorded here rather than built, because a separate reference type would be a second
+  place the edge is written down, and the two would eventually disagree about a chain that has one
+  authority. FR-022's guarantee — that reachability from a set of roots is computable by walking the
+  store alone — is met by the envelope carrying the edge, and is what
+  `test_explain.py::test_the_chain_reaches_the_source_blob_in_four_hops` walks.
+  - Added 2026-08-25. The subsumption was always the design; it was the only entity in the spec's
+    list with no referent in this document, while `RunLimits`, the `Stage` enum, and the logging
+    payload each had one. An omission in a list of deliberate decisions reads as an oversight, which
+    is the whole reason that list exists.

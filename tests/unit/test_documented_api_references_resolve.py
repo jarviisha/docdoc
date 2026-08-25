@@ -324,3 +324,92 @@ def test_the_configuration_check_can_actually_fail() -> None:
     )
     assert "DOCDOC_SCHEMA_PATHS" in _defined_env_names(), "a known-real name must be found"
     assert "DOCDOC_NOT_A_REAL_NAME" not in _defined_env_names()
+
+
+# -- T144: a retired claim must not come back --------------------------------
+#
+# SC-001 promised "100% of extracted values carry a page" until 2026-08-25, and
+# no honest implementation could meet it: Principle II forbids emitting a
+# location for a value the grounder could not place, so reaching 100% meant
+# inventing one. The criterion was amended, and reconciling the documents that
+# restated it took two passes — the first fixed four and missed four.
+#
+# This is the narrow guard, not the general one. It pins *this* retired phrasing
+# so it cannot reappear in a document nobody re-reads. A general check — read a
+# claim in one document, look for it in the others — is the thing that would have
+# caught all three of this milestone's amendment-misses at once, and it does not
+# exist here.
+
+#: Every document that describes what `inspect` returns. Wider than DOCUMENTS,
+#: which is scoped to python blocks: the claim this guards is prose, and prose is
+#: exactly where it survived.
+_LOCATION_CLAIM_DOCUMENTS = (
+    "README.md",
+    "CHANGELOG.md",
+    "specs/007-pipeline-api-cli/spec.md",
+    "specs/007-pipeline-api-cli/quickstart.md",
+    "specs/007-pipeline-api-cli/contracts/cli.md",
+    "docs/concepts/pipeline.md",
+    "docs/concepts/grounding.md",
+)
+
+#: Phrasings that promise a location for values that may not have one. Matched
+#: case-insensitively over prose, so a reworded return of the same promise is
+#: caught rather than only the exact old sentence.
+_OVERPROMISES = (
+    "any extracted value which page",
+    "every extracted value carries a page",
+    "100% of extracted values carry a page",
+    "its page, its rectangle",
+    "its page, and its bounding box",
+)
+
+
+#: Quoted spans are citations, not claims. This repository's amendment notes work
+#: by quoting the wording they retired — SC-001's says `It read "100% of extracted
+#: values carry a page…"` — and a check that could not tell a quotation from a
+#: promise would forbid explaining the very change it exists to protect.
+_QUOTED = re.compile(r"[\"“][^\"”]*[\"”]", re.S)
+
+
+@pytest.mark.parametrize("document", _LOCATION_CLAIM_DOCUMENTS)
+def test_no_document_promises_a_location_for_every_value(document: str) -> None:
+    """The claim SC-001 stopped making must not survive in prose.
+
+    A document promising a page for every extracted value tells a reader the
+    eight ungrounded rows on the committed fixture are a failure, when they are
+    the requirement being met. The honest promise is provenance for every located
+    value and an explicit `ungrounded` for the rest.
+    """
+    path = pathlib.Path(document)
+    if not path.is_file():  # pragma: no cover - a moved document fails elsewhere
+        pytest.skip(f"{document} does not exist")
+
+    text = _QUOTED.sub(" ", path.read_text(encoding="utf-8").lower())
+    found = [phrase for phrase in _OVERPROMISES if phrase in text]
+    assert not found, (
+        f"{document} promises a location for values that may not have one: {found}. "
+        f"SC-001 was amended on 2026-08-25 to quantify over *grounded* values, because "
+        f"Principle II forbids inventing a page for one the grounder could not place"
+    )
+
+
+def test_the_overpromise_check_can_actually_fail() -> None:
+    """Guards the guard: a substring sweep that matches nothing passes silently."""
+    sample = "a human can ask ANY EXTRACTED VALUE WHICH PAGE it came from".lower()
+    assert [p for p in _OVERPROMISES if p in sample] == ["any extracted value which page"]
+    assert not [p for p in _OVERPROMISES if p in "a located value carries a page"]
+
+
+def test_a_quoted_overpromise_is_read_as_a_citation() -> None:
+    """The distinction the check rests on, asserted in both directions.
+
+    Quoting a retired claim in order to explain it must pass; making the same
+    claim unquoted must fail. Without this, the amendment notes that document
+    every change in this repository would be the thing that breaks the build.
+    """
+    citation = 'it read "100% of extracted values carry a page and a box", which was false'
+    promise = "100% of extracted values carry a page and a box"
+
+    assert not [p for p in _OVERPROMISES if p in _QUOTED.sub(" ", citation)]
+    assert [p for p in _OVERPROMISES if p in _QUOTED.sub(" ", promise)]

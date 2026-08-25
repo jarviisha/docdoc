@@ -11,9 +11,11 @@ API may change in any release. `document_id` derivation is versioned separately 
 
 Milestone 7: the pipeline, the artifact store, the command line, and the HTTP interface. **The
 Definition of Done stated at the project's founding is reachable**: a PDF goes in one end of a
-command, and a human can ask any extracted value which page and which rectangle it came from. And
-ADR-0003's central promise — change a prompt, reuse the parse — executes for the first time, having
-been text for five milestones.
+command, and a human can ask an extracted value which page and which rectangle it came from —
+getting the location for every value docdoc could place in the document, and an explicit
+`ungrounded` for every value it could not. Never a guess: a located value is located because docdoc
+found it, and the rest say so. And ADR-0003's central promise — change a prompt, reuse the parse —
+executes for the first time, having been text for five milestones.
 
 ### Added
 
@@ -31,7 +33,11 @@ been text for five milestones.
 - **The `docdoc` command** — `parse`, `extract`, `inspect`, `explain`, `eval`, and `store clear`,
   built on `argparse` so the base install acquires no dependency. `--json` writes exactly one
   document to standard output; exit codes distinguish "the document is invalid" (`1`) from "docdoc
-  could not run" (`2`).
+  could not run" (`2`). Every deployment setting that can change what a command does has a flag of
+  the same name — including `--max-document-bytes` and `--max-pages`, which make FR-039's size limits
+  reachable without importing the library. The three settings that deliberately have none (the HTTP
+  request cap, the per-process match-view bound, and the per-provider settings) are recorded with
+  their reasons rather than left to be discovered.
 - **`docdoc explain ARTIFACT_ID`** — the tool ADR-0003 accepted unreadable cache keys on the
   condition of. Names the stage, the input identity, the processor and its version, and the names of
   the folded inputs, walking back to the source blob. It explains identities, never documents.

@@ -10,7 +10,7 @@ Built on `argparse`, so the base install acquires no dependency and everyone who
 ```bash
 docdoc parse   FILE                       # route, parse, report what the parse produced
 docdoc extract FILE --schema invoice@1    # the whole pipeline: parse, extract, ground, validate
-docdoc inspect FILE --schema invoice@1    # every value, its verdict, its page, its rectangle
+docdoc inspect FILE --schema invoice@1    # every value, its verdict, and where it was found
 docdoc inspect --result PROCESSING_ID     # the same, read back from the store
 docdoc explain ARTIFACT_ID                # how this identity was derived, and its chain
 docdoc eval    MANIFEST --predictions DIR # score a golden set
@@ -59,21 +59,43 @@ carries the stages that succeeded.
 
 ## 4. Configuration
 
-Every environment setting that already exists keeps its name and gains a flag of the same meaning
-(FR-031). No second vocabulary:
+Every environment setting that can change what an invocation does keeps its name and gains a flag of
+the same meaning (FR-031, as amended 2026-08-25). No second vocabulary:
 
 | Setting | Flag |
 |---|---|
 | `DOCDOC_SCHEMA_PATHS` | `--schema-path` (repeatable) |
 | `DOCDOC_MODEL_ADAPTERS` | `--adapter` |
+| `DOCDOC_ECHO_FIXTURES` | `--echo-fixtures` |
 | `DOCDOC_STORE_ROOT` *(new)* | `--store` / `--no-store` |
+| `DOCDOC_MAX_DOCUMENT_BYTES` | `--max-document-bytes` |
+| `DOCDOC_MAX_PAGES` | `--max-pages` |
 | — | `--verify-cache` — execute every stage and still write, so a drifted processor surfaces (FR-064) |
+| — | `--json` — the machine form, and the only thing then written to standard output (FR-027) |
+
+**Three settings deliberately have no flag**, and the exclusions are listed because an unlisted one
+reads as an oversight — which is how two rows above went missing until 2026-08-25, while this
+sentence claimed the table was complete:
+
+| Setting | Why it has no flag |
+|---|---|
+| `DOCDOC_MAX_REQUEST_BYTES` | Caps an HTTP request body while it is read. The command line reads none. |
+| `DOCDOC_MATCH_VIEW_CACHE` | A process-level memory bound. One run grounds one document once, so every bound above zero behaves identically. |
+| `DOCDOC_GEMINI_MODEL`, and the provider credentials | Per-provider. A vendor's vocabulary does not belong on a provider-agnostic command line (Principle IV), and `argv` is readable by every process on the host, which is a worse place for a credential than the environment (FR-042). |
+
+The two lists are checked against the parser, and against every setting the code reads, by
+`tests/unit/test_cli_config_vocabulary.py`. A setting added later lands on one of them or fails that
+check.
 
 There is no default store root, so `--no-store` is the behaviour you already have; `--store` is the
 opt-in (FR-017).
 
 An explicit flag beats the environment, which beats the default — the arrangement the library
-already uses.
+already uses, applied **per setting**: `--max-pages` on the command line and
+`DOCDOC_MAX_DOCUMENT_BYTES` in the environment both take effect.
+
+A size limit of zero or less is an invocation error (exit `64`) naming the flag that was typed,
+rather than a validation failure naming a field that was not.
 
 With neither `DOCDOC_SCHEMA_PATHS` nor `--schema-path`, the registry is empty, because docdoc ships
 no schema. The error for a schema that cannot be resolved MUST say the registry is empty and name the

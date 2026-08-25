@@ -191,6 +191,7 @@ tests/
 │   ├── test_explain.py               # FR-024, FR-025 (US4)
 │   ├── test_parse_plan.py            # the ingest plan/execute split (US2)
 │   ├── test_identity_recompute.py    # SC-006
+│   ├── test_cli_config_vocabulary.py # FR-031, the env and the flags as sets
 │   └── test_packaging.py             # git and the wheel, not the working tree
 ├── property/
 │   └── test_artifact_store_properties.py   # put/get round-trip, hash stability
