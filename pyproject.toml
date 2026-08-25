@@ -48,6 +48,16 @@ azure = ["azure-ai-documentintelligence>=1.0"]
 # `google-genai` SDK, not the legacy `google-generativeai`. Apache-2.0, so no
 # licence caveat like the pdf extra's.
 google = ["google-genai>=1.0"]
+# The HTTP interface of Milestone 7, confined to `docdoc.api` and enforced there
+# by the forbidden-imports contracts below, which name `fastapi` for every
+# deterministic layer. An extra rather than a base dependency for the same reason
+# every provider SDK is one: the base install is the deterministic layers and
+# nothing else (FR-038, FR-053).
+#
+# There is deliberately no `cli` extra. The command line is argparse, so there is
+# nothing to keep out of the base install, and `docdoc` is a console script every
+# `pip install docdoc` gets (research R12).
+api = ["fastapi>=0.110", "uvicorn>=0.29"]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
@@ -56,6 +66,14 @@ dev = [
     "ruff>=0.5",
     "import-linter>=2.0",
 ]
+
+# One console script, and only one. `docdoc` costs nothing because the CLI is
+# argparse; a second script for the HTTP service would not be free, because
+# `[project.scripts]` cannot be conditioned on an extra -- a `docdoc-api` command
+# would install for everyone, including everyone without `docdoc[api]`, and fail
+# at import. Serving is `uvicorn docdoc.api:app`.
+[project.scripts]
+docdoc = "docdoc.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/docdoc"]
@@ -193,17 +211,57 @@ include_external_packages = true
 # and omitted `grounding` and `validation`, which do. This list is the
 # authoritative form because it is the one CI checks, and the constitution is now
 # amended in the same change that adds a layer here.
+#
+# Milestone 7 adds four, and two of the positions are worth explaining because a
+# reader would reasonably guess differently.
+#
+# `artifacts` sits directly ABOVE the kernel, which is the lowest position that is
+# true: it depends on `pydantic` and two kernel hashing helpers and on nothing
+# else. It stores whole result models without importing a single one of them --
+# the caller names the model at the call site -- and that is what keeps it here
+# instead of somewhere near the top next to the code it serves.
+#
+# `pipeline` sits directly ABOVE `validation`, the highest stage it drives, rather
+# than above `evaluation` where its milestone might suggest. Inserting it here
+# leaves the `recording > evaluation` edge Milestone 6 argued for exactly as it
+# was, and it gives `recording > pipeline`, which is what makes the recorder a
+# CALLER of the pipeline rather than a second definition of the stage order.
+#
+# A total order forces `evaluation > pipeline` although evaluation imports nothing
+# from it. That is an artefact of the contract type and is harmless; the
+# alternative is a dozen pairwise `forbidden` contracts nobody will maintain.
+#
+# `api` and `cli` cannot be honestly ordered against each other -- neither should
+# import the other -- so they share the top position here and are separated by the
+# independence contract below.
 [[tool.importlinter.contracts]]
 name = "docdoc layers (Constitution Principle X)"
 type = "layers"
 layers = [
+    "docdoc.api : docdoc.cli",
     "docdoc.recording",
     "docdoc.evaluation",
+    "docdoc.pipeline",
     "docdoc.validation",
     "docdoc.grounding",
     "docdoc.extraction",
     "docdoc.ingest",
+    "docdoc.artifacts",
     "docdoc.kernel",
+]
+
+# Siblings, not a stack. Sharing a layer position above says neither may import
+# the other's *lower* neighbours wrongly; it does not say they may not import each
+# other, and a position in a list would have implied a permission. The coupling
+# this prevents is the tempting one: the HTTP layer reusing the CLI's renderer.
+# They are two presentation layers with different audiences, and the thing they
+# genuinely share is the result model both already import.
+[[tool.importlinter.contracts]]
+name = "the two front ends do not know about each other (FR-054)"
+type = "independence"
+modules = [
+    "docdoc.api",
+    "docdoc.cli",
 ]
 
 # Grounding is deterministic all the way down: no network, no credentials, no
@@ -216,6 +274,7 @@ name = "grounding reaches no network and no provider (FR-048)"
 type = "forbidden"
 source_modules = ["docdoc.grounding"]
 forbidden_modules = [
+    "docdoc.artifacts",
     "socket",
     "urllib",
     "http",
@@ -240,6 +299,7 @@ name = "validation reaches no network and no provider (FR-007)"
 type = "forbidden"
 source_modules = ["docdoc.validation"]
 forbidden_modules = [
+    "docdoc.artifacts",
     "socket",
     "urllib",
     "http",
@@ -279,6 +339,7 @@ name = "evaluation reaches no network and no provider (FR-007)"
 type = "forbidden"
 source_modules = ["docdoc.evaluation"]
 forbidden_modules = [
+    "docdoc.artifacts",
     "socket",
     "urllib",
     "http",

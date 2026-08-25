@@ -27,12 +27,12 @@ from docdoc.kernel.provenance import IngestProvenance
 from docdoc.kernel.span import Span
 from docdoc.kernel.span_index import SpanIndex
 from docdoc.kernel.table import Table
+from docdoc.kernel.token import Token
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from docdoc.kernel.geometry import Geometry
-    from docdoc.kernel.token import Token
 
 __all__ = ["Document"]
 
@@ -109,10 +109,31 @@ class Document(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _coerce_tokens(cls, data: Any) -> Any:
+        """Accept a sequence of ``Token`` where a ``SpanIndex`` is declared.
+
+        Only for tokens that are *already* ``Token`` objects. Raw JSON — a list
+        of lists, which is how a ``NamedTuple`` serialises — is left alone for
+        ``SpanIndex``'s own core schema to validate, because ``SpanIndex(...)``
+        cannot build itself from unvalidated data and would fail reaching for
+        ``.span`` on a list.
+
+        That distinction only started mattering in Milestone 7, when the parse
+        stage became an artifact that has to survive a round trip through the
+        store.
+        """
         if isinstance(data, dict):
             tokens = data.get("tokens")
             if tokens is not None and not isinstance(tokens, SpanIndex):
-                data = {**data, "tokens": SpanIndex(tokens)}
+                # The *first* element decides, not all of them. A document can
+                # carry fifty thousand tokens and this runs on every
+                # construction, so an `all(...)` here is an O(n) scan on the hot
+                # path — which is precisely what it was, and what the kernel
+                # performance budget caught. A token sequence is homogeneous:
+                # either the caller built `Token`s or pydantic is handing over
+                # raw JSON, and one look tells which.
+                first = next(iter(tokens), None)
+                if first is None or isinstance(first, Token):
+                    data = {**data, "tokens": SpanIndex(tokens)}
         return data
 
     @model_validator(mode="after")

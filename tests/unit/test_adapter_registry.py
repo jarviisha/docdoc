@@ -103,16 +103,37 @@ def test_the_echo_adapter_is_never_selected_automatically() -> None:
     Echo answers from fixtures. If it were selected when no real adapter is
     usable, a missing credential would produce confident, fabricated extractions
     carrying full provenance — not an error, which is far worse than one.
+
+    **Amended in Milestone 7.** The property being defended is that echo never
+    wins a *fallback*: no configuration that merely fails to name a real adapter
+    may land on it. Naming it is a different act, and FR-029 requires the offline
+    path to be reachable from the command line — so `select` now honours an
+    explicit priority. The test therefore asserts the fallback case, which is the
+    dangerous one, rather than the naming case, which is somebody's decision.
     """
-    registry = AdapterRegistry(priority=("echo",))
+    registry = AdapterRegistry(priority=("gemini",))
     registry.register(EchoAdapter.from_fixtures("tests/fixtures/echo"))
     assert len(registry) == 1
-    assert registry.candidates()[0].available is True, "it is usable — just not selectable"
+    assert registry.candidates()[0].available is True, "it is usable — just not a fallback"
 
     with pytest.raises(ModelProviderError) as caught:
         registry.select()
     assert caught.value.reason == "unavailable"
     assert "never selected automatically" in str(caught.value)
+
+
+def test_the_echo_adapter_is_selected_when_configuration_names_it() -> None:
+    """FR-029 — the offline path must be reachable from configuration.
+
+    The counterpart to the test above, and the pair is the whole rule: echo is
+    unreachable by accident and reachable on purpose. Reaching it on purpose
+    takes two explicit settings, because a registered echo with no fixtures
+    answers nothing — `DOCDOC_MODEL_ADAPTERS=echo` says *use fabricated answers*
+    and `DOCDOC_ECHO_FIXTURES` says *these ones*.
+    """
+    registry = AdapterRegistry(priority=("echo",))
+    registry.register(EchoAdapter.from_fixtures("tests/fixtures/echo"))
+    assert registry.select().id == "echo"
 
 
 def test_echo_is_still_usable_when_passed_explicitly() -> None:
@@ -127,8 +148,15 @@ def test_echo_is_still_usable_when_passed_explicitly() -> None:
     assert result.provenance.adapter_id == "echo"
 
 
-def test_a_real_adapter_wins_even_when_echo_is_registered_first() -> None:
-    registry = AdapterRegistry(priority=("echo", "gemini"))
+def test_a_real_adapter_wins_when_configuration_does_not_name_echo() -> None:
+    """Registration order never decides. Configuration does, or the default does.
+
+    Before Milestone 7 this read ``priority=("echo", "gemini")`` and still
+    expected gemini, because echo was unselectable outright. It now names only
+    gemini: a priority that puts echo first is a caller asking for echo, and
+    overriding that would be the registry deciding it knows better.
+    """
+    registry = AdapterRegistry(priority=("gemini",))
     registry.register(EchoAdapter.from_fixtures("tests/fixtures/echo"))
     registry.register(_Stub("gemini"))
     assert registry.select().id == "gemini"
@@ -166,20 +194,33 @@ def test_an_uninstalled_extra_is_recorded_not_omitted() -> None:
 # -- the default registry ----------------------------------------------------
 
 
-def test_the_default_registry_knows_the_real_adapter_and_not_echo() -> None:
+def test_the_default_registry_knows_both_and_still_will_not_fall_back_to_echo() -> None:
+    """Registered is not the same as selectable, and Milestone 7 needs the first.
+
+    Echo has to be a *candidate* for `DOCDOC_MODEL_ADAPTERS=echo` to mean
+    anything — before this it was absent from the default set, so naming it
+    produced "no usable adapter" rather than the offline run FR-029 requires.
+    What must not change is the outcome when nothing names it, which is the
+    assertion below.
+    """
     registry = default_adapter_registry()
     ids = [c.id for c in registry.candidates()]
     assert "gemini" in ids
-    assert "echo" not in ids, "a fixture adapter must not be in the default set at all"
+    assert "echo" in ids
+
+    with pytest.raises(ModelProviderError):
+        registry.select()
 
 
 def test_the_default_registry_reports_the_missing_credential_rather_than_hiding_it() -> None:
+    pytest.importorskip("google.genai")  # SC-013: skips on a base install
     candidate = next(c for c in default_adapter_registry().candidates() if c.id == "gemini")
     assert candidate.available is False
     assert "API key" in (candidate.reason or "")
 
 
 def test_default_adapter_raises_with_the_reason_when_nothing_is_usable() -> None:
+    pytest.importorskip("google.genai")  # SC-013: skips on a base install
     with pytest.raises(ModelProviderError) as caught:
         default_adapter()
     assert "GEMINI_API_KEY" in str(caught.value)
@@ -188,6 +229,7 @@ def test_default_adapter_raises_with_the_reason_when_nothing_is_usable() -> None
 def test_default_adapter_selects_when_a_credential_is_present(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    pytest.importorskip("google.genai")  # SC-013: skips on a base install
     monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-used-for-a-call")
     adapter = default_adapter()
     assert adapter.id == "gemini"
@@ -205,6 +247,7 @@ def test_application_code_can_extract_without_naming_a_provider(
     contains a provider name. Swapping providers changes what is installed and the
     priority order, not this code.
     """
+    pytest.importorskip("google.genai")  # SC-013: skips on a base install
     monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-used-for-a-call")
 
     source = """
@@ -263,6 +306,7 @@ def test_the_selected_adapter_carries_the_configured_model(
     constructor honours but the registry bypasses would leave the requirement
     unmet along the only path application code actually takes.
     """
+    pytest.importorskip("google.genai")  # SC-013: skips on a base install
     monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-used-for-a-call")
     monkeypatch.setenv(MODEL_ENV, "gemini-3.5-pro")
     assert default_adapter().model_id == "gemini-3.5-pro"  # type: ignore[attr-defined]

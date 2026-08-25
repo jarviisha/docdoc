@@ -29,13 +29,22 @@ which the constitution's precedence rule forbids resolving in code. It is a
 
 from __future__ import annotations
 
+import os
 import unicodedata
+from collections import OrderedDict
 from hashlib import sha256
 
 from docdoc.grounding.offsets import OffsetMap, Segment
 from docdoc.kernel import Document, canonical_json
 
-__all__ = ["MATCH_VIEW_VERSION", "MatchView", "fold_claim"]
+__all__ = [
+    "MATCH_VIEW_CACHE_ENV",
+    "MATCH_VIEW_CACHE_LIMIT",
+    "MATCH_VIEW_VERSION",
+    "MatchView",
+    "clear_view_cache",
+    "fold_claim",
+]
 
 #: Pinned by ADR-0006. Adding, removing, or altering any transformation below
 #: REQUIRES a bump here, enforced by the snapshot test rather than by review.
@@ -72,9 +81,124 @@ class MatchView:
 
     @classmethod
     def build(cls, document: Document) -> MatchView:
-        """Fold a document's canonical text, recording where every position came from."""
+        """Fold a document's canonical text, recording where every position came from.
+
+        Cached by ``(document_id, match_view_version)``, which ADR-0006 specifies
+        and this did not honour until Milestone 7. The case it serves is the one
+        artifact reuse cannot: several extractions grounding against **one**
+        document inside a single process — a corpus sweep, or one document tried
+        against three schemas. When the grounding *artifact* is reused the view
+        is never built and this cache is never reached.
+
+        Returning the shared instance is safe because a ``MatchView`` is
+        immutable in practice: nothing in this layer writes to ``text`` or
+        ``offsets`` after construction, and both are read-only structures.
+        """
+        view_id = _view_id_for(document.id, MATCH_VIEW_VERSION)
+
+        cached = _VIEWS.get(view_id, document.text)
+        if cached is not None:
+            return cached
+
         text, offsets = _fold(document.text, document_id=document.id)
-        return cls(text=text, offsets=offsets, document_id=document.id)
+        view = cls(text=text, offsets=offsets, document_id=document.id)
+        _VIEWS.put(view_id, document.text, view)
+        return view
+
+
+class _ViewCache:
+    """A bounded, least-recently-used cache of folded views.
+
+    **Bounded on purpose, and the bound is the point.** A folded view is roughly
+    the size of the document's text plus its offset map, and an unbounded cache
+    over a corpus sweep is a memory profile nobody chose (FR-020). The default
+    holds a handful, because the case this serves is several extractions against
+    *one* document rather than one extraction against many.
+
+    No filesystem, no serialisation, no identity: this is a process-local
+    optimisation and nothing more. Grounding's forbidden-imports contract still
+    holds, and a cold cache and a warm one produce the same result — which the
+    test asserts rather than assumes.
+    """
+
+    __slots__ = ("_entries", "_limit")
+
+    def __init__(self, limit: int) -> None:
+        self._limit = max(0, limit)
+        self._entries: OrderedDict[str, tuple[str, MatchView]] = OrderedDict()
+
+    def get(self, view_id: str, source: str) -> MatchView | None:
+        """A hit only if the cached view was folded from *this* text.
+
+        The key is ``(document_id, match_view_version)``, which is what ADR-0006
+        specifies — and a ``document_id`` is derived from the blob, the parser,
+        and the options, never from the text. For a parsed document those
+        determine the text, so the key is sound. For a ``Document`` built by hand
+        they do not, and returning the wrong view hands the matcher an offset map
+        for different text: every span it produces then points into a document
+        that never had those characters.
+
+        So the text is confirmed rather than assumed. It short-circuits on length
+        for anything that is not a genuine hit, and even a full comparison is far
+        cheaper than the NFKC fold and the offset map this avoids rebuilding.
+        """
+        entry = self._entries.get(view_id)
+        if entry is None:
+            return None
+        cached_source, view = entry
+        if cached_source != source:
+            return None
+        self._entries.move_to_end(view_id)
+        return view
+
+    def put(self, view_id: str, source: str, view: MatchView) -> None:
+        if self._limit == 0:
+            return
+        self._entries[view_id] = (source, view)
+        self._entries.move_to_end(view_id)
+        while len(self._entries) > self._limit:
+            self._entries.popitem(last=False)
+
+    def clear(self) -> None:
+        self._entries.clear()
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+
+#: How many folded views to keep. Small because the case being served is several
+#: extractions against one document, not one extraction against a corpus; a
+#: larger number would hold documents nobody is going to ask about again.
+#: Configurable through the environment for a deployment whose shape differs.
+MATCH_VIEW_CACHE_LIMIT = 8
+
+#: Overrides the bound above. Named in the style of every other docdoc setting so
+#: there is no second vocabulary (FR-031).
+MATCH_VIEW_CACHE_ENV = "DOCDOC_MATCH_VIEW_CACHE"
+
+
+def _configured_limit() -> int:
+    """The bound, from the environment or the documented default.
+
+    An unparseable value falls back to the default rather than raising: a typo in
+    a cache size should not stop a document being processed, and the default is
+    always a safe answer because the cache changes no result.
+    """
+    raw = os.environ.get(MATCH_VIEW_CACHE_ENV, "").strip()
+    if not raw:
+        return MATCH_VIEW_CACHE_LIMIT
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return MATCH_VIEW_CACHE_LIMIT
+
+
+_VIEWS = _ViewCache(_configured_limit())
+
+
+def clear_view_cache() -> None:
+    """Empty the cache. For tests that need a cold one, and for nothing else."""
+    _VIEWS.clear()
 
 
 def _view_id_for(document_id: str, version: str) -> str:

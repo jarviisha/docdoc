@@ -17,6 +17,13 @@ from docdoc.ingest.assess import TextLayerRule, assess_text_layer, meaningful_le
 from docdoc.ingest.errors import ParserCapabilityError
 from docdoc.ingest.source import SourceFile
 
+# SC-013: the offline suite must pass on a base install — one with no provider
+# SDK at all. Constitution XII: "Provider adapters MUST have integration tests;
+# those tests MUST NOT be required to run the unit and property suites." These
+# tests exercise the text-layer assessment, which reads page text, so they
+# skip rather than fail when it is absent.
+pytest.importorskip("pymupdf")
+
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 
 

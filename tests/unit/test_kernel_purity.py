@@ -29,6 +29,17 @@ KERNEL_DIR = pathlib.Path(docdoc.kernel.__file__).parent
 ALLOWED_TOP_LEVEL = frozenset(
     {
         "pydantic",
+        # Permitted by **Principle I itself**, which records that
+        # `pydantic_core` counts as `pydantic` rather than as a second
+        # dependency (constitution 1.5.2). Read that clause for the reasoning;
+        # it is not repeated here on purpose.
+        #
+        # This entry existed before the amendment did, with the argument in this
+        # comment — which meant the permission lived inside the test enforcing
+        # the prohibition, and the failure message below told the reader to go
+        # amend a document that said nothing about it. `/speckit-converge`
+        # raised that as CRITICAL and was right to.
+        "pydantic_core",
         "bisect",
         "hashlib",
         "json",

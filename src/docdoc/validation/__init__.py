@@ -86,6 +86,7 @@ __all__ = [
     "ValidationProvenance",
     "ValidationResult",
     "Verdict",
+    "resolve_enabled_rules",
     "validate",
 ]
 
@@ -181,6 +182,26 @@ def validate(
     )
     log_validation(result, duration_ms=(time.perf_counter() - started) * 1000)
     return result
+
+
+def resolve_enabled_rules(
+    schema: Schema, options: ValidationOptions | None = None
+) -> tuple[str, ...]:
+    """The rule ids a run under these options would evaluate, resolved.
+
+    The two steps ``validate`` takes internally, exposed as one, so that the
+    pipeline can compute this stage's artifact id *before* running the stage
+    (FR-012) without reaching for a private function or restating the resolution.
+    Restating it is the specific hazard: the folded set would then live in two
+    places, and the day they disagreed the store would answer with an artifact
+    validated under a different rule set (FR-058).
+
+    Raises what ``validate`` would raise for the same inputs — an ``enabled_rules``
+    naming a rule the schema does not declare is a fault whenever it is noticed,
+    and noticing it earlier is not a reason to soften it.
+    """
+    options = options or ValidationOptions()
+    return enabled_names(schema, _enabled_rules(schema, options))
 
 
 def enabled_names(schema: Schema, enabled: frozenset[str] | None) -> tuple[str, ...]:

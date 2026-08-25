@@ -122,6 +122,7 @@ def test_the_one_module_allowed_to_name_a_parser_only_does_so_in_a_message() -> 
 def test_the_example_selects_by_capability() -> None:
     """The documented example is what a new user copies, so it has to model the
     supported way of asking."""
+    pytest.importorskip("pymupdf")  # SC-013: skips on a base install
     source = (EXAMPLES / "parse_pdf.py").read_text(encoding="utf-8")
 
     assert "CapabilityRequest" in source

@@ -21,7 +21,7 @@ import time
 import pytest
 
 from docdoc.grounding import GroundingOptions, ground
-from docdoc.grounding.view import MatchView
+from docdoc.grounding.view import MatchView, clear_view_cache
 from tests.fixtures.grounding import ADVERSARIAL_CLAIMS, ADVERSARIAL_TEXT
 from tests.support import make_document, make_extracted, make_extraction
 
@@ -56,11 +56,27 @@ def extraction_of(document, claims: list[str]):
     )
 
 
+def _cold_build(document):
+    """Build a match view with the cache emptied first.
+
+    Milestone 7 made ``MatchView.build`` cached, so timing it warm measures a
+    dictionary lookup. Every budget in this file is about the cost of the *work*.
+    """
+    clear_view_cache()
+    return MatchView.build(document)
+
+
+def _cold_ground(document, extraction):
+    """Ground with no cached view, so the fold is inside the measurement."""
+    clear_view_cache()
+    return ground(document, extraction)
+
+
 class TestTheMatchViewIsBuiltOncePerRun:
     """FR-019 -- the row that would move if this regressed, and the reason for the file."""
 
     def test_building_it_once_is_within_budget(self, big_document) -> None:
-        elapsed = best_of(lambda: MatchView.build(big_document))
+        elapsed = best_of(lambda: _cold_build(big_document))
         assert elapsed < 200, f"match view construction took {elapsed:.1f} ms"
 
     def test_grounding_twenty_values_costs_about_one_view_plus_the_matching(
@@ -70,16 +86,41 @@ class TestTheMatchViewIsBuiltOncePerRun:
 
         Asserted as a shape rather than as a number: twenty values must not cost
         twenty view builds, whatever the machine.
+
+        **The baseline is a cold build, and has to be.** Milestone 7 gave
+        ``MatchView.build`` a process-local cache (FR-020), so measuring it
+        without clearing first measures a dictionary lookup — against which
+        *any* real work looks like a per-value rebuild, and this test failed
+        while the thing it guards had actually got faster.
         """
         claims = [big_document.text[i * 400 : i * 400 + 30] for i in range(20)]
         extraction = extraction_of(big_document, claims)
 
-        one_view = best_of(lambda: MatchView.build(big_document))
-        twenty = best_of(lambda: ground(big_document, extraction))
+        one_view = best_of(lambda: _cold_build(big_document))
+        twenty = best_of(lambda: _cold_ground(big_document, extraction))
 
         assert twenty < one_view * 10, (
             f"twenty values took {twenty:.1f} ms against {one_view:.1f} ms for a single "
             "view build -- the view looks like it is being rebuilt per value (FR-019)"
+        )
+
+    def test_a_second_grounding_of_one_document_reuses_the_view(self, big_document) -> None:
+        """FR-020's actual payoff, which the shape test above cannot see.
+
+        Several extractions grounding against **one** document inside one process
+        is the case artifact reuse does not serve: each has its own extraction
+        artifact, so each misses the store, and each would fold the same document
+        again. This is the measurement that says it does not.
+        """
+        claims = [big_document.text[i * 400 : i * 400 + 30] for i in range(20)]
+        extraction = extraction_of(big_document, claims)
+
+        cold = best_of(lambda: _cold_ground(big_document, extraction))
+        warm = best_of(lambda: ground(big_document, extraction))
+
+        assert warm < cold, (
+            f"a second grounding of the same document took {warm:.1f} ms against "
+            f"{cold:.1f} ms cold -- the match view is not being reused (FR-020)"
         )
 
 

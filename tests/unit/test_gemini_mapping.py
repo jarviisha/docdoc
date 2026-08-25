@@ -16,6 +16,11 @@ from typing import Any
 
 import pytest
 
+# SC-013: the offline suite must pass on a base install, which has no provider
+# SDK. Constitution XII says provider tests must not be required to run the unit
+# suite, and this module maps a real provider's response shapes.
+pytest.importorskip("google.genai")
+
 from docdoc.extraction import ExtractionError, ModelProviderError, response_shape_for
 from docdoc.extraction.adapters.gemini import ADAPTER_ID, DEFAULT_MODEL, GeminiAdapter
 from docdoc.extraction.prompt import build_request

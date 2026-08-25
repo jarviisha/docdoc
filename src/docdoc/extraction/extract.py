@@ -15,7 +15,7 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from docdoc.extraction.adapter import ExtractionOptions, ModelAdapter, ModelUsage
 from docdoc.extraction.budget import guard_input_budget
@@ -107,6 +107,34 @@ class ExtractionResult(BaseModel):
     #: dropped (FR-008). Paths only -- never the values themselves.
     discarded: tuple[str, ...] = ()
 
+    @model_validator(mode="before")
+    @classmethod
+    def _rebuild_values(cls, data: Any) -> Any:
+        """Turn a deserialised value tree back into ``ExtractedValue`` nodes.
+
+        ``values`` is ``dict[str, Any]`` because ``ValueTree`` is recursive by
+        declaration, and ``Any`` means pydantic hands back the plain dictionaries
+        it read rather than the models they describe. Every consumer then sees a
+        mapping where it expected a value: ``value_at`` raises, ``grounded``
+        does not exist, and grounding reads a claim off a ``dict`` that has no
+        ``claimed_text`` attribute.
+
+        Milestone 6 met this first and solved it inside
+        ``evaluation/predictions.py``, where a result read from disk scored as
+        entirely missing. Milestone 7 meets it again, because a reused stage is
+        also a result read from disk — and FR-012 requires a reused result to be
+        indistinguishable from the executed one, which "equal once serialised"
+        is not. Fixing it on the model rather than in a third caller is what
+        stops it being met a fourth time.
+
+        Deliberately no type coercion: JSON cannot tell an int from a Decimal,
+        and deciding which one a field wanted needs the schema. That stays in
+        ``evaluation``, which has the declared types to do it with.
+        """
+        if isinstance(data, dict) and isinstance(data.get("values"), dict):
+            data = {**data, "values": _rebuild_tree(data["values"])}
+        return data
+
     def value_at(self, path: str) -> ExtractedValue:
         """Fetch a scalar by dotted path, for callers that prefer it to indexing."""
         node: Any = self.values
@@ -117,6 +145,28 @@ class ExtractionResult(BaseModel):
         if not isinstance(node, ExtractedValue):
             raise KeyError(f"{path!r} is a group, not a value")
         return node
+
+
+def _rebuild_tree(node: Any) -> Any:
+    """Walk a value tree, rebuilding every leaf that is a serialised value.
+
+    A leaf is recognised by carrying ``field_path`` and ``present`` together —
+    the two fields every ``ExtractedValue`` has and no group node does. Matching
+    on both rather than on ``field_path`` alone is the cheap guard against a
+    schema that happens to declare a field of that name.
+    """
+    if isinstance(node, ExtractedValue):
+        return node
+    if isinstance(node, dict):
+        if "field_path" in node and "present" in node:
+            return ExtractedValue.model_validate(node)
+        return {name: _rebuild_tree(child) for name, child in node.items()}
+    if isinstance(node, (list, tuple)):
+        # A repeating group. Restored as a tuple, because that is what the
+        # extraction layer builds and what `ValueTree` declares; a list here
+        # would compare unequal to the executed result for no reason.
+        return tuple(_rebuild_tree(child) for child in node)
+    return node
 
 
 def _requested_model(adapter: ModelAdapter) -> tuple[str, str]:

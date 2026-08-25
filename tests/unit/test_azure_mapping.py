@@ -14,6 +14,14 @@ from typing import Any
 
 import pytest
 
+# Constitution XII: "Provider adapters MUST have integration tests; those tests
+# MUST NOT be required to run the unit and property suites." This module reaches a
+# provider library at import time, so without this guard the whole file fails
+# *collection* on a base install — and SC-013 requires the offline suite to pass
+# there. `importorskip` is the mechanism that makes the requirement structural
+# rather than a convention every new test file has to remember.
+pytest.importorskip("azure.ai.documentintelligence")
+
 from docdoc.ingest.errors import ParserError
 from docdoc.ingest.parsers.azure_di import map_analyze_result
 from docdoc.ingest.source import SourceFile

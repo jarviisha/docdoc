@@ -174,6 +174,96 @@ non-blocking decision remains open: PRE_1_0_VERSIONING.
 
 Templates: no changes required — the plan-template gate table references
 principles by number and remains accurate.
+
+---
+AMENDMENT 1.4.0 → 1.5.0 (2026-08-22)
+Bump rationale: MINOR — Principle X's chain gains four layers and the guidance
+around two of their positions. No principle is removed and nothing previously
+compliant becomes non-compliant.
+
+  - Principle X's chain extended to
+    `API, CLI -> Recording -> Evaluation -> Pipeline -> Validation -> Grounding
+    -> Extraction -> Ingest -> Artifacts -> Kernel`, the form the `import-linter`
+    contract in `pyproject.toml` now enforces. This amendment lands in the same
+    change as that contract, which is what the rule added at 1.4.0 requires.
+
+  - `Artifacts` is recorded as sitting directly ABOVE the kernel. It stores whole
+    result models without importing one — the caller names the model at the call
+    site — so its dependencies are `pydantic` and two kernel hashing helpers, and
+    the lowest position that is true is the honest one.
+
+  - `Pipeline` is recorded as sitting directly ABOVE `Validation`, the highest
+    stage it drives, rather than above `Evaluation` where its milestone number
+    might suggest. This leaves the `Recording > Evaluation` edge of 1.3.0
+    untouched and yields `Recording > Pipeline`, which is what makes the recorder
+    a caller of the pipeline rather than a second definition of the stage order.
+
+  - `API` and `CLI` are siblings, not a stack, separated by an `independence`
+    contract. Neither may import the other; a position in an ordered list would
+    have implied a permission.
+
+  - The "planned and not yet built" list is now empty. Every layer this document
+    names exists.
+
+Sections amended: Principle X (chain, one rule clarified). No decision moved; one
+non-blocking decision remains open: PRE_1_0_VERSIONING, which Milestone 7
+resolves separately via ADR-0011.
+
+Templates: no changes required — the plan-template gate table references
+principles by number and remains accurate. Note that gate 11's parenthetical in
+`plan-template.md` still quotes the pre-1.4.0 chain and should be corrected when
+that template is next touched; it is advisory text, not the enforced contract.
+
+---
+AMENDMENT 1.5.0 → 1.5.1 (2026-08-24)
+Bump rationale: PATCH — the last open decision moves to Resolved. No principle is
+added, removed, or redefined, and no previously compliant work becomes
+non-compliant; the policy recorded describes what the project already did.
+
+  - TODO(PRE_1_0_VERSIONING) resolved (ADR-0011). While the major version is `0`,
+    a minor bump may break any public API and a patch bump may not, and every
+    breaking change ships a changelog entry naming what moved and what to do
+    about it. Two surfaces get a deprecation path instead of a silent break —
+    the kernel's identity derivations and the on-disk artifact format — because a
+    change to either invalidates data that already exists on somebody else's
+    disk, which is the one class of breakage upgrading cannot repair. Nothing
+    else is promised stable before `1.0.0`.
+
+  - The mechanism that path relies on already runs: `FileArtifactStore.get`
+    treats an incompatible `artifact_format_version` as a logged miss, so an
+    artifact written under an older format is recomputed rather than misread.
+
+Sections amended: Open Constitutional Decisions (PRE_1_0_VERSIONING moved to
+Resolved; the "Still open" list is now empty and says so). Principle XII is
+untouched — ADR-0011 states what "follows semantic versioning" means below
+`1.0.0` rather than changing the requirement.
+
+Templates: no changes required.
+
+---
+AMENDMENT 1.5.1 → 1.5.2 (2026-08-24)
+Bump rationale: PATCH — a clarification, not a widening. `pydantic_core` is
+recorded as being `pydantic` rather than admitted as a second dependency, so
+nothing previously compliant becomes non-compliant and nothing previously
+forbidden becomes permitted.
+
+  - Principle I gains a sub-clause stating that `pydantic_core` counts as
+    `pydantic`. It is pydantic's own compiled runtime: installing pydantic
+    installs it, pydantic cannot function without it, and it is not separately
+    declared in `pyproject.toml`. The kernel reaches it for one purpose —
+    `SpanIndex.__get_pydantic_core_schema__`, without which a `Document` cannot
+    be serialised and the parse stage has no storable artifact.
+
+  - Recorded here because it had been argued **only in a comment inside
+    `tests/unit/test_kernel_purity.py`**, whose own failure message says that
+    adding a kernel dependency requires a constitution amendment. A permission
+    that lives in the test enforcing the prohibition is not a governed decision,
+    and `/speckit-converge` was right to raise it as CRITICAL.
+
+Sections amended: Principle I (one sub-clause). No decision moved; the open list
+stays empty.
+
+Templates: no changes required.
 -->
 
 # docdoc Constitution
@@ -209,6 +299,15 @@ Rules:
 - The kernel's only permitted runtime dependency is `pydantic`. The kernel MUST NOT import
   HTTP clients, provider SDKs, PDF/OCR libraries, database drivers, queue clients, or web
   frameworks. A dependency-boundary test MUST enforce this mechanically.
+  - `pydantic_core` counts as `pydantic` and not as a second dependency. It is pydantic's own
+    compiled runtime: `pip install pydantic` installs it, pydantic cannot function without it, and
+    it is not separately declared in `pyproject.toml`. The kernel reaches it for exactly one
+    purpose — `SpanIndex.__get_pydantic_core_schema__`, which is the documented way to make a
+    non-pydantic class serialisable and is what lets a `Document` survive a round trip through the
+    artifact store. Without it the parse stage has no storable artifact and ADR-0003's central
+    promise is unkeepable. It is named here because the boundary test reads top-level module names
+    and cannot know the two ship together, and because a permission argued only in a test comment
+    is not recorded.
 - `locate()`, `find()`, `slice()`, and `merge()` are mandatory kernel operations. `slice()` and
   `merge()` MUST preserve geometry and rebase offsets without losing source mapping.
 - `find()` is **exact-only** and stdlib-implemented; fuzzy matching lives in the extraction layer
@@ -404,13 +503,23 @@ not regress.
 The dependency direction MUST be, strictly downward. The layers that **exist**, in order:
 
 ```text
-Evaluation → Validation → Grounding → Extraction → Ingest → Kernel
+API, CLI → Recording → Evaluation → Pipeline → Validation → Grounding
+         → Extraction → Ingest → Artifacts → Kernel
 ```
 
-Planned and not yet built: **Recording** (above Evaluation), and **Pipeline** and **API** above
-both — Milestones 6 and 7. `Transform` was named as a layer in this document until v1.4.0 and was
-never built: ADR-0006 put its transformations inside grounding's versioned match view instead, so
-the layer it would have been is grounding.
+Nothing is planned and unbuilt: every layer named here exists. `Transform` was named as a layer in
+this document until v1.4.0 and was never built — ADR-0006 put its transformations inside grounding's
+versioned match view instead, so the layer it would have been is grounding.
+
+Two positions in that chain are not the ones a reader would guess, and both are deliberate.
+**`Artifacts` sits directly above the kernel**, because it stores whole result models without
+importing one — the caller names the model — so it depends on `pydantic` and two kernel helpers and
+nothing else. **`Pipeline` sits directly above `Validation`**, the highest stage it drives, which
+leaves `Recording → Evaluation` as it was and yields `Recording → Pipeline`: the recorder *calls* the
+pipeline rather than holding a second copy of the stage order.
+
+**`API` and `CLI` are siblings, not a stack.** Neither may import the other, which an ordered
+position cannot express; an `independence` contract states it instead.
 
 Rules:
 
@@ -421,9 +530,10 @@ Rules:
   document never named — and the reconciliation lived only in a `pyproject.toml` comment and three
   `research.md` files. A dependency graph a reader must reconstruct from three research documents
   is not a governing one.
-- **This chain MUST name only layers that exist**, with planned ones listed separately as above. A
-  principle that names `Transform` and `Pipeline` alongside `Kernel` invites a designer to build
-  against a graph that is partly aspiration, which is the specific failure this rule now prevents.
+- **This chain MUST name only layers that exist**, with planned ones listed separately. A principle
+  that names `Transform` and `Pipeline` alongside `Kernel` invites a designer to build against a
+  graph that is partly aspiration, which is the specific failure this rule now prevents. As of
+  v1.5.0 the separate list is empty, and it MUST stay empty rather than becoming a wish list.
 - ADR-0003's per-document stage chain — parse → extraction → grounding → validation — is finer
   grained than this list and consistent with it. Where they overlap, both hold; neither overrides
   the other.
@@ -570,12 +680,15 @@ on 2026-08-14:
 | `LICENSE` | Apache-2.0, chosen for its explicit patent grant | [0007](../../docs/adr/0007-apache-2-license.md) |
 | `SCHEMA_EVOLUTION_POLICY` | Major `schema_version` for contract breaks, derived `schema_hash` for cache invalidation; concurrent majors allowed; no `latest` in the core (2026-08-17) | [0008](../../docs/adr/0008-schema-evolution-policy.md) |
 | `GOLDEN_DATASET_LICENSING` | Two tiers: a vendored public tier sufficient on its own for a complete report, plus an optional hash-referenced restricted tier whose absence makes a report partial; gate 5's target size stated (2026-08-20) | [0009](../../docs/adr/0009-golden-dataset-licensing.md) |
+| `PRE_1_0_VERSIONING` | While the major is `0`, a minor may break any public API and a patch may not; the kernel's identity derivations and the on-disk artifact format get a deprecation path rather than a silent break, because a change to either invalidates data on somebody else's disk; nothing else is promised stable before `1.0.0` (2026-08-24) | [0011](../../docs/adr/0011-pre-1.0-versioning.md) |
 
-**Still open:**
+**Still open:** none.
 
-- **TODO(PRE_1_0_VERSIONING)** — before first public release. Principle XII mandates semantic
-  versioning while the kernel API is expected to churn. Confirm the `0.x` policy and what
-  stability, if any, is promised before `1.0.0`.
+Every decision this document has ever raised is resolved and points at an accepted ADR. That is a
+statement about *this* list, not a claim that no decision will ever be needed again — a later
+question is raised here, decided, and recorded, exactly as these were. What it does mean is that no
+implementer is currently working around an unresolved constitutional question, which is the
+condition the precedence rule below exists to keep true.
 
 ## Governance
 
@@ -604,4 +717,4 @@ insufficient. Unjustified violations are rejected regardless of the code's quali
 **Precedence for unresolved items.** Where an "Open Constitutional Decision" is unresolved,
 implementers MUST NOT resolve it silently in code. Raise it, decide it, record it.
 
-**Version**: 1.4.0 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-08-20
+**Version**: 1.5.2 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-08-24

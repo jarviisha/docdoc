@@ -16,6 +16,7 @@ accents and CJK, both verified to round-trip.
 
 from __future__ import annotations
 
+import importlib.util
 import unicodedata
 from pathlib import Path
 
@@ -62,6 +63,14 @@ class TestThroughARealPdf:
 
     @pytest.fixture
     def document(self) -> object:
+        """SC-013 — the base install has no native PDF reader, and this needs one.
+
+        Guarded in the fixture rather than on the class, because every test here
+        takes ``document`` and the fixture is the single place the requirement
+        actually bites. A class decorator would have to be remembered by whoever
+        adds the next test; this cannot be forgotten.
+        """
+        pytest.importorskip("pymupdf")
         return parse((FIXTURES / "pdf" / "unicode_text.pdf").read_bytes())
 
     def test_nothing_was_lost_to_a_broken_decode(self, document) -> None:  # type: ignore[no-untyped-def]
@@ -172,6 +181,13 @@ class TestZeroPageDocument:
     ("cannot save with zero pages"), so the only way to have one is to author the
     bytes.
     """
+
+    # SC-013: refusing a zero-page PDF still requires opening it, so this class
+    # needs the native reader that a base install does not have.
+    pytestmark = pytest.mark.skipif(
+        importlib.util.find_spec("pymupdf") is None,
+        reason="needs the native PDF reader (docdoc[pdf])",
+    )
 
     def test_it_is_refused_as_unreadable_rather_than_routed(self) -> None:
         # Left to the text-layer rule this would come out "not usable" and the
