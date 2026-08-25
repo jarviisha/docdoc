@@ -234,6 +234,28 @@ def test_an_observer_that_raises_does_not_fail_the_run(
 # -- FR-045 on the path that raises ------------------------------------------
 
 
+def _artifact_for(root: Path, stage: Any) -> Path:
+    """The stored envelope for one named stage.
+
+    **Chosen by name, never by filesystem order.** These tests used to reach for
+    `next(glob("*/*.json"))`, which corrupts whichever entry the platform happens
+    to list first — the store's two-character fan-out makes that order a property
+    of the filesystem rather than of the run. On ext4 here it returned the
+    `validate` artifact and the tests passed; on GitHub's ubuntu and windows
+    runners it returned `parse`, the run died at the first stage having emitted
+    nothing, and the assertion below failed. Green on one machine through six
+    convergence passes for no better reason than directory iteration order.
+    """
+    entries = sorted((root / "artifacts").glob("*/*.json"))
+    for entry in entries:
+        if json.loads(entry.read_text())["stage"] == stage.value:
+            return entry
+    raise AssertionError(
+        f"no {stage.value} artifact under {root}; the fixture stored "
+        f"{[json.loads(e.read_text())['stage'] for e in entries]}"
+    )
+
+
 def test_a_run_that_raises_still_emits_events_for_the_stages_that_ran(
     captured: pytest.LogCaptureFixture, tmp_path: Path
 ) -> None:
@@ -258,7 +280,11 @@ def test_a_run_that_raises_still_emits_events_for_the_stages_that_ran(
     first = _run(store=store)
     assert first.failed_stage is None, "the fixture must succeed before it is corrupted"
 
-    entry = next((tmp_path / "artifacts").glob("*/*.json"))
+    # Corrupting the *last* stage is the strongest version of this check: every
+    # earlier stage is then reused from the store, so all three must still emit
+    # an event despite executing nothing. "One event per stage execution" is the
+    # weaker reading of FR-045; this pins the stronger one.
+    entry = _artifact_for(tmp_path, Stage.VALIDATE)
     stored = json.loads(entry.read_text())
     stored["payload"]["__corrupted_by_this_test__"] = True
     entry.write_text(json.dumps(stored))
@@ -294,11 +320,12 @@ def test_a_raising_run_leaks_nothing_through_its_events(
 ) -> None:
     """The events added above must obey the same prohibition as the rest."""
     from docdoc.artifacts import ArtifactError
+    from docdoc.pipeline import Stage
 
     store = FileArtifactStore(tmp_path)
     _run(store=store)
 
-    entry = next((tmp_path / "artifacts").glob("*/*.json"))
+    entry = _artifact_for(tmp_path, Stage.VALIDATE)
     stored = json.loads(entry.read_text())
     stored["payload"]["__corrupted_by_this_test__"] = True
     entry.write_text(json.dumps(stored))

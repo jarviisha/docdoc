@@ -75,9 +75,7 @@ def test_every_package_on_disk_is_named_in_the_contract() -> None:
     A new package that no layer names is unconstrained — it may import anything,
     in any direction, and CI stays green.
     """
-    declared = {
-        name.strip() for entry in EXPECTED_LAYERS for name in entry.split(":")
-    }
+    declared = {name.strip() for entry in EXPECTED_LAYERS for name in entry.split(":")}
     on_disk = {
         f"docdoc.{path.name}"
         for path in (ROOT / "src" / "docdoc").iterdir()
@@ -106,11 +104,7 @@ def test_the_constitution_states_the_same_chain() -> None:
     chain = re.search(r"```text\n(.*?)```", principle, re.DOTALL)
     assert chain is not None, "Principle X no longer states a chain"
 
-    stated = [
-        name.strip().lower()
-        for name in re.split(r"[,→\n]", chain.group(1))
-        if name.strip()
-    ]
+    stated = [name.strip().lower() for name in re.split(r"[,→\n]", chain.group(1)) if name.strip()]
     enforced = [
         name.strip().removeprefix("docdoc.")
         for entry in EXPECTED_LAYERS

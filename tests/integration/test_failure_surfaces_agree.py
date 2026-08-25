@@ -96,23 +96,15 @@ def _from_the_command_line(
     monkeypatch.setenv("DOCDOC_MODEL_ADAPTERS", "echo")
     monkeypatch.setenv("DOCDOC_ECHO_FIXTURES", str(Path("tests/fixtures/echo").resolve()))
 
-    code = main(
-        ["extract", str(FIXTURE), "--schema", ABSENT_SCHEMA, "--json", "--no-store"]
-    )
+    code = main(["extract", str(FIXTURE), "--schema", ABSENT_SCHEMA, "--json", "--no-store"])
     payload = json.loads(capsys.readouterr().out)
     assert code == 2, "a run that could not complete exits 2"
 
-    outcome = next(
-        item for item in payload["outcomes"] if item["stage"] == payload["failed_stage"]
-    )
+    outcome = next(item for item in payload["outcomes"] if item["stage"] == payload["failed_stage"])
     return _facts(
         payload["failed_stage"],
         outcome["failure_class"],
-        {
-            name
-            for name, key in (("extraction", "fields"),)
-            if payload.get(key)
-        },
+        {name for name, key in (("extraction", "fields"),) if payload.get(key)},
     )
 
 
@@ -132,9 +124,7 @@ def _from_the_http_interface(tmp_path: Path) -> dict[str, Any]:
     client = TestClient(build_app(deployment))
 
     blob_id = client.post("/v1/documents", content=FIXTURE.read_bytes()).json()["blob_id"]
-    body = client.post(
-        f"/v1/documents/{blob_id}/extract", params={"schema": ABSENT_SCHEMA}
-    ).json()
+    body = client.post(f"/v1/documents/{blob_id}/extract", params={"schema": ABSENT_SCHEMA}).json()
 
     return _facts(
         body["error"]["stage"],

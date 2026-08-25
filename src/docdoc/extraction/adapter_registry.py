@@ -232,9 +232,7 @@ def _register_echo(registry: AdapterRegistry) -> None:
     except OSError as error:
         registry.register_unavailable(
             "echo",
-            reason=(
-                f"${ECHO_FIXTURES_ENV} is set to {fixtures!r}, which is unreadable: {error}"
-            ),
+            reason=(f"${ECHO_FIXTURES_ENV} is set to {fixtures!r}, which is unreadable: {error}"),
         )
 
 

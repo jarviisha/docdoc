@@ -135,9 +135,7 @@ def test_an_ungrounded_value_is_still_a_value(
     every other assertion in this file.
     """
     _, out = run(["inspect", FIXTURE, "--schema", SCHEMA, "--json"], capsys)
-    ungrounded = [
-        row for row in json.loads(out)["fields"] if row["grounding"] == "ungrounded"
-    ]
+    ungrounded = [row for row in json.loads(out)["fields"] if row["grounding"] == "ungrounded"]
     assert ungrounded
     for row in ungrounded:
         assert row["value"] not in (None, ""), f"{row['field']} was reported without its value"

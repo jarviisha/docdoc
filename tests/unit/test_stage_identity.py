@@ -177,8 +177,19 @@ def test_a_duration_cannot_be_folded_into_an_identity() -> None:
     """
     import inspect
 
-    forbidden = {"duration", "duration_ms", "started_at", "timestamp", "request_id",
-                 "attempt", "attempts", "retries", "timeout", "deadline", "elapsed"}
+    forbidden = {
+        "duration",
+        "duration_ms",
+        "started_at",
+        "timestamp",
+        "request_id",
+        "attempt",
+        "attempts",
+        "retries",
+        "timeout",
+        "deadline",
+        "elapsed",
+    }
     for function in (
         options_hash_for_extraction,
         options_hash_for_grounding,
@@ -206,8 +217,14 @@ def test_a_limit_cannot_be_folded_into_an_identity() -> None:
     """
     import inspect
 
-    forbidden = {"limits", "max_pages", "max_size_bytes", "max_document_bytes",
-                 "allowed_media_types", "max_request_bytes"}
+    forbidden = {
+        "limits",
+        "max_pages",
+        "max_size_bytes",
+        "max_document_bytes",
+        "allowed_media_types",
+        "max_request_bytes",
+    }
     for function in (
         options_hash_for_extraction,
         options_hash_for_grounding,

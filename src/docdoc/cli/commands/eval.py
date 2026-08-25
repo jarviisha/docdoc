@@ -102,8 +102,7 @@ def _lines(report: EvaluationReport) -> list[str]:
     lines = ["Golden set"]
     for size in report.dataset_size:
         lines.append(
-            f"  {size.tier:<12} {size.documents} documents, "
-            f"{size.labelled_fields} labelled fields"
+            f"  {size.tier:<12} {size.documents} documents, {size.labelled_fields} labelled fields"
         )
 
     lines.append("")
@@ -124,8 +123,7 @@ def _lines(report: EvaluationReport) -> list[str]:
         [
             "",
             "Outcomes",
-            f"  correct {counts.correct}, incorrect {counts.incorrect}, "
-            f"missing {counts.missing}",
+            f"  correct {counts.correct}, incorrect {counts.incorrect}, missing {counts.missing}",
             f"  spurious {counts.spurious}, unevaluated {counts.unevaluated}",
             f"  unlabeled {counts.unlabeled} (counted, and in no denominator)",
         ]
@@ -138,8 +136,7 @@ def _lines(report: EvaluationReport) -> list[str]:
                 "",
                 "PARTIAL RUN (ADR-0009)",
                 f"  skipped tiers: {', '.join(str(tier) for tier in partial.skipped_tiers)}",
-                f"  covered {partial.covered_labels} of "
-                f"{partial.declared_labels} declared labels",
+                f"  covered {partial.covered_labels} of {partial.declared_labels} declared labels",
             ]
         )
 

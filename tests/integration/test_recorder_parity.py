@@ -81,8 +81,7 @@ def regenerated(registry: SchemaRegistry) -> PredictionSet:
         for name in dataset.PAGES
     }
     documents = {
-        name: parse((DATASET / "documents" / f"{name}.pdf").read_bytes())
-        for name in dataset.PAGES
+        name: parse((DATASET / "documents" / f"{name}.pdf").read_bytes()) for name in dataset.PAGES
     }
 
     recorded: dict[str, Any] = {}

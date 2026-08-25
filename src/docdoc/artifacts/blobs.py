@@ -30,6 +30,7 @@ __all__ = ["BlobStore"]
 
 _logger = logging.getLogger("docdoc.artifacts")
 
+
 class BlobStore:
     """Source bytes on a filesystem, keyed by their own content."""
 

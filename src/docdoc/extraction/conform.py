@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, cast
 
 from docdoc.extraction.errors import ExtractionError
 from docdoc.extraction.schema import Cardinality, FieldSpec, FieldType, Schema
@@ -316,7 +316,11 @@ def retype(values: ValueTree, schema: Schema) -> ValueTree:
         adapter_id=None,
         discarded=[],
     )
-    return _retype_object(values, schema.fields, path="", context=context)
+    # `_retype_object` is a recursive walker over an untyped tree and returns
+    # `Any` by necessity; the cast is where that `Any` stops. Narrowed here
+    # rather than inside the walker because this is the boundary a caller sees,
+    # and it is the schema that makes the claim true.
+    return cast("ValueTree", _retype_object(values, schema.fields, path="", context=context))
 
 
 def _retype_object(

@@ -276,12 +276,19 @@ class Settings:
         """
         from docdoc.ingest import Limits
 
-        overrides: dict[str, int] = {}
-        if self.max_document_bytes is not None:
-            overrides["max_size_bytes"] = self.max_document_bytes
-        if self.max_pages is not None:
-            overrides["max_pages"] = self.max_pages
-        return Limits(**overrides)
+        # Constructed once with no arguments so its field defaults do the
+        # environment read, then rebuilt with whichever flags were given. Written
+        # out field by field rather than as `Limits(**overrides)`: a `**` unpack
+        # of `dict[str, int]` is not type-safe against a model whose third field
+        # is a `frozenset[str]`, and `mypy --strict` says so.
+        base = Limits()
+        return Limits(
+            max_size_bytes=(
+                base.max_size_bytes if self.max_document_bytes is None else self.max_document_bytes
+            ),
+            max_pages=base.max_pages if self.max_pages is None else self.max_pages,
+            allowed_media_types=base.allowed_media_types,
+        )
 
     def store(self) -> ArtifactStore:
         """The artifact store, which is the null one unless somebody said where."""

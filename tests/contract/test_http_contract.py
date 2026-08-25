@@ -197,9 +197,7 @@ def test_an_unavailable_result_is_not_silently_recomputed(
     assert response.json()["status"] == "unavailable"
 
 
-def test_a_stored_result_is_retrievable_by_its_identity(
-    client: TestClient, source: bytes
-) -> None:
+def test_a_stored_result_is_retrievable_by_its_identity(client: TestClient, source: bytes) -> None:
     job_id = extract(client, submit(client, source)).json()["job_id"]
     fetched = client.get(f"/v1/jobs/{job_id}/result")
     assert fetched.status_code == 200
@@ -242,9 +240,7 @@ def test_an_unresolvable_schema_is_a_400_naming_the_stage(
     assert response.json()["error"]["stage"] == "extract"
 
 
-def test_a_mid_run_failure_carries_the_completed_stages(
-    client: TestClient, source: bytes
-) -> None:
+def test_a_mid_run_failure_carries_the_completed_stages(client: TestClient, source: bytes) -> None:
     """FR-066 — a failed run has no job to fetch, so this is the only place the
     partial result can appear."""
     body = extract(client, submit(client, source), schema="no-such-schema@1").json()
@@ -255,18 +251,14 @@ def test_a_mid_run_failure_carries_the_completed_stages(
     assert statuses["ground"] == "skipped"
 
 
-def test_an_error_body_never_carries_a_provider_message(
-    client: TestClient, source: bytes
-) -> None:
+def test_an_error_body_never_carries_a_provider_message(client: TestClient, source: bytes) -> None:
     """FR-037 — a provider's error text may quote the document it choked on."""
     body = extract(client, submit(client, source), schema="no-such-schema@1").json()
     serialised = json.dumps(body)
     assert "Traceback" not in serialised
 
 
-def test_every_failure_arrives_as_a_status_in_the_table(
-    client: TestClient, source: bytes
-) -> None:
+def test_every_failure_arrives_as_a_status_in_the_table(client: TestClient, source: bytes) -> None:
     """SC-011 — no untyped exception reaches a caller, over any endpoint."""
     from docdoc.api.errors import STATUS_BY_ERROR
 

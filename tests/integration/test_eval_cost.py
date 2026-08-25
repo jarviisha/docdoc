@@ -110,9 +110,7 @@ def test_the_parser_is_not_merely_fast_the_second_time(
 
     monkeypatch.setattr(ingest_parse, "execute_plan", refuse)
 
-    second = run(
-        path.read_bytes(), schema=schema, registry=registry, adapter=adapter, store=store
-    )
+    second = run(path.read_bytes(), schema=schema, registry=registry, adapter=adapter, store=store)
     assert second.outcome_for(Stage.PARSE).status.value == "reused"  # type: ignore[union-attr]
     assert second.failed_stage is None
 

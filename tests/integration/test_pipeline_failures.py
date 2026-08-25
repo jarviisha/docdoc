@@ -208,9 +208,7 @@ def test_a_run_that_fails_at_validate_keeps_the_first_three(
 
         return validate(foreign, grounding, registry.resolve(schema).schema, **kwargs)
 
-    monkeypatch.setattr(
-        "docdoc.pipeline.runner._validate", _validate_against_a_foreign_extraction
-    )
+    monkeypatch.setattr("docdoc.pipeline.runner._validate", _validate_against_a_foreign_extraction)
     result = _run()
 
     assert result.failed_stage is Stage.VALIDATE

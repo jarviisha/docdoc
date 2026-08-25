@@ -69,9 +69,7 @@ LAYERS: tuple[tuple[str, pathlib.Path], ...] = (
 #: **between** `docdoc.evaluation` and `docdoc.validation`, which is its height in
 #: the chain. `docdoc.artifacts` stays out for the same reason `docdoc.recording`
 #: does: its tests reach it directly and would form a layer of four.
-EXTRA_PLANS: tuple[pathlib.Path, ...] = (
-    pathlib.Path("specs/007-pipeline-api-cli/plan.md"),
-)
+EXTRA_PLANS: tuple[pathlib.Path, ...] = (pathlib.Path("specs/007-pipeline-api-cli/plan.md"),)
 
 #: `docdoc.recording` is deliberately **not** listed, though it is a layer and it
 #: sits above `docdoc.evaluation`. Its tests reach it *through* the evaluation

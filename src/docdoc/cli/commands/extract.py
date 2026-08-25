@@ -187,9 +187,7 @@ def _pipeline_run(args: argparse.Namespace, settings: Settings) -> PipelineResul
     if args.schema not in registry:
         message = empty_registry_message(settings)
         if message is not None:
-            raise SchemaError(
-                message, identity=args.schema, available=registry.identities()
-            )
+            raise SchemaError(message, identity=args.schema, available=registry.identities())
 
     return run_pipeline(
         Path(args.file).read_bytes(),

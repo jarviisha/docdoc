@@ -118,9 +118,7 @@ class _Reuse:
         if artifact_id is None or self._verify or self._degraded:
             return None
         try:
-            return self._store.get(
-                artifact_id, model=model, artifact_format_version=version
-            )
+            return self._store.get(artifact_id, model=model, artifact_format_version=version)
         except ArtifactError:
             raise
         except Exception as error:
@@ -171,7 +169,7 @@ class _Clock:
 
 
 def run(
-    source: SourceFile | bytes,
+    source: SourceFile | bytes | None = None,
     *,
     schema: str,
     registry: Any,
@@ -189,7 +187,13 @@ def run(
     """Run the four stages over one document.
 
     Args:
-        source: The bytes, or a ``SourceFile`` the caller already built.
+        source: The bytes, or a ``SourceFile`` the caller already built. May be
+            omitted **only** when ``document`` is supplied, because then no parse
+            happens and there is nothing to read. Optional since 2026-08-25: the
+            recorder had been passing its already-parsed ``Document`` here *and*
+            as ``document=``, which worked because this argument is untouched on
+            that path — a dead argument of the wrong type, which `mypy
+            src/docdoc` reported and the kernel-only type check never saw.
         schema: The schema identity, as data. The pipeline branches on nothing.
         registry: A ``SchemaRegistry`` resolving ``schema``.
         adapter: The model adapter. Configuration picks it; this signature names
@@ -221,6 +225,14 @@ def run(
     from docdoc.artifacts import NullArtifactStore
     from docdoc.pipeline.observe import correlation
 
+    if source is None and document is None:
+        # Raised rather than left to fail inside the parse stage, where the
+        # message would name a routing failure instead of the missing argument.
+        raise PipelineError(
+            "run() needs either source bytes to parse or an already-parsed "
+            "document=; it was given neither"
+        )
+
     with correlation(request_id=request_id):
         return _run(
             source,
@@ -239,7 +251,7 @@ def run(
 
 
 def _run(
-    source: SourceFile | bytes,
+    source: SourceFile | bytes | None,
     *,
     schema: str,
     registry: Any,
@@ -270,6 +282,9 @@ def _run(
     try:
         if parsed is None:
             clock = _Clock()
+            # `run` has already refused the both-absent case, so a source exists
+            # wherever there is no document to reuse.
+            assert source is not None
             # Routing and parser selection happen here; the parser does not.
             # That gap is what makes a cached parse skip the billable half while
             # still computing the text-layer verdict on every run (FR-061).
@@ -326,6 +341,7 @@ def _run(
         )
         cached = reuse.get(expected, ExtractionResult, _format(Stage.EXTRACT))
         if cached is not None:
+            assert expected is not None  # a hit proves the id: `get` misses on None
             extraction = _retyped(cached, schema=schema, registry=registry)
             outcomes.append(_reused(Stage.EXTRACT, expected, clock))
         else:
@@ -352,8 +368,7 @@ def _run(
                 # identity it could be filed under is one a future run asking for
                 # the same thing would never look up.
                 _logger.info(
-                    "extraction not cached: the model that answered is not the "
-                    "one requested",
+                    "extraction not cached: the model that answered is not the one requested",
                     extra={
                         "event": "pipeline.extract_not_cacheable",
                         "expected_artifact_id": expected,
@@ -364,9 +379,7 @@ def _run(
         processors[Stage.EXTRACT.value] = _processor_record(Stage.EXTRACT, extraction)
 
         clock = _Clock()
-        expected = ground_artifact_id(
-            extraction.artifact_id, options=grounding_options
-        )
+        expected = ground_artifact_id(extraction.artifact_id, options=grounding_options)
         cached = reuse.get(expected, GroundingResult, _format(Stage.GROUND))
         if cached is not None:
             grounding = cached
@@ -393,6 +406,7 @@ def _run(
         )
         cached = reuse.get(expected, ValidationResult, _format(Stage.VALIDATE))
         if cached is not None:
+            assert expected is not None  # a hit proves the id: `get` misses on None
             validation = cached
             outcomes.append(_reused(Stage.VALIDATE, expected, clock))
         else:
@@ -622,9 +636,7 @@ def _retyped(extraction: ExtractionResult, *, schema: str, registry: Any) -> Ext
 
     try:
         entry = registry.resolve(schema)
-        return extraction.model_copy(
-            update={"values": retype(extraction.values, entry.schema)}
-        )
+        return extraction.model_copy(update={"values": retype(extraction.values, entry.schema)})
     except Exception as error:
         _logger.info(
             "reused extraction could not be retyped against its schema",
@@ -679,9 +691,7 @@ def _extract(
 ) -> Any:
     from docdoc.extraction.extract import extract
 
-    return extract(
-        document, schema=schema, registry=registry, adapter=adapter, options=options
-    )
+    return extract(document, schema=schema, registry=registry, adapter=adapter, options=options)
 
 
 def _ground(document: Document, extraction: Any, *, options: Any = None) -> Any:
@@ -695,6 +705,4 @@ def _validate(
 ) -> Any:
     from docdoc.validation import validate
 
-    return validate(
-        extraction, grounding, registry.resolve(schema).schema, options=options
-    )
+    return validate(extraction, grounding, registry.resolve(schema).schema, options=options)

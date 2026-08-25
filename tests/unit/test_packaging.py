@@ -43,7 +43,12 @@ def _packages() -> set[str]:
     wrong directory.
     """
     return {
-        str(path.parent.relative_to(SOURCE))
+        # `as_posix`, not `str`. The other side of every comparison in this file
+        # comes from `git ls-files` or a wheel's zip namelist, and both of those
+        # speak forward slashes on every platform. `str()` of a `WindowsPath`
+        # does not, so on Windows this compared `cli\commands` against
+        # `cli/commands` and reported the whole tree as untracked.
+        path.parent.relative_to(SOURCE).as_posix()
         for path in SOURCE.rglob("__init__.py")
         if path.parent != SOURCE and "__pycache__" not in path.parts
     }
@@ -68,7 +73,7 @@ def test_every_source_file_is_tracked_by_git() -> None:
     exist for anyone else — no clone, no wheel, no CI job, no contributor.
     """
     on_disk = {
-        str(path.relative_to(REPO))
+        path.relative_to(REPO).as_posix()
         for path in SOURCE.rglob("*.py")
         if "__pycache__" not in path.parts
     }
@@ -92,7 +97,7 @@ def test_every_package_is_tracked_by_git() -> None:
     """
     prefix = "src/docdoc/"
     tracked_dirs = {
-        str(Path(name).relative_to(prefix).parent)
+        Path(name).relative_to(prefix).parent.as_posix()
         for name in _tracked("src/docdoc")
         if name.startswith(prefix)
     }
@@ -157,7 +162,7 @@ def wheel_packages(tmp_path_factory: pytest.TempPathFactory) -> set[str]:
 
     with zipfile.ZipFile(wheels[0]) as archive:
         return {
-            str(Path(name).relative_to("docdoc").parent)
+            Path(name).relative_to("docdoc").parent.as_posix()
             for name in archive.namelist()
             if name.startswith("docdoc/") and name.endswith(".py")
         }

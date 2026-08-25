@@ -209,9 +209,7 @@ def test_a_failed_run_still_reports_the_stages_that_succeeded(
     the exit codes and output forms — which need no reader — still run there.
     """
     pytest.importorskip("pymupdf")
-    code, out, _ = run(
-        ["extract", FIXTURE, "--schema", "no-such-schema@1", "--json"], capsys
-    )
+    code, out, _ = run(["extract", FIXTURE, "--schema", "no-such-schema@1", "--json"], capsys)
     assert code == EXIT_COULD_NOT_RUN
 
     payload = json.loads(out)
@@ -256,9 +254,7 @@ def test_an_explicit_flag_beats_the_environment(
 ) -> None:
     pytest.importorskip("pymupdf")  # SC-013: skips on a base install
     monkeypatch.setenv("DOCDOC_SCHEMA_PATHS", "/no/such/schemas")
-    code, _, _ = run(
-        ["extract", FIXTURE, "--schema", SCHEMA, "--schema-path", "schemas"], capsys
-    )
+    code, _, _ = run(["extract", FIXTURE, "--schema", SCHEMA, "--schema-path", "schemas"], capsys)
     assert code == EXIT_OK
 
 
@@ -300,14 +296,13 @@ def test_inspect_reads_a_stored_result_by_its_identity(
     pytest.importorskip("pymupdf")
     store = str(tmp_path)
 
-    code, out, _ = run(
-        ["extract", FIXTURE, "--schema", SCHEMA, "--store", store, "--json"], capsys
-    )
+    code, out, _ = run(["extract", FIXTURE, "--schema", SCHEMA, "--store", store, "--json"], capsys)
     assert code == EXIT_OK
     produced = json.loads(out)
 
-    code, out, _ = run(["inspect", "--result", produced["processing_id"], "--store", store,
-                        "--json"], capsys)
+    code, out, _ = run(
+        ["inspect", "--result", produced["processing_id"], "--store", store, "--json"], capsys
+    )
     assert code == EXIT_OK
 
     read_back = json.loads(out)

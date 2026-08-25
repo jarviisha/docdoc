@@ -118,7 +118,7 @@ def test_an_explanation_carries_no_document_content(
 def test_folded_input_names_are_names_and_never_values(
     stored: tuple[FileArtifactStore, str], tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """"prompt_hash" is a name; the prompt is a document."""
+    """ "prompt_hash" is a name; the prompt is a document."""
     _, processing_id = stored
     main(["explain", processing_id, "--chain", "--store", str(tmp_path), "--json"])
     payload = json.loads(capsys.readouterr().out)

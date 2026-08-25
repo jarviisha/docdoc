@@ -16,6 +16,23 @@ from pydantic import BaseModel
 
 from docdoc.artifacts import ArtifactError, FileArtifactStore, NullArtifactStore
 
+#: FR-044's guarantee — "readable only by the account that owns them" — is
+#: expressed in POSIX mode bits, which Windows does not have; there, the same
+#: property is an ACL and `artifacts/paths.py` does not write one. The honest
+#: statement is therefore that **the guarantee is POSIX-only**, which matches
+#: `plan.md`'s stated target platform of Linux and macOS.
+#:
+#: Skipped rather than silently weakened, and skipped rather than deleted: a
+#: deployment on Windows does not get FR-044, and a reader of this file should be
+#: told that by the skip reason rather than discover it from a store that turned
+#: out to be world-readable. Implementing the ACL is a real piece of work and is
+#: not this milestone's (Principle XI).
+posix_permissions = pytest.mark.skipif(
+    os.name != "posix",
+    reason="FR-044's owner-only guarantee is POSIX mode bits; Windows would need "
+    "an ACL, which paths.py does not write. Target platform is Linux and macOS.",
+)
+
 ID = "sha256:" + "a" * 64
 OTHER_ID = "sha256:" + "b" * 64
 INPUT_ID = "sha256:" + "c" * 64
@@ -205,6 +222,7 @@ def test_a_conflicting_write_never_overwrites(tmp_path: Path) -> None:
 # -- row 7-8: degradation ---------------------------------------------------
 
 
+@posix_permissions
 def test_an_unwritable_root_does_not_raise(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -262,6 +280,7 @@ def test_a_failed_write_leaves_no_temporary_file(
 # -- permissions (FR-044) ---------------------------------------------------
 
 
+@posix_permissions
 def test_the_store_is_not_group_or_world_readable(tmp_path: Path) -> None:
     """Artifacts hold extracted values, so their directory is the owner's alone."""
     store = _store(tmp_path)
@@ -356,6 +375,7 @@ def test_blobs_are_stored_once_per_content(tmp_path: Path) -> None:
     assert blobs.size_of(first) == len(data)
 
 
+@posix_permissions
 def test_blobs_are_not_group_or_world_readable(tmp_path: Path) -> None:
     """FR-044, on the store the requirement names explicitly — and why.
 

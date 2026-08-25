@@ -133,15 +133,22 @@ class ErrorDetail(BaseModel):
     document it choked on (FR-037).
     """
 
-    # `populate_by_name` so the field can be built as `error_class=` in Python
-    # and still serialise as `class`, which is what the contract's example shows
-    # and what a caller reads. `class` is a keyword, so the alias is the only way
-    # to have both.
-    model_config = ConfigDict(
-        frozen=True, extra="forbid", populate_by_name=True, serialize_by_alias=True
-    )
+    # Built as `error_class=` in Python and serialised as `class`, which is what
+    # the contract's example shows and what a caller reads. `class` is a keyword,
+    # so the two names are the only way to have both.
+    #
+    # A **serialization** alias rather than a plain one, because that is the
+    # narrower statement of the intent and the only one that type-checks. A plain
+    # `alias` also renames the constructor parameter — `dataclass_transform`,
+    # which is how mypy reads a pydantic model, then sees `ErrorDetail(class=...)`
+    # as the only valid call and rejects every real one. `populate_by_name` fixes
+    # that at runtime and is invisible to the type checker, which is why
+    # `mypy src/docdoc` flagged both call sites for a model that has always worked.
+    # Nothing validates an `ErrorDetail` *from* a payload, so the input alias was
+    # never needed: this type is constructed and serialised, never parsed.
+    model_config = ConfigDict(frozen=True, extra="forbid", serialize_by_alias=True)
 
-    error_class: str = Field(alias="class")
+    error_class: str = Field(serialization_alias="class")
     stage: str | None = None
     message: str
     detail: dict[str, Any] = Field(default_factory=dict)

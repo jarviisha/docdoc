@@ -455,9 +455,9 @@ def _install_error_handler(app: FastAPI) -> None:
     async def _typed(request: Request, error: DocdocError) -> Response:
         return JSONResponse(
             status_code=api_errors.status_for(error),
-            content=api_errors.body_for_exception(
-                error, stage=_stage_of(error)
-            ).model_dump(mode="json"),
+            content=api_errors.body_for_exception(error, stage=_stage_of(error)).model_dump(
+                mode="json"
+            ),
         )
 
     @app.exception_handler(Exception)

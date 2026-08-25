@@ -260,8 +260,7 @@ class FileArtifactStore:
 
         if stored.artifact_id != artifact_id:
             raise ArtifactError(
-                "stored artifact carries a different identity than the one it is "
-                "filed under",
+                "stored artifact carries a different identity than the one it is filed under",
                 reason="integrity",
                 artifact_id=artifact_id,
                 root=str(self.root),

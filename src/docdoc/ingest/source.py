@@ -99,12 +99,12 @@ class Limits(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    max_size_bytes: int = Field(default_factory=lambda: _from_env(
-        MAX_DOCUMENT_BYTES_ENV, DEFAULT_MAX_SIZE_BYTES
-    ), gt=0)
-    max_pages: int = Field(default_factory=lambda: _from_env(
-        MAX_PAGES_ENV, DEFAULT_MAX_PAGES
-    ), gt=0)
+    max_size_bytes: int = Field(
+        default_factory=lambda: _from_env(MAX_DOCUMENT_BYTES_ENV, DEFAULT_MAX_SIZE_BYTES), gt=0
+    )
+    max_pages: int = Field(
+        default_factory=lambda: _from_env(MAX_PAGES_ENV, DEFAULT_MAX_PAGES), gt=0
+    )
     allowed_media_types: frozenset[str] = frozenset({PDF, JPEG, PNG})
 
 

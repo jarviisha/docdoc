@@ -207,12 +207,16 @@ def _record_one(
     try:
         parsed = _resolve_document(document, documents, root)
         result = run(
-            parsed,
             schema=document.schema_identity,
             registry=registry,
             adapter=adapter,
             # No store. A committed prediction set is the product of full
             # execution, so a stale artifact can never move a published metric.
+            #
+            # No `source` either: the document is already parsed, so there is
+            # nothing to read. It used to be passed here positionally *as well*,
+            # which type-checked as `SourceFile | bytes` receiving a `Document`
+            # and was simply never read.
             document=parsed,
         )
     # Resolving the document can still raise — the pipeline never sees a file it
