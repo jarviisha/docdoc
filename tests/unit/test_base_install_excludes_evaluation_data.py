@@ -80,7 +80,14 @@ def test_no_new_optional_extra_was_added_for_evaluation() -> None:
     # `evaluation` extra, and none of the others gates scoring. Note also the
     # absence of a `cli` extra, which is not an oversight: the command line is
     # argparse, so there is nothing to keep out of the base install.
-    assert extras == {"pdf", "azure", "google", "gcv", "api", "dev"}, (
+    #
+    # `ui` was added by Milestone 8 and is the odd one: it pulls no SDK and no
+    # framework, only the built browser client as a separate distribution. It is
+    # an extra for the reason FR-035 gives — a Python extra can add a dependency
+    # but cannot add *files* to a wheel everyone already installs, so opting in
+    # is the only way the base install can stay free of static assets. Scoring is
+    # not gated by it either, which is what this test is actually about.
+    assert extras == {"pdf", "azure", "google", "gcv", "api", "ui", "dev"}, (
         f"the extras are now {sorted(extras)}; evaluation must need none of its own"
     )
 

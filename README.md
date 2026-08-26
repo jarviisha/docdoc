@@ -356,11 +356,43 @@ higher-layer work merges while that property is failing or absent.
 | 5 | Validation: schema, field, and cross-field rules | **Done** |
 | 6 | Evaluation: golden dataset, field accuracy, grounding rate | **Done** |
 | 7 | Pipeline, artifact store, CLI, and HTTP API | **Done** |
+| 8 | Read-only grounding viewer, and the two endpoints that reach it | **Done** |
+
+Milestone 8 adds no guarantee — no stage, no provider, no change to any value docdoc produces. What it
+changes is who can see the guarantees the first seven built.
+
+## The browser viewer
+
+```bash
+pip install 'docdoc[api,ui]'
+uvicorn --factory docdoc.api.app:create_app --port 8000    # then open /ui/
+```
+
+Read-only: it shows which page and which rectangle each extracted value came from, lists every value
+docdoc could **not** place rather than hiding it, and edits nothing. Five things worth knowing before
+you run it anywhere real:
+
+- **It is unauthenticated, and anyone who can reach it can spend your model provider budget.** It
+  belongs on a trusted network; docdoc ships no `serve` command and cannot pick a safer bind address
+  for you.
+- **A run continues after you close the page.** There is no cancel, because closing a browser stops the
+  waiting and not the work. A proxy in front of it must allow a request duration at least as long as
+  your slowest extraction, or it will terminate runs you have already paid for.
+- **Pages are shown selectively** — those carrying located values — because a deployment accepts
+  1000-page documents by default. Every other page is reachable, and the interface says so on screen.
+- **No accessibility conformance level is claimed.** What is guaranteed instead: every fact the overlay
+  conveys is in the value list, the list works without a pointer, and no distinction depends on colour.
+- **The rendered interface carries no automated test.** Its decisions are tested as pure functions; the
+  screen is not. [How the viewer works](docs/concepts/viewer.md) says exactly what that costs.
+
+A related change to the API: **`POST /v1/extract` runs a document with no store configured** and writes
+nothing. A deployment that previously refused every extraction for want of storage now serves them
+(ADR-0012).
 
 ## Documentation
 
 - [Constitution](.specify/memory/constitution.md) — the governing principles
-- [Architecture decisions](docs/adr/) — eleven accepted ADRs, and no open constitutional decisions
+- [Architecture decisions](docs/adr/) — twelve accepted ADRs, and no open constitutional decisions
 - [Document concepts](docs/concepts/document.md)
 - [Identity model](docs/concepts/identity.md)
 - [Kernel API contract](specs/001-kernel-document-ir/contracts/kernel-api.md)
@@ -370,6 +402,7 @@ higher-layer work merges while that property is failing or absent.
 - [How grounding works](docs/concepts/grounding.md) — the three states, the match view, and why the two scores are not comparable
 - [How validation works](docs/concepts/validation.md) — the three verdicts, rules as data, and why docdoc has its own regex dialect
 - [How evaluation works](docs/concepts/evaluation.md) — the six outcomes, the denominators, the two tiers, and how to add a document to the golden set
+- [How the viewer works](docs/concepts/viewer.md) — the three geometry states, why no coordinate is transformed, and what carries no automated test
 - [The pipeline](docs/concepts/pipeline.md) — the four stages, the reuse decision, what a cached parse still pays for, and why a job needs no queue
 - [Artifacts](docs/concepts/artifacts.md) — the chain, the two hashes, which misses are errors, and the one symptom of a missed version bump
 - [Grounding API contract](specs/004-deterministic-grounding/contracts/grounding-api.md)
@@ -378,6 +411,8 @@ higher-layer work merges while that property is failing or absent.
 - [Pipeline and store API contract](specs/007-pipeline-api-cli/contracts/pipeline-api.md)
 - [CLI contract](specs/007-pipeline-api-cli/contracts/cli.md) — commands, output forms, exit codes
 - [HTTP API contract](specs/007-pipeline-api-cli/contracts/http-api.md) — endpoints, statuses, error shapes
+- [HTTP API additions](specs/008-grounding-viewer/contracts/http-api-additions.md) — the storeless run and the schema listing
+- [View-model contract](specs/008-grounding-viewer/contracts/view-model.md) — the viewer's tested surface, and what it does not cover
 - [Contributing](CONTRIBUTING.md)
 
 ## License

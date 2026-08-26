@@ -623,10 +623,14 @@ google = [
 pdf = [
     { name = "pymupdf" },
 ]
+ui = [
+    { name = "docdoc-ui" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "azure-ai-documentintelligence", marker = "extra == 'azure'", specifier = ">=1.0" },
+    { name = "docdoc-ui", marker = "extra == 'ui'", directory = "packaging/docdoc-ui" },
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.110" },
     { name = "google-cloud-vision", marker = "extra == 'gcv'", specifier = ">=3.4" },
     { name = "google-genai", marker = "extra == 'google'", specifier = ">=1.0" },
@@ -641,7 +645,12 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5" },
     { name = "uvicorn", marker = "extra == 'api'", specifier = ">=0.29" },
 ]
-provides-extras = ["pdf", "azure", "google", "gcv", "api", "dev"]
+provides-extras = ["pdf", "azure", "google", "gcv", "api", "ui", "dev"]
+
+[[package]]
+name = "docdoc-ui"
+version = "0.1.0"
+source = { directory = "packaging/docdoc-ui" }
 
 [[package]]
 name = "fastapi"

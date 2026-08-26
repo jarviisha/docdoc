@@ -25,7 +25,10 @@ __all__ = [
     "JobStatus",
     "JobStatusResponse",
     "RunResponse",
+    "SchemaChoice",
+    "SchemaListing",
     "StageOutcomeView",
+    "StorelessRunResponse",
     "SubmissionResponse",
 ]
 
@@ -99,20 +102,50 @@ class JobStatusResponse(BaseModel):
     detail: str | None = None
 
 
-class RunResponse(BaseModel):
-    """What a run returns: the identity **and** the result (FR-067).
+class SchemaChoice(BaseModel):
+    """One schema a deployment has configured.
 
-    Returning only the identity would be a receipt the caller often cannot
-    redeem. With no store configured the terminal artifact is never written, and
-    after a degraded write it is written nowhere — in both cases the run
-    succeeded, the result existed, and this response is the only copy of it.
+    Carries the identity and nothing else. Not trimmed for tidiness: this
+    endpoint is unauthenticated like the rest of the interface, and a filesystem
+    layout is not something to hand out for free (FR-011). Field descriptions
+    exist — ``SchemaRegistry.describe()`` returns them — and publishing schema
+    internals to serve a choice that needs only a string would be a poor trade.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    #: The terminal artifact id, which is ADR-0003's ``processing_id`` and the
-    #: job id. Not a second identifier (FR-033).
-    job_id: str
+    #: A concrete ``name@version``, exactly the form ``POST /v1/extract`` accepts
+    #: and ``SchemaRegistry.resolve()`` resolves, so a listed schema is runnable
+    #: without translation (FR-010).
+    identity: str
+
+
+class SchemaListing(BaseModel):
+    """What ``GET /v1/schemas`` returns.
+
+    **An empty list is success** (FR-012). A deployment with no schemas
+    configured is validly configured — it just has nothing to offer — and
+    reporting that as an error would send a caller looking for a fault that is
+    not there. The viewer names the setting that populates it instead.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schemas: tuple[SchemaChoice, ...] = ()
+
+
+class _RunFields(BaseModel):
+    """Everything a run reports except its identity.
+
+    Extracted so that ``StorelessRunResponse`` is *literally* "the run response
+    minus ``job_id``" rather than a second model that has to be kept in step with
+    the first. A field added here reaches both surfaces; a field added to one of
+    the subclasses is a deliberate difference between them, which is the only
+    difference either should have.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     document_id: str | None = None
     schema_identity: str
     verdict: str | None = None
@@ -124,6 +157,35 @@ class RunResponse(BaseModel):
     extraction: Any = None
     grounding: Any = None
     validation: Any = None
+
+
+class RunResponse(_RunFields):
+    """What a run returns: the identity **and** the result (FR-067).
+
+    Returning only the identity would be a receipt the caller often cannot
+    redeem. With no store configured the terminal artifact is never written, and
+    after a degraded write it is written nowhere — in both cases the run
+    succeeded, the result existed, and this response is the only copy of it.
+    """
+
+    #: The terminal artifact id, which is ADR-0003's ``processing_id`` and the
+    #: job id. Not a second identifier (FR-033).
+    job_id: str
+
+
+class StorelessRunResponse(_RunFields):
+    """What ``POST /v1/extract`` returns: the result, and no job (FR-003).
+
+    **The missing field is the point.** A storeless run writes no terminal
+    artifact, and ADR-0003's ``processing_id`` *is* the terminal artifact id — so
+    there is no identity to hand back and nothing to fetch later. Returning
+    ``job_id: null`` would be the same statement; omitting the field is the
+    stronger one, because a caller cannot then pass it to ``GET /v1/jobs/{id}``
+    and receive ``unknown`` for an identity we invented.
+
+    A caller who wants a retrievable identity submits the document first and uses
+    the store-backed route, which is unchanged (FR-001, contracts §2).
+    """
 
 
 class ErrorDetail(BaseModel):

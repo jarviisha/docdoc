@@ -9,6 +9,77 @@ API may change in any release. `document_id` derivation is versioned separately 
 
 ## [Unreleased]
 
+Milestone 8: a read-only grounding viewer, and the two endpoints that make it reachable. **The
+project's central promise is now legible to someone who does not write Python.** Every guarantee the
+first seven milestones built was reachable through exactly two doors — a Python import and a terminal —
+and Principle II makes source grounding a *feature* rather than an implementation detail. A feature
+nobody outside the project can perceive is one the project is asserting rather than demonstrating.
+
+This milestone adds no guarantee: no stage, no provider, no change to any value docdoc produces.
+
+### Added
+
+- **The browser viewer**, behind `docdoc[ui]`. Pick a document, choose a schema, and see every located
+  value's rectangle on the page it came from — with every value docdoc could **not** place listed
+  just as visibly, because "never a guess" is broken more effectively by a quiet omission than by any
+  bug. Selecting a field outlines its rectangles, brings its page into view, and names every page it
+  touches; selecting a rectangle names its field.
+
+  PDFs render page by page and images as their single page. A document no browser can draw — the
+  engine detects `image/tiff` — **still lists every value it produced**: the list is authoritative and
+  the overlay only an aid, so such a document loses its picture and none of its facts. A run that
+  fails part way names the failing stage and lists what the stages before it produced, which is the
+  only place those results appear, since a failed run has no job identity to fetch later.
+
+  Read-only in the strong sense: there is no request it can make that changes a stored byte, and no
+  control it offers that edits a value. Principle IX's `Correction` model exists and this milestone
+  does not import it. That is what keeps this outside the "full review UI" the constitution defers —
+  no queue, no assignment, no approval state, no per-user state, no database.
+- **`POST /v1/extract`** — run the pipeline over submitted bytes and persist **nothing**: no blob, no
+  artifact, no temporary file, and not even when a store *is* configured. Whether a run persists is a
+  property of the endpoint the caller chose, never of how the deployment happens to be set up.
+
+  It exists because there was no way, over HTTP, to run an extraction without the document first
+  coming to rest on disk — every extracting route took a `blob_id`, a `blob_id` existed only after a
+  submission, and submission was refused without a store. docdoc had already rejected that shape
+  elsewhere: the `gcv` adapter declines Vision's asynchronous API for requiring "a place for document
+  content to come to rest outside the process", and the objection applies with more force to our own
+  interface (**ADR-0012**).
+- **`GET /v1/schemas`** — the identities a deployment has configured, which nothing exposed before, so
+  a browser had nothing to offer but a text box and a guess.
+- **A view-model boundary that is machine-checked.** Everything the viewer decides lives in pure
+  functions tested with `node --test`; `npm run lint:boundaries` fails if the model imports React, the
+  renderer or a component, and fails if a component contains an editable control. Principle XII
+  requires dependency boundaries to be enforced by a test rather than by convention, and the browser
+  client gets the same treatment as the Python layer graph.
+
+### Changed
+
+- **Milestone 7's HTTP contract said something false and now does not.** `http-api.md` §1 read
+  "Running an extraction and reading what it produced do not [need a store], because the run's
+  response carries the result." That was false against the code on the day it was written, and no
+  endpoint whose input is a `blob_id` could have made it true. The disagreement is ended by building
+  the route the sentence described rather than by weakening the sentence.
+
+### Known gaps, recorded rather than hidden
+
+- **The rendered interface carries no automated test.** A deliberate choice, and what it costs is
+  specific: a box the model placed correctly and the renderer draws at the wrong scale, a rotated page
+  whose boxes land on the wrong content, a value listed in the model and hidden by a layout, three
+  geometry states rendered indistinguishably, or a stale rectangle surviving a document change in the
+  renderer after the model cleared it — none of these would go red. What contains it is that the
+  renderer decides nothing, enforced by the boundary check above. What reverses it is additive: the
+  view model is already the seam a browser test would attach to.
+- **A store-less deployment now serves extractions it used to refuse.** A change in exposure and not
+  only in capability: the interface has no authentication, so anyone who can reach it can spend the
+  deployment's provider budget on a deployment where every such request was previously refused for
+  want of storage.
+- **No accessibility conformance level is claimed**, because nothing here verifies one. The narrower
+  guarantee that *is* kept: every fact the overlay conveys is in the value list, the list is operable
+  without a pointing device, and no distinction depends on colour alone.
+
+---
+
 Milestone 7: the pipeline, the artifact store, the command line, and the HTTP interface. **The
 Definition of Done stated at the project's founding is reachable**: a PDF goes in one end of a
 command, and a human can ask an extracted value which page and which rectangle it came from —

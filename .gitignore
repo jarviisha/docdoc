@@ -131,3 +131,18 @@ site/
 
 # Build output from `uv build`
 dist/
+
+# ---------------------------------------------------------------------------
+# The browser client (Milestone 8)
+# ---------------------------------------------------------------------------
+# Source lives in `ui/`; build output never does. FR-038 forbids committing it,
+# and FR-035 keeps it out of the base install — the built assets ship as the
+# separate `docdoc-ui` distribution, so a checkout that has never run the build
+# is the normal state of this repository rather than an unfinished one.
+ui/node_modules/
+ui/dist/
+
+# Copied in by packaging/docdoc-ui/build.sh immediately before the wheel is
+# built. Never committed, for the same reason ui/dist is not (FR-038).
+packaging/docdoc-ui/src/docdoc_ui/assets/
+packaging/docdoc-ui/dist/

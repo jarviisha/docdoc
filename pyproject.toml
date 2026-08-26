@@ -62,6 +62,26 @@ gcv = ["google-cloud-vision>=3.4"]
 # nothing to keep out of the base install, and `docdoc` is a console script every
 # `pip install docdoc` gets (research R12).
 api = ["fastapi>=0.110", "uvicorn>=0.29"]
+# The browser client of Milestone 8, as a *dependency* rather than as files.
+#
+# A Python extra can add a dependency but cannot add files to a wheel everyone
+# already installs, so shipping the assets here would give them to every
+# `pip install docdoc` -- which FR-035 forbids in as many words. Opting in has to
+# be what delivers them, and that means a second distribution (research R7,
+# ADR-0012's neighbour in `packaging/docdoc-ui/`).
+#
+# Pinned with `==` rather than a range: the assets and the routes that serve them
+# are one artifact split for packaging reasons, not two things with a
+# compatibility window. They move together or they disagree about what `/ui`
+# means.
+#
+# NOTE ON LICENSING: unlike the `pdf` extra above, nothing here carries an
+# obligation beyond Apache-2.0 -- every browser dependency is MIT or Apache-2.0,
+# recorded with its licence in `ui/LICENSES.md` and checked by `npm run licenses`
+# rather than asserted. That is not a coincidence: the renderer was chosen on
+# licence before it was chosen on merit, because the server-side alternative
+# would have made AGPL-3.0 a required path.
+ui = ["docdoc-ui==0.1.0"]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
@@ -78,6 +98,17 @@ dev = [
 # at import. Serving is `uvicorn docdoc.api:app`.
 [project.scripts]
 docdoc = "docdoc.cli:main"
+
+# `docdoc-ui` is built from this repository (`packaging/docdoc-ui/`) and is not
+# on an index until a release publishes it. Without this, adding the `ui` extra
+# above breaks `uv sync --all-extras` for every contributor — and it did, on the
+# first run after the extra was declared.
+#
+# A development-time source only: the published `docdoc[ui]` still resolves
+# `docdoc-ui==0.1.0` from the index, exactly as its dependency line says. uv
+# ignores `[tool.uv.sources]` when building a distribution for that reason.
+[tool.uv.sources]
+docdoc-ui = { path = "packaging/docdoc-ui" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/docdoc"]

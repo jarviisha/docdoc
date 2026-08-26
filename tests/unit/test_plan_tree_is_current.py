@@ -69,7 +69,17 @@ LAYERS: tuple[tuple[str, pathlib.Path], ...] = (
 #: **between** `docdoc.evaluation` and `docdoc.validation`, which is its height in
 #: the chain. `docdoc.artifacts` stays out for the same reason `docdoc.recording`
 #: does: its tests reach it directly and would form a layer of four.
-EXTRA_PLANS: tuple[pathlib.Path, ...] = (pathlib.Path("specs/007-pipeline-api-cli/plan.md"),)
+#:
+#: Milestone 8 joins for a related reason. It adds `docdoc.api` routes and their
+#: tests, and `docdoc.api` is not a layer in the chain at all -- but those tests
+#: reach `docdoc.extraction` to build a registry and an adapter, so the scan
+#: attributes them to Milestone 3's plan, where they emphatically do not belong.
+#: Registering the plan puts them in the tree of the milestone that introduced
+#: them, which is the rule this whole module exists to keep.
+EXTRA_PLANS: tuple[pathlib.Path, ...] = (
+    pathlib.Path("specs/007-pipeline-api-cli/plan.md"),
+    pathlib.Path("specs/008-grounding-viewer/plan.md"),
+)
 
 #: `docdoc.recording` is deliberately **not** listed, though it is a layer and it
 #: sits above `docdoc.evaluation`. Its tests reach it *through* the evaluation
