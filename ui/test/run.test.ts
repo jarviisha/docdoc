@@ -232,6 +232,103 @@ describe("the three geometry states", () => {
   });
 });
 
+describe("a field carrying more than one finding", () => {
+  /**
+   * The combination every other fixture in this file avoids.
+   *
+   * `RUN` and the constructed runs above supply `findings: []` or one finding
+   * per field, so the line that picks *which* finding a row's verdict comes from
+   * has never been exercised where the choice arises. It picked the first, and
+   * the first is whatever `check_id` sorts lowest — `src/docdoc/validation/
+   * verdict.py` orders findings by walk position and then by `check_id`, which
+   * within one field is alphabetical.
+   *
+   * `#grounding` sorts before `#pattern`, and a present-but-ungrounded value
+   * carries `warning` by default (`GroundingPolicy.ungrounded`) while a failed
+   * constraint carries `error`. So the ordering that reaches this function puts
+   * the *lesser* severity first on exactly the row where the difference matters.
+   */
+  const withFindings = (findings: WireRun["validation"]): WireRun => ({
+    document_id: null,
+    schema_identity: "test@1",
+    verdict: "invalid",
+    extraction: {
+      values: {
+        total: { field_path: "total", value: "12.00", present: true, claimed_text: "12.00" },
+      },
+    },
+    grounding: {
+      outcomes: {
+        total: {
+          field_path: "total",
+          status: "ungrounded",
+          score: null,
+          span: null,
+          pages: [],
+          geometry: null,
+        },
+      },
+    },
+    validation: findings,
+  });
+
+  it("reports the worst severity, not the first finding", () => {
+    // FR-016, SC-017. Understating is the failure that matters: a viewer whose
+    // subject is telling a reader what is really there, reporting `warning` on a
+    // value the engine failed at `error`, looks entirely normal on screen.
+    const run = withFindings({
+      verdict: "invalid",
+      findings: [
+        { field_path: "total", severity: "warning", reason: "ungrounded" },
+        { field_path: "total", severity: "error", reason: "pattern_mismatch" },
+      ],
+    });
+
+    const row = toRunView(run).values[0];
+
+    assert.equal(row?.verdict, "error");
+    assert.equal(row?.labels.verdict, "error");
+  });
+
+  it("does not depend on the order the findings arrive in", () => {
+    // The ordering above is the one the engine produces today. Pinning the
+    // answer under both orders is what stops this becoming a test of
+    // `check_id` collation rather than of severity.
+    const severities = ["info", "warning", "error"];
+    const findings = severities.map((severity) => ({
+      field_path: "total",
+      severity,
+      reason: severity,
+    }));
+
+    for (const ordered of [findings, [...findings].reverse()]) {
+      const row = toRunView(withFindings({ verdict: "invalid", findings: ordered })).values[0];
+      assert.equal(row?.verdict, "error");
+    }
+  });
+
+  it("reports a severity it does not rank rather than calling the field ok", () => {
+    // A severity outside the engine's three would otherwise rank at the bottom
+    // and, alone, lose to the `ok` a field with no findings gets — turning an
+    // unrecognised finding into no finding, which is the one answer that is
+    // certainly wrong.
+    const row = toRunView(
+      withFindings({
+        verdict: "invalid",
+        findings: [{ field_path: "total", severity: "catastrophe", reason: "unknown" }],
+      }),
+    ).values[0];
+
+    assert.equal(row?.verdict, "catastrophe");
+  });
+
+  it("still says ok for a field with no findings at all", () => {
+    const row = toRunView(withFindings({ verdict: "valid", findings: [] })).values[0];
+
+    assert.equal(row?.verdict, "ok");
+  });
+});
+
 describe("selection", () => {
   it("resolves a box back to its field", () => {
     const view = toRunView(RUN);

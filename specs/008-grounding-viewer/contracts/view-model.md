@@ -51,8 +51,12 @@ Names are indicative; the signatures are the contract.
 | Function | Signature | Requirement |
 |---|---|---|
 | `toRunView` | `(result, pageCount) => RunView` | FR-015..FR-020, FR-055, FR-057 |
-| `pagesToRender` | `(RunView) => number[]` | FR-051..FR-053 |
-| `select` | `(RunView, fieldPath \| boxRef) => RunView` | FR-021, FR-022 |
+| `initialRequests` | `(RunView) => PageRequests` | FR-051, FR-053 |
+| `requestPage` | `(PageRequests, pageIndex) => PageRequests` | FR-052 |
+| `rendered` | `(PageRequests) => number[]` | FR-051, FR-052 |
+| `selectivityNotice` | `(RunView) => string \| null` | FR-054 |
+| `select` | `(RunView, fieldPath \| null) => RunView` | FR-021, FR-022 |
+| `fieldForBox` | `(BoxEntry) => fieldPath` | FR-021, the reverse direction |
 | `pagesForSelection` | `(RunView) => number[]` | FR-021, FR-022, US1/AC3 |
 | `reduce` | `(RunState, Event) => RunState` | FR-028, FR-045..FR-049 |
 | `viewOf` | `(RunState) => RunView \| null` | FR-025 |
@@ -60,6 +64,17 @@ Names are indicative; the signatures are the contract.
 | `toDocumentView` | `(bytes) => DocumentView` | FR-013, FR-014, FR-058 |
 | `toSchemaChoices` | `(listing) => SchemaChoice[]` | FR-026 |
 | `requestFor` | `(intent) => Request` | FR-030, FR-032, SC-013 |
+
+**`pagesToRender` is a field of `RunView`, not a function, and this table said otherwise** until
+T100's pass. `toRunView` computes it from the same traversal that fills `boxesByPage`, which is what
+makes `data-model.md`'s invariant between the two hold by construction rather than by maintenance; the
+functions above act on it. `select` likewise takes `fieldPath | null` and never a box — the box
+direction is `fieldForBox`, which was in the code, tested, and absent from this table. Three earlier
+convergence passes found artifact drift in this milestone and the answer each time was that a claim
+nobody maintains is a claim that lies. It applies with more force here than anywhere else: this
+document is the definition of what is verified, so a reader checking coverage against it would look
+for a `pagesToRender` function, fail to find one, and have no way to tell whether the contract or the
+code had moved.
 
 `viewOf` is on this list because of what its absence cost. A component read
 `state.kind === "complete" ? state.view : null` and so could not reach a failed run's surviving values
@@ -103,14 +118,19 @@ These are the claims the tests exist to check, stated once so a test can be read
     in any state (FR-046).
 11. **No request writes.** `requestFor` can construct no request that writes to a store and no
     correction, over the full set of user intents (FR-030, SC-013).
-12. **Pages rendered are pages named.** `pagesToRender` returns exactly the pages carrying located
-    values, and its length does not grow with document length (FR-051, SC-016).
+12. **Pages rendered are pages named.** `RunView.pagesToRender` holds exactly the pages carrying
+    located values, and its length does not grow with document length; `requestPage` reaches every
+    other page without adding to it (FR-051, FR-052, SC-016).
 13. **A failure carries what survived it, and says so only when it did.** `toFailureView` reads the
     response's `results` into a `RunView`, and `failureNotice` claims results are shown exactly when
     `survivors` is non-null. An omitted stage yields `null`, never an empty view (FR-025).
 14. **Everything offered can be drawn, and what cannot be drawn is still listed.** Every media type in
     `ACCEPTED` has a rendering path, and a document with none is extracted and listed anyway, with a
     notice about the missing picture rather than a refusal (FR-013, FR-014, FR-058).
+15. **A row's verdict is the worst of its field's findings.** Not the first. Findings reach the viewer
+    in `check_id` order, which within one field is alphabetical and therefore unrelated to severity,
+    so a value that is both ungrounded (`warning`) and invalid (`error`) must still read `error`
+    (FR-016, SC-017).
 
 ## 4. What this contract does not cover
 

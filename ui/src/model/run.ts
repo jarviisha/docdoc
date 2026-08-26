@@ -153,10 +153,48 @@ function toScore(outcome: WireOutcome | undefined): ScoreView | null {
   return { value: outcome.score, tier: outcome.status };
 }
 
+/**
+ * Severity order, so "worst" is computed rather than assumed.
+ *
+ * Only `error` moves the run's verdict (`src/docdoc/validation/severity.py`);
+ * the other two are recorded and deliberately powerless. A row reports the worst
+ * of its field's findings all the same, because a value that failed a constraint
+ * is not made less wrong by also being ungrounded.
+ */
+const SEVERITY_RANK: Record<string, number> = { error: 3, warning: 2, info: 1 };
+
+/**
+ * The worst severity recorded against one field, or `ok` if there is none.
+ *
+ * **This took the first finding until T100, and the first is not the worst.**
+ * `assemble` emits findings in `sort_key` order — walk position, then entry
+ * indices, then `check_id` — which within a single field is alphabetical. So
+ * `total#grounding` arrives before `total#pattern`, and the default
+ * `GroundingPolicy.ungrounded` is `warning` while a failed constraint is
+ * `error`: a value that is both ungrounded *and* invalid was listed as
+ * `warning`, understating the engine's own answer on the one row where the two
+ * disagree.
+ *
+ * Understating is the direction that matters. A viewer whose entire subject is
+ * telling a reader what is really there had no visible symptom for this — the
+ * row renders perfectly, with the wrong word in it — which is why it survived
+ * five convergence passes and a person looking at the screen.
+ *
+ * An unranked severity sorts below the three but still beats having no finding,
+ * so a vocabulary this file has not heard of degrades to "something is wrong
+ * here" rather than to `ok`.
+ */
 function verdictFor(fieldPath: string, run: WireRun): string {
-  const findings = run.validation?.findings ?? [];
-  const worst = findings.find((finding) => finding.field_path === fieldPath);
-  return worst === undefined ? "ok" : worst.severity;
+  let worst: string | null = null;
+
+  for (const finding of run.validation?.findings ?? []) {
+    if (finding.field_path !== fieldPath) continue;
+    if (worst === null || (SEVERITY_RANK[finding.severity] ?? 0) > (SEVERITY_RANK[worst] ?? 0)) {
+      worst = finding.severity;
+    }
+  }
+
+  return worst ?? "ok";
 }
 
 export function toRunView(run: WireRun, pageCount = 1): RunView {
@@ -174,12 +212,16 @@ export function toRunView(run: WireRun, pageCount = 1): RunView {
     // One decision, two labels. They cannot disagree with each other or with
     // `presence`, because the same value produces all three.
     const labels = labelsFor(situationOf(presence, outcome), outcome, geometry);
+    // Computed once and used twice. `verdict` and `labels.verdict` are the same
+    // fact — the field and its textual equivalent (FR-057) — and calling the
+    // function twice was how they could have come to differ.
+    const verdict = verdictFor(leaf.field_path, run);
 
     values.push({
       fieldPath: leaf.field_path,
       value: leaf.value === null || leaf.value === undefined ? null : String(leaf.value),
       presence,
-      verdict: verdictFor(leaf.field_path, run),
+      verdict,
       status: outcome?.status ?? null,
       score: toScore(outcome),
       geometry,
@@ -187,7 +229,7 @@ export function toRunView(run: WireRun, pageCount = 1): RunView {
       boxes,
       labels: {
         status: labels.status,
-        verdict: verdictFor(leaf.field_path, run),
+        verdict,
         geometry: labels.geometry,
       },
     });

@@ -672,3 +672,88 @@ invariant over *combinations the code had never been exercised on*. The fixtures
 path had always supplied `extract` and `ground` together, so the one combination that mislabelled
 everything was the one nothing had ever constructed. Enumerating the stage combinations a run can fail
 in took three lines and found the defect immediately.
+
+---
+
+## Phase 14: Convergence
+
+Appended by `/speckit-converge` on 2026-08-26, after Phase 13 closed the list at 99/99 with a green
+gate. Two findings, neither constitutional, neither blocking a user story.
+
+**The first is Phase 13's own lesson arriving on a different field.** That pass closed with the
+observation that what catches these defects is "an invariant over combinations the code had never been
+exercised on", and named the stage combinations as the example. The combination this one turns on is
+adjacent and was never enumerated either: **a field carrying more than one finding.** Every fixture in
+`ui/test/run.test.ts` supplies `findings: []` or one finding, so the line that picks *which* finding a
+row's verdict comes from has only ever been exercised where the choice does not arise. It picks the
+first, and the first is the alphabetically-lowest `check_id`, not the worst.
+
+That it understates rather than overstates is what makes it worth a task rather than a note. A viewer
+whose subject is telling a reader what is really there, reporting `warning` on a value the engine
+failed at `error`, is the same category of quiet omission FR-016 exists to forbid — and unlike a
+mislabelled sentence, nobody looking at the screen would see anything wrong with it.
+
+- [X] T100 Select the **highest** severity rather than the first finding in `ui/src/model/run.ts:156`. `verdictFor` names its result `worst` and computes it with `findings.find(...)`, which returns the first finding for the field in report order — and `src/docdoc/validation/verdict.py:61` orders findings by `check_id`, which within one field is alphabetical. So a present-but-ungrounded `total` that also fails a declared constraint carries `total#grounding` (severity `warning`, the default `GroundingPolicy.ungrounded` at `src/docdoc/validation/options.py:37`) before `total#pattern` (severity `error`, `src/docdoc/validation/constraints.py:188`), and the row is listed as `verdict warning` while the run's own report holds an `error`. Rank the severities explicitly — `error` over `warning` over `info` — and add the fixture the existing tests never build: one field, two findings, differing severities, the lower-severity `check_id` sorting first. `ui/test/run.test.ts:210` supplies only `findings: []` or a single finding, which is why the choice has never been exercised per FR-016, SC-017 (partial)
+- [X] T101 Correct the two signatures in `specs/008-grounding-viewer/contracts/view-model.md` §2 that no code has. The table lists `pagesToRender` as `(RunView) => number[]` when it is a field of `RunView` (`ui/src/model/types.ts:108`) computed inside `toRunView`, and `select` as `(RunView, fieldPath | boxRef) => RunView` when it takes `string | null` (`ui/src/model/run.ts:215`) and the box direction is the separate `fieldForBox`. §2 states that "the signatures are the contract" and §1 that a contract describing something other than the check is the same defect as one describing more, so this is the document's own standard applied to itself. `data-model.md:21` already has `pagesToRender` right, which is what makes the disagreement worth ending rather than tolerating per plan §view-model boundary, FR-041 (contradicts)
+
+### Why the second one is not filed as cosmetic
+
+Three of this milestone's earlier convergence phases found artifact drift, and the answer each time was
+that a claim nobody maintains is a claim that lies. This is the same shape with a smaller radius: the
+view-model contract is the *definition of what is verified*, and two of the ten rows in its function
+table describe an API that does not exist. A reader checking coverage against it would look for a
+`pagesToRender` function, not find one, and have no way to tell whether the contract or the code moved.
+
+---
+
+## Phase 15: Implementation record — 2026-08-26
+
+`/speckit-implement` over Phase 14. Both closed; the list stands at 101/101.
+
+**T100 was written as a test first, and the test failed the way the finding predicted.** Two
+assertions, before any change: `verdict` came back `warning` where `error` was owed, and `info` once
+the same three findings were reversed. That second number is the one worth keeping — it says the row
+was reporting *position*, not severity, so the answer moved when nothing about the data's meaning did.
+
+`verdictFor` now walks the field's findings and keeps the highest rank, with `error > warning > info`
+stated in one map rather than implied by an ordering nobody chose. A severity outside those three
+ranks below them and still beats having no finding at all, so a vocabulary this file has not heard of
+degrades to "something is wrong here" rather than to `ok` — the one answer that would certainly be
+false. Four tests hold it: the two above, the unranked case, and the empty case.
+
+The duplicate call went with it. `verdict` and `labels.verdict` are the same fact — the field and its
+textual equivalent under FR-057 — and were computed by two separate calls to the same function, which
+is how two copies of a fact come to disagree. One call, used twice.
+
+**T101 grew by one row and one line while being fixed, which is the point of doing it.** Correcting
+`pagesToRender` and `select` meant writing down what the pages story actually is, and that surfaced
+four functions the contract had never listed (`initialRequests`, `requestPage`, `rendered`,
+`selectivityNotice`) plus `fieldForBox`, which was in the code, tested, and absent from the table —
+the same shape as `pagesForSelection` in Phase 9, a tested function the contract did not know about.
+Invariant 12 was reworded for the same reason: it said `pagesToRender` "returns", and it does not.
+
+`data-model.md`'s `verdict` row was corrected in the same pass. It read "the validation verdict as
+produced. Never recomputed here", which was true about the severities and silent about the choice
+between them — and the silence is exactly where the defect lived. Invariant 15 in the view-model
+contract now states the rule the new tests enforce, because a check the contract does not describe is
+the defect §1 names in the other direction.
+
+**Gate at close**: 94 view-model tests (was 90), 2794 Python tests with 23 skipped, `tsc` clean, four
+boundary checks clean, 11 dependencies Apache-2.0-compatible, build succeeds. The Python suite is
+unchanged in count because nothing Python-side changed; `tests/perf` fails locally on the 300 ms
+kernel-construction budget at 335 ms and passes on CI in 27 s, which is a property of this machine and
+not of this milestone.
+
+### What made this one findable when five passes had missed it
+
+Not a new kind of test — the same kind Phase 13 named, pointed one field over. That pass closed by
+observing that what catches these is "an invariant over combinations the code had never been exercised
+on", and gave the stage combinations as its example. The combination here is *a field carrying more
+than one finding*, and every fixture in the milestone supplies zero or one, so the line that chooses
+between them had never been asked to choose.
+
+The reason it survived a person looking at the screen is worth separating from that. T080 was found by
+eye because a sentence beside a value contradicted the value. This one has no such tell: the row
+renders correctly, in the right place, with the right value, and one word in it is wrong in the
+direction that makes the result look better than it is. The rendering layer's missing coverage is not
+what hid it — a browser test would have rendered `warning` just as happily.

@@ -38,7 +38,7 @@ reader who never sees a rectangle loses nothing.
 | `fieldPath` | `string` | The identity used for selection in both directions (FR-021). |
 | `value` | `string \| null` | Rendered form. `null` only where the model reported the field absent. |
 | `presence` | `'asserted' \| 'absent'` | The distinction of FR-019. An absent field has no grounding outcome at all — it is not "ungrounded". |
-| `verdict` | `string` | The validation verdict as produced. Never recomputed here. |
+| `verdict` | `string` | The **worst** severity the run recorded against this field, or `ok` where it recorded none. Severities are copied, never recomputed — but which of them a row reports is a choice, and taking the first was wrong: findings arrive in `check_id` order, so `#grounding` (`warning` by default) precedes `#pattern` (`error`) and the row understated the engine (T100). |
 | `status` | `'exact' \| 'fuzzy' \| 'ungrounded' \| null` | `null` when there is no grounding outcome — either the field was absent, or grounding never ran (a partial result). `labels.status` tells those two apart; this field does not. Closed vocabulary; ADR-0005 makes a fourth member an amendment. |
 | `score` | `ScoreView \| null` | See below. Never a bare number. |
 | `geometry` | `GeometryState` | See below. Three states, never two. |
