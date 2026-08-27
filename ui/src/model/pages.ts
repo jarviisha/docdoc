@@ -14,6 +14,7 @@
  * its own summary of it.
  */
 
+import { viewOf, type RunState } from "./state.ts";
 import type { RunView } from "./types.ts";
 
 export interface PageRequests {
@@ -67,4 +68,23 @@ export function selectivityNotice(view: RunView): string | null {
     `Showing ${shown} of ${view.pageCount} pages — those carrying located values. ` +
     "Every other page is reachable."
   );
+}
+
+/**
+ * The page requests a state's result calls for, or `null` when none does.
+ *
+ * **This exists so the decision is testable** (T105). "Which pages should be
+ * asked for right now?" was answered by a `useEffect` in a component — the one
+ * layer nothing tests — and it answered wrongly for every completed run without
+ * a single check going red. Moving it here makes it a pure function of the
+ * state, which is what FR-043 asks for and what lets `pages.test.ts` assert that
+ * a finished run asks for the pages its result names.
+ *
+ * A run in flight asks for nothing: it has no result yet. A failed run asks for
+ * whatever its surviving stages produced, because those values are drawn on
+ * pages like any other (FR-025).
+ */
+export function requestsForResult(state: RunState): PageRequests | null {
+  const view = viewOf(state);
+  return view === null ? null : initialRequests(view);
 }

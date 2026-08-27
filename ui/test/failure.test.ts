@@ -12,7 +12,12 @@ import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
-import { failureNotice, toFailureView } from "../src/model/failure.ts";
+import {
+  failureNotice,
+  failureTitle,
+  toFailureView,
+  transportFailure,
+} from "../src/model/failure.ts";
 import { emptyRegistryNotice, toSchemaChoices } from "../src/model/schemas.ts";
 
 /** The same run the other suites use, reshaped as a failure's survivors. */
@@ -180,5 +185,70 @@ describe("a deployment with no schemas", () => {
     // "Not yet known" and "known to be none" is the same distinction FR-018
     // keeps apart for geometry. Collapsing it here was that mistake elsewhere.
     assert.equal(emptyRegistryNotice(null), null);
+  });
+});
+
+describe("the sixth failure path — the one the server never reports", () => {
+  /**
+   * SC-010 enumerates five failures and `REACHABLE` above covers them; every one
+   * is the deployment telling us the run stopped. This is the other kind: the
+   * run did not stop, we merely stopped hearing about it.
+   *
+   * The spec's Edge Cases are explicit — *"A proxy or a browser abandoning a
+   * request does not abandon the run: the extraction continues, the provider is
+   * still paid, and only the answer is lost. An interface that reports this as a
+   * failed run is describing the connection, not the work."* It reported it as a
+   * failed run, because the wording was built in a component's `.catch` where
+   * this list could not reach it (T102).
+   */
+  it("is not called a failed run", () => {
+    const lost = transportFailure(new Error("NetworkError: connection reset"));
+
+    assert.equal(lost.origin, "transport");
+    assert.doesNotMatch(failureTitle(lost), /the run failed/i);
+    assert.doesNotMatch(failureNotice(lost), /the run failed/i);
+  });
+
+  it("says the three things only this case can say", () => {
+    const notice = failureNotice(transportFailure(new Error("aborted")));
+
+    // The run continues.
+    assert.match(notice, /still running/i);
+    // It has already been paid for.
+    assert.match(notice, /cost is already incurred/i);
+    // And the answer cannot be fetched later, because a storeless run has no
+    // job identity (FR-003) — the fact nobody would guess, and the reason this
+    // is not simply "try again".
+    assert.match(notice, /no job identity/i);
+    assert.match(notice, /second extraction at a second cost/i);
+    // FR-050's obligation to the operator, at the moment it matters.
+    assert.match(notice, /proxy/i);
+  });
+
+  it("claims nothing about what the run produced", () => {
+    // Not "the run produced nothing" — we do not know what it produced.
+    const lost = transportFailure(new Error("aborted"));
+
+    assert.equal(lost.survivors, null);
+    assert.deepEqual(lost.completed, []);
+    assert.doesNotMatch(failureNotice(lost), /produced no result/i);
+  });
+
+  it("reads differently from a server-reported failure", () => {
+    const reported = toFailureView({
+      error: { class: "ProviderError", stage: "extract", message: "the provider failed" },
+    });
+    const lost = transportFailure(new Error("aborted"));
+
+    assert.equal(reported.origin, "run");
+    assert.notEqual(failureTitle(reported), failureTitle(lost));
+    assert.notEqual(failureNotice(reported), failureNotice(lost));
+  });
+
+  it("keeps every server-reported failure on the run side", () => {
+    for (const error of REACHABLE) {
+      assert.equal(toFailureView({ error }).origin, "run");
+      assert.match(failureTitle(toFailureView({ error })), /the run failed/i);
+    }
   });
 });

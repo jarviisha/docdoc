@@ -17,6 +17,8 @@ import { describe, it } from "node:test";
 import {
   ACCEPTED,
   detectMediaType,
+  isReadyToRun,
+  openingNotice,
   pageCountFor,
   renderFailureNotice,
   toDocumentView,
@@ -127,5 +129,70 @@ describe("a document the browser cannot draw", () => {
 
     assert.match(notice, /application\/pdf/);
     assert.match(notice, /still run|can still/i);
+  });
+});
+
+describe("a run may not start before the document is open", () => {
+  /**
+   * T104. `pageCount` is taken when the run is launched, and for a PDF it comes
+   * from the renderer — `null` until `getDocument` resolves. The control was
+   * live in that window, so a run launched then built a view with
+   * `pageCount: 0`, and two requirements switched themselves off in silence:
+   * `reachablePages` returned nothing (FR-052) and `selectivityNotice` returned
+   * nothing, because `shown >= 0` is trivially true (FR-054).
+   *
+   * The window is real on a document at the deployment's 1000-page limit, which
+   * is the size FR-053 exists for.
+   */
+  it("waits for the renderer on a PDF", () => {
+    assert.equal(isReadyToRun(toDocumentView(PDF), false), false);
+    assert.equal(isReadyToRun(toDocumentView(PDF), true), true);
+  });
+
+  it("does not wait for a renderer that will never be asked", () => {
+    // An image draws itself and an undrawable document draws nothing; neither
+    // has a page count to wait for.
+    assert.equal(isReadyToRun(toDocumentView(PNG), false), true);
+    assert.equal(isReadyToRun(toDocumentView(JPEG), false), true);
+    assert.equal(isReadyToRun(toDocumentView(TIFF), false), true);
+  });
+
+  it("is not ready before a document has been chosen at all", () => {
+    assert.equal(isReadyToRun(null, true), false);
+  });
+
+  it("never yields the page count that disables the two requirements", () => {
+    // The property, rather than the symptom: a document with pages to reach must
+    // never record zero of them once a run is permitted.
+    //
+    // `unrenderable` is deliberately excluded, and the first draft of this test
+    // was wrong to include it. Zero is the *correct* count there — the document
+    // has no renderable page, `PageNav` is not drawn, and the notice explains
+    // why. The defect T104 describes is a document that has pages and reports
+    // none, which is only reachable while a PDF is still opening.
+    for (const bytes of [PDF, PNG, JPEG]) {
+      const view = toDocumentView(bytes);
+      assert.ok(isReadyToRun(view, true), `${view.mediaType} should be runnable when open`);
+      assert.ok(
+        pageCountFor(view, view.kind === "pdf" ? 12 : null) > 0,
+        `${view.mediaType} would have recorded a page count of 0`,
+      );
+    }
+  });
+
+  it("still reports zero pages for a document that has none to render", () => {
+    // The distinction the assertion above turns on, stated so it is not read as
+    // an oversight: nothing is hidden here, so nothing is misreported.
+    const view = toDocumentView(TIFF);
+
+    assert.equal(view.kind, "unrenderable");
+    assert.equal(pageCountFor(view, null), 0);
+  });
+
+  it("says why the control is disabled, rather than leaving it a mystery", () => {
+    assert.match(openingNotice(toDocumentView(PDF), false) ?? "", /opening/i);
+    assert.equal(openingNotice(toDocumentView(PDF), true), null);
+    assert.equal(openingNotice(toDocumentView(PNG), false), null);
+    assert.equal(openingNotice(null, false), null);
   });
 });

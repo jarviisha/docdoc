@@ -21,8 +21,14 @@ by the person it would have warned.
 2. **A run continues after you close the page.** There is no cancel, because closing the browser stops
    the waiting and not the work — the extraction runs to completion and the provider is paid either
    way. If you put a proxy in front of this, allow a request duration at least as long as your slowest
-   extraction, or the proxy will terminate runs you have already paid for and it will look like a
-   viewer bug.
+   extraction, or the proxy will terminate runs you have already paid for.
+
+   When that happens the viewer says so accurately: it reports that **the connection was lost and the
+   run was not**, that the extraction is still going and its cost is already incurred, and that a
+   storeless run keeps no job identity — so that particular answer cannot be fetched afterwards and
+   running it again is a second extraction at a second cost. It used to call this "The run failed",
+   which was the opposite of the two facts an operator needs, and is why this page previously warned
+   that a proxy timeout "will look like a viewer bug". It no longer looks like one.
 3. **Pages are shown selectively.** The viewer renders the pages carrying located values, not the
    whole document — a deployment accepts documents of up to 1000 pages by default, and rendering all
    of them in a browser fails. Every other page is reachable, and the interface says on screen how

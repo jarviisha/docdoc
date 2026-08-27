@@ -115,6 +115,39 @@ export function pageCountFor(view: DocumentView, fromRenderer: number | null): n
   return fromRenderer ?? 0;
 }
 
+/**
+ * Whether the document is open enough to run against (T104).
+ *
+ * **A run started too early produces a view that quietly disables two
+ * requirements.** `pageCount` is taken when the run is launched, and for a PDF it
+ * comes from the renderer — which is `null` until `getDocument` resolves. A run
+ * launched in that window builds a `RunView` with `pageCount: 0`, and then
+ * `reachablePages` returns nothing, so no page is reachable (FR-052), and
+ * `selectivityNotice` returns nothing, because `shown >= 0` is trivially true, so
+ * the viewer stops saying it is showing pages selectively (FR-054). Neither
+ * failure raises anything; the two requirements simply switch themselves off.
+ *
+ * The window is real on a long document, which is precisely the case FR-053
+ * exists for — a document at the deployment's 1000-page limit takes a moment to
+ * open, and the run control was live throughout.
+ *
+ * An image or an undrawable document needs no renderer, so it is ready as soon
+ * as its bytes are read.
+ */
+export function isReadyToRun(view: DocumentView | null, rendererReady: boolean): boolean {
+  if (view === null) return false;
+  return view.kind === "pdf" ? rendererReady : true;
+}
+
+/**
+ * What to say while a document is still opening, so the disabled control is not
+ * a mystery. `null` once there is nothing to wait for.
+ */
+export function openingNotice(view: DocumentView | null, rendererReady: boolean): string | null {
+  if (view === null || isReadyToRun(view, rendererReady)) return null;
+  return "Opening the document — the page count is needed before a run can start.";
+}
+
 /** Why the picture failed when the renderer itself refused the bytes. */
 export function renderFailureNotice(mediaType: string | null): string {
   const what = mediaType === null ? "This document" : `This ${mediaType}`;

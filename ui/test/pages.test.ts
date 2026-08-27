@@ -16,9 +16,12 @@ import {
   reachablePages,
   rendered,
   requestPage,
+  requestsForResult,
   selectivityNotice,
 } from "../src/model/pages.ts";
+import { toFailureView } from "../src/model/failure.ts";
 import { toRunView } from "../src/model/run.ts";
+import { initial, reduce } from "../src/model/state.ts";
 import type { WireRun } from "../src/model/types.ts";
 
 const RUN = JSON.parse(
@@ -112,5 +115,67 @@ describe("saying so", () => {
     const view = toRunView(RUN, 1);
 
     assert.equal(selectivityNotice(view), null);
+  });
+});
+
+describe("what a finished run asks to have rendered", () => {
+  /**
+   * T105's other half, and the check the task asked for by name: **a completed
+   * run must ask for pages.** The whole suite passed while the viewer rendered
+   * none, because "which pages should be asked for now?" lived in a component's
+   * effect rather than in a function anything could call.
+   *
+   * It lives here now, so this is a question the model answers and the tests
+   * ask.
+   */
+  const completed = () =>
+    reduce(reduce(initial, { type: "run-started", token: 1 }), {
+      type: "result",
+      token: 1,
+      view: toRunView(RUN),
+    });
+
+  it("asks for exactly the pages its result names", () => {
+    const requests = requestsForResult(completed());
+
+    assert.notEqual(requests, null, "a completed run must ask for pages");
+    assert.ok((requests?.upFront.length ?? 0) > 0, "the fixture names pages; none were requested");
+    assert.deepEqual([...(requests?.upFront ?? [])], toRunView(RUN).pagesToRender);
+    assert.deepEqual([...(requests?.onDemand ?? [])], []);
+  });
+
+  it("asks for nothing while a run is still in flight", () => {
+    assert.equal(requestsForResult(reduce(initial, { type: "run-started", token: 1 })), null);
+    assert.equal(requestsForResult(initial), null);
+  });
+
+  it("asks for the pages a failed run's survivors sit on", () => {
+    // FR-025 — a partial result's values are drawn like any other.
+    const failure = toFailureView(
+      {
+        error: { class: "ValidationError", stage: "validate", message: "a rule failed" },
+        results: { extract: (RUN as unknown as { extraction: unknown }).extraction },
+      },
+      3,
+    );
+    const failed = reduce(reduce(initial, { type: "run-started", token: 5 }), {
+      type: "failure",
+      token: 5,
+      failure,
+    });
+
+    assert.notEqual(requestsForResult(failed), null);
+  });
+
+  it("asks for nothing when a failure carried no survivors", () => {
+    const failed = reduce(reduce(initial, { type: "run-started", token: 5 }), {
+      type: "failure",
+      token: 5,
+      failure: toFailureView({
+        error: { class: "ParserError", stage: "parse", message: "would not parse" },
+      }),
+    });
+
+    assert.equal(requestsForResult(failed), null);
   });
 });

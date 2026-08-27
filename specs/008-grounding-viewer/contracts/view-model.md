@@ -60,6 +60,12 @@ Names are indicative; the signatures are the contract.
 | `pagesForSelection` | `(RunView) => number[]` | FR-021, FR-022, US1/AC3 |
 | `reduce` | `(RunState, Event) => RunState` | FR-028, FR-045..FR-049 |
 | `viewOf` | `(RunState) => RunView \| null` | FR-025 |
+| `failureOf` | `(RunState) => FailureView \| null` | FR-049, SC-015 |
+| `resultIdOf` | `(RunState) => number \| null` | FR-049, SC-015, FR-014 |
+| `requestsForResult` | `(RunState) => PageRequests \| null` | FR-014, FR-051, FR-052 |
+| `transportFailure` | `(cause) => FailureView` | FR-050, spec §Edge Cases |
+| `failureTitle` | `(FailureView) => string` | FR-043, spec §Edge Cases |
+| `isReadyToRun` | `(DocumentView \| null, rendererReady) => boolean` | FR-052, FR-054 |
 | `toFailureView` | `(errorBody, pageCount) => FailureView` | FR-025 |
 | `toDocumentView` | `(bytes) => DocumentView` | FR-013, FR-014, FR-058 |
 | `toSchemaChoices` | `(listing) => SchemaChoice[]` | FR-026 |
@@ -124,7 +130,20 @@ These are the claims the tests exist to check, stated once so a test can be read
 13. **A failure carries what survived it, and says so only when it did.** `toFailureView` reads the
     response's `results` into a `RunView`, and `failureNotice` claims results are shown exactly when
     `survivors` is non-null. An omitted stage yields `null`, never an empty view (FR-025).
-14. **Everything offered can be drawn, and what cannot be drawn is still listed.** Every media type in
+14. **A discarded run does not speak.** Everything a renderer shows about a failure comes from
+    `failureOf`, and the state it reads is only reachable through the token check — so a run `reduce`
+    discarded cannot put a banner on screen (FR-049, SC-015).
+15. **A lost connection is not a failed run.** `transportFailure` carries `origin: 'transport'`, and
+    its notice says the extraction continues, its cost is already incurred, and a storeless run keeps
+    no job identity to fetch the answer from later (FR-050, spec §Edge Cases).
+16. **A finished run asks for pages.** `requestsForResult` returns the pages a completed run's result
+    names, and `resultIdOf` changes at the moment that result arrives while staying fixed across
+    selection. Its predecessor satisfied only the second half, so a renderer keyed on it never
+    rebuilt anything and drew no page and no rectangle for any completed run (FR-014, FR-015, T105).
+17. **A run cannot start against a document that is not open.** `isReadyToRun` is false while a PDF's
+    renderer has not answered, so no `RunView` is ever built with a `pageCount` of `0` for a document
+    that has pages — the value that silently disables FR-052 and FR-054.
+18. **Everything offered can be drawn, and what cannot be drawn is still listed.** Every media type in
     `ACCEPTED` has a rendering path, and a document with none is extracted and listed anyway, with a
     notice about the missing picture rather than a refusal (FR-013, FR-014, FR-058).
 15. **A row's verdict is the worst of its field's findings.** Not the first. Findings reach the viewer

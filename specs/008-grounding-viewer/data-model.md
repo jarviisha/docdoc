@@ -113,8 +113,22 @@ The state machine. Its transitions are what SC-011 and SC-015 measure, and it ta
 |---|---|---|
 | `idle` | — | A document and schema may be chosen. |
 | `running` | `token`, `elapsedMs` | A run is in flight. |
-| `complete` | `view: RunView` | A result arrived and is current. |
-| `failed` | `failure: FailureView` | A run failed; completed stages survive. |
+| `complete` | `token`, `view: RunView` | A result arrived and is current. |
+| `failed` | `token`, `failure: FailureView` | A run failed; completed stages survive. |
+
+**`token` is carried into every state after a run starts**, and it is load-bearing rather than
+bookkeeping. A renderer holding its own copy of a result — its own banner text, its own page set — has
+no way to ask "is this still the current run?", and so cannot discard what this machine discarded.
+That is exactly what happened: `reduce` refused a stale failure and the component put the banner up
+anyway, because the banner was a second variable with no token in it. With the token here, anything
+derived from the state inherits the discard.
+
+**What a renderer keys on is `resultIdOf`, not the raw token.** The token is issued when a run
+*starts* and `reduce` carries it unchanged into `complete`, so `running(42) → complete(42)` is no
+change at all — a renderer keyed on the raw token never rebuilds at the moment a result appears.
+`resultIdOf` is `null` until a result exists, which makes that transition visible while still staying
+fixed across selection. Keying on the raw token cost this milestone its rectangles: the viewer listed
+every value and rendered no page (T105).
 
 **Transitions**
 
@@ -141,7 +155,8 @@ provider is paid either way (FR-047).
 
 | Field | Type | Notes |
 |---|---|---|
-| `stage` | `string` | The stage at fault, as the server named it. |
+| `origin` | `'run' \| 'transport'` | **Which thing failed.** `run` is the deployment reporting the extraction stopped. `transport` is this browser losing the answer — a proxy or network abandoning the request, or a body that could not be read. |
+| `stage` | `string` | The stage at fault, as the server named it. `null` for a `transport` failure, which has no stage. |
 | `errorClass` | `string` | The typed docdoc error class. |
 | `message` | `string` | docdoc's own message. Never a provider's error text. |
 | `completed` | `StageResult[]` | Which stages ran and how they ended — `{ stage, status }`, from the response's `outcomes`. |
@@ -161,6 +176,13 @@ presentations are how the two come to disagree about what a grounding status mea
 **Invariant**: a failure is never rendered as an empty result. Milestone 7's FR-066 preserves partial
 results precisely so that this view can show them, and discarding them here would waste the guarantee
 at the last step.
+
+**Invariant**: a `transport` failure is never presented as a failed run. The spec's Edge Cases are
+explicit that a proxy or browser abandoning a request does not abandon the run — the extraction
+continues, the provider is still paid, and only the answer is lost — so its notice says those two
+things plus the one nobody would guess: a storeless run keeps no job identity (FR-003), so the answer
+cannot be fetched later and re-running is a second extraction at a second cost. `survivors` is always
+`null` there, because we do not know what the run produced rather than knowing it produced nothing.
 
 **Invariant**: an omitted stage and a stage that produced nothing stay distinct. A response with no
 `extract` key yields `survivors: null`, never an empty `RunView` — the same distinction FR-018 spends

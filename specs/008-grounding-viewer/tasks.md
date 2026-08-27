@@ -757,3 +757,278 @@ eye because a sentence beside a value contradicted the value. This one has no su
 renders correctly, in the right place, with the right value, and one word in it is wrong in the
 direction that makes the result look better than it is. The rendering layer's missing coverage is not
 what hid it — a browser test would have rendered `warning` just as happily.
+
+---
+
+## Phase 16: Convergence
+
+Appended by `/speckit-converge` on 2026-08-26, after Phase 15 closed the list at 101/101 with a green
+gate and a green CI run. One finding, not constitutional, not blocking a user story.
+
+**The spec wrote the rule and nothing implemented it.** Under Edge Cases: *"The wait outlives the
+connection. A proxy or a browser abandoning a request does not abandon the run: the extraction
+continues, the provider is still paid, and only the answer is lost. An interface that reports this as
+a failed run is describing the connection, not the work."* The interface reports it as a failed run.
+
+Two things make this the same shape as the last two findings rather than a new one. It sits on the
+**sixth** failure path — `ui/test/failure.test.ts` enumerates SC-010's five, all of them
+server-reported, and the one the server never reports is the one with no test and no model function.
+And the sentence a user reads for it is assembled inside `App.tsx`'s `.catch`, which is a decision
+about what to tell someone, in the layer FR-043 exists to keep decisions out of.
+
+The cost is not cosmetic, and the documentation already says so from the other side:
+`docs/concepts/viewer.md:23` warns an operator that a proxy killing a request "will look like a viewer
+bug". It looks like one because the viewer says the run failed. An operator reading that banner has
+been told the opposite of the two facts they need — that the extraction is still running and that they
+have already paid for it.
+
+- [X] T102 Give a lost connection its own failure view, in `ui/src/model/failure.ts` rather than in `ui/src/components/App.tsx:135`. The component currently hand-builds `{ error: { class: "NetworkError", message: String(error) } }` and `failureNotice` renders it under the banner `title="The run failed"` (`App.tsx:258`), which is exactly what the spec's Edge Case forbids: the connection failed, the run did not. The same `.catch` also swallows `transport.ts:30`'s `response.json()`, so a proxy's HTML 504 reaches the user as a JSON `SyntaxError` presented as the run's cause. Add a model-side constructor for the transport case whose message says the three things only it can say — the extraction continues on the server, its cost is already incurred, and a storeless run has no job identity to fetch the answer from later (FR-003), so the answer is genuinely lost rather than retrievable — and distinguish it from a run failure at the banner. Then extend `ui/test/failure.test.ts`, whose `REACHABLE` list covers SC-010's five server-reported failures and not this sixth one per spec §Edge Cases "The wait outlives the connection", FR-043, FR-050 (partial)
+
+### Why this is filed against FR-043 and not only against the edge case
+
+The edge case says what the interface must not say. FR-043 says why nobody noticed it was saying it:
+the wording lives in a `.catch` in the rendering layer, so no test could have covered it and no
+contract lists it. Phase 14 found a decision that had escaped into a `find()`; Phase 9 found one that
+had escaped into a component's `state.kind === "complete"`. This is the third of the same kind, and
+the three of them together are the argument for reading FR-043 as the milestone's load-bearing
+requirement rather than as a style rule — every defect this milestone has found by convergence has
+been a decision sitting outside the tested surface.
+
+---
+
+## Phase 17: Convergence
+
+Appended by `/speckit-converge` on 2026-08-26. **T102 was still open when this ran** — re-verified
+against `App.tsx:136`, `App.tsx:258` and `transport.ts:30`, all unchanged — so it is not restated
+here. Two new findings, neither constitutional, neither blocking a user story. The gate is green:
+94 view-model tests, 2794 Python tests, `tsc` clean, four boundary checks clean.
+
+**Both are the shape Phase 16 named, and the first is that shape at its sharpest.** `state.ts` carries
+a comment about the stale-result failure — "It can be reached two ways ... and both are closed here
+rather than in a component, because a component closing them is a decision outside the tested
+surface." Both doors it names are genuinely closed, and `reduce` discards a stale token in every test.
+The banner is a **third door in the same flow**, and it was never given a token: `setFailure` runs
+before the check and outside it, so a run the model correctly discarded still speaks. The requirement
+it defeats is the one the spec calls the same invisible failure arriving by a different route.
+
+The second is smaller and stranger: two requirements switch themselves off when a `RunView` is built
+with `pageCount: 0`, which happens whenever someone presses Extract before a large PDF has finished
+opening — a window the interface leaves open on purpose, because `canRun` never asked whether the
+document was ready.
+
+- [X] T103 Apply the run token to the failure banner and the page requests in `ui/src/components/App.tsx`. `setFailure(failureNotice(view))` at `:126` and `:137` runs before the token check at `:127` and outside it, so a run for a document the user has since replaced still puts "The run failed" on screen — `reduce` discards the failure, `state` stays `idle`, and the banner appears anyway for a document that never ran. `setRequests` at `:128` and `:133` is unguarded in the same way; that one is latent only because `view === null` currently gates the results region, which is a coincidence of layout rather than a guarantee. `ui/src/model/state.ts` closes the two doors it owns and says so in a comment; this is the third. Derive the banner from the state the model already returns rather than holding it beside that state, then cover it in `ui/test/state.test.ts`, which asserts the discard for `reduce` and cannot see the component per FR-049, SC-015, spec §Edge Cases "A result arrives after the user has moved on" (partial)
+- [X] T104 Stop building a view whose `pageCount` is `0` in `ui/src/components/App.tsx`. `canRun` at `:246` is `canStartRun(state) && bytes !== null && schema !== null` and never waits for the document to open: `onDocument` sets `bytes` at `:82` and `pdf` only after `await pdfjs.getDocument(...)` at `:101`, so Extract is live in between and `pageCount` is captured at `:116` as `pdf?.numPages ?? null`, which is `0`. Two requirements then switch themselves off without any error: `reachablePages` returns `[]` so `PageNav` renders no buttons and **no page is reachable** (FR-052), and `selectivityNotice` returns `null` because `shown >= 0` is trivially true, so the viewer **stops saying it is showing pages selectively** (FR-054). The window is real on a document at the deployment's default limit, which is the size FR-053 exists for. Gate the run on the document being open — a condition the model can compute from `DocumentView` and the renderer's state — or take the page count when the response arrives rather than when the button is pressed per FR-052, FR-054, FR-053 (partial)
+
+### The pattern is now six for six
+
+Every defect convergence has found in this milestone has been a decision sitting outside the tested
+surface, and the count is worth stating plainly because it has stopped being a coincidence:
+
+| Phase | What had escaped | Into |
+|---|---|---|
+| 9 | which view is current | `state.kind === "complete"` in a component |
+| 12 | what a label means when there is no record | three separate sentences |
+| 14 | which finding a verdict comes from | a `find()` |
+| 16 | what a lost connection says | a `.catch` |
+| 17 | whether a discarded run may still speak | component state beside the model's |
+| 17 | whether a run may start yet | a `canRun` expression |
+
+FR-043 says the rendering layer must contain no decision the view model could have made, and calls
+moving one back "not optional". Six passes have found six. That is not an argument that the
+requirement is being ignored — each of these is small, and the large decisions did move — but it is
+evidence that **the boundary is not self-enforcing at the granularity where these live**, and that
+`check-model-boundary.mjs` cannot see them because they are not imports.
+
+What would see them is narrower than a browser test and is recorded here rather than added, because
+the spec is closed: every piece of component state that shadows something the model already knows
+(`failure` beside `RunState.failed`, `requests` beside `RunView.pagesToRender`, `canRun` beside
+`canStartRun`) is a place where the two can disagree, and both findings above are exactly that
+disagreement. A rule that says the component may hold no state the model also holds would have caught
+five of the six.
+
+---
+
+## Phase 18: Implementation record — 2026-08-26
+
+`/speckit-implement` over T102 (Phase 16) and T103–T104 (Phase 17). All three closed; the list stands
+at 104/104.
+
+**The three were one defect, and they were fixed as one.** Phase 17's note argued that five of the six
+convergence findings shared a cause — component state shadowing something the model already knows —
+and named the three shadows: `failure` beside `RunState.failed`, `requests` beside the run, `canRun`
+beside `canStartRun`. Rather than guard each one, the shadows were removed.
+
+- **`failure` is gone.** The banner is `failureOf(state)`, and `RunState` now carries the run's
+  `token` into `complete` and `failed`. There is one place a failure can live, the token guards entry
+  to it, and everything a renderer shows about a failure is read from there. A discarded run can no
+  longer speak, because there is nothing left for it to speak through.
+- **`requests` is reset from `runTokenOf(state)`**, not from a response. Keying on the run token
+  rather than the view matters: `select` returns a new view on every selection, so keying on the view
+  would have thrown away the reader's on-demand pages each time they clicked a row.
+- **`canRun` asks the model.** `isReadyToRun(doc, pdf !== null)` is false while a PDF is still
+  opening, so no `RunView` is ever built with the `pageCount: 0` that silently switched off FR-052 and
+  FR-054. `openingNotice` says why the control is disabled, so the wait is not a mystery.
+
+**T102 also reached into `transport.ts`.** `await response.json()` was unguarded, so a proxy answering
+a timeout with HTML surfaced a JSON `SyntaxError` presented as the *run's* cause — the deployment
+blamed for a body it never sent. `send` now throws a `TransportError` naming what happened, and
+`transportFailure` turns it into a view that says the three things only this case can say: the
+extraction is still running, its cost is already incurred, and a storeless run keeps no job identity
+(FR-003) so the answer cannot be fetched later and re-running is a second extraction at a second cost.
+`failureTitle` supplies the banner heading, because a title is a claim about what went wrong and
+belongs in the model.
+
+`docs/concepts/viewer.md` had warned operators that a proxy timeout "will look like a viewer bug". It
+said that because the viewer said the run had failed. That sentence has been replaced with what the
+viewer now actually reports.
+
+**Gate at close**: 110 view-model tests (was 94), 2794 Python tests, 23 skipped, `tsc` clean, four
+boundary checks clean, 11 dependencies Apache-2.0-compatible, build succeeds and leaves nothing to
+commit.
+
+### Two things found while doing this, both recorded rather than quietly handled
+
+**A test of mine was wrong and the suite caught it.** The first draft of T104's invariant asserted
+that no runnable document ever records a page count of zero — and `unrenderable` legitimately does,
+because it has no renderable page, draws no `PageNav`, and explains itself. Zero is the right answer
+there. The assertion was narrowed to documents that *have* pages, and the distinction written down as
+its own test so it is not read later as an oversight.
+
+**`tests/integration/test_storeless_extract.py` can fail for reasons that have nothing to do with
+docdoc.** Two runs failed on this machine with an extra path in the temp directory —
+`/tmp/rustdoctesttz24rn/rustdoc-cfgs`, written by an unrelated `rustdoc` process. `_temporaries()`
+snapshots the whole of `tempfile.gettempdir()` and attributes anything new to the run, so any
+concurrent process on the machine can fail SC-007 and SC-008. In isolation the tests pass, and a
+clean re-run of the full suite passed 2794. This is **not** a regression from this pass and was not
+touched: it is a pre-existing fragility in a test written under T013 and T014, it will produce
+spurious CI failures on a shared runner, and the fix — scoping the snapshot to a temp directory the
+test controls — is a change to those tasks' work rather than to these.
+
+---
+
+## Phase 19: Convergence
+
+Appended by `/speckit-converge` on 2026-08-26, after Phase 18 closed the list at 104/104 with a green
+gate. Two findings. **The first is CRITICAL and is a regression introduced by Phase 18 itself.**
+
+**The viewer stopped drawing rectangles on PDFs, and every check stayed green.** Phase 18 removed the
+component's shadow copies of model state — the right fix for T103 — and reset `requests` from an
+effect keyed on the run token. The token is issued when a run **starts**, and `reduce` carries the
+same token into `complete`, so `running(42) → complete(42)` changes nothing the effect watches. It
+last ran while the state was `running`, when `view` was still `null`, and set `requests = null`. The
+PDF branch renders only when `requests !== null`.
+
+So after a successful run: the value list appears, and the page, the overlay and the page navigation
+do not. US1 is the milestone's entire reason for existing — *"see every located value's rectangle on
+the page it came from"* — and it produces no rectangle. FR-052 and FR-054 go with it, because
+`PageNav` and the selectivity notice sit inside the same gate. Images are unaffected; their branch
+does not consult `requests`.
+
+**The comment above the effect asserts the opposite of what the code does.** It reads "keyed on the run
+token, which only changes when a run this machine accepted finishes". The token changes when a run
+*begins*. The comment describes the intention and the code implements the text, which is how a
+plausible-looking dependency array survives review.
+
+Nothing caught it. 110 view-model tests, `tsc`, four boundary guards, the licence check and the
+production build all passed, and not one of them renders a component — which is the deviation the
+spec's first clarification accepted and its Assumptions predicted in almost these words: *"a value
+listed in the model and hidden by a layout"*. The previous pass reported that gate as evidence the
+work was sound. It was evidence that the model was sound.
+
+- [X] T105 **CRITICAL** — restore page and overlay rendering for PDFs in `ui/src/components/App.tsx`. The effect at `:198` resets `requests` keyed on `[runToken]`, and `runTokenOf` returns the same token for `running` and `complete` (`ui/src/model/state.ts:139`; `reduce` copies `event.token` into both), so it never fires when the view arrives — it last ran during `running`, when `view` was `null`, and set `requests = null`. The gate at `:318` needs `requests !== null`, so a completed run on a PDF renders no page, no rectangle and no `PageNav`, while the value list still renders and makes the interface look functional. The key must change when the **view arrives** and must not change on **selection**, which is the constraint that produced the token in the first place — `select` returns a new `RunView` each time, so keying on view identity would discard the reader's on-demand pages. Whatever key is chosen, add a test that fails when a completed run yields no page request, since the existing suite passes with the feature entirely absent per FR-014, FR-015, FR-052, FR-054, US1 (contradicts)
+- [X] T106 Scope the temporary-file snapshot in `tests/integration/test_storeless_extract.py:50` to a directory the test controls. `_temporaries()` reads all of `tempfile.gettempdir()` and treats any new entry as something the run wrote, so a concurrent process on the same host fails SC-007 and SC-008: two runs here failed on `/tmp/rustdoctesttz24rn/rustdoc-cfgs`, left by an unrelated `rustdoc` process, while the same tests passed in isolation and a clean full re-run passed 2794. The criteria are meant to assert that a storeless run writes zero bytes; as written they also assert that nothing else on the machine wrote anything, which is not a property of docdoc and will fail spuriously on a shared CI runner per SC-007, SC-008 (partial)
+
+### What this pass says about the last one
+
+Phase 18's record closed by listing what it had verified: "110 view-model tests, 2794 Python tests,
+`tsc` clean, four boundary checks clean, build succeeds". Every line of that was true, and the feature
+was broken at the time it was written.
+
+That is worth stating without softening, because the milestone made this trade deliberately and this
+is the first time it has cost something central. The recorded deviation is that **the rendered
+interface carries no automated test**; the mitigation is FR-043, which keeps the renderer thin enough
+that little can go wrong in it; and the residual risk named in Assumptions is a value "hidden by a
+layout". What happened is one step past that — not a layout, but a dependency array — still inside the
+untested layer, still invisible to everything the gate runs.
+
+Two things follow, and neither is a change to this milestone's scope:
+
+- **A green gate is not evidence the viewer works**, and any report implying otherwise overstates what
+  was checked. The closing summaries in Phases 13, 15 and 18 should be read that way.
+- **T080 remains the only check that would have caught this**, and it is a one-off by construction — a
+  person opened the page once, in Phase 11. Six convergence passes have found defects by reading and
+  running code; this one was found the same way, and only because the dependency array happened to be
+  re-read. A rendered-interface check that runs more than once is the standing gap, and the seam for
+  it is unchanged: the view model is already where a browser test would attach.
+
+---
+
+## Phase 20: Implementation record — 2026-08-27
+
+`/speckit-implement` over Phase 19. Both closed; the list stands at 106/106.
+
+**T105 — the rectangles are back, and the decision that lost them is now a tested function.**
+`runTokenOf` is gone. It returned `state.token` for `running` as well as `complete`, and `reduce`
+carries one token across that transition, so the key a renderer rebuilt on never changed at the moment
+a result arrived. `resultIdOf` replaces it: `null` until a result exists, the run's token once one
+does. It satisfies both conditions the key has to satisfy at once — it changes when a result arrives,
+and it does not change on selection — and `state.test.ts` now asserts each half separately, including
+the one its predecessor failed.
+
+The second half of the fix matters as much. "Which pages should be asked for now?" was a line inside a
+`useEffect`, which is why nothing could check it; it is now `requestsForResult(state)` in
+`ui/src/model/pages.ts`, and `pages.test.ts` asserts that a completed run asks for exactly the pages
+its result names. That is the check the task asked for by name, and the suite passed for a full pass
+with the feature entirely absent because no such check existed.
+
+Verified by running the real functions over the committed fixture, at the exact transition that had
+been broken:
+
+```
+idle         resultId = null   requests = null
+running      resultId = null   requests = null
+complete     resultId = 42     requests = [0]
+```
+
+**T106 — SC-007 and SC-008 stopped depending on what else the machine is doing.** `_temporaries()`
+read all of `tempfile.gettempdir()`, so an unrelated `rustdoc` process failed them here twice. A
+`scratch` fixture now redirects `tempfile` to a directory created by `tmp_path_factory` — deliberately
+not the test's own `tmp_path`, which is the store's directory in the second test, so the two
+assertions stay about different things. The narrowing does not weaken the check: verified separately
+that a file spooled through `tempfile` during the window is still detected.
+
+**Gate at close**: 119 view-model tests (was 110), 2794 Python tests, 23 skipped, `tsc` clean, four
+boundary checks clean, 11 dependencies Apache-2.0-compatible, build succeeds and leaves nothing to
+commit.
+
+### What was verified, and what was not
+
+Phase 19 said a green gate is not evidence the viewer works, so this pass should not close by listing
+one. The chain T105 depends on, link by link:
+
+| Link | Verified how |
+|---|---|
+| `running → complete` carries the same token | test, and Phase 19's demonstration |
+| `resultIdOf` changes across that transition | `state.test.ts`, new |
+| `resultIdOf` is stable across selection and ticks | `state.test.ts`, new |
+| `requestsForResult` yields the result's pages | `pages.test.ts`, new |
+| React re-runs an effect when a dependency value changes | **not verified here** — framework contract |
+| the render gate then admits `Page` and `Overlay` | **not verified here** — read, not run |
+
+The last two are the untested rendering layer, and the break last time was at the *second* link — our
+own logic, and exactly what the new tests now cover. That is a materially better position than the
+previous pass, and it is not the same as having seen it.
+
+**An end-to-end render check was attempted and did not complete.** A harness was built that mounts the
+real `App`, stubs only the network with a real `POST /v1/extract` body, and drives the interface the
+way a person would — pick the fixture, choose the schema through the real Selector, press Extract,
+then assert a canvas and at least one `Located value for …` rectangle exist. Firefox screenshots a
+plain page from the same server fine and the release gate works when called directly, but the harness
+page never issued its first request under `--screenshot` and the run timed out three times. This is
+the same wall Phase 7 recorded, reached from a different direction. The harness was deleted; nothing
+was committed.
+
+So the honest statement is: **the defect's cause is fixed and covered by tests that fail if it
+returns; the pixels have not been seen since Phase 11.** T080's confirmation remains the only time
+anyone has watched this interface draw a rectangle, and a rendered-interface check that runs more than
+once is still the milestone's standing gap.

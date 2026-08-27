@@ -21,11 +21,30 @@ export interface Response {
   body: unknown;
 }
 
+/**
+ * A request that never produced a readable answer.
+ *
+ * Thrown so the caller can tell "the deployment reported a failure" from "we
+ * never heard a usable answer" — two different things that reached the user as
+ * one until T102. What the distinction *means* is `failure.ts`'s to say; this
+ * only reports which happened, which is mechanics rather than a decision.
+ */
+export class TransportError extends Error {}
+
 export async function send(plan: RequestPlan, body?: BodyInit): Promise<Response> {
   const response = await fetch(toUrl(plan), {
     method: plan.method,
     ...(plan.hasBody && body !== undefined ? { body } : {}),
   });
 
-  return { ok: response.ok, body: await response.json() };
+  try {
+    return { ok: response.ok, body: await response.json() };
+  } catch {
+    // A proxy timing out mid-flight answers with HTML, not JSON. Letting the
+    // `SyntaxError` escape presented a JSON parse failure to the user as the
+    // *run's* cause — the deployment blamed for a body it never sent.
+    throw new TransportError(
+      `the deployment answered ${response.status} with a body this page could not read`,
+    );
+  }
 }

@@ -18,11 +18,24 @@
 import type { RunView } from "./types.ts";
 import type { FailureView } from "./failure.ts";
 
+/**
+ * Every state after a run starts carries **the token of the run it belongs to**.
+ *
+ * Not decoration. A component that holds a result beside this state — its own
+ * copy of the banner text, its own copy of which pages to render — has no way to
+ * ask "is this still the current run?", and so cannot discard what this machine
+ * discarded. That is exactly what happened: `reduce` refused a stale failure and
+ * the component put the banner up anyway, because the banner was a second
+ * variable with no token in it (T103).
+ *
+ * With the token here, "which run is this?" has one answer and anything derived
+ * from the state inherits it.
+ */
 export type RunState =
   | { kind: "idle" }
   | { kind: "running"; token: number; elapsedMs: number }
-  | { kind: "complete"; view: RunView }
-  | { kind: "failed"; failure: FailureView };
+  | { kind: "complete"; token: number; view: RunView }
+  | { kind: "failed"; token: number; failure: FailureView };
 
 export type Event =
   | { type: "document-chosen" }
@@ -52,11 +65,11 @@ export function reduce(state: RunState, event: Event): RunState {
 
     case "result":
       if (state.kind !== "running" || state.token !== event.token) return state;
-      return { kind: "complete", view: event.view };
+      return { kind: "complete", token: event.token, view: event.view };
 
     case "failure":
       if (state.kind !== "running" || state.token !== event.token) return state;
-      return { kind: "failed", failure: event.failure };
+      return { kind: "failed", token: event.token, failure: event.failure };
   }
 }
 
@@ -97,6 +110,50 @@ export function viewOf(state: RunState): RunView | null {
   if (state.kind === "complete") return state.view;
   if (state.kind === "failed") return state.failure.survivors;
   return null;
+}
+
+/**
+ * The failure to show, or `null` — **derived, never held alongside** (T103).
+ *
+ * The rule this exists to enforce: a discarded run does not get to speak. The
+ * component used to keep the banner in its own `failure` string, set from the
+ * response *before* `reduce` had judged the token, so a run for a document the
+ * user had already replaced still announced itself. `reduce` had discarded it;
+ * the sentence about it appeared regardless.
+ *
+ * Reading it from the state instead makes that impossible rather than merely
+ * fixed. There is one place a failure can live, the token guards entry to it, and
+ * anything a renderer shows about a failure comes from here.
+ */
+export function failureOf(state: RunState): FailureView | null {
+  return state.kind === "failed" ? state.failure : null;
+}
+
+/**
+ * The identity of the run whose **result is on screen**, or `null` if none is.
+ *
+ * A renderer resetting per-run scaffolding — which pages have been asked for —
+ * keys on this. It has to satisfy two conditions at once, and they pull in
+ * opposite directions: it must **change when a result arrives**, so the
+ * scaffolding is rebuilt for it, and it must **not change when the selection
+ * changes**, or the reader's on-demand pages are thrown away every time they
+ * click a row.
+ *
+ * **The predecessor of this function satisfied only the second** (T105). It
+ * returned `state.token` for every state after `idle`, including `running` — and
+ * `reduce` carries the same token from `run-started` into `result`, so
+ * `running(42) → complete(42)` changed nothing. A renderer keyed on it never
+ * rebuilt anything: its last run was during `running`, when the view was still
+ * `null`, so it cleared the page requests and left them cleared. The viewer
+ * listed every value and drew no page and no rectangle, which is US1 entire.
+ *
+ * Its docstring said "or `null` before any has finished" while its body returned
+ * a token for a run still in flight. The sentence was right and the code was not.
+ * `running` yields `null` here because a run in flight has produced no result,
+ * which is the whole distinction the name now carries.
+ */
+export function resultIdOf(state: RunState): number | null {
+  return state.kind === "complete" || state.kind === "failed" ? state.token : null;
 }
 
 /**

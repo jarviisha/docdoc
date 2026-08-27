@@ -31,7 +31,28 @@ export interface StageResult {
   status: string;
 }
 
+/**
+ * Which thing failed — and they are not the same thing (T102).
+ *
+ * `run` is the deployment reporting that the extraction stopped. `transport` is
+ * this browser losing the answer: the request was abandoned by a proxy, the
+ * network went, or the body came back unreadable. The spec's Edge Cases are
+ * explicit that the second must not be reported as the first — *"A proxy or a
+ * browser abandoning a request does not abandon the run: the extraction
+ * continues, the provider is still paid, and only the answer is lost. An
+ * interface that reports this as a failed run is describing the connection, not
+ * the work."*
+ *
+ * The interface reported it as a failed run, under a banner reading "The run
+ * failed", because the wording was assembled in a component's `.catch` where no
+ * test could see it and no contract listed it. `docs/concepts/viewer.md` already
+ * warned operators from the other side that a proxy killing a request "will look
+ * like a viewer bug" — it looked like one because the viewer said so.
+ */
+export type FailureOrigin = "run" | "transport";
+
 export interface FailureView {
+  origin: FailureOrigin;
   stage: string | null;
   errorClass: string;
   message: string;
@@ -41,6 +62,9 @@ export interface FailureView {
    * What those stages actually produced, or `null` if the run stopped before
    * anything survived. This is the half FR-025 asks for that the outcome list
    * above cannot supply: "extract executed" is not the extracted values.
+   *
+   * Always `null` for a `transport` failure: the run may well have produced
+   * everything, and we simply never received it.
    */
   survivors: RunView | null;
 }
@@ -90,6 +114,7 @@ function toSurvivors(results: WireError["results"], pageCount: number): RunView 
 export function toFailureView(body: WireError, pageCount = 1): FailureView {
   const error = body.error ?? {};
   return {
+    origin: "run",
     stage: error.stage ?? null,
     errorClass: error.class ?? "UnknownError",
     // docdoc's own message, never a provider's — a provider's may quote the
@@ -98,6 +123,50 @@ export function toFailureView(body: WireError, pageCount = 1): FailureView {
     completed: (body.outcomes ?? []).filter((outcome) => outcome.status !== "failed"),
     survivors: toSurvivors(body.results, pageCount),
   };
+}
+
+/**
+ * The answer was lost. The run was not (FR-050, spec §Edge Cases).
+ *
+ * Three facts belong here and nowhere else, because only this case has them,
+ * and an operator who is not told them will read the banner as a defect:
+ *
+ *  1. **The extraction is still running.** Closing a connection does not close a
+ *     run; the server has no idea the browser left.
+ *  2. **It has already been paid for.** The provider tokens are spent whether or
+ *     not anyone sees the result, which is the same reason FR-047 forbids a
+ *     control that claims to cancel.
+ *  3. **The answer cannot be fetched later.** A storeless run writes no terminal
+ *     artifact and therefore has no job identity (FR-003), so this is genuinely
+ *     lost rather than merely delayed — a caller who needs a retrievable
+ *     identity submits the document first and uses the store-backed route.
+ *
+ * The third is the one nobody would guess, and it is the reason this is not
+ * simply "try again": trying again is a second extraction at a second cost.
+ */
+export function transportFailure(cause: unknown): FailureView {
+  return {
+    origin: "transport",
+    stage: null,
+    errorClass: "ConnectionLost",
+    message: String(cause),
+    completed: [],
+    // Not "the run produced nothing" — we do not know what it produced.
+    survivors: null,
+  };
+}
+
+/**
+ * What to call the failure on screen.
+ *
+ * A title is a claim about what went wrong, so it is decided here rather than
+ * written into a component's JSX (FR-043). "The run failed" over a lost
+ * connection is the specific false claim T102 exists to remove.
+ */
+export function failureTitle(failure: FailureView): string {
+  return failure.origin === "transport"
+    ? "The connection was lost — the run was not"
+    : "The run failed";
 }
 
 /**
@@ -112,6 +181,19 @@ export function toFailureView(body: WireError, pageCount = 1): FailureView {
  * about what is on screen is worse than no sentence at all.
  */
 export function failureNotice(failure: FailureView): string {
+  if (failure.origin === "transport") {
+    // Deliberately says nothing about the run having failed, because it has not,
+    // and nothing about retrying being free, because it is not.
+    return (
+      "The answer did not reach this page, but the extraction is still running on " +
+      "the server and its provider cost is already incurred. A storeless run keeps " +
+      "no job identity, so this particular answer cannot be fetched later — running " +
+      "it again is a second extraction at a second cost. If a proxy sits in front of " +
+      "this deployment, it must allow a request to last as long as the slowest " +
+      `expected extraction. (${failure.message})`
+    );
+  }
+
   const where = failure.stage === null ? "" : ` at the ${failure.stage} stage`;
 
   let kept = "";

@@ -23,13 +23,20 @@ import { Banner, Heading, Stack, Text } from "@astryxdesign/core";
 import * as pdfjs from "pdfjs-dist";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
-import { pageCountFor, renderFailureNotice, toDocumentView, type DocumentView } from "../model/document.ts";
-import { failureNotice, toFailureView } from "../model/failure.ts";
 import {
-  initialRequests,
+  isReadyToRun,
+  openingNotice,
+  pageCountFor,
+  renderFailureNotice,
+  toDocumentView,
+  type DocumentView,
+} from "../model/document.ts";
+import { failureNotice, failureTitle, toFailureView, transportFailure } from "../model/failure.ts";
+import {
   reachablePages,
   rendered,
   requestPage,
+  requestsForResult,
   selectivityNotice,
   type PageRequests,
 } from "../model/pages.ts";
@@ -38,7 +45,16 @@ import { send } from "../transport.ts";
 import { pagesForSelection, select, toRunView } from "../model/run.ts";
 import type { WireRun } from "../model/types.ts";
 import { emptyRegistryNotice, toSchemaChoices, type SchemaChoice } from "../model/schemas.ts";
-import { canStartRun, initial, reduce, viewOf, waitingLabel, type RunState } from "../model/state.ts";
+import {
+  canStartRun,
+  failureOf,
+  initial,
+  reduce,
+  resultIdOf,
+  viewOf,
+  waitingLabel,
+  type RunState,
+} from "../model/state.ts";
 import { ImagePage } from "./ImagePage.tsx";
 import { Overlay } from "./Overlay.tsx";
 import { Page } from "./Page.tsx";
@@ -64,8 +80,10 @@ export function App() {
   const [doc, setDoc] = useState<DocumentView | null>(null);
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [state, setState] = useState<RunState>(initial);
+  // `requests` is the only per-run state this component still holds of its own.
+  // It is rebuilt from the model's answer when a *result* arrives (T103, T105),
+  // never from a response — so a discarded run cannot reach it either.
   const [requests, setRequests] = useState<PageRequests | null>(null);
-  const [failure, setFailure] = useState<string | null>(null);
   const pageRefs = useRef(new Map<number, HTMLDivElement>());
   /** The selection we have already scrolled to, so we do it once. */
   const scrolledFor = useRef<string | null>(null);
@@ -82,7 +100,6 @@ export function App() {
 
     setBytes(buffer);
     setDoc(view);
-    setFailure(null);
     // The model clears the previous result before any new box can exist, and
     // invalidates whatever is in flight (FR-028).
     setState((previous) => reduce(previous, { type: "document-chosen" }));
@@ -107,35 +124,46 @@ export function App() {
     }
   }, []);
 
+  /**
+   * Start a run.
+   *
+   * **Every outcome goes to exactly one place: `reduce`.** Nothing here writes a
+   * banner, a page set, or any other copy of the result, because a second copy
+   * is a copy the run token does not guard — which is how a run the model had
+   * already discarded still put "The run failed" on screen (T103). What a
+   * failure *says* is `failure.ts`'s answer, and which run is current is
+   * `state.ts`'s; this only carries the response between them.
+   */
   const onRun = useCallback(() => {
     if (bytes === null || schema === null) return;
     const token = Date.now();
     setState((previous) => reduce(previous, { type: "run-started", token }));
-    setFailure(null);
 
     const pageCount = pageCountFor(doc ?? toDocumentView(bytes), pdf?.numPages ?? null);
     const plan = requestFor({ type: "extract", schema, document: bytes });
 
     void send(plan, bytes.slice())
       .then(({ ok, body }) => {
-        if (!ok) {
-          // The surviving stages are read out of the same body (FR-025), so a
-          // mid-run failure shows what it produced instead of only saying that
-          // it produced something.
-          const view = toFailureView(body as Parameters<typeof toFailureView>[0], pageCount);
-          setFailure(failureNotice(view));
-          setState((previous) => reduce(previous, { type: "failure", token, failure: view }));
-          if (view.survivors !== null) setRequests(initialRequests(view.survivors));
-          return;
-        }
-        const view = toRunView(body as WireRun, pageCount);
-        setState((previous) => reduce(previous, { type: "result", token, view }));
-        setRequests(initialRequests(view));
+        // The surviving stages are read out of the same body (FR-025), so a
+        // mid-run failure shows what it produced instead of only saying that it
+        // produced something.
+        const event = ok
+          ? ({ type: "result", token, view: toRunView(body as WireRun, pageCount) } as const)
+          : ({
+              type: "failure",
+              token,
+              failure: toFailureView(body as Parameters<typeof toFailureView>[0], pageCount),
+            } as const);
+
+        setState((previous) => reduce(previous, event));
       })
       .catch((error: unknown) => {
-        const view = toFailureView({ error: { class: "NetworkError", message: String(error) } });
-        setFailure(failureNotice(view));
-        setState((previous) => reduce(previous, { type: "failure", token, failure: view }));
+        // The connection failed; the run did not. Saying otherwise is what the
+        // spec's Edge Case forbids, and the sentence that says it correctly is
+        // the model's (T102).
+        setState((previous) =>
+          reduce(previous, { type: "failure", token, failure: transportFailure(error) }),
+        );
       });
   }, [bytes, schema, pdf, doc]);
 
@@ -154,6 +182,30 @@ export function App() {
   // A completed run, or a failed one's survivors. Which is which is the model's
   // answer, not this file's (FR-025, T091).
   const view = viewOf(state);
+  const failure = failureOf(state);
+  const resultId = resultIdOf(state);
+
+  /**
+   * Rebuild the page requests when a **result** arrives — not on every render,
+   * and not on selection.
+   *
+   * `resultIdOf` is `null` while a run is in flight and the run's token once its
+   * result is on screen, so this fires exactly at the transition that produces
+   * something to render. The previous key was `runTokenOf`, which returned the
+   * same token for `running` and `complete`; it therefore never fired at that
+   * transition, left `requests` at the `null` it had set during `running`, and
+   * the PDF branch below — which needs a non-null `requests` — rendered no page
+   * and no rectangle for any completed run (T105).
+   *
+   * What the requests should be is `requestsForResult`'s answer, so the decision
+   * is a tested function rather than a line in an effect.
+   */
+  useEffect(() => {
+    setRequests(requestsForResult(state));
+    // `state` is deliberately not a dependency: it changes identity on every
+    // selection and tick, and neither produces a new result to rebuild for.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resultId]);
 
   // Pure: it computes the next state and does nothing else. The side effects a
   // selection implies — asking for the page and scrolling to it — belong to the
@@ -243,7 +295,7 @@ export function App() {
         schemas={schemas ?? []}
         emptyNotice={emptyRegistryNotice(schemas)}
         selectedSchema={schema}
-        canRun={canStartRun(state) && bytes !== null && schema !== null}
+        canRun={canStartRun(state) && schema !== null && isReadyToRun(doc, pdf !== null)}
         onDocument={(file) => void onDocument(file)}
         onSchema={setSchema}
         onRun={onRun}
@@ -253,9 +305,17 @@ export function App() {
         <Banner status="info" title="No page image for this document" description={doc.notice} />
       )}
 
+      {openingNotice(doc, pdf !== null) === null ? null : (
+        <Text size="sm">{openingNotice(doc, pdf !== null)}</Text>
+      )}
+
       <Running label={waitingLabel(state)} />
       {failure === null ? null : (
-        <Banner status="error" title="The run failed" description={failure} />
+        <Banner
+          status="error"
+          title={failureTitle(failure)}
+          description={failureNotice(failure)}
+        />
       )}
 
       {view === null ? null : (
