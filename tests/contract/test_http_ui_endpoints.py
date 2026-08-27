@@ -312,7 +312,7 @@ def test_a_missing_interface_says_what_is_missing_and_what_fixes_it(
     """
     from docdoc.api import ui as ui_module
 
-    monkeypatch.setattr(ui_module, "locate_assets", lambda: None)
+    monkeypatch.setattr(ui_module, "chosen_assets", lambda: (None, None))
     client = TestClient(build_app(_Deployment(registry=_registry(), adapter=_adapter())))
 
     response = client.get("/ui")
@@ -335,7 +335,7 @@ def test_a_built_interface_is_served_from_this_origin(
     from docdoc.api import ui as ui_module
 
     (tmp_path / "index.html").write_text("<!doctype html><div id=root></div>", encoding="utf-8")
-    monkeypatch.setattr(ui_module, "locate_assets", lambda: tmp_path)
+    monkeypatch.setattr(ui_module, "chosen_assets", lambda: ("test", tmp_path))
     client = TestClient(build_app(_Deployment(registry=_registry(), adapter=_adapter())))
 
     assert client.get("/ui/").status_code == 200
@@ -396,3 +396,99 @@ def test_the_blob_shaped_route_still_requires_a_store(storeless: TestClient, sou
     )
 
     assert response.status_code >= 400
+
+
+def _built_at(root: Path, marker: str) -> Path:
+    """A directory that looks like a real build, tagged so it can be told apart."""
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "index.html").write_text(f"<!doctype html><title>{marker}</title>", encoding="utf-8")
+    return root
+
+
+def test_a_checkout_build_beats_an_installed_distribution(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A rebuild must be what you see.
+
+    Both roots exist on any machine that has run ``packaging/docdoc-ui/build.sh``
+    or synced the ``ui`` extra, and the installed copy used to win. Silently: a
+    developer ran ``npm run build``, started the server from the checkout, and got
+    a months-old bundle — one that predated the component library, so the page had
+    no styling and carried labels two fixes out of date. The stale page was then
+    read as evidence about current code, which is the real cost and the reason
+    this is a test rather than a note.
+    """
+    from docdoc.api import ui as ui_module
+
+    checkout = _built_at(tmp_path / "checkout" / "ui" / "dist", "checkout")
+    installed = _built_at(tmp_path / "site-packages" / "docdoc_ui" / "assets", "installed")
+
+    monkeypatch.delenv("DOCDOC_UI_ROOT", raising=False)
+    monkeypatch.setattr(ui_module, "_checkout_root", lambda: checkout)
+    monkeypatch.setattr(ui_module, "_installed_root", lambda: installed)
+
+    source, chosen = ui_module.chosen_assets()
+
+    assert chosen == checkout, "the checkout's own build must win over an installed copy"
+    assert "checkout" in (source or "")
+
+
+def test_an_explicit_setting_beats_both(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A deployment that named a path meant it — unchanged by the reorder above."""
+    from docdoc.api import ui as ui_module
+
+    configured = _built_at(tmp_path / "configured", "configured")
+    monkeypatch.setenv("DOCDOC_UI_ROOT", str(configured))
+    monkeypatch.setattr(ui_module, "_checkout_root", lambda: _built_at(tmp_path / "c", "checkout"))
+    monkeypatch.setattr(ui_module, "_installed_root", lambda: _built_at(tmp_path / "i", "inst"))
+
+    source, chosen = ui_module.chosen_assets()
+
+    assert chosen == configured
+    assert source == "DOCDOC_UI_ROOT"
+
+
+def test_the_installed_distribution_still_serves_a_real_deployment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The reorder costs a deployment nothing.
+
+    From a wheel there is no ``ui/dist`` four parents up, so the installed copy is
+    reached exactly as before. This is the half that makes preferring the checkout
+    safe rather than merely convenient.
+    """
+    from docdoc.api import ui as ui_module
+
+    installed = _built_at(tmp_path / "site-packages" / "docdoc_ui" / "assets", "installed")
+
+    monkeypatch.delenv("DOCDOC_UI_ROOT", raising=False)
+    monkeypatch.setattr(ui_module, "_checkout_root", lambda: None)
+    monkeypatch.setattr(ui_module, "_installed_root", lambda: installed)
+
+    source, chosen = ui_module.chosen_assets()
+
+    assert chosen == installed
+    assert "installed" in (source or "")
+
+
+def test_an_unbuilt_checkout_does_not_shadow_a_working_installation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Preference is not blind: a checkout that has not been built is skipped.
+
+    ``_built`` requires the entry point, so an empty or absent ``ui/dist`` falls
+    through to the next candidate instead of serving a blank page — which is the
+    failure FR-037 exists to prevent, and it would have been an easy one to
+    introduce while reordering.
+    """
+    from docdoc.api import ui as ui_module
+
+    empty = tmp_path / "checkout" / "ui" / "dist"
+    empty.mkdir(parents=True)
+    installed = _built_at(tmp_path / "site-packages" / "docdoc_ui" / "assets", "installed")
+
+    monkeypatch.delenv("DOCDOC_UI_ROOT", raising=False)
+    monkeypatch.setattr(ui_module, "_checkout_root", lambda: empty)
+    monkeypatch.setattr(ui_module, "_installed_root", lambda: installed)
+
+    assert ui_module.chosen_assets()[1] == installed

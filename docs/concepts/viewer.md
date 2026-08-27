@@ -51,11 +51,46 @@ by the person it would have warned.
 Two builds, and they produce different things.
 
 **The application**, from a checkout — this is what you run while developing, and what
-`docdoc.api.ui` finds when no `docdoc-ui` distribution is installed:
+`docdoc.api.ui` prefers whenever a checkout has been built:
 
 ```bash
 cd ui && npm ci && npm run build     # writes ui/dist, which is gitignored
 ```
+
+**Which build you get, when more than one exists.** Three places can hold assets, and they are
+preferred in this order:
+
+| Order | Root | Used when |
+|---|---|---|
+| 1 | `DOCDOC_UI_ROOT` | you named a directory, so you meant it |
+| 2 | the checkout's `ui/dist` | you are running from a source tree that has been built |
+| 3 | the installed `docdoc-ui` distribution | everything else, which is every real deployment |
+
+**A checkout's own build wins over an installed copy**, and it did not always. On any machine that has
+run `packaging/docdoc-ui/build.sh` or synced the `ui` extra, both exist — and the installed one used to
+win, silently, so `npm run build` appeared to change nothing. A months-old bundle was served, its page
+looked wrong in ways that matched no source file, and it was read as evidence about current code
+before anyone thought to check which assets were on the wire.
+
+**If the page does not match the source you are editing, ask which root won:**
+
+```bash
+python -c "from docdoc.api.ui import chosen_assets; print(chosen_assets())"
+# ("the checkout's ui/dist", PosixPath('/…/ui/dist'))
+```
+
+That answers without needing a running server or any logging setup, which is why it is the one written
+down here. The application also emits the same fact once at startup —
+
+```
+{"event": "ui.assets", "source": "the checkout's ui/dist", "path": "/…/ui/dist"}
+```
+
+— on the `docdoc.api` logger at `INFO`, and **you will not see it unless your application configures
+logging**. `uvicorn` configures its own `uvicorn.*` loggers and leaves the root logger without a
+handler, so docdoc's structured events fall to `logging.lastResort`, which drops anything below
+`WARNING`. That is true of every structured event docdoc emits, not only this one; making a library
+visible by default is the application's decision and not one this package takes on its behalf.
 
 **The distribution**, which is what `pip install 'docdoc[ui]'` actually delivers:
 

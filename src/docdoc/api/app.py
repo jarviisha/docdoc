@@ -32,6 +32,8 @@ and never from a client-declared type.
 
 from __future__ import annotations
 
+import json
+import logging
 import os
 from typing import TYPE_CHECKING, Any
 
@@ -166,9 +168,9 @@ def _mount_ui(app: FastAPI) -> None:
     cannot shadow an API path — now or when a later route is added by someone who
     has forgotten this exists.
     """
-    from docdoc.api.ui import absence_reason, locate_assets
+    from docdoc.api.ui import absence_reason, chosen_assets
 
-    assets = locate_assets()
+    source, assets = chosen_assets()
 
     if assets is None:
         # Not an error: a deployment without the `ui` extra is a supported and
@@ -190,6 +192,27 @@ def _mount_ui(app: FastAPI) -> None:
         return
 
     from fastapi.staticfiles import StaticFiles
+
+    # **Say which of the three roots won.** Three places can hold three different
+    # builds, and until this line nothing named the winner: a stale installed
+    # distribution shadowed a fresh `ui/dist`, every rebuild appeared to do
+    # nothing, and the months-old page that resulted was read as evidence about
+    # current code.
+    #
+    # **Visible only where the application configures logging**, which uvicorn's
+    # defaults do not — it sets up `uvicorn.*` and leaves root without a handler,
+    # so this INFO falls to `logging.lastResort` and is dropped. That is how every
+    # structured event docdoc emits behaves, and adding a handler here would be
+    # the library deciding for the application. `docdoc.api.ui.chosen_assets` is
+    # the answer that needs no logging at all, and it is what the documentation
+    # tells a developer to run.
+    #
+    # Not a second request-logging path, and so not the thing T019 forbids: it
+    # runs once at construction, and it carries a filesystem path and no document
+    # content, no values and no credentials (FR-033).
+    logging.getLogger("docdoc.api").info(
+        json.dumps({"event": "ui.assets", "source": source, "path": str(assets)})
+    )
 
     app.mount("/ui", StaticFiles(directory=assets, html=True), name="ui")
 
