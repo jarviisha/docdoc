@@ -1032,3 +1032,48 @@ So the honest statement is: **the defect's cause is fixed and covered by tests t
 returns; the pixels have not been seen since Phase 11.** T080's confirmation remains the only time
 anyone has watched this interface draw a rectangle, and a rendered-interface check that runs more than
 once is still the milestone's standing gap.
+
+---
+
+## Phase 21: The rendered interface, observed — 2026-08-27
+
+Phase 20 closed with "the defect's cause is fixed and covered by tests that fail if it returns; the
+pixels have not been seen since Phase 11". They have now been seen, by a person, on current code.
+
+**T105 is confirmed.** The page renders, the rectangles are drawn, and
+`line_items[0].description` — "Widget, large" — carries **two** of them, over `Widget,` and over
+`large` separately. That is FR-015 and SC-001's wrapping case, which is the one a viewer gets wrong by
+drawing the first box and looking right while doing it.
+
+**T096 is confirmed on screen**, which matters because it was found on screen. The four asserted values
+the grounder could not place — `issue_date`, `currency`, `total`, `supplier.legal_name` — read *"Not
+located, so there is no rectangle to draw"*, and the two the model reported absent read *"No location,
+because there is no value to locate"*. Two sentences for two facts, beside the values they describe.
+
+The server log records the run that produced it: `POST /v1/extract?schema=invoice%401 → 200`, through
+the storeless route, on a deployment with no store configured.
+
+### What this run did not cover
+
+Stated because the last time a screenshot was taken as evidence, it was evidence about the wrong
+build, and the way that went wrong was by not asking what it did *not* show.
+
+- **T102** — the wording for a lost connection needs a connection to lose.
+- **T103** — a discarded run's banner needs two runs and a race.
+- **FR-024, rotation** — this fixture has no rotated page. Confirmed separately in Phase 11 against
+  `rotated_90.pdf`, and unchanged since.
+- **The `unavailable` and `empty` geometry states** — no fixture in this repository produces either,
+  so neither label has ever been read off a screen. They rest on T052.
+
+### The build that was nearly taken for this one
+
+The first attempt at this confirmation rendered a bundle old enough to predate the component library,
+because an installed `docdoc-ui` distribution silently outranked the checkout's fresh `ui/dist`. The
+page had no styling and carried labels two fixes out of date, and it was read as evidence about
+current code — a conclusion that was wrong in the specific way this milestone keeps finding: not a
+false claim about a fact, but a true claim about the wrong thing.
+
+Fixed in the same sitting: the checkout now wins, `chosen_assets` names which root did, and
+`docs/concepts/viewer.md` leads with the one-liner that answers it without a running server. The
+instruction that produced the wrong screenshot was mine, and the fix is the reason a reader of this
+file can trust the paragraphs above it.
