@@ -47,8 +47,35 @@ def _files(root: Path) -> set[Path]:
     return {path for path in root.rglob("*") if path.is_file()}
 
 
-def _temporaries() -> set[Path]:
-    return _files(Path(tempfile.gettempdir()))
+@pytest.fixture
+def scratch(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A temporary directory nothing outside this test can write to.
+
+    **These tests used to read the whole of ``tempfile.gettempdir()``** and treat
+    any new entry as something the run had written. That made SC-007 and SC-008
+    assertions about the machine rather than about docdoc: two runs here failed on
+    ``/tmp/rustdoctesttz24rn/rustdoc-cfgs``, left by an unrelated ``rustdoc``
+    process, while the same tests passed in isolation and the full suite passed on
+    a clean re-run. On a shared CI runner that is a spurious failure on the two
+    criteria that matter most about the storeless path (T106).
+
+    Redirecting ``tempfile`` here keeps the check strictly stronger than a
+    narrower one would be: anything docdoc spools through ``tempfile`` lands in
+    this directory, so an empty directory is still evidence that nothing was
+    written — it just stops being evidence about everyone else's processes too.
+    """
+    # Deliberately not under the test's own ``tmp_path``: that is the store's
+    # directory in the second test, and the two assertions must stay about
+    # different things — one about what the store holds, one about what was
+    # spooled and left behind.
+    private = tmp_path_factory.mktemp("scratch")
+
+    monkeypatch.setattr(tempfile, "tempdir", str(private))
+    for name in ("TMPDIR", "TEMP", "TMP"):
+        monkeypatch.setenv(name, str(private))
+
+    assert Path(tempfile.gettempdir()) == private
+    return private
 
 
 def _run(client: TestClient) -> None:
@@ -56,17 +83,17 @@ def _run(client: TestClient) -> None:
     assert response.status_code == 200, response.text
 
 
-def test_a_run_with_no_store_configured_leaves_nothing_anywhere() -> None:
+def test_a_run_with_no_store_configured_leaves_nothing_anywhere(scratch: Path) -> None:
     """FR-002, SC-007 — no blob, no artifact, no temporary file."""
     client = TestClient(build_app(_deployment()))
-    before = _temporaries()
+    before = _files(scratch)
 
     _run(client)
 
-    assert _temporaries() - before == set()
+    assert _files(scratch) - before == set()
 
 
-def test_a_run_with_a_store_configured_still_leaves_nothing(tmp_path: Path) -> None:
+def test_a_run_with_a_store_configured_still_leaves_nothing(tmp_path: Path, scratch: Path) -> None:
     """FR-008, SC-008 — the endpoint decides, not the deployment.
 
     If this test ever fails, read the diff for a call to
@@ -74,12 +101,12 @@ def test_a_run_with_a_store_configured_still_leaves_nothing(tmp_path: Path) -> N
     this test exists to catch, and it will have looked entirely reasonable.
     """
     client = TestClient(build_app(_deployment(tmp_path)))
-    before_store, before_temp = _files(tmp_path), _temporaries()
+    before_store, before_temp = _files(tmp_path), _files(scratch)
 
     _run(client)
 
     assert _files(tmp_path) == before_store
-    assert _temporaries() - before_temp == set()
+    assert _files(scratch) - before_temp == set()
 
 
 def test_the_store_backed_route_on_the_same_deployment_does_write(tmp_path: Path) -> None:
