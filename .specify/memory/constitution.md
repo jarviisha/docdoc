@@ -264,6 +264,46 @@ Sections amended: Principle I (one sub-clause). No decision moved; the open list
 stays empty.
 
 Templates: no changes required.
+
+---
+AMENDMENT 1.5.2 → 1.6.0 (2026-08-28)
+Bump rationale: MINOR — guidance is materially widened. A process type that a
+literal reading of the Development Compose sentence excluded is now permitted, so
+this is not a clarification and must not be recorded as one.
+
+Principles affected: XI (MVP Discipline and Scale Through Boundaries), via the
+MVP Scope Constraints "Deferred technology" paragraph. No principle is removed or
+redefined; nothing previously compliant becomes non-compliant.
+
+  - Development Compose gains `worker`. Principle XI itself mandates that local
+    synchronous execution be able to become "API → queue → workers", and the
+    composition sentence as written permitted three containers, so the document
+    required an evolution its own scope constraint forbade demonstrating. A
+    worker is the docdoc image already in the composition at a different entry
+    point — it acquires no dependency the api container does not already have.
+
+  - Recorded as an amendment rather than settled by reading. `specs/009`'s plan
+    argued that "only" governs third-party infrastructure and not docdoc's own
+    processes. That argument is sound and was made in the open, and it is still
+    the wrong instrument: Governance says the constitution wins where a plan
+    conflicts with it, so a plan that reinterprets a constitutional sentence to
+    make itself compliant inverts the precedence. `/speckit-analyze` raised it as
+    CRITICAL on exactly that ground.
+
+  - The "multi-tenant billing" entry gains a sentence distinguishing billing from
+    tenant isolation. Milestone 9 scopes runs, blobs, and artifacts per tenant;
+    it meters and invoices nothing. The two are one phrase apart and the deferral
+    should not be read to forbid the isolation.
+
+Sections amended: MVP Scope Constraints (Deferred technology). No decision moved;
+the open list stays empty.
+
+Migration note: no artifact is invalidated. `specs/009-asynchronous-runs/plan.md`
+retains its Gate 12 argument for the other two constraints and now cites this
+amendment for the third rather than carrying the reinterpretation.
+
+Templates: no changes required — the plan-template gate table references
+Principle XI by number and remains accurate.
 -->
 
 # docdoc Constitution
@@ -619,7 +659,12 @@ ADR-0005, and the **kernel** alone depends on `pydantic` only.
 appear in the MVP without an approved amendment: Kafka, Temporal, Kubernetes, multi-region
 deployment, distributed DAG engines, vector databases, RAG infrastructure, workflow/BPM engines,
 semantic chunking, EditMap-style normalization, automatic model training, multi-tenant billing,
-and a full review UI. Development Compose contains only api, postgres, and object storage.
+and a full review UI. Development Compose contains only api, worker, postgres, and object storage.
+
+"Multi-tenant billing" above forbids **billing**, not tenant isolation. Scoping runs, blobs, and
+artifacts to a tenant so that one customer cannot read another's is permitted and, from Milestone 9,
+required; metering, invoicing, and per-tenant pricing remain deferred. The distinction is stated
+because the two are one phrase apart and a reviewer would otherwise have to guess which was meant.
 
 **Normalization.** `Document.text` is byte-faithful source text. No Unicode normalization, line
 joining, hyphen removal, whitespace normalization, or table linearization is applied to the
@@ -718,4 +763,4 @@ insufficient. Unjustified violations are rejected regardless of the code's quali
 **Precedence for unresolved items.** Where an "Open Constitutional Decision" is unresolved,
 implementers MUST NOT resolve it silently in code. Raise it, decide it, record it.
 
-**Version**: 1.5.2 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-08-24
+**Version**: 1.6.0 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-08-28
