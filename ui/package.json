@@ -1,0 +1,33 @@
+{
+  "name": "docdoc-ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only grounding viewer for docdoc. Shows which page and which rectangle each extracted value came from, and says plainly when there is none.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test",
+    "lint:boundaries": "node scripts/check-model-boundary.mjs && node scripts/check-readonly.mjs",
+    "licenses": "node scripts/check-licenses.mjs"
+  },
+  "dependencies": {
+    "@astryxdesign/core": "0.5.0",
+    "@astryxdesign/theme-neutral": "0.5.0",
+    "pdfjs-dist": "^6.2.108",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@astryxdesign/cli": "0.5.0",
+    "@types/node": "^26.3.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2"
+  }
+}

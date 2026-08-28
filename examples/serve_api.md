@@ -102,8 +102,52 @@ failed run produces no terminal artifact and therefore no job to fetch later.
 A provider's error message never crosses the wire, because it may quote the
 document it choked on.
 
+## Running a document without a store
+
+`POST /v1/extract` takes the bytes directly, returns the result, and **writes nothing** — no blob, no
+artifact, no temporary file, and not even when a store *is* configured. Whether a run persists is a
+property of the endpoint you called, never of how the deployment is set up (ADR-0012).
+
+```bash
+export DOCDOC_SCHEMA_PATHS=/etc/docdoc/schemas
+export DOCDOC_MODEL_ADAPTERS=echo
+unset DOCDOC_STORE_ROOT                    # nothing to configure
+
+curl -sS "$BASE/schemas" | jq .            # what this deployment can run
+curl -sS -X POST "$BASE/extract?schema=invoice@1" --data-binary @invoice.pdf | jq .verdict
+```
+
+It returns **no `job_id`**: a run that writes no terminal artifact has no identity to hand back, since
+ADR-0003 makes the job id *be* the terminal artifact id. Submit the document first if you want one.
+
+**This changes what an unconfigured deployment exposes.** Before, a deployment with no
+`DOCDOC_STORE_ROOT` refused every extraction request — submission was refused, and every extracting
+route took a `blob_id` that only a submission could produce. It now serves them. If you were relying on
+that refusal as a closed door, it has opened.
+
+## The browser interface
+
+Behind a second extra, and absent unless you ask for it:
+
+```bash
+pip install 'docdoc[api,ui]'
+# then open http://127.0.0.1:8000/ui/
+```
+
+Read-only: it shows which page and which rectangle each value came from and says plainly when there is
+none. Two things to know before exposing it — **it is unauthenticated, so anyone who can reach it can
+spend your provider budget**, and **a run continues after the page is closed**, because closing a
+browser stops the waiting and not the work. If a proxy sits in front, allow a request duration at least
+as long as your slowest extraction, or it will terminate runs you have already paid for.
+
+The interface belongs on a trusted network. docdoc ships no `serve` command, so it cannot pick a safer
+bind address for you.
+
 ## See also
 
 - [`contracts/http-api.md`](../specs/007-pipeline-api-cli/contracts/http-api.md) — the full contract
+- [`contracts/http-api-additions.md`](../specs/008-grounding-viewer/contracts/http-api-additions.md) — the two newer endpoints
+- [`docs/concepts/viewer.md`](../docs/concepts/viewer.md) — how the viewer works, and what carries no test
 - [`docs/concepts/pipeline.md`](../docs/concepts/pipeline.md) — why a job needs no queue
+- [`examples/view_grounding.md`](view_grounding.md) — a PDF to a rectangle, offline
 - [`examples/run_pipeline.py`](run_pipeline.py) — the same thing in-process

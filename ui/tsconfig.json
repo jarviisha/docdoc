@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+
+    // The two roots are named separately because the boundary between them is a
+    // requirement (FR-041, FR-043), not a folder convention. `@model/*` is
+    // importable from anywhere; `@components/*` is importable from everywhere
+    // except the model, which `scripts/check-model-boundary.mjs` enforces --
+    // TypeScript paths make the boundary expressible, not enforced.
+    // No `baseUrl`: TypeScript 7 removed it, and non-relative targets with it.
+    "paths": {
+      "@model/*": ["./src/model/*"],
+      "@components/*": ["./src/components/*"]
+    }
+  },
+  "include": ["src", "test", "vite.config.ts"]
+}

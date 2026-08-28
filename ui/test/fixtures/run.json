@@ -1,0 +1,874 @@
+{
+  "document_id": "sha256:0e2b084338de6f4c013481172d5787ead8f9154393703178655493313836b08e",
+  "extraction": {
+    "artifact_id": "sha256:668f4ed17071837615b65c64e37f16d03e96e08c1d46ba8d4cf5f7a0efa13604",
+    "discarded": [],
+    "provenance": {
+      "adapter_id": "echo",
+      "adapter_version": "1.0.0",
+      "decoding": {
+        "input_budget_tokens": 200000,
+        "max_output_tokens": 8192,
+        "seed": null,
+        "temperature": 0.0,
+        "thinking_budget": null,
+        "top_k": null,
+        "top_p": null
+      },
+      "document_id": "sha256:0e2b084338de6f4c013481172d5787ead8f9154393703178655493313836b08e",
+      "extractor_version": "1.0.0+echo-1.0.0",
+      "model_id": "echo-fixture",
+      "model_version": "1",
+      "projection_id": "response-shape@1",
+      "prompt_hash": "sha256:87e8c15ef798eb4f23e73625f718707d0a33a550725b246aec126120e7564dc6",
+      "schema_hash": "sha256:37a9f66014c4a99a4fa3e2442e4557184e3fa4e3985f55bc04130b937076fd00",
+      "schema_identity": "invoice@1",
+      "usage": {
+        "cache_creation_input_tokens": null,
+        "cache_read_input_tokens": null,
+        "input_tokens": null,
+        "output_tokens": null,
+        "reasoning_tokens": null
+      }
+    },
+    "values": {
+      "currency": {
+        "calibrated_confidence": null,
+        "calibrator_version": null,
+        "claimed_text": "$",
+        "field_path": "currency",
+        "grounding": null,
+        "grounding_score": null,
+        "model_confidence": null,
+        "present": true,
+        "value": "USD"
+      },
+      "due_date": {
+        "calibrated_confidence": null,
+        "calibrator_version": null,
+        "claimed_text": null,
+        "field_path": "due_date",
+        "grounding": null,
+        "grounding_score": null,
+        "model_confidence": null,
+        "present": false,
+        "value": null
+      },
+      "invoice_number": {
+        "calibrated_confidence": null,
+        "calibrator_version": null,
+        "claimed_text": "INV-001",
+        "field_path": "invoice_number",
+        "grounding": null,
+        "grounding_score": null,
+        "model_confidence": 0.98,
+        "present": true,
+        "value": "INV-001"
+      },
+      "issue_date": {
+        "calibrated_confidence": null,
+        "calibrator_version": null,
+        "claimed_text": "1 March 2026",
+        "field_path": "issue_date",
+        "grounding": null,
+        "grounding_score": null,
+        "model_confidence": null,
+        "present": true,
+        "value": "2026-03-01"
+      },
+      "line_items": [
+        {
+          "amount": {
+            "calibrated_confidence": null,
+            "calibrator_version": null,
+            "claimed_text": "1,000.00",
+            "field_path": "line_items[0].amount",
+            "grounding": null,
+            "grounding_score": null,
+            "model_confidence": null,
+            "present": true,
+            "value": "1000.00"
+          },
+          "description": {
+            "calibrated_confidence": null,
+            "calibrator_version": null,
+            "claimed_text": "Widget, large",
+            "field_path": "line_items[0].description",
+            "grounding": null,
+            "grounding_score": null,
+            "model_confidence": null,
+            "present": true,
+            "value": "Widget, large"
+          },
+          "quantity": {
+            "calibrated_confidence": null,
+            "calibrator_version": null,
+            "claimed_text": "2",
+            "field_path": "line_items[0].quantity",
+            "grounding": null,
+            "grounding_score": null,
+            "model_confidence": null,
+            "present": true,
+            "value": 2.0
+          },
+          "unit_price": {
+            "calibrated_confidence": null,
+            "calibrator_version": null,
+            "claimed_text": "500.00",
+            "field_path": "line_items[0].unit_price",
+            "grounding": null,
+            "grounding_score": null,
+            "model_confidence": null,
+            "present": true,
+            "value": "500.00"
+          }
+        },
+        {
+          "amount": {
+            "calibrated_confidence": null,
+            "calibrator_version": null,
+            "claimed_text": "240.00",
+            "field_path": "line_items[1].amount",
+            "grounding": null,
+            "grounding_score": null,
+            "model_confidence": null,
+            "present": true,
+            "value": "240.00"
+          },
+          "description": {
+            "calibrated_confidence": null,
+            "calibrator_version": null,
+            "claimed_text": "Delivery",
+            "field_path": "line_items[1].description",
+            "grounding": null,
+            "grounding_score": null,
+            "model_confidence": null,
+            "present": true,
+            "value": "Delivery"
+          },
+          "quantity": {
+            "calibrated_confidence": null,
+            "calibrator_version": null,
+            "claimed_text": "1",
+            "field_path": "line_items[1].quantity",
+            "grounding": null,
+            "grounding_score": null,
+            "model_confidence": null,
+            "present": true,
+            "value": 1.0
+          },
+          "unit_price": {
+            "calibrated_confidence": null,
+            "calibrator_version": null,
+            "claimed_text": "240.00",
+            "field_path": "line_items[1].unit_price",
+            "grounding": null,
+            "grounding_score": null,
+            "model_confidence": null,
+            "present": true,
+            "value": "240.00"
+          }
+        }
+      ],
+      "supplier": {
+        "legal_name": {
+          "calibrated_confidence": null,
+          "calibrator_version": null,
+          "claimed_text": "ACME LTD",
+          "field_path": "supplier.legal_name",
+          "grounding": null,
+          "grounding_score": null,
+          "model_confidence": null,
+          "present": true,
+          "value": "Acme Ltd"
+        },
+        "tax_id": {
+          "calibrated_confidence": null,
+          "calibrator_version": null,
+          "claimed_text": null,
+          "field_path": "supplier.tax_id",
+          "grounding": null,
+          "grounding_score": null,
+          "model_confidence": null,
+          "present": false,
+          "value": null
+        }
+      },
+      "total": {
+        "calibrated_confidence": null,
+        "calibrator_version": null,
+        "claimed_text": "1,240.00",
+        "field_path": "total",
+        "grounding": null,
+        "grounding_score": null,
+        "model_confidence": 0.91,
+        "present": true,
+        "value": "1240.00"
+      }
+    }
+  },
+  "grounding": {
+    "artifact_id": "sha256:8cf8ae44d9b23ae71b653d46ac1ee52e55fa6dd0af2d689db3b4dbfa34299b3e",
+    "counts": {
+      "exact": 5,
+      "fuzzy": 0,
+      "not_applicable": 2,
+      "truncated": 0,
+      "ungrounded": 8
+    },
+    "outcomes": {
+      "currency": {
+        "alternatives": [],
+        "field_path": "currency",
+        "geometry": null,
+        "pages": [],
+        "score": null,
+        "span": null,
+        "status": "ungrounded",
+        "truncated": false
+      },
+      "invoice_number": {
+        "alternatives": [],
+        "field_path": "invoice_number",
+        "geometry": [
+          [
+            0,
+            [
+              0.1645478833623293,
+              0.10234560932512804,
+              0.2323596345276392,
+              0.1202957262052776
+            ]
+          ]
+        ],
+        "pages": [
+          0
+        ],
+        "score": 1.0,
+        "span": [
+          30,
+          37
+        ],
+        "status": "exact",
+        "truncated": false
+      },
+      "issue_date": {
+        "alternatives": [],
+        "field_path": "issue_date",
+        "geometry": null,
+        "pages": [],
+        "score": null,
+        "span": null,
+        "status": "ungrounded",
+        "truncated": false
+      },
+      "line_items[0].amount": {
+        "alternatives": [],
+        "field_path": "line_items[0].amount",
+        "geometry": null,
+        "pages": [],
+        "score": null,
+        "span": null,
+        "status": "ungrounded",
+        "truncated": false
+      },
+      "line_items[0].description": {
+        "alternatives": [],
+        "field_path": "line_items[0].description",
+        "geometry": [
+          [
+            0,
+            [
+              0.10084033613445378,
+              0.23061164257928482,
+              0.1635125937582064,
+              0.24856175945943437
+            ]
+          ],
+          [
+            0,
+            [
+              0.16865208729976366,
+              0.23061164257928482,
+              0.20974955839269302,
+              0.24856175945943437
+            ]
+          ]
+        ],
+        "pages": [
+          0
+        ],
+        "score": 1.0,
+        "span": [
+          163,
+          176
+        ],
+        "status": "exact",
+        "truncated": false
+      },
+      "line_items[0].quantity": {
+        "alternatives": [
+          {
+            "score": 1.0,
+            "span": [
+              47,
+              48
+            ]
+          },
+          {
+            "score": 1.0,
+            "span": [
+              60,
+              61
+            ]
+          },
+          {
+            "score": 1.0,
+            "span": [
+              62,
+              63
+            ]
+          },
+          {
+            "score": 1.0,
+            "span": [
+              107,
+              108
+            ]
+          },
+          {
+            "score": 1.0,
+            "span": [
+              179,
+              180
+            ]
+          }
+        ],
+        "field_path": "line_items[0].quantity",
+        "geometry": [
+          [
+            0,
+            [
+              0.16044367942489496,
+              0.12372328153415417,
+              0.25498818790211397,
+              0.14167339841430374
+            ]
+          ]
+        ],
+        "pages": [
+          0
+        ],
+        "score": 1.0,
+        "span": [
+          45,
+          46
+        ],
+        "status": "exact",
+        "truncated": false
+      },
+      "line_items[0].unit_price": {
+        "alternatives": [],
+        "field_path": "line_items[0].unit_price",
+        "geometry": null,
+        "pages": [],
+        "score": null,
+        "span": null,
+        "status": "ungrounded",
+        "truncated": false
+      },
+      "line_items[1].amount": {
+        "alternatives": [],
+        "field_path": "line_items[1].amount",
+        "geometry": null,
+        "pages": [],
+        "score": null,
+        "span": null,
+        "status": "ungrounded",
+        "truncated": false
+      },
+      "line_items[1].description": {
+        "alternatives": [],
+        "field_path": "line_items[1].description",
+        "geometry": [
+          [
+            0,
+            [
+              0.10084033613445378,
+              0.2733669869973371,
+              0.16759832045611214,
+              0.29131710387748666
+            ]
+          ]
+        ],
+        "pages": [
+          0
+        ],
+        "score": 1.0,
+        "span": [
+          220,
+          228
+        ],
+        "status": "exact",
+        "truncated": false
+      },
+      "line_items[1].quantity": {
+        "alternatives": [
+          {
+            "score": 1.0,
+            "span": [
+              53,
+              54
+            ]
+          },
+          {
+            "score": 1.0,
+            "span": [
+              68,
+              69
+            ]
+          },
+          {
+            "score": 1.0,
+            "span": [
+              106,
+              107
+            ]
+          },
+          {
+            "score": 1.0,
+            "span": [
+              185,
+              186
+            ]
+          },
+          {
+            "score": 1.0,
+            "span": [
+              206,
+              207
+            ]
+          }
+        ],
+        "field_path": "line_items[1].quantity",
+        "geometry": [
+          [
+            0,
+            [
+              0.1645478833623293,
+              0.10234560932512804,
+              0.2323596345276392,
+              0.1202957262052776
+            ]
+          ]
+        ],
+        "pages": [
+          0
+        ],
+        "score": 1.0,
+        "span": [
+          36,
+          37
+        ],
+        "status": "exact",
+        "truncated": false
+      },
+      "line_items[1].unit_price": {
+        "alternatives": [],
+        "field_path": "line_items[1].unit_price",
+        "geometry": null,
+        "pages": [],
+        "score": null,
+        "span": null,
+        "status": "ungrounded",
+        "truncated": false
+      },
+      "supplier.legal_name": {
+        "alternatives": [],
+        "field_path": "supplier.legal_name",
+        "geometry": null,
+        "pages": [],
+        "score": null,
+        "span": null,
+        "status": "ungrounded",
+        "truncated": false
+      },
+      "total": {
+        "alternatives": [],
+        "field_path": "total",
+        "geometry": null,
+        "pages": [],
+        "score": null,
+        "span": null,
+        "status": "ungrounded",
+        "truncated": false
+      }
+    },
+    "provenance": {
+      "document_id": "sha256:0e2b084338de6f4c013481172d5787ead8f9154393703178655493313836b08e",
+      "extraction_artifact_id": "sha256:668f4ed17071837615b65c64e37f16d03e96e08c1d46ba8d4cf5f7a0efa13604",
+      "grounder_id": "deterministic-grounder",
+      "grounder_version": "1.0.0",
+      "grounding_version": "v1",
+      "match_view_version": "v1",
+      "options": {
+        "candidate_budget": 1500,
+        "threshold": 0.9
+      },
+      "view_id": "sha256:db305a24b5498aded7888e860bebc1acdc666c76d6c14c9ef3226f4d48885870"
+    }
+  },
+  "outcomes": [
+    {
+      "artifact_id": "sha256:0e2b084338de6f4c013481172d5787ead8f9154393703178655493313836b08e",
+      "duration_ms": 104,
+      "failure_class": null,
+      "stage": "parse",
+      "status": "executed"
+    },
+    {
+      "artifact_id": "sha256:668f4ed17071837615b65c64e37f16d03e96e08c1d46ba8d4cf5f7a0efa13604",
+      "duration_ms": 0,
+      "failure_class": null,
+      "stage": "extract",
+      "status": "executed"
+    },
+    {
+      "artifact_id": "sha256:8cf8ae44d9b23ae71b653d46ac1ee52e55fa6dd0af2d689db3b4dbfa34299b3e",
+      "duration_ms": 1,
+      "failure_class": null,
+      "stage": "ground",
+      "status": "executed"
+    },
+    {
+      "artifact_id": "sha256:3a1ede67ca1b3c10b157dc1231d51ef69448bb5ae9fbf917f17068c38003fe2d",
+      "duration_ms": 0,
+      "failure_class": null,
+      "stage": "validate",
+      "status": "executed"
+    }
+  ],
+  "schema_identity": "invoice@1",
+  "validation": {
+    "artifact_id": "sha256:3a1ede67ca1b3c10b157dc1231d51ef69448bb5ae9fbf917f17068c38003fe2d",
+    "checks": [
+      {
+        "check_id": "invoice_number#max_length",
+        "field_path": "invoice_number",
+        "kind": "constraint",
+        "outcome": "passed",
+        "reason": null
+      },
+      {
+        "check_id": "invoice_number#required",
+        "field_path": "invoice_number",
+        "kind": "required",
+        "outcome": "passed",
+        "reason": null
+      },
+      {
+        "check_id": "issue_date#grounding",
+        "field_path": "issue_date",
+        "kind": "grounding",
+        "outcome": "failed",
+        "reason": "value_not_grounded"
+      },
+      {
+        "check_id": "issue_date#required",
+        "field_path": "issue_date",
+        "kind": "required",
+        "outcome": "passed",
+        "reason": null
+      },
+      {
+        "check_id": "currency#enum",
+        "field_path": "currency",
+        "kind": "constraint",
+        "outcome": "passed",
+        "reason": null
+      },
+      {
+        "check_id": "currency#grounding",
+        "field_path": "currency",
+        "kind": "grounding",
+        "outcome": "failed",
+        "reason": "value_not_grounded"
+      },
+      {
+        "check_id": "currency#required",
+        "field_path": "currency",
+        "kind": "required",
+        "outcome": "passed",
+        "reason": null
+      },
+      {
+        "check_id": "total#grounding",
+        "field_path": "total",
+        "kind": "grounding",
+        "outcome": "failed",
+        "reason": "value_not_grounded"
+      },
+      {
+        "check_id": "total#minimum",
+        "field_path": "total",
+        "kind": "constraint",
+        "outcome": "passed",
+        "reason": null
+      },
+      {
+        "check_id": "total#required",
+        "field_path": "total",
+        "kind": "required",
+        "outcome": "passed",
+        "reason": null
+      },
+      {
+        "check_id": "supplier#required",
+        "field_path": "supplier",
+        "kind": "required",
+        "outcome": "passed",
+        "reason": null
+      },
+      {
+        "check_id": "supplier.legal_name#grounding",
+        "field_path": "supplier.legal_name",
+        "kind": "grounding",
+        "outcome": "failed",
+        "reason": "value_not_grounded"
+      },
+      {
+        "check_id": "supplier.legal_name#required",
+        "field_path": "supplier.legal_name",
+        "kind": "required",
+        "outcome": "passed",
+        "reason": null
+      },
+      {
+        "check_id": "line_items[0].description#required",
+        "field_path": "line_items[0].description",
+        "kind": "required",
+        "outcome": "passed",
+        "reason": null
+      },
+      {
+        "check_id": "line_items[0].unit_price#grounding",
+        "field_path": "line_items[0].unit_price",
+        "kind": "grounding",
+        "outcome": "failed",
+        "reason": "value_not_grounded"
+      },
+      {
+        "check_id": "line_items[0].amount#grounding",
+        "field_path": "line_items[0].amount",
+        "kind": "grounding",
+        "outcome": "failed",
+        "reason": "value_not_grounded"
+      },
+      {
+        "check_id": "line_items[0].amount#required",
+        "field_path": "line_items[0].amount",
+        "kind": "required",
+        "outcome": "passed",
+        "reason": null
+      },
+      {
+        "check_id": "line_items[1].description#required",
+        "field_path": "line_items[1].description",
+        "kind": "required",
+        "outcome": "passed",
+        "reason": null
+      },
+      {
+        "check_id": "line_items[1].unit_price#grounding",
+        "field_path": "line_items[1].unit_price",
+        "kind": "grounding",
+        "outcome": "failed",
+        "reason": "value_not_grounded"
+      },
+      {
+        "check_id": "line_items[1].amount#grounding",
+        "field_path": "line_items[1].amount",
+        "kind": "grounding",
+        "outcome": "failed",
+        "reason": "value_not_grounded"
+      },
+      {
+        "check_id": "line_items[1].amount#required",
+        "field_path": "line_items[1].amount",
+        "kind": "required",
+        "outcome": "passed",
+        "reason": null
+      }
+    ],
+    "counts": {
+      "declared": 21,
+      "errors": 0,
+      "evaluated": 21,
+      "failed": 8,
+      "infos": 0,
+      "not_evaluated": 0,
+      "passed": 13,
+      "warnings": 8
+    },
+    "findings": [
+      {
+        "actual": "ungrounded",
+        "check_id": "issue_date#grounding",
+        "expected": "a located value",
+        "field_path": "issue_date",
+        "geometry": null,
+        "kind": "grounding",
+        "message": "'issue_date' is present but nothing in the document was found to support it",
+        "pages": [],
+        "participants": [
+          "issue_date"
+        ],
+        "reason": "value_not_grounded",
+        "rule_id": null,
+        "severity": "warning",
+        "span": null
+      },
+      {
+        "actual": "ungrounded",
+        "check_id": "currency#grounding",
+        "expected": "a located value",
+        "field_path": "currency",
+        "geometry": null,
+        "kind": "grounding",
+        "message": "'currency' is present but nothing in the document was found to support it",
+        "pages": [],
+        "participants": [
+          "currency"
+        ],
+        "reason": "value_not_grounded",
+        "rule_id": null,
+        "severity": "warning",
+        "span": null
+      },
+      {
+        "actual": "ungrounded",
+        "check_id": "total#grounding",
+        "expected": "a located value",
+        "field_path": "total",
+        "geometry": null,
+        "kind": "grounding",
+        "message": "'total' is present but nothing in the document was found to support it",
+        "pages": [],
+        "participants": [
+          "total"
+        ],
+        "reason": "value_not_grounded",
+        "rule_id": null,
+        "severity": "warning",
+        "span": null
+      },
+      {
+        "actual": "ungrounded",
+        "check_id": "supplier.legal_name#grounding",
+        "expected": "a located value",
+        "field_path": "supplier.legal_name",
+        "geometry": null,
+        "kind": "grounding",
+        "message": "'supplier.legal_name' is present but nothing in the document was found to support it",
+        "pages": [],
+        "participants": [
+          "supplier.legal_name"
+        ],
+        "reason": "value_not_grounded",
+        "rule_id": null,
+        "severity": "warning",
+        "span": null
+      },
+      {
+        "actual": "ungrounded",
+        "check_id": "line_items[0].unit_price#grounding",
+        "expected": "a located value",
+        "field_path": "line_items[0].unit_price",
+        "geometry": null,
+        "kind": "grounding",
+        "message": "'line_items[0].unit_price' is present but nothing in the document was found to support it",
+        "pages": [],
+        "participants": [
+          "line_items[0].unit_price"
+        ],
+        "reason": "value_not_grounded",
+        "rule_id": null,
+        "severity": "warning",
+        "span": null
+      },
+      {
+        "actual": "ungrounded",
+        "check_id": "line_items[0].amount#grounding",
+        "expected": "a located value",
+        "field_path": "line_items[0].amount",
+        "geometry": null,
+        "kind": "grounding",
+        "message": "'line_items[0].amount' is present but nothing in the document was found to support it",
+        "pages": [],
+        "participants": [
+          "line_items[0].amount"
+        ],
+        "reason": "value_not_grounded",
+        "rule_id": null,
+        "severity": "warning",
+        "span": null
+      },
+      {
+        "actual": "ungrounded",
+        "check_id": "line_items[1].unit_price#grounding",
+        "expected": "a located value",
+        "field_path": "line_items[1].unit_price",
+        "geometry": null,
+        "kind": "grounding",
+        "message": "'line_items[1].unit_price' is present but nothing in the document was found to support it",
+        "pages": [],
+        "participants": [
+          "line_items[1].unit_price"
+        ],
+        "reason": "value_not_grounded",
+        "rule_id": null,
+        "severity": "warning",
+        "span": null
+      },
+      {
+        "actual": "ungrounded",
+        "check_id": "line_items[1].amount#grounding",
+        "expected": "a located value",
+        "field_path": "line_items[1].amount",
+        "geometry": null,
+        "kind": "grounding",
+        "message": "'line_items[1].amount' is present but nothing in the document was found to support it",
+        "pages": [],
+        "participants": [
+          "line_items[1].amount"
+        ],
+        "reason": "value_not_grounded",
+        "rule_id": null,
+        "severity": "warning",
+        "span": null
+      }
+    ],
+    "provenance": {
+      "document_id": "sha256:0e2b084338de6f4c013481172d5787ead8f9154393703178655493313836b08e",
+      "enabled_rules": [],
+      "extraction_artifact_id": "sha256:668f4ed17071837615b65c64e37f16d03e96e08c1d46ba8d4cf5f7a0efa13604",
+      "grounding_artifact_id": "sha256:8cf8ae44d9b23ae71b653d46ac1ee52e55fa6dd0af2d689db3b4dbfa34299b3e",
+      "options": {
+        "enabled_rules": null,
+        "grounding_policy": {
+          "exact": null,
+          "fuzzy": "info",
+          "ungrounded": "warning"
+        }
+      },
+      "pattern_dialect_version": "pattern_dialect@1",
+      "rule_vocabulary_version": "rule_vocabulary@1",
+      "schema_hash": "sha256:37a9f66014c4a99a4fa3e2442e4557184e3fa4e3985f55bc04130b937076fd00",
+      "schema_identity": "invoice@1",
+      "validator_id": "deterministic-validator",
+      "validator_version": "1.1.0"
+    },
+    "verdict": "valid"
+  },
+  "verdict": "valid"
+}

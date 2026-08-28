@@ -77,6 +77,61 @@ jobs:
       - name: Import boundaries
         run: uv run lint-imports
 
+  # The browser client. A separate job because it is a separate toolchain, and
+  # separate on purpose: `base-install` must never gain a Node step, since its
+  # entire argument is that the base install needs none. If these two jobs ever
+  # share a setup step, FR-035 has been reversed by accident.
+  #
+  # `npm test` covers the view model and nothing else. The rendered interface
+  # carries no automated test at all, by the first clarification of 2026-08-25 —
+  # so a green run here means the decisions are right, not that the screen is.
+  # `lint:boundaries` is what keeps those two claims from drifting apart: it
+  # fails when a decision moves into a component, where nothing would test it.
+  ui:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 24, and the floor is load-bearing rather than a default. The view
+      # model's tests are TypeScript run directly by `node --test`, which relies
+      # on native type stripping — unflagged from Node 24. The alternative was a
+      # transpiler dependency, and research R4 spent its argument on not adding
+      # one: the only thing a test framework would buy here is the simulated DOM
+      # that clarification 1 excluded.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      # Vite does not type-check — it strips types and bundles. Without this step
+      # a type error merges green, which it would have until T081 added it.
+      - name: It type-checks
+        run: npx tsc --noEmit
+
+      - name: The view model
+        run: npm test
+
+      - name: The model decides, the components render (FR-043, FR-029)
+        run: npm run lint:boundaries
+
+      - name: Every dependency is compatible with Apache-2.0 (FR-039)
+        run: npm run licenses
+
+      - name: It builds
+        run: npm run build
+
+      # FR-038. The build writes to ui/dist, which is gitignored; if build output
+      # ever becomes tracked, it surfaces here rather than in a release.
+      - name: The build left nothing to commit
+        run: git status --porcelain --untracked-files=all -- . | tee /dev/stderr | (! grep .)
+
   # SC-021 is a success criterion, and plan.md says it is "enforced by" the perf
   # suite. It was not: the job above deselects `perf` and nothing else ran it, so
   # the claim was enforcement by nobody.

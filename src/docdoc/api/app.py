@@ -1,4 +1,4 @@
-"""Five endpoints, one synchronous run each, and no state of its own.
+"""Seven endpoints, one synchronous run each, and no state of its own.
 
 The run happens inside the request. There is no queue, no worker pool, no
 background executor, and no job table — not as a simplification of an
@@ -8,10 +8,19 @@ is not knowable until the stages feeding it have finished (research R7). Running
 inside the request dissolves the problem: by the time there is something to hand
 back, the id exists.
 
-**A store is a deployment decision, and two endpoints need one** (FR-068).
+**A store is a deployment decision, and four endpoints need one** (FR-068).
 Submission has nowhere to put bytes without it, and a job lookup is definitionally
-a store lookup. Running an extraction and reading its result do not, because the
-run's response carries the result (FR-067).
+a store lookup. ``POST /v1/documents/{blob_id}/extract`` needs one too, and not
+incidentally: its input is a ``blob_id``, a ``blob_id`` exists only after a
+submission, and submission is refused without a store.
+
+That coupling meant there was no way, over HTTP, to run an extraction without the
+document first coming to rest on disk — an objection this project had already
+accepted elsewhere, when the ``gcv`` adapter declined Vision's asynchronous API
+for requiring "a place for document content to come to rest outside the process".
+``POST /v1/extract`` is the path that needs no store (Milestone 8 FR-001,
+ADR-0012). It is also the reason this docstring no longer claims that running an
+extraction needs none: for five endpoints that sentence was simply false.
 
 **Limits are enforced in two places, and both are necessary.** The request body
 cap is applied while reading, before the body is buffered — the one limit
@@ -23,6 +32,8 @@ and never from a client-declared type.
 
 from __future__ import annotations
 
+import json
+import logging
 import os
 from typing import TYPE_CHECKING, Any
 
@@ -35,7 +46,10 @@ from docdoc.api.models import (
     JobStatus,
     JobStatusResponse,
     RunResponse,
+    SchemaChoice,
+    SchemaListing,
     StageOutcomeView,
+    StorelessRunResponse,
     SubmissionResponse,
 )
 from docdoc.api.settings import (
@@ -138,7 +152,69 @@ def build_app(deployment: _Deployment | None = None) -> FastAPI:
     app.state.deployment = deployment or _default_deployment()
     app.include_router(_router())
     _install_error_handler(app)
+    _mount_ui(app)
     return app
+
+
+def _mount_ui(app: FastAPI) -> None:
+    """Serve the browser client from this origin, or explain its absence.
+
+    **Same origin, so no cross-origin configuration exists anywhere** (Milestone 8
+    FR-034). That is the whole reason the assets are mounted here rather than
+    served by something else: a second origin would need a CORS policy, and a
+    CORS policy is a thing to get wrong.
+
+    Mounted under ``/ui`` and never at the root, so that adding an interface
+    cannot shadow an API path — now or when a later route is added by someone who
+    has forgotten this exists.
+    """
+    from docdoc.api.ui import absence_reason, chosen_assets
+
+    source, assets = chosen_assets()
+
+    if assets is None:
+        # Not an error: a deployment without the `ui` extra is a supported and
+        # ordinary deployment. But a blank page is exactly what FR-037 forbids,
+        # so the one route that exists says what is missing and what fixes it.
+        @app.get("/ui", include_in_schema=False)
+        @app.get("/ui/{path:path}", include_in_schema=False)
+        async def _no_ui(path: str = "") -> JSONResponse:
+            return JSONResponse(
+                status_code=501,
+                content={
+                    "error": {
+                        "class": "ViewerNotInstalled",
+                        "message": absence_reason(),
+                    }
+                },
+            )
+
+        return
+
+    from fastapi.staticfiles import StaticFiles
+
+    # **Say which of the three roots won.** Three places can hold three different
+    # builds, and until this line nothing named the winner: a stale installed
+    # distribution shadowed a fresh `ui/dist`, every rebuild appeared to do
+    # nothing, and the months-old page that resulted was read as evidence about
+    # current code.
+    #
+    # **Visible only where the application configures logging**, which uvicorn's
+    # defaults do not — it sets up `uvicorn.*` and leaves root without a handler,
+    # so this INFO falls to `logging.lastResort` and is dropped. That is how every
+    # structured event docdoc emits behaves, and adding a handler here would be
+    # the library deciding for the application. `docdoc.api.ui.chosen_assets` is
+    # the answer that needs no logging at all, and it is what the documentation
+    # tells a developer to run.
+    #
+    # Not a second request-logging path, and so not the thing T019 forbids: it
+    # runs once at construction, and it carries a filesystem path and no document
+    # content, no values and no credentials (FR-033).
+    logging.getLogger("docdoc.api").info(
+        json.dumps({"event": "ui.assets", "source": source, "path": str(assets)})
+    )
+
+    app.mount("/ui", StaticFiles(directory=assets, html=True), name="ui")
 
 
 def create_app() -> FastAPI:
@@ -246,6 +322,69 @@ def _router() -> APIRouter:
 
         return _run_response(result)
 
+    @router.post("/extract")
+    async def extract_storeless(request: Request, schema: str) -> Any:
+        """Run the pipeline over submitted bytes and persist nothing.
+
+        The body is the document; ``schema`` is a concrete ``name@version``.
+
+        **``NullArtifactStore()`` unconditionally**, and that word is the
+        requirement (FR-008). Reaching for ``deployment.artifact_store()`` here
+        would make persistence a property of how the deployment happens to be
+        configured, when it is a property of the endpoint the caller chose. A
+        deployment *with* a store gets the same nothing written as one without.
+        """
+        from docdoc.artifacts import NullArtifactStore
+        from docdoc.ingest.source import SourceFile
+        from docdoc.pipeline import run as run_pipeline
+
+        deployment = _deployment_of(request)
+
+        # No `has_store` check: this route is the one that needs none, which is
+        # its entire reason for existing.
+        data = await _read_capped(request, deployment.max_request_bytes)
+
+        # The submission path's limits, reused rather than restated, so FR-005
+        # holds by calling the same code. From the bytes, never from a
+        # client-declared `Content-Type`.
+        file = SourceFile.from_bytes(data, limits=deployment.limits)
+        file.check_limits(deployment.limits or _default_limits())
+
+        result = run_pipeline(
+            data,
+            schema=schema,
+            registry=deployment.registry(),
+            adapter=deployment.adapter(),
+            store=NullArtifactStore(),
+            limits=deployment.limits,
+            request_id=request.headers.get("x-request-id"),
+        )
+
+        if result.failed_stage is not None:
+            # Same body, same statuses, same partial results as the store-backed
+            # route (FR-006). A storeless run fails identically or the two paths
+            # are not the same pipeline.
+            return JSONResponse(
+                status_code=api_errors.status_for_failed_run(result),
+                content=api_errors.body_for_failed_run(result).model_dump(mode="json"),
+            )
+
+        return _storeless_run_response(result)
+
+    @router.get("/schemas", response_model=SchemaListing)
+    async def schemas(request: Request) -> Any:
+        """The identities this deployment has configured, sorted.
+
+        A projection of ``SchemaRegistry.identities()``, which already returns
+        exactly the set ``resolve()`` accepts — so there is no translation here
+        to get wrong, and a listed identity is runnable verbatim (FR-010).
+        """
+        deployment = _deployment_of(request)
+        registry = deployment.registry()
+        return SchemaListing(
+            schemas=tuple(SchemaChoice(identity=identity) for identity in registry.identities())
+        )
+
     @router.get("/jobs/{job_id}", response_model=JobStatusResponse)
     async def job(request: Request, job_id: str) -> Any:
         """One of three statuses, and never ``pending`` (FR-035)."""
@@ -291,15 +430,19 @@ def _router() -> APIRouter:
     return router
 
 
-def _run_response(result: PipelineResult) -> RunResponse:
-    """A completed run, serialised. The interface produces no different one."""
-    assert result.processing_id is not None
-    return RunResponse(
-        job_id=result.processing_id,
-        document_id=None if result.document is None else result.document.id,
-        schema_identity=result.provenance.schema_identity,
-        verdict=None if result.validation is None else result.validation.verdict.value,
-        outcomes=tuple(
+def _run_fields(result: PipelineResult) -> dict[str, Any]:
+    """Everything a completed run reports except its identity.
+
+    Shared by both run responses so that the storeless one differs from the
+    store-backed one in exactly the field it is defined to omit, and in nothing
+    that drifted. SC-006 asserts the two agree; this is what makes agreeing the
+    default rather than something to maintain.
+    """
+    return {
+        "document_id": None if result.document is None else result.document.id,
+        "schema_identity": result.provenance.schema_identity,
+        "verdict": None if result.validation is None else result.validation.verdict.value,
+        "outcomes": tuple(
             StageOutcomeView(
                 stage=outcome.stage.value,
                 status=outcome.status.value,
@@ -309,10 +452,30 @@ def _run_response(result: PipelineResult) -> RunResponse:
             )
             for outcome in result.outcomes
         ),
-        extraction=None if result.extraction is None else result.extraction.model_dump(mode="json"),
-        grounding=None if result.grounding is None else result.grounding.model_dump(mode="json"),
-        validation=None if result.validation is None else result.validation.model_dump(mode="json"),
-    )
+        "extraction": None
+        if result.extraction is None
+        else result.extraction.model_dump(mode="json"),
+        "grounding": None if result.grounding is None else result.grounding.model_dump(mode="json"),
+        "validation": None
+        if result.validation is None
+        else result.validation.model_dump(mode="json"),
+    }
+
+
+def _run_response(result: PipelineResult) -> RunResponse:
+    """A completed run, serialised. The interface produces no different one."""
+    assert result.processing_id is not None
+    return RunResponse(job_id=result.processing_id, **_run_fields(result))
+
+
+def _storeless_run_response(result: PipelineResult) -> StorelessRunResponse:
+    """A completed run that wrote nothing, and therefore has no job (FR-003).
+
+    No ``processing_id`` assertion, and no ``processing_id`` field: with a null
+    store no terminal artifact exists, so the id ADR-0003 defines as the job id
+    was never produced. That is the shape of the choice, not a gap in it.
+    """
+    return StorelessRunResponse(**_run_fields(result))
 
 
 def _terminal(deployment: _Deployment, job_id: str) -> Any:

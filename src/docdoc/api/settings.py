@@ -18,11 +18,18 @@ __all__ = [
     "REQUEST_BYTES_ENV",
     "SCHEMA_PATHS_ENV",
     "STORE_ROOT_ENV",
+    "UI_ROOT_ENV",
 ]
 
 #: The same settings the CLI reads. One vocabulary, not two (FR-031).
 STORE_ROOT_ENV = "DOCDOC_STORE_ROOT"
 SCHEMA_PATHS_ENV = "DOCDOC_SCHEMA_PATHS"
+
+#: Where the browser client's built assets are, when a deployment wants to say so
+#: rather than let ``docdoc.api.ui`` find them. Research R7 kept this as the
+#: fallback for a deployment that would rather build the interface itself than
+#: install the ``docdoc-ui`` distribution; unset is the normal case.
+UI_ROOT_ENV = "DOCDOC_UI_ROOT"
 
 #: The request body cap, in bytes, applied while reading. Distinct from the
 #: document size limit of ``ingest.Limits``: this one bounds what the *process*

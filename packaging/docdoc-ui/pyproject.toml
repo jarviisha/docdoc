@@ -1,0 +1,43 @@
+# The built browser client, as its own distribution.
+#
+# It exists because three requirements collide and nothing else satisfies all
+# three (research R7). The base install must acquire no static asset (FR-035);
+# built output must not be committed (FR-038); and the assets must be served from
+# the same origin as the API (FR-034). A Python extra can add a *dependency* but
+# cannot add *files* to a wheel everyone already installs — so assets in the main
+# wheel would reach every `pip install docdoc`, which FR-035 forbids in as many
+# words. Opting in has to be what delivers the files, and that means a second
+# distribution.
+#
+# Only the artifact is separate. The source lives in `ui/` in the docdoc
+# repository, versioned and reviewed alongside the endpoints it depends on.
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "docdoc-ui"
+# Pinned in lockstep with docdoc by `docdoc[ui]`, which depends on `==` this
+# version. Assets and the routes that serve them are one artifact split for
+# packaging reasons, not two things with a compatibility range.
+version = "0.1.0"
+description = "Built browser client for docdoc's read-only grounding viewer"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+# No dependencies at all. This distribution is a directory of static files with
+# a `__file__` to locate them by; `docdoc.api.ui` does the locating.
+dependencies = []
+
+# The assets are copied into `src/docdoc_ui/assets` by `build.sh` immediately
+# before the wheel is built, from `ui/dist`, which is gitignored. A checkout
+# therefore contains no built asset at any time — the property FR-038 asks for,
+# and the reason this cannot be a normal committed package.
+#
+# Whatever is inside the package directory at build time ships; nothing is
+# force-included. That matters for more than tidiness: a `force-include` naming
+# `assets` would fail the build outright in a checkout where the interface has
+# not been built, which is the *normal* state of this repository and must stay
+# installable.
+[tool.hatch.build.targets.wheel]
+packages = ["src/docdoc_ui"]

@@ -15,12 +15,35 @@ synchronous, no queue, no database (research R7).
 | `GET` | `/v1/jobs/{job_id}` | The job's status. |
 | `GET` | `/v1/jobs/{job_id}/result` | The full result. |
 
-**Which of these need a store** (FR-068). Submission and the two job endpoints do: submission has
-nowhere to put the bytes without one, and a job lookup is definitionally a store lookup. Running an
-extraction and reading what it produced do not, because the run's response carries the result. With
-no store configured, `POST /v1/documents` is refused with an explicit error naming the setting that
-would fix it — accepting bytes the deployment cannot keep, and handing back an identity that will
-never resolve, is the worse answer.
+Milestone 8 adds two more — `POST /v1/extract` and `GET /v1/schemas` — specified in
+[its own contract](../../008-grounding-viewer/contracts/http-api-additions.md). The first is the
+reason the paragraph below was rewritten.
+
+**Which of these need a store** (FR-068), corrected 2026-08-25. Four do. Submission has nowhere to
+put the bytes without one and a job lookup is definitionally a store lookup — but so does
+`POST /v1/documents/{blob_id}/extract`, and not incidentally: its input is a `blob_id`, a `blob_id`
+exists only after a submission, and submission is refused without a store. With no store configured,
+`POST /v1/documents` is refused with an explicit error naming the setting that would fix it —
+accepting bytes the deployment cannot keep, and handing back an identity that will never resolve, is
+the worse answer.
+
+**Running an extraction needs no store** — through `POST /v1/extract`, which takes the bytes
+directly, returns the result, and writes nothing (Milestone 8 FR-001, ADR-0012).
+
+> **What this paragraph used to say, and why it was wrong.** It read: *"Running an extraction and
+> reading what it produced do not [need a store], because the run's response carries the result."*
+> That was false against the code from the day it was written — `app.py` refuses the `blob_id` route
+> without a store — and no endpoint whose input is a `blob_id` could ever have made it true. The
+> disagreement could have been ended by weakening the sentence to match the code. It was ended the
+> other way, because the sentence described the better system: the library could already run a
+> pipeline over bytes with no store at all (FR-017), and only the HTTP surface could not. A
+> deployment configured without a store therefore now **serves extractions it used to refuse**, which
+> is a change in exposure an operator is entitled to hear from us rather than from a bill.
+
+A storeless run produces no terminal artifact and therefore **no job**: ADR-0003's `processing_id`
+*is* the terminal artifact id, so there is nothing to hand back and nothing to fetch later. A caller
+who wants a retrievable identity submits the document first and uses the route above. That is a
+property of the choice, not a defect in it.
 
 ## 2. Why submission returns a blob identity
 
