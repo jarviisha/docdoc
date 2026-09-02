@@ -206,7 +206,9 @@ tests/
 ├── contract/
 │   └── test_async_matches_sync.py      #   SC-001, the criterion the milestone exists for
 └── integration/
-    └── test_run_queue_postgres.py      #   SKIP LOCKED under real concurrency; the check constraint
+    ├── test_run_queue_postgres.py      #   SKIP LOCKED under real concurrency; the check constraint
+    ├── test_failed_run_is_recorded.py  #   three failure shapes, told apart (US2)
+    └── test_run_record_leaks_nothing.py #  SC-007 and FR-093, over the row and the log line
 
 packaging/
 └── docker/        # NEW — Dockerfile (one image, two entry points) and compose.yml

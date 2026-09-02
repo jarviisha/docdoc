@@ -125,20 +125,20 @@ stage and error class and carries the completed stages' outcomes.
 
 ### Tests for User Story 2
 
-- [ ] T040 [P] [US2] Write `tests/integration/test_failed_run_is_recorded.py` — an extraction failure yields `status: failed`, a named `failed_stage`, a named `error_class`, and no `processing_id`
-- [ ] T041 [P] [US2] Write `tests/integration/test_run_record_leaks_nothing.py` — over a document seeded with distinctive strings, assert 0% of document text, extracted values, claimed text, prompt bodies, and provider messages appear in any run record or log line (SC-007)
-- [ ] T042 [P] [US2] Write `tests/integration/test_poison_run.py` — a document that terminates the worker comes to rest at `failed` with `error_class: "RunAbandonedError"` within the attempt limit, terminating at most that many workers (SC-006)
+- [X] T040 [P] [US2] Write `tests/integration/test_failed_run_is_recorded.py` — an extraction failure yields `status: failed`, a named `failed_stage`, a named `error_class`, and no `processing_id`
+- [X] T041 [P] [US2] Write `tests/integration/test_run_record_leaks_nothing.py` — over a document seeded with distinctive strings, assert 0% of document text, extracted values, claimed text, prompt bodies, and provider messages appear in any run record or log line (SC-007)
+- [X] T042 [P] [US2] Write `tests/integration/test_poison_run.py` — a document that terminates the worker comes to rest at `failed` with `error_class: "RunAbandonedError"` within the attempt limit, terminating at most that many workers (SC-006)
 
 ### Implementation for User Story 2
 
-- [ ] T043 [US2] Persist `failed_stage`, `error_class`, and `stage_outcomes` in `PostgresRunQueue.finish()` in `src/docdoc/runs/postgres.py`, copied from `PipelineResult` and narrowed to the four fields that survive the no-content rule (R2, FR-035, FR-036)
-- [ ] T043a [US2] Implement the unresolvable-schema path in `src/docdoc/runs/worker.py` and `src/docdoc/runs/postgres.py`: resolve `schema_identity` before calling the pipeline, and on failure finish the run terminally with a schema error class, a null `failed_stage`, and no re-queue or retry (FR-091)
-- [ ] T043b [P] [US2] Write `tests/integration/test_schema_withdrawn_between_submit_and_claim.py` — queue a run, remove the schema from the registry, start the worker; the run is `failed` with a schema error class and a null `failed_stage`, is claimed exactly once, and never reports `RunAbandonedError` (FR-091, FR-038)
-- [ ] T044 [US2] Implement the abandonment transition in `src/docdoc/runs/postgres.py`: at the attempt limit, move to `failed` with `RunAbandonedError` and stop the run being claimable (FR-021, FR-038)
+- [X] T043 [US2] Persist `failed_stage`, `error_class`, and `stage_outcomes` in `PostgresRunQueue.finish()` in `src/docdoc/runs/postgres.py`, copied from `PipelineResult` and narrowed to the four fields that survive the no-content rule (R2, FR-035, FR-036)
+- [X] T043a [US2] Implement the unresolvable-schema path in `src/docdoc/runs/worker.py` and `src/docdoc/runs/postgres.py`: resolve `schema_identity` before calling the pipeline, and on failure finish the run terminally with a schema error class, a null `failed_stage`, and no re-queue or retry (FR-091)
+- [X] T043b [P] [US2] Write `tests/integration/test_schema_withdrawn_between_submit_and_claim.py` — queue a run, remove the schema from the registry, start the worker; the run is `failed` with a schema error class and a null `failed_stage`, is claimed exactly once, and never reports `RunAbandonedError` (FR-091, FR-038)
+- [X] T044 [US2] Implement the abandonment transition in `src/docdoc/runs/postgres.py`: at the attempt limit, move to `failed` with `RunAbandonedError` and stop the run being claimable (FR-021, FR-038)
 - [X] T044a [P] [US2] Implement `src/docdoc/runs/observe.py` emitting one `run.transition` event per state change — `run_id`, `tenant_id`, `from_state`, `to_state`, `attempts`, `worker_id`, `reason` — via standard-library `logging`, with a module docstring arguing why this does not violate `pipeline/observe.py`'s refusal of a run-level event (FR-092, R10a)
-- [ ] T044b [P] [US2] Write `tests/unit/test_run_events_carry_no_content.py` — over a run seeded with distinctive strings, assert `run.transition` payloads contain no document text, extracted value, claimed text, prompt body, credential, or provider message, and no duration, token count, cost, or stage result (FR-092, FR-093)
-- [ ] T045 [US2] Surface `failed_stage`, `error_class`, and `stage_outcomes` in the `GET /v1/runs/{run_id}` response in `src/docdoc/api/app.py`
-- [ ] T046 [US2] Assert in `tests/unit/` that `error_class` can only ever be a class name — the value is read from `PipelineResult`, which already reduced it, so the test pins that the projection never substitutes a message (FR-037)
+- [X] T044b [P] [US2] Write `tests/unit/test_run_events_carry_no_content.py` — over a run seeded with distinctive strings, assert `run.transition` payloads contain no document text, extracted value, claimed text, prompt body, credential, or provider message, and no duration, token count, cost, or stage result (FR-092, FR-093)
+- [X] T045 [US2] Surface `failed_stage`, `error_class`, and `stage_outcomes` in the `GET /v1/runs/{run_id}` response in `src/docdoc/api/app.py`
+- [X] T046 [US2] Assert in `tests/unit/` that `error_class` can only ever be a class name — the value is read from `PipelineResult`, which already reduced it, so the test pins that the projection never substitutes a message (FR-037)
 
 **Checkpoint**: US1 + US2 together are a usable asynchronous engine on a single worker with a local store.
 
