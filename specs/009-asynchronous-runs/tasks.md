@@ -153,16 +153,16 @@ the second.
 
 ### Tests for User Story 3
 
-- [ ] T047 [P] [US3] Write `tests/integration/test_shared_store_reuse.py` — two workers on one MinIO bucket; a document already parsed and resubmitted by the **same tenant** reuses the parse, counted on a parser invocation counter (SC-005)
+- [X] T047 [P] [US3] Write `tests/integration/test_shared_store_reuse.py` — two workers on one MinIO bucket; a document already parsed and resubmitted by the **same tenant** reuses the parse, counted on a parser invocation counter (SC-005)
 - [ ] T048 [P] [US3] Write `tests/integration/test_redelivery.py` — kill the worker at each of the four stage boundaries; every run completes on redelivery with an identical `processing_id`, and billable invocations exceed the uninterrupted count by at most one, by zero between stages (SC-003, SC-004)
 - [ ] T049 [P] [US3] Write `tests/integration/test_restart_survival.py` — restart the API and every worker mid-run; 100% of in-flight runs reach a terminal state with no operator action (SC-011)
-- [ ] T050 [P] [US3] Write `tests/integration/test_s3_store_rules.py` — the six rows of contracts/runs-layer.md's table: miss, format mismatch, content mismatch raising, unreachable degrading, identical write as no-op, divergent write raising. Plus a store-equivalence case: the same document through the filesystem store and the S3 store agrees on every value, verdict, location, and identity (FR-051) — a cheap copy of SC-001 aimed at the store rather than the transport
+- [X] T050 [P] [US3] Write `tests/integration/test_s3_store_rules.py` — the six rows of contracts/runs-layer.md's table: miss, format mismatch, content mismatch raising, unreachable degrading, identical write as no-op, divergent write raising. Plus a store-equivalence case: the same document through the filesystem store and the S3 store agrees on every value, verdict, location, and identity (FR-051) — a cheap copy of SC-001 aimed at the store rather than the transport
 
 ### Implementation for User Story 3
 
-- [ ] T051 [US3] Implement `S3ArtifactStore` in `src/docdoc/artifacts/s3.py` satisfying the existing `ArtifactStore` Protocol, with `boto3` imported lazily in the constructor so a base install neither imports nor requires it (R5)
-- [ ] T052 [US3] Implement `S3BlobStore` in `src/docdoc/artifacts/s3.py` on the same terms
-- [ ] T053 [US3] Ensure both stores in `src/docdoc/artifacts/s3.py` inherit ADR-0010 §4 and §5 rather than restating them — degradation, format mismatch, content mismatch, and the no-overwrite rule — sharing the filesystem store's logic where it is store-agnostic (R3, FR-047, FR-048)
+- [X] T051 [US3] Implement `S3ArtifactStore` in `src/docdoc/artifacts/s3.py` satisfying the existing `ArtifactStore` Protocol, with `boto3` imported lazily in the constructor so a base install neither imports nor requires it (R5)
+- [X] T052 [US3] Implement `S3BlobStore` in `src/docdoc/artifacts/s3.py` on the same terms
+- [X] T053 [US3] Ensure both stores in `src/docdoc/artifacts/s3.py` inherit ADR-0010 §4 and §5 rather than restating them — degradation, format mismatch, content mismatch, and the no-overwrite rule — sharing the filesystem store's logic where it is store-agnostic (R3, FR-047, FR-048)
 - [ ] T054 [US3] Wire store selection into `src/docdoc/api/settings.py` via `DOCDOC_STORE_URL`, keeping the filesystem store the default and unchanged (FR-050)
 - [ ] T055 [US3] Apply `tenant_root()` in both stores' key derivation in `src/docdoc/artifacts/s3.py` and in the filesystem store, so namespacing is on from the first commit and the default tenant resolves to the **unprefixed** legacy layout (FR-084, FR-084a, FR-088). No relocation, no copy, no read-through fallback
 - [ ] T056 [P] [US3] Correct the `pyproject.toml` layers comment claiming `artifacts` "depends on `pydantic` and two kernel hashing helpers and on nothing else" — it stops being true in this change, and a comment that lies is worse than one that is absent (R5)

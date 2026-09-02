@@ -208,7 +208,9 @@ tests/
 └── integration/
     ├── test_run_queue_postgres.py      #   SKIP LOCKED under real concurrency; the check constraint
     ├── test_failed_run_is_recorded.py  #   three failure shapes, told apart (US2)
-    └── test_run_record_leaks_nothing.py #  SC-007 and FR-093, over the row and the log line
+    ├── test_run_record_leaks_nothing.py #  SC-007 and FR-093, over the row and the log line
+    ├── test_s3_store_rules.py          #   ADR-0010 §4 and §5, over an object store
+    └── test_shared_store_reuse.py      #   SC-005, counted rather than timed
 
 packaging/
 └── docker/        # NEW — Dockerfile (one image, two entry points) and compose.yml
