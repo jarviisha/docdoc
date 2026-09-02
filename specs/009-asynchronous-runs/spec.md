@@ -230,7 +230,7 @@ declared siblings under an `independence` contract, exactly as `API` and `CLI` a
   happens when a worker claims it? → A: **It fails terminally on the first occurrence, classified as a
   schema error, and does not consume the retry budget.** A withdrawn schema is a configuration fault,
   not a transient one, so retrying it only spends attempts and then mislabels the outcome as
-  `RunAbandoned` — a word that names the wrong cause. This is the rule `extraction/retry.py` already
+  `RunAbandonedError` — a word that names the wrong cause. This is the rule `extraction/retry.py` already
   applies one layer down ("every refusal fail on the first attempt"). *Implementation note*: the claim
   statement increments `attempts` atomically (R8) and that is not undone; "does not consume the retry
   budget" is satisfied by the run being terminal at once, never by a compensating decrement.

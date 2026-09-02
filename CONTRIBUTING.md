@@ -51,6 +51,22 @@ You need Python 3.11+ and [`uv`](https://docs.astral.sh/uv/). Nothing else — n
 object storage, no credentials. If a change makes any of those necessary to run the core suite,
 that change is wrong.
 
+Milestone 9 added a database and an object store, and did not change that sentence. Tests needing
+either carry a marker and **skip themselves** when their dependency is unconfigured, exactly as the
+live-provider tests already did:
+
+```bash
+docker compose -f packaging/docker/compose.yml up -d postgres minio
+
+DOCDOC_TEST_DATABASE_URL=postgresql://docdoc:docdoc@localhost:5432/docdoc \
+  uv run pytest -m postgres
+DOCDOC_TEST_S3_ENDPOINT=http://localhost:9000 \
+  uv run pytest -m s3
+```
+
+Run `uv run pytest` with neither variable set and the suite passes, reporting what it skipped. That
+is asserted rather than assumed — see SC-013 in `specs/009-asynchronous-runs/spec.md`.
+
 ## Before you open a PR
 
 ```bash

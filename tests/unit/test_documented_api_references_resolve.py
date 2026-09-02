@@ -246,6 +246,17 @@ CONFIG_MODULES = {
     "docdoc.ingest.source": ("MAX_DOCUMENT_BYTES_ENV", "MAX_PAGES_ENV"),
 }
 
+#: Names the *suite* reads, which docdoc itself never does.
+#:
+#: Milestone 9's infrastructure tests find their database and object store here,
+#: and CONTRIBUTING.md documents both so a contributor can run them. They are
+#: excluded from the check below rather than added to CONFIG_MODULES, because
+#: CONFIG_MODULES feeds `test_cli_config_vocabulary.py` too -- and that file
+#: would then require a `--test-database-url` flag on `docdoc`, which is a
+#: command-line surface for configuring pytest. The real definitions, with their
+#: skip helpers, are in `tests/infra.py`.
+SUITE_ONLY_ENV = frozenset({"DOCDOC_TEST_DATABASE_URL", "DOCDOC_TEST_S3_ENDPOINT"})
+
 #: Wider than DOCUMENTS: configuration is described in places that carry no python
 #: block at all, and those are exactly the ones an import check cannot reach.
 CONFIG_DOCUMENTS = (
@@ -283,7 +294,13 @@ def test_every_documented_configuration_name_exists(document: str) -> None:
     """
     defined = _defined_env_names()
     text = pathlib.Path(document).read_text(encoding="utf-8")
-    unknown = sorted({name for name in _ENV_NAME.findall(text) if name not in defined})
+    unknown = sorted(
+        {
+            name
+            for name in _ENV_NAME.findall(text)
+            if name not in defined and name not in SUITE_ONLY_ENV
+        }
+    )
     assert not unknown, (
         f"{document} documents configuration names that no module defines: {unknown}. "
         f"Defined: {sorted(defined)}"

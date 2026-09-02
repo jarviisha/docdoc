@@ -98,7 +98,7 @@ stage's artifact, so "redelivery" is mostly "resume".
 uv run pytest tests/integration/test_poison_run.py
 ```
 
-**Expected**: the run comes to rest at `failed` with `error_class: "RunAbandoned"` after three
+**Expected**: the run comes to rest at `failed` with `error_class: "RunAbandonedError"` after three
 attempts, and terminates at most three worker processes. Without the attempt limit this test never
 ends, which is the point of having one.
 

@@ -304,6 +304,32 @@ amendment for the third rather than carrying the reinterpretation.
 
 Templates: no changes required — the plan-template gate table references
 Principle XI by number and remains accurate.
+
+---
+AMENDMENT 1.6.0 → 1.7.0 (2026-08-28)
+Bump rationale: MINOR — a layer is added to the chain in Principle X. Same class
+of change as 1.4.0 → 1.5.0, which added four.
+
+Principles affected: X (Layered Dependency Direction and Bounded Concepts).
+
+  - `Runs` joins the chain as a sibling of `Recording`, above `Pipeline`. It is
+    Milestone 9's transport layer: it accepts a request, records it, and hands it
+    to a worker that calls `pipeline.run()` unchanged.
+
+  - Recorded here because Principle X requires it in as many words: "This text
+    MUST be amended in the same change that adds a layer to it." That rule exists
+    because from Milestone 4 to Milestone 6 the prose and the contract disagreed
+    and nobody noticed. `tests/unit/test_layer_boundaries.py` is what now
+    notices, and it is what raised this — the layer landed in `pyproject.toml`
+    and the suite went red in the same run.
+
+Sections amended: Principle X (the chain, and one paragraph on the new sibling
+pair). No decision moved; the open list stays empty.
+
+Migration note: no artifact is invalidated. The `pyproject.toml` layers contract
+remains the authoritative form and already carries the change.
+
+Templates: no changes required.
 -->
 
 # docdoc Constitution
@@ -543,7 +569,7 @@ not regress.
 The dependency direction MUST be, strictly downward. The layers that **exist**, in order:
 
 ```text
-API, CLI → Recording → Evaluation → Pipeline → Validation → Grounding
+API, CLI → Recording, Runs → Evaluation → Pipeline → Validation → Grounding
          → Extraction → Ingest → Artifacts → Kernel
 ```
 
@@ -560,6 +586,11 @@ pipeline rather than holding a second copy of the stage order.
 
 **`API` and `CLI` are siblings, not a stack.** Neither may import the other, which an ordered
 position cannot express; an `independence` contract states it instead.
+
+**`Recording` and `Runs` are siblings for the same reason.** `Recording` drives the pipeline to
+produce a prediction set; `Runs` drives it to serve an accepted request. Neither uses the other, so
+an ordered position between them would grant a permission neither needs. A second `independence`
+contract states it.
 
 Rules:
 
@@ -763,4 +794,4 @@ insufficient. Unjustified violations are rejected regardless of the code's quali
 **Precedence for unresolved items.** Where an "Open Constitutional Decision" is unresolved,
 implementers MUST NOT resolve it silently in code. Raise it, decide it, record it.
 
-**Version**: 1.6.0 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-08-28
+**Version**: 1.7.0 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-08-28

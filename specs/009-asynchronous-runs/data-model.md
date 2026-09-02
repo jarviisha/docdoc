@@ -79,11 +79,11 @@ Five states, and the set is closed (FR-006).
    performed by a reaper. A worker shutting down cleanly performs it explicitly, so a rolling restart
    costs no lease timeout (FR-043).
 3. **`running → failed/abandoned`** when `attempts` has reached the limit. Distinguishable from an
-   ordinary failure by `error_class = 'RunAbandoned'` (FR-038).
+   ordinary failure by `error_class = 'RunAbandonedError'` (FR-038).
 4. **`running → failed` on an unresolvable schema** is terminal at the first occurrence, never
    re-queued and never retried (FR-091). `attempts` shows the one claim that happened — the claim
    statement increments it atomically and nothing compensates — but the run is terminal, so the retry
-   budget is not spent and `RunAbandoned` is never reached. A configuration fault must not be recorded
+   budget is not spent and `RunAbandonedError` is never reached. A configuration fault must not be recorded
    under the word for a poison document.
 5. **Cancellation** applies to `queued` immediately and to `running` at the next stage boundary
    (FR-028). It is refused in every terminal state, naming the state (FR-031), and is idempotent in

@@ -32,14 +32,14 @@ Single project: `src/docdoc/`, `tests/` at repository root, per plan.md's Struct
 
 **Purpose**: Make the four-container topology runnable so later phases have somewhere to run.
 
-- [ ] T001 Add `postgres` and `s3` optional extras (`psycopg[binary,pool]>=3.1`, `boto3>=1.34`) to `[project.optional-dependencies]` in `pyproject.toml`, each with a comment stating why it is an extra and not a base dependency, matching the existing extras' style
-- [ ] T002 Add `docdoc.runs` to the `layers` contract in `pyproject.toml` as `"docdoc.recording : docdoc.runs"`, and add an `independence` contract over `["docdoc.recording", "docdoc.runs"]`, with a comment giving the R10 reasoning
-- [ ] T002a Add a `forbidden` contract in `pyproject.toml` with `source_modules = ["docdoc.api"]` and `forbidden_modules = ["docdoc.runs.worker"]`. The layers contract puts `api` *above* `runs`, so it may import anything there — the second half of FR-044 is unfalsifiable without this
-- [ ] T002b Add a `forbidden` contract in `pyproject.toml` with `source_modules = ["docdoc.runs"]` and `forbidden_modules = ["celery", "kombu", "redis", "kafka", "confluent_kafka", "temporalio", "rq", "dramatiq"]`, enforcing FR-026's prohibition instead of trusting review to catch it
-- [ ] T003 [P] Create the package skeleton `src/docdoc/runs/` with `__init__.py`, and empty `model.py`, `identity.py`, `queue.py`, `postgres.py`, `worker.py`, `errors.py`, `observe.py` plus a `migrations/` directory
-- [ ] T004 [P] Register `postgres` and `s3` pytest markers in `pyproject.toml` so the offline suite excludes infrastructure-dependent tests by default, and document the two commands in `CONTRIBUTING.md`
-- [ ] T005 Write `packaging/docker/Dockerfile` — one image, entry point selected at runtime, no second image for the worker
-- [ ] T006 Write `packaging/docker/compose.yml` with `api`, `worker`, `postgres`, and `minio`, runnable with no cloud credentials and reaching a working deployment with no manual step beyond a schema path and a provider key (FR-076, FR-077, SC-014). Two commands total — `docker compose up -d` then `docdoc migrate`; no `Makefile` or task runner is added, because the repository has neither and quickstart.md already names both commands
+- [X] T001 Add `postgres` and `s3` optional extras (`psycopg[binary,pool]>=3.1`, `boto3>=1.34`) to `[project.optional-dependencies]` in `pyproject.toml`, each with a comment stating why it is an extra and not a base dependency, matching the existing extras' style
+- [X] T002 Add `docdoc.runs` to the `layers` contract in `pyproject.toml` as `"docdoc.recording : docdoc.runs"`, and add an `independence` contract over `["docdoc.recording", "docdoc.runs"]`, with a comment giving the R10 reasoning
+- [X] T002a Add a `forbidden` contract in `pyproject.toml` with `source_modules = ["docdoc.api"]` and `forbidden_modules = ["docdoc.runs.worker"]`. The layers contract puts `api` *above* `runs`, so it may import anything there — the second half of FR-044 is unfalsifiable without this
+- [X] T002b Add a `forbidden` contract in `pyproject.toml` with `source_modules = ["docdoc.runs"]` and `forbidden_modules = ["celery", "kombu", "redis", "kafka", "confluent_kafka", "temporalio", "rq", "dramatiq"]`, enforcing FR-026's prohibition instead of trusting review to catch it
+- [X] T003 [P] Create the package skeleton `src/docdoc/runs/` with `__init__.py`, and empty `model.py`, `identity.py`, `queue.py`, `postgres.py`, `worker.py`, `errors.py`, `observe.py` plus a `migrations/` directory
+- [X] T004 [P] Register `postgres` and `s3` pytest markers in `pyproject.toml` so the offline suite excludes infrastructure-dependent tests by default, and document the two commands in `CONTRIBUTING.md`
+- [X] T005 Write `packaging/docker/Dockerfile` — one image, entry point selected at runtime, no second image for the worker
+- [X] T006 Write `packaging/docker/compose.yml` with `api`, `worker`, `postgres`, and `minio`, runnable with no cloud credentials and reaching a working deployment with no manual step beyond a schema path and a provider key (FR-076, FR-077, SC-014). Two commands total — `docker compose up -d` then `docdoc migrate`; no `Makefile` or task runner is added, because the repository has neither and quickstart.md already names both commands
 
 **Checkpoint**: `docker compose up` reaches a healthy Postgres and MinIO. Nothing docdoc-specific runs yet.
 
@@ -58,16 +58,16 @@ Single project: `src/docdoc/`, `tests/` at repository root, per plan.md's Struct
 
 ### The run model
 
-- [ ] T010 [P] Implement `RunStatus` (five states — no `expired`; see data-model.md transition rule 6) and `Run` in `src/docdoc/runs/model.py` as pydantic models with no I/O, per data-model.md
-- [ ] T011 [P] Implement `RunError` and its subclasses — including `RunAbandoned`, `RunNotCancellable`, `RunStateUnavailable` — in `src/docdoc/runs/errors.py`, typed and provider-neutral (FR-074)
-- [ ] T012 Implement `src/docdoc/runs/identity.py`: `new_run_id()`, `now()`, and deadline arithmetic. **The only module in the package permitted to import `uuid`, `time`, `datetime`, `random`, or `secrets`** (R11, FR-072)
-- [ ] T013 Implement `RunOutcome.of(result: PipelineResult)` in `src/docdoc/runs/model.py` — a projection copying six fields, with no translation and no conditional on schema or document type (R2)
-- [ ] T014 [P] Implement `tenant_root(tenant_id)` in `src/docdoc/artifacts/paths.py`: **the empty string for the default tenant** and `t/<tenant_id>/` for every other, ahead of the existing two-character fan-out, changing no identity derivation (R12, FR-084a, FR-085). The docstring must state why the default tenant is unprefixed, so the branch is not tidied away later
+- [X] T010 [P] Implement `RunStatus` (five states — no `expired`; see data-model.md transition rule 6) and `Run` in `src/docdoc/runs/model.py` as pydantic models with no I/O, per data-model.md
+- [X] T011 [P] Implement `RunError` and its subclasses — including `RunAbandonedError`, `RunNotCancellableError`, `RunStateUnavailableError` — in `src/docdoc/runs/errors.py`, typed and provider-neutral (FR-074)
+- [X] T012 Implement `src/docdoc/runs/identity.py`: `new_run_id()`, `now()`, and deadline arithmetic. **The only module in the package permitted to import `uuid`, `time`, `datetime`, `random`, or `secrets`** (R11, FR-072)
+- [X] T013 Implement `RunOutcome.of(result: PipelineResult)` in `src/docdoc/runs/model.py` — a projection copying six fields, with no translation and no conditional on schema or document type (R2)
+- [X] T014 [P] Implement `tenant_root(tenant_id)` in `src/docdoc/artifacts/paths.py`: **the empty string for the default tenant** and `t/<tenant_id>/` for every other, ahead of the existing two-character fan-out, changing no identity derivation (R12, FR-084a, FR-085). The docstring must state why the default tenant is unprefixed, so the branch is not tidied away later
 
 ### The queue
 
-- [ ] T015 Define the `RunQueue` Protocol in `src/docdoc/runs/queue.py` with `now` and `run_id` as parameters on every method that needs them, never read inside (contracts/runs-layer.md)
-- [ ] T016 [P] Implement `InMemoryRunQueue` in `tests/fixtures/run_queue.py` satisfying the same Protocol, so claim policy is testable with no database
+- [X] T015 Define the `RunQueue` Protocol in `src/docdoc/runs/queue.py` with `now` and `run_id` as parameters on every method that needs them, never read inside (contracts/runs-layer.md)
+- [X] T016 [P] Implement `InMemoryRunQueue` in `tests/fixtures/run_queue.py` satisfying the same Protocol, so claim policy is testable with no database
 - [ ] T017 Write `src/docdoc/runs/migrations/0001_runs.sql`: the `runs` table, the check constraint enforcing `processing_id IS NOT NULL` **iff** `status = 'succeeded'`, and the four indexes of data-model.md. Include `tenant_id` from creation — it is the column that cannot be added later (FR-062) — and add **no index on `expires_at`**, which nothing in this milestone queries
 - [ ] T018 Implement the migration runner and `docdoc migrate [--check]` in `src/docdoc/cli/commands/migrate.py`: numbered plain-SQL files, an applied-versions table, idempotent, never run implicitly at process start (R7, FR-078)
 - [ ] T019 Implement `PostgresRunQueue.submit()` and `.get()` in `src/docdoc/runs/postgres.py`, with tenant scoping expressed **in the query** rather than as a check after the fetch (FR-063, FR-066)
@@ -78,10 +78,10 @@ Single project: `src/docdoc/`, `tests/` at repository root, per plan.md's Struct
 
 ### Foundational tests
 
-- [ ] T024 [P] Unit-test the state machine in `tests/unit/test_run_state_machine.py`: every legal transition, every terminal state refusing further transitions (FR-007), that no code path deletes a row, and both invariants of data-model.md
-- [ ] T025 [P] Unit-test claim policy against `InMemoryRunQueue` in `tests/unit/test_claim_policy.py`: oldest-first (FR-024), lease expiry making a run eligible, attempt increment, and the attempt limit — all at arbitrary `now` values, with no database
-- [ ] T026 [P] Unit-test determinism confinement in `tests/unit/test_runs_clock_confinement.py`: assert no module in `docdoc.runs` except `identity.py` imports `uuid`, `time`, `datetime`, `random`, or `secrets` (R11)
-- [ ] T027 [P] Assert `uv run lint-imports` passes with the new layer and independence contracts, and that the existing `tests/unit/test_kernel_purity.py` is unmodified (FR-073)
+- [X] T024 [P] Unit-test the state machine in `tests/unit/test_run_state_machine.py`: every legal transition, every terminal state refusing further transitions (FR-007), that no code path deletes a row, and both invariants of data-model.md
+- [X] T025 [P] Unit-test claim policy against `InMemoryRunQueue` in `tests/unit/test_claim_policy.py`: oldest-first (FR-024), lease expiry making a run eligible, attempt increment, and the attempt limit — all at arbitrary `now` values, with no database
+- [X] T026 [P] Unit-test determinism confinement in `tests/unit/test_runs_clock_confinement.py`: assert no module in `docdoc.runs` except `identity.py` imports `uuid`, `time`, `datetime`, `random`, or `secrets` (R11)
+- [X] T027 [P] Assert `uv run lint-imports` passes with the new layer and independence contracts, and that the existing `tests/unit/test_kernel_purity.py` is unmodified (FR-073)
 - [ ] T028 Integration-test `PostgresRunQueue` in `tests/integration/test_run_queue_postgres.py` under the `postgres` marker: concurrent claims never hand one run to two workers, and `SKIP LOCKED` lets a second worker claim the second-oldest rather than blocking
 
 **Checkpoint**: runs can be submitted, claimed, and finished from Python. No HTTP, no worker process yet.
@@ -127,14 +127,14 @@ stage and error class and carries the completed stages' outcomes.
 
 - [ ] T040 [P] [US2] Write `tests/integration/test_failed_run_is_recorded.py` — an extraction failure yields `status: failed`, a named `failed_stage`, a named `error_class`, and no `processing_id`
 - [ ] T041 [P] [US2] Write `tests/integration/test_run_record_leaks_nothing.py` — over a document seeded with distinctive strings, assert 0% of document text, extracted values, claimed text, prompt bodies, and provider messages appear in any run record or log line (SC-007)
-- [ ] T042 [P] [US2] Write `tests/integration/test_poison_run.py` — a document that terminates the worker comes to rest at `failed` with `error_class: "RunAbandoned"` within the attempt limit, terminating at most that many workers (SC-006)
+- [ ] T042 [P] [US2] Write `tests/integration/test_poison_run.py` — a document that terminates the worker comes to rest at `failed` with `error_class: "RunAbandonedError"` within the attempt limit, terminating at most that many workers (SC-006)
 
 ### Implementation for User Story 2
 
 - [ ] T043 [US2] Persist `failed_stage`, `error_class`, and `stage_outcomes` in `PostgresRunQueue.finish()` in `src/docdoc/runs/postgres.py`, copied from `PipelineResult` and narrowed to the four fields that survive the no-content rule (R2, FR-035, FR-036)
 - [ ] T043a [US2] Implement the unresolvable-schema path in `src/docdoc/runs/worker.py` and `src/docdoc/runs/postgres.py`: resolve `schema_identity` before calling the pipeline, and on failure finish the run terminally with a schema error class, a null `failed_stage`, and no re-queue or retry (FR-091)
-- [ ] T043b [P] [US2] Write `tests/integration/test_schema_withdrawn_between_submit_and_claim.py` — queue a run, remove the schema from the registry, start the worker; the run is `failed` with a schema error class and a null `failed_stage`, is claimed exactly once, and never reports `RunAbandoned` (FR-091, FR-038)
-- [ ] T044 [US2] Implement the abandonment transition in `src/docdoc/runs/postgres.py`: at the attempt limit, move to `failed` with `RunAbandoned` and stop the run being claimable (FR-021, FR-038)
+- [ ] T043b [P] [US2] Write `tests/integration/test_schema_withdrawn_between_submit_and_claim.py` — queue a run, remove the schema from the registry, start the worker; the run is `failed` with a schema error class and a null `failed_stage`, is claimed exactly once, and never reports `RunAbandonedError` (FR-091, FR-038)
+- [ ] T044 [US2] Implement the abandonment transition in `src/docdoc/runs/postgres.py`: at the attempt limit, move to `failed` with `RunAbandonedError` and stop the run being claimable (FR-021, FR-038)
 - [ ] T044a [P] [US2] Implement `src/docdoc/runs/observe.py` emitting one `run.transition` event per state change — `run_id`, `tenant_id`, `from_state`, `to_state`, `attempts`, `worker_id`, `reason` — via standard-library `logging`, with a module docstring arguing why this does not violate `pipeline/observe.py`'s refusal of a run-level event (FR-092, R10a)
 - [ ] T044b [P] [US2] Write `tests/unit/test_run_events_carry_no_content.py` — over a run seeded with distinctive strings, assert `run.transition` payloads contain no document text, extracted value, claimed text, prompt body, credential, or provider message, and no duration, token count, cost, or stage result (FR-092, FR-093)
 - [ ] T045 [US2] Surface `failed_stage`, `error_class`, and `stage_outcomes` in the `GET /v1/runs/{run_id}` response in `src/docdoc/api/app.py`

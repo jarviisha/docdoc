@@ -1,0 +1,115 @@
+# The four-process topology, runnable with no cloud credentials (FR-076).
+#
+#   docker compose -f packaging/docker/compose.yml up -d
+#   docker compose -f packaging/docker/compose.yml run --rm api docdoc migrate
+#
+# Two commands. There is no Makefile and no task runner: this repository has
+# neither, and quickstart.md names both lines.
+#
+# Constitution v1.6.0 admits `worker` to this composition. The sentence used to
+# read "only api, postgres, and object storage", which excluded a process type
+# Principle XI's own "API → queue → workers" requires — the document forbade
+# demonstrating an evolution it mandated.
+#
+# Nothing here is a production deployment. There is no TLS, the object store
+# holds a well-known key pair, and Postgres trusts a password in plaintext.
+
+name: docdoc
+
+services:
+  api:
+    build:
+      context: ../..
+      dockerfile: packaging/docker/Dockerfile
+    depends_on:
+      postgres: {condition: service_healthy}
+      minio: {condition: service_healthy}
+    ports: ["8000:8000"]
+    environment: &docdoc_env
+      DOCDOC_RUN_DATABASE_URL: postgresql://docdoc:docdoc@postgres:5432/docdoc
+      DOCDOC_STORE_URL: s3://docdoc?endpoint_url=http://minio:9000
+      AWS_ACCESS_KEY_ID: docdoc
+      AWS_SECRET_ACCESS_KEY: docdocdocdoc
+      AWS_DEFAULT_REGION: us-east-1
+      # Mounted below. The registry is empty without this and every extraction
+      # is refused, which is the correct behaviour and a confusing first run.
+      DOCDOC_SCHEMA_PATHS: /schemas
+      # Offline by default: the composition comes up and runs documents with no
+      # provider account. Swap to `gemini` and supply GEMINI_API_KEY for real
+      # extraction. `echo` is never selected automatically by docdoc itself —
+      # naming it here is an explicit local choice, not a fallback.
+      DOCDOC_MODEL_ADAPTERS: ${DOCDOC_MODEL_ADAPTERS:-echo}
+      DOCDOC_ECHO_FIXTURES: /fixtures
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      # Authentication is off by default here, exactly as it is off by default in
+      # docdoc (FR-088). Point this at a key file to turn it on.
+      DOCDOC_API_KEYS_FILE: ${DOCDOC_API_KEYS_FILE:-}
+    volumes: &docdoc_mounts
+      - ../../schemas:/schemas:ro
+      - ../../tests/fixtures/echo:/fixtures:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2).status == 200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # `docker compose up --scale worker=3` is how concurrency is configured.
+  # A worker executes exactly one run at a time and there is no --concurrency
+  # flag, because a threaded worker can starve a heartbeat until a live run
+  # loses its lease — a utilisation choice becoming a correctness bug
+  # (FR-025, research R9a).
+  worker:
+    build:
+      context: ../..
+      dockerfile: packaging/docker/Dockerfile
+    depends_on:
+      postgres: {condition: service_healthy}
+      minio: {condition: service_healthy}
+    command: ["docdoc", "worker"]
+    environment: *docdoc_env
+    volumes: *docdoc_mounts
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: docdoc
+      POSTGRES_PASSWORD: docdoc
+      POSTGRES_DB: docdoc
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U docdoc -d docdoc"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # MinIO stands in for S3 so the S3 code path is exercised locally with no cloud
+  # account. Production points DOCDOC_STORE_URL at S3, R2, GCS, or a self-hosted
+  # MinIO; S3ArtifactStore does not know the difference.
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: docdoc
+      MINIO_ROOT_PASSWORD: docdocdocdoc
+    ports: ["9000:9000", "9001:9001"]
+    volumes: ["miniodata:/data"]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-shot: creates the bucket the store writes to, then exits. Compose has no
+  # way to declare "this bucket must exist", and a first run that fails on a
+  # missing bucket reads as a docdoc bug rather than a setup step.
+  createbucket:
+    image: minio/mc:latest
+    depends_on:
+      minio: {condition: service_healthy}
+    entrypoint: >
+      sh -c "mc alias set local http://minio:9000 docdoc docdocdocdoc &&
+             mc mb --ignore-existing local/docdoc"
+
+volumes:
+  pgdata:
+  miniodata:
