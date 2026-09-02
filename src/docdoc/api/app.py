@@ -59,6 +59,8 @@ from docdoc.api.settings import (
     REQUEST_BYTES_ENV,
     SCHEMA_PATHS_ENV,
     STORE_ROOT_ENV,
+    STORE_URL_ENV,
+    store_from_url,
 )
 
 if TYPE_CHECKING:
@@ -156,6 +158,14 @@ def _default_deployment() -> _Deployment:
     from docdoc.artifacts import BlobStore, FileArtifactStore
 
     runs = _configured_run_queue()
+
+    # An object store, if one was named. Checked first because a deployment that
+    # sets both meant the more specific one, and because `DOCDOC_STORE_ROOT`
+    # keeps working untouched for everyone who sets only it (SC-018).
+    url = os.environ.get(STORE_URL_ENV, "").strip()
+    if url:
+        store, blobs = store_from_url(url)
+        return _Deployment(store=store, blobs=blobs, runs=runs)  # type: ignore[arg-type]
 
     root = os.environ.get(STORE_ROOT_ENV, "").strip()
     if not root:

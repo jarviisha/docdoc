@@ -37,3 +37,47 @@ UI_ROOT_ENV = "DOCDOC_UI_ROOT"
 #: by the time bytes reach ingest they are already in memory (research R10).
 REQUEST_BYTES_ENV = "DOCDOC_MAX_REQUEST_BYTES"
 DEFAULT_MAX_REQUEST_BYTES = 32 * 1024 * 1024
+
+
+#: Where artifacts and blobs live, when that is an object store rather than a
+#: directory. Milestone 9.
+#:
+#: ``DOCDOC_STORE_ROOT`` keeps its meaning and its precedence exactly: a
+#: deployment that sets only the root behaves as it did under Milestone 8, which
+#: is what SC-018 asserts. This is a second way to say where, not a replacement.
+#:
+#: Form: ``s3://bucket[/prefix][?endpoint_url=...]``. The query parameter exists
+#: because MinIO and every other S3-compatible store needs one and AWS does not,
+#: and putting it in the URL keeps "where the store is" a single value rather
+#: than three variables that can disagree.
+STORE_URL_ENV = "DOCDOC_STORE_URL"
+
+
+def store_from_url(url: str, *, tenant_id: str = "default") -> tuple[object, object]:
+    """Build ``(artifact_store, blob_store)`` from a store URL.
+
+    Returns both because they are one decision: a deployment whose artifacts are
+    in an object store and whose blobs are on a local disk has two halves of a
+    store that cannot see each other, which is the multi-worker failure SC-005
+    describes arriving by configuration instead of by omission.
+    """
+    from urllib.parse import parse_qs, urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme != "s3":
+        raise ValueError(
+            f"unsupported store URL scheme {parsed.scheme!r}; use s3:// or set "
+            f"{STORE_ROOT_ENV} for a local directory"
+        )
+
+    from docdoc.artifacts.s3 import S3ArtifactStore, S3BlobStore, s3_client
+
+    endpoint = parse_qs(parsed.query).get("endpoint_url", [None])[0]
+    client = s3_client(endpoint_url=endpoint)
+    bucket = parsed.netloc
+    prefix = parsed.path.strip("/")
+
+    return (
+        S3ArtifactStore(bucket, client=client, prefix=prefix, tenant_id=tenant_id),
+        S3BlobStore(bucket, client=client, prefix=prefix, tenant_id=tenant_id),
+    )

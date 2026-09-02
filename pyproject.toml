@@ -296,10 +296,17 @@ include_external_packages = true
 # reader would reasonably guess differently.
 #
 # `artifacts` sits directly ABOVE the kernel, which is the lowest position that is
-# true: it depends on `pydantic` and two kernel hashing helpers and on nothing
-# else. It stores whole result models without importing a single one of them --
-# the caller names the model at the call site -- and that is what keeps it here
-# instead of somewhere near the top next to the code it serves.
+# true: it depends on `pydantic`, two kernel hashing helpers, and -- since
+# Milestone 9 -- `boto3`, lazily and behind the `s3` extra. It stores whole result
+# models without importing a single one of them -- the caller names the model at
+# the call site -- and that is what keeps it here instead of somewhere near the
+# top next to the code it serves.
+#
+# The `boto3` clause is new and this comment used to end "and on nothing else".
+# `S3ArtifactStore` lives here because it implements a protocol this layer
+# defines, and separating the two would force one of them to import across a
+# boundary. The import is inside the constructor, so a base install still
+# acquires neither the dependency nor the import (research R5, SC-013).
 #
 # `pipeline` sits directly ABOVE `validation`, the highest stage it drives, rather
 # than above `evaluation` where its milestone might suggest. Inserting it here

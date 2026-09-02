@@ -22,8 +22,8 @@ import tempfile
 from pathlib import Path
 
 from docdoc.artifacts.errors import ArtifactError
+from docdoc.artifacts.paths import DEFAULT_TENANT, secure_mkdir, tenant_root
 from docdoc.artifacts.paths import FILE_MODE as _FILE_MODE
-from docdoc.artifacts.paths import secure_mkdir
 from docdoc.kernel import blob_id_for
 
 __all__ = ["BlobStore"]
@@ -32,11 +32,18 @@ _logger = logging.getLogger("docdoc.artifacts")
 
 
 class BlobStore:
-    """Source bytes on a filesystem, keyed by their own content."""
+    """Source bytes on a filesystem, keyed by their own content.
 
-    def __init__(self, root: str | Path) -> None:
+    Namespaced per tenant above the fan-out, with the **default tenant keeping
+    the unprefixed layout** so an existing deployment's blobs stay where they
+    are (FR-084a). See ``paths.tenant_root``.
+    """
+
+    def __init__(self, root: str | Path, *, tenant_id: str = DEFAULT_TENANT) -> None:
         self.root = Path(root)
-        self._blobs = self.root / "blobs"
+        segment = tenant_root(tenant_id)
+        self._base = self.root / segment if segment else self.root
+        self._blobs = self._base / "blobs"
 
     def _path_for(self, blob_id: str) -> Path:
         digest = blob_id.split(":", 1)[-1]
