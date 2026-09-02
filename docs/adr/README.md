@@ -19,6 +19,7 @@ it would be decided explicitly rather than settled by whichever code landed firs
 | [0011](0011-pre-1.0-versioning.md) | Pre-1.0 versioning policy | Accepted | `PRE_1_0_VERSIONING` |
 | [0012](0012-storeless-extraction-over-http.md) | Extraction over HTTP without a store | Accepted | `STORELESS_EXTRACTION` |
 | [0013](0013-asynchronous-run-model.md) | The asynchronous run model, and the second identity it requires | Accepted | — (amends 0010 §6) |
+| [0014](0014-tenant-scoping-and-store-namespacing.md) | Tenant scoping, store namespacing, and the existence oracle | Accepted | — (Milestone 9 design) |
 
 ## Conventions
 

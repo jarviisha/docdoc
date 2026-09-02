@@ -53,12 +53,12 @@ Single project: `src/docdoc/`, `tests/` at repository root, per plan.md's Struct
 
 ### Decisions that gate code
 
-- [ ] T008 Write `docs/adr/0014-tenant-scoping-and-store-namespacing.md` and mark it Accepted: per-tenant namespacing of the content-addressed store, the cross-tenant existence oracle it closes, the cross-tenant reuse it forfeits, and authentication defaulting to off (FR-090). Add its row to `docs/adr/README.md`
+- [x] T008 Write `docs/adr/0014-tenant-scoping-and-store-namespacing.md` and mark it Accepted: per-tenant namespacing of the content-addressed store, the cross-tenant existence oracle it closes on **cost and timing** rather than only on response bodies, the cross-tenant reuse it forfeits, the default tenant's namespace being the store root (FR-084a), and authentication defaulting to off (FR-090). Add its row to `docs/adr/README.md` — **done 2026-08-28**
 - [x] T009 Amend FR-040 in `specs/009-asynchronous-runs/spec.md` from "without modification to it" to "without changing its behaviour for existing callers", cross-referencing R4 and plan.md's Complexity Tracking — **done 2026-08-28**, applied during `/speckit-analyze` remediation so the contradiction did not stay live in the artifacts while T076 waited
 
 ### The run model
 
-- [ ] T010 [P] Implement `RunStatus` (five states — no `expired`; see data-model.md transition rule 5) and `Run` in `src/docdoc/runs/model.py` as pydantic models with no I/O, per data-model.md
+- [ ] T010 [P] Implement `RunStatus` (five states — no `expired`; see data-model.md transition rule 6) and `Run` in `src/docdoc/runs/model.py` as pydantic models with no I/O, per data-model.md
 - [ ] T011 [P] Implement `RunError` and its subclasses — including `RunAbandoned`, `RunNotCancellable`, `RunStateUnavailable` — in `src/docdoc/runs/errors.py`, typed and provider-neutral (FR-074)
 - [ ] T012 Implement `src/docdoc/runs/identity.py`: `new_run_id()`, `now()`, and deadline arithmetic. **The only module in the package permitted to import `uuid`, `time`, `datetime`, `random`, or `secrets`** (R11, FR-072)
 - [ ] T013 Implement `RunOutcome.of(result: PipelineResult)` in `src/docdoc/runs/model.py` — a projection copying six fields, with no translation and no conditional on schema or document type (R2)

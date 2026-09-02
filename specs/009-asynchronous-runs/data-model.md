@@ -126,7 +126,7 @@ amplification on every insert; Milestone 10 adds it alongside the sweep that nee
   directions.
 - **No tenants table.** A tenant is what a credential resolves to (R14); it has no attributes this
   milestone reads. A table would be an entity created to hold a foreign key.
-- **No retention sweep and no `expired` state.** See transition rule 5.
+- **No retention sweep and no `expired` state.** See transition rule 6.
 - **No priority, no queue name, no scheduled-for column.** Out of Scope, and each would be a column
   nothing reads.
 - **No worker table.** `worker_id` is a diagnostic string. Worker liveness is the lease, and a
