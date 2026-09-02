@@ -234,3 +234,55 @@ class ErrorBody(BaseModel):
     error: ErrorDetail
     outcomes: tuple[StageOutcomeView, ...] = ()
     results: dict[str, Any] = Field(default_factory=dict)
+
+
+class RunAcceptedResponse(BaseModel):
+    """What ``POST /v1/documents/{blob_id}/runs`` returns, before anything ran.
+
+    **No ``processing_id`` field at all** — absent, not null. ADR-0012 §3 set the
+    precedent for the same reason: a null invites the caller to send it to
+    ``GET /v1/jobs/{id}``, which would answer ``unknown`` about an identity
+    nobody issued. Omitting the field ends that conversation one step earlier.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    run_id: str
+    status: str
+    created_at: str
+
+
+class RunStateResponse(BaseModel):
+    """What ``GET /v1/runs/{run_id}`` returns.
+
+    ``tenant_id`` and ``idempotency_key`` are absent by construction: the model
+    is built from ``Run.dump_public()``, which excludes both. Returning the first
+    would give one tenant a value to compare against another's, and SC-008 wants
+    cross-tenant responses byte-identical to non-existence.
+
+    ``failed_stage`` is ``None`` on a run that failed before reaching a stage —
+    an unresolvable schema, under FR-091 — and that is a real distinction rather
+    than a missing value.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    run_id: str
+    status: str
+    #: The caller's own submission, echoed back. Not another tenant's anything:
+    #: a run is only readable under the tenant that owns it, so returning what
+    #: was submitted discloses nothing the submitter did not send.
+    blob_id: str
+    schema_identity: str
+    attempts: int = Field(ge=0)
+    created_at: str
+    updated_at: str
+    expires_at: str
+
+    processing_id: str | None = None
+    failed_stage: str | None = None
+    error_class: str | None = None
+    worker_id: str | None = None
+    lease_until: str | None = None
+    request_id: str | None = None
+    stage_outcomes: tuple[dict[str, Any], ...] = ()

@@ -16,6 +16,7 @@ docdoc explain ARTIFACT_ID                # how this identity was derived, and i
 docdoc eval    MANIFEST --predictions DIR # score a golden set
 docdoc store   clear [--stage STAGE]      # all of it, or one stage (FR-019)
 docdoc migrate [--check]                  # apply the run-state schema (Milestone 9, FR-078)
+docdoc worker  [--lease-seconds N]         # claim runs and execute them (Milestone 9, FR-039)
 ```
 
 `migrate` was added by Milestone 9 and is the only command that touches a database. It is explicit

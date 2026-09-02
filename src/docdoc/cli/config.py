@@ -128,7 +128,7 @@ FLAG_FOR_SETTING: dict[str, str] = {
 #: direction. So the map records the scope rather than the setting pretending to
 #: a reach it does not have.
 COMMAND_SCOPED: dict[str, tuple[str, ...]] = {
-    "DOCDOC_RUN_DATABASE_URL": ("migrate",),
+    "DOCDOC_RUN_DATABASE_URL": ("migrate", "worker"),
 }
 
 #: Settings that deliberately have no flag, each with the reason, because an

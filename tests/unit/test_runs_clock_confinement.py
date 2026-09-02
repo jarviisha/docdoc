@@ -12,14 +12,15 @@ observing that re-executing a stage cannot produce a different answer, and that
 holds only while the layers below stay pure. A clock that crept downward would
 make a redelivered run able to disagree with the one it replaced.
 
-**This checks calls, not imports, and the distinction is the whole design.**
-`model.py` imports `datetime` and `UUID` because its fields are typed with them,
-and `queue.py` imports both under `TYPE_CHECKING` for annotations. Neither reads
-anything. Banning the import would ban expressing "this field holds an instant",
-which is not what FR-072 asks for and would push those types out of the models
-where they belong. What the rule actually forbids is *producing* a value from
-ambient state: `datetime.now()`, `uuid4()`, `time.monotonic()`. So that is what
-is detected.
+**What is forbidden is reaching past `identity.py` to the standard library.**
+Calling `docdoc.runs.identity.now()` is the sanctioned way to obtain an instant —
+somebody has to, and that module exists to be the somebody. So this resolves each
+call back to where its name came from, rather than matching the name alone.
+
+An earlier version of this test matched bare call names, and `worker.py` passed it
+by importing `now as clock`. The alias was written to avoid a false positive and
+it also disabled the check, which is the precise failure mode a guard that cannot
+see provenance will always have.
 """
 
 from __future__ import annotations
@@ -31,28 +32,29 @@ import pytest
 
 RUNS = Path(__file__).resolve().parents[2] / "src" / "docdoc" / "runs"
 
-#: Callables that read ambient state. Matched on the name at the call site, so
-#: both `datetime.now(...)` and a bare `now(...)` imported from `datetime` are
-#: caught -- the second being the shape a well-meant "tidy the imports" produces.
-FORBIDDEN_CALLS = frozenset(
+#: Standard-library modules that produce values from ambient state.
+FORBIDDEN_MODULES = frozenset({"datetime", "time", "uuid", "random", "secrets"})
+
+#: The one module allowed to import them, and the reason it exists.
+PERMITTED = "identity.py"
+
+#: Calls that read ambient state, by attribute name. Used for the
+#: ``module.attr()`` form, where the module is named at the call site.
+_READERS = frozenset(
     {
-        # datetime
         "now",
         "utcnow",
         "today",
         "fromtimestamp",
-        # time
         "time",
         "time_ns",
         "monotonic",
         "monotonic_ns",
         "perf_counter",
-        # uuid
         "uuid1",
         "uuid3",
         "uuid4",
         "uuid5",
-        # random / secrets
         "randint",
         "randrange",
         "choice",
@@ -64,9 +66,6 @@ FORBIDDEN_CALLS = frozenset(
     }
 )
 
-#: The one module allowed to, and the reason it exists.
-PERMITTED = "identity.py"
-
 
 def _modules() -> list[Path]:
     found = sorted(p for p in RUNS.rglob("*.py") if p.name != PERMITTED)
@@ -74,61 +73,109 @@ def _modules() -> list[Path]:
     return found
 
 
-def _called_names(source: str) -> set[str]:
-    """Every name invoked as a call, wherever it appears.
+def _forbidden_reads(source: str) -> set[str]:
+    """Calls that reach a forbidden stdlib module, however the name was bound.
 
-    Walks the whole tree rather than the module body, because a clock read
-    inside a function is precisely the shape this test exists to catch, and it
-    is the only shape a linter would not already mention.
+    Two forms, and both are resolved through the import that introduced the name
+    rather than by matching the name itself:
+
+        import datetime        -> datetime.now()      caught via the module name
+        from time import monotonic; monotonic()       caught via the binding
+        from docdoc.runs.identity import now; now()   permitted, it is not stdlib
     """
-    called: set[str] = set()
-    for node in ast.walk(ast.parse(source)):
+    tree = ast.parse(source)
+
+    # name -> the top-level module it was imported from
+    origin: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root = alias.name.split(".")[0]
+                origin[alias.asname or root] = root
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            root = node.module.split(".")[0]
+            for alias in node.names:
+                origin[alias.asname or alias.name] = root
+
+    offending: set[str] = set()
+    for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         func = node.func
         if isinstance(func, ast.Attribute):
-            called.add(func.attr)
+            # `datetime.now()`, and also `datetime.datetime.now()` — walk down to
+            # the root name, because `import datetime` then the doubled form is
+            # the most common way to read a clock in Python and matching only the
+            # single-attribute shape would miss it.
+            base: ast.expr = func.value
+            while isinstance(base, ast.Attribute):
+                base = base.value
+            if (
+                isinstance(base, ast.Name)
+                and origin.get(base.id) in FORBIDDEN_MODULES
+                and func.attr in _READERS
+            ):
+                offending.add(f"{base.id}.{func.attr}")
         elif isinstance(func, ast.Name):
-            called.add(func.id)
-    return called
+            # `monotonic()` — permitted unless the name came from a stdlib clock.
+            if origin.get(func.id) in FORBIDDEN_MODULES:
+                offending.add(func.id)
+    return offending
 
 
 @pytest.mark.parametrize("module", _modules(), ids=lambda p: p.name)
 def test_only_identity_may_read_a_clock_or_a_random_source(module: Path) -> None:
-    offending = sorted(_called_names(module.read_text(encoding="utf-8")) & FORBIDDEN_CALLS)
+    offending = sorted(_forbidden_reads(module.read_text(encoding="utf-8")))
     assert not offending, (
-        f"{module.name} calls {offending}. Only `{PERMITTED}` may: every other "
-        f"module takes `now` and `run_id` as parameters (FR-072), which is what "
+        f"{module.name} reads {offending} from the standard library. Only "
+        f"`{PERMITTED}` may: every other module takes `now` and `run_id` as "
+        f"parameters, or calls `docdoc.runs.identity` (FR-072). That is what "
         f"keeps the claim policy testable at an arbitrary instant and keeps the "
         f"layers below this one deterministic"
     )
 
 
 def test_identity_is_where_the_clock_actually_lives() -> None:
-    """Guards the guard: the exemption must be exempting something.
-
-    If `identity.py` stopped reading a clock, every module would trivially pass
-    the check above and the rule would be enforcing nothing.
-    """
+    """Guards the guard: the exemption must be exempting something."""
     source = (RUNS / PERMITTED).read_text(encoding="utf-8")
-    assert _called_names(source) & FORBIDDEN_CALLS, (
+    assert _forbidden_reads(source), (
         f"{PERMITTED} reads no clock and no random source, so the exemption above "
         "is protecting nothing and the check has gone vacuous"
     )
 
 
-def test_the_check_finds_a_clock_read_inside_a_function() -> None:
-    """The shape that matters: not at module level, where anyone would see it."""
-    source = "from datetime import datetime\ndef f():\n    return datetime.now()\n"
-    assert _called_names(source) & FORBIDDEN_CALLS == {"now"}
+def test_an_alias_does_not_defeat_the_check() -> None:
+    """The regression that motivated rewriting this file.
+
+    `from datetime import datetime as dt` then `dt.now()` matched nothing when
+    the check compared call names, and that is exactly what a developer writes
+    to silence a false positive.
+    """
+    source = "from datetime import datetime as dt\ndef f():\n    return dt.now()\n"
+    assert _forbidden_reads(source) == {"dt.now"}
+
+    source = "import time as t\nx = t.monotonic()\n"
+    assert _forbidden_reads(source) == {"t.monotonic"}
 
 
-def test_the_check_finds_a_bare_imported_name() -> None:
-    """`from time import monotonic` then `monotonic()` has no attribute to match."""
-    assert _called_names("from time import monotonic\nx = monotonic()\n") >= {"monotonic"}
+def test_calling_identitys_clock_is_permitted() -> None:
+    """`identity.now()` is the sanctioned way to obtain an instant."""
+    source = "from docdoc.runs.identity import now\ndef f():\n    return now()\n"
+    assert not _forbidden_reads(source)
 
 
-def test_the_check_permits_a_type_annotation() -> None:
-    """Importing `datetime` to type a field is not reading one."""
+def test_a_type_annotation_is_not_a_read() -> None:
     source = "from datetime import datetime\nclass M:\n    at: datetime\n"
-    assert not _called_names(source) & FORBIDDEN_CALLS
+    assert not _forbidden_reads(source)
+
+
+def test_a_clock_read_inside_a_function_is_found() -> None:
+    """Not at module level, where anyone would see it."""
+    source = "from time import monotonic\ndef f():\n    return monotonic()\n"
+    assert _forbidden_reads(source) == {"monotonic"}
+
+
+def test_the_doubled_module_form_is_found() -> None:
+    """`import datetime` then `datetime.datetime.now()` — the commonest shape."""
+    source = "import datetime\ndef f():\n    return datetime.datetime.now()\n"
+    assert _forbidden_reads(source) == {"datetime.now"}

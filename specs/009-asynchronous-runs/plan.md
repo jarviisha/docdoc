@@ -196,9 +196,17 @@ src/docdoc/
     └── runner.py               # CHANGED — one additive optional parameter; see Complexity Tracking
 
 tests/
-├── unit/          # run state machine, claim policy against a fake queue, auth, key derivation
-├── contract/      # async-vs-sync equivalence (SC-001), tenant isolation (SC-008, SC-017)
-└── integration/   # postgres- and minio-backed: redelivery, poison, restart survival
+├── infra.py                            # the two variables that point the suite at real services
+├── fixtures/
+│   └── run_queue.py                    #   InMemoryRunQueue — the claim policy without a database
+├── unit/
+│   ├── test_run_state_machine.py       #   five states, both invariants, cancellation refusal
+│   ├── test_claim_policy.py            #   oldest-first, lease expiry, attempt limit, idempotency
+│   └── test_runs_clock_confinement.py  #   only identity.py reaches a stdlib clock (FR-072)
+├── contract/
+│   └── test_async_matches_sync.py      #   SC-001, the criterion the milestone exists for
+└── integration/
+    └── test_run_queue_postgres.py      #   SKIP LOCKED under real concurrency; the check constraint
 
 packaging/
 └── docker/        # NEW — Dockerfile (one image, two entry points) and compose.yml

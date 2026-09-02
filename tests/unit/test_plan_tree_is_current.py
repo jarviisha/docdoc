@@ -79,6 +79,11 @@ LAYERS: tuple[tuple[str, pathlib.Path], ...] = (
 EXTRA_PLANS: tuple[pathlib.Path, ...] = (
     pathlib.Path("specs/007-pipeline-api-cli/plan.md"),
     pathlib.Path("specs/008-grounding-viewer/plan.md"),
+    # Milestone 9. `docdoc.runs` stays out of LAYERS for the reason recorded
+    # above for `pipeline` and `artifacts`: the substantial-suite guard wants
+    # eight files per layer and this one is still being built. Registering the
+    # plan keeps every test traceable meanwhile.
+    pathlib.Path("specs/009-asynchronous-runs/plan.md"),
 )
 
 #: `docdoc.recording` is deliberately **not** listed, though it is a layer and it

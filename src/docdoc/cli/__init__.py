@@ -139,6 +139,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_common_arguments(migrate)
 
+    # One run at a time, and no --concurrency. Concurrency is replica count
+    # (FR-025): a threaded worker lets one long parse starve a sibling's
+    # heartbeat until it loses a lease it is still executing.
+    worker = subcommands.add_parser("worker", help="claim runs and execute them")
+    worker.add_argument(
+        "--lease-seconds", type=int, default=None, metavar="N", help="claim duration"
+    )
+    worker.add_argument(
+        "--max-attempts", type=int, default=None, metavar="N", help="before abandoning a run"
+    )
+    worker.add_argument(
+        "--run-database-url",
+        default=None,
+        metavar="URL",
+        help=f"where run state lives. Overrides ${RUN_DATABASE_URL_ENV}",
+    )
+    add_common_arguments(worker)
+
     return parser
 
 
@@ -230,10 +248,13 @@ def _dispatch(args: argparse.Namespace) -> Any:
     install has to stay usable with no extras at all (FR-053, SC-013).
     """
     from docdoc.cli.commands import eval as eval_command
-    from docdoc.cli.commands import explain, extract, inspect, migrate, parse, store
+    from docdoc.cli.commands import explain, extract, inspect, migrate, parse, store, worker
 
     if args.command == "migrate":
         return migrate.run
+
+    if args.command == "worker":
+        return worker.run
 
     if args.command == "store":
         if getattr(args, "action", None) != "clear":

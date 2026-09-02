@@ -45,7 +45,9 @@ from docdoc.api.models import (
     BlobMetadata,
     JobStatus,
     JobStatusResponse,
+    RunAcceptedResponse,
     RunResponse,
+    RunStateResponse,
     SchemaChoice,
     SchemaListing,
     StageOutcomeView,
@@ -83,9 +85,11 @@ class _Deployment:
         adapter: Any = None,
         max_request_bytes: int | None = None,
         limits: Any = None,
+        runs: Any = None,
     ) -> None:
         self.store = store
         self.blobs = blobs
+        self._runs = runs
         self._registry = registry
         self._adapter = adapter
         self.limits = limits
@@ -94,6 +98,21 @@ class _Deployment:
     @property
     def has_store(self) -> bool:
         return self.blobs is not None
+
+    @property
+    def has_runs(self) -> bool:
+        """Whether this deployment can accept asynchronous runs.
+
+        False is a valid configuration and not a degraded one: a deployment using
+        only the synchronous routes needs no database, and Milestone 8's install
+        keeps working untouched.
+        """
+        return self._runs is not None
+
+    def runs(self) -> Any:
+        if self._runs is None:
+            raise RuntimeError("no run store configured")
+        return self._runs
 
     def registry(self) -> Any:
         if self._registry is not None:
@@ -136,10 +155,45 @@ def _default_deployment() -> _Deployment:
     """
     from docdoc.artifacts import BlobStore, FileArtifactStore
 
+    runs = _configured_run_queue()
+
     root = os.environ.get(STORE_ROOT_ENV, "").strip()
     if not root:
-        return _Deployment()
-    return _Deployment(store=FileArtifactStore(root), blobs=BlobStore(root))
+        return _Deployment(runs=runs)
+    return _Deployment(store=FileArtifactStore(root), blobs=BlobStore(root), runs=runs)
+
+
+def _configured_run_queue() -> Any:
+    """The run store, or ``None`` when this deployment accepts no asynchronous runs.
+
+    ``None`` is a supported configuration and not a degraded one. A Milestone 8
+    install upgrades with no change and keeps working: it uses the synchronous
+    routes, which need no database, and the run routes answer 503 with a sentence
+    naming what to configure rather than failing at import.
+
+    Nothing is migrated here. ``docdoc migrate`` is explicit precisely so that
+    several workers booting at once are not several processes altering one table
+    (FR-078), and an API that quietly applied a schema would defeat that from the
+    other side.
+    """
+    dsn = os.environ.get("DOCDOC_RUN_DATABASE_URL", "").strip()
+    if not dsn:
+        return None
+
+    try:
+        import psycopg
+    except ImportError:
+        # Configured but unusable. Left as `None` so the route answers 503 with
+        # its own message; raising here would take the whole service down for a
+        # capability the synchronous routes do not need.
+        logging.getLogger("docdoc.api").warning(
+            json.dumps({"event": "runs.driver_missing", "extra": "docdoc[postgres]"})
+        )
+        return None
+
+    from docdoc.runs.postgres import PostgresRunQueue
+
+    return PostgresRunQueue(lambda: psycopg.connect(dsn))
 
 
 def build_app(deployment: _Deployment | None = None) -> FastAPI:
@@ -220,6 +274,45 @@ def _mount_ui(app: FastAPI) -> None:
 def create_app() -> FastAPI:
     """The ASGI factory, for ``uvicorn docdoc.api.app:create_app --factory``."""
     return build_app()
+
+
+class _RunSpec:
+    """What a submission carries before it is a run.
+
+    A plain object rather than a pydantic model: `RunQueue.submit` takes a
+    structural `RunSpec`, and building a validated model here would validate the
+    same five strings twice — once at the HTTP boundary and once on the way to a
+    database that has its own constraints.
+    """
+
+    __slots__ = ("blob_id", "idempotency_key", "request_id", "schema_identity", "tenant_id")
+
+    def __init__(
+        self,
+        *,
+        tenant_id: str,
+        blob_id: str,
+        schema_identity: str,
+        request_id: str | None,
+        idempotency_key: str | None,
+    ) -> None:
+        self.tenant_id = tenant_id
+        self.blob_id = blob_id
+        self.schema_identity = schema_identity
+        self.request_id = request_id
+        self.idempotency_key = idempotency_key
+
+
+def _unknown_run(run_id: str) -> JSONResponse:
+    """The one answer for unknown, malformed, and another tenant's (FR-066).
+
+    One function so the three cannot drift apart into three messages, which is
+    how an existence oracle gets written by accident.
+    """
+    return JSONResponse(
+        status_code=404,
+        content={"error": {"class": "RunNotFoundError", "message": "no such run here"}},
+    )
 
 
 def _deployment_of(request: Request) -> _Deployment:
@@ -370,6 +463,126 @@ def _router() -> APIRouter:
             )
 
         return _storeless_run_response(result)
+
+    @router.post("/documents/{blob_id}/runs", status_code=202)
+    async def submit_run(request: Request, blob_id: str, schema: str) -> Any:
+        """Accept a run and return before any stage executes.
+
+        The response carries a ``run_id`` and **omits** ``processing_id``, which
+        does not exist yet and cannot: it is the terminal artifact id, derived
+        from stage outputs (ADR-0013 §1). That is the whole reason this is a new
+        resource rather than a ``pending`` status on ``GET /v1/jobs``.
+        """
+        from docdoc.artifacts import ArtifactError
+        from docdoc.runs.errors import RunStateUnavailableError
+        from docdoc.runs.identity import DEFAULT_RETENTION, deadline, new_run_id, now
+        from docdoc.runs.model import DEFAULT_TENANT
+
+        deployment = _deployment_of(request)
+        if not deployment.has_runs:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": {
+                        "class": "RunStateUnavailableError",
+                        "message": (
+                            "this deployment accepts no asynchronous runs; set "
+                            "DOCDOC_RUN_DATABASE_URL and apply `docdoc migrate`"
+                        ),
+                    }
+                },
+            )
+        if not deployment.has_store:
+            raise _no_store_configured()
+
+        tenant = DEFAULT_TENANT
+        assert deployment.blobs is not None
+        # A malformed identity and an absent one get the same 404. The store
+        # raises `ArtifactError` for the first, which would surface as a 500 —
+        # and "the server broke" is the wrong thing to tell a caller who typed a
+        # bad identifier. The two synchronous routes still answer 500 here; that
+        # is pre-existing and FR-009 requires their status codes to be unchanged,
+        # so it is reported rather than fixed under this milestone.
+        try:
+            known = deployment.blobs.get(blob_id) is not None
+        except ArtifactError:
+            known = False
+        if not known:
+            return JSONResponse(
+                status_code=404,
+                content={"error": {"class": "UnknownBlob", "message": "no such document here"}},
+            )
+
+        if schema not in deployment.registry().identities():
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": {"class": "SchemaError", "message": "schema is not configured here"}
+                },
+            )
+
+        spec = _RunSpec(
+            tenant_id=tenant,
+            blob_id=blob_id,
+            schema_identity=schema,
+            request_id=request.headers.get("x-request-id"),
+            idempotency_key=request.headers.get("idempotency-key"),
+        )
+        started = now()
+        try:
+            run = deployment.runs().submit(
+                spec,
+                run_id=new_run_id(),
+                now=started,
+                expires_at=deadline(started, DEFAULT_RETENTION),
+            )
+        except RunStateUnavailableError as exc:
+            # Refused rather than accepted and dropped (FR-057). A run that
+            # cannot be recorded is work that will never be done and never be
+            # reported, which is the silent failure this status exists to avoid.
+            return JSONResponse(
+                status_code=503,
+                content={"error": {"class": type(exc).__name__, "message": str(exc)}},
+            )
+
+        return JSONResponse(
+            status_code=202,
+            content=RunAcceptedResponse(
+                run_id=str(run.run_id),
+                status=str(run.status),
+                created_at=run.created_at.isoformat(),
+            ).model_dump(mode="json"),
+        )
+
+    @router.get("/runs/{run_id}", response_model=RunStateResponse)
+    async def run_state(request: Request, run_id: str) -> Any:
+        """One of the five states, and never the result itself.
+
+        A succeeded run names its ``processing_id``; the unchanged
+        ``GET /v1/jobs/{processing_id}/result`` serves the result. One result
+        representation, reachable one way (FR-013).
+        """
+        from uuid import UUID
+
+        deployment = _deployment_of(request)
+        if not deployment.has_runs:
+            return _unknown_run(run_id)
+
+        from docdoc.runs.model import DEFAULT_TENANT
+
+        try:
+            identity = UUID(run_id)
+        except ValueError:
+            # A malformed identifier and an unknown one get the same answer: a
+            # different one would tell a caller which identifiers are well-formed
+            # enough to exist (FR-066).
+            return _unknown_run(run_id)
+
+        run = deployment.runs().get(identity, DEFAULT_TENANT)
+        if run is None:
+            return _unknown_run(run_id)
+
+        return RunStateResponse(**run.dump_public())
 
     @router.get("/schemas", response_model=SchemaListing)
     async def schemas(request: Request) -> Any:

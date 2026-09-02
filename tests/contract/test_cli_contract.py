@@ -57,7 +57,7 @@ def run(argv: Sequence[str], capsys: pytest.CaptureFixture[str]) -> tuple[int, s
 # -- §1 the command set ------------------------------------------------------
 
 
-def test_the_command_set_is_the_seven_the_contract_names() -> None:
+def test_the_command_set_is_the_eight_the_contract_names() -> None:
     parser = build_parser()
     subcommands = next(
         action for action in parser._actions if hasattr(action, "choices") and action.choices
@@ -73,6 +73,10 @@ def test_the_command_set_is_the_seven_the_contract_names() -> None:
         # whose absence would leave a deployment's schema to whichever worker
         # started first (FR-078).
         "migrate",
+        # Also Milestone 9. Blocks until signalled, which is what it is for, and
+        # takes no --concurrency: one run per process, concurrency is replicas
+        # (FR-025).
+        "worker",
     }
 
 
