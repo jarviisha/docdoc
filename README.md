@@ -218,7 +218,14 @@ export DOCDOC_MODEL_ADAPTERS=gemini              # adapter preference order, com
 export DOCDOC_GEMINI_MODEL=gemini-3.5-flash      # which model answers
 export GEMINI_API_KEY=...                        # or GOOGLE_API_KEY
 export DOCDOC_STORE_ROOT=/var/lib/docdoc         # where artifacts and blobs land — no default
+export DOCDOC_RUN_DATABASE_URL=postgresql://…    # run state, for asynchronous runs — no default
 ```
+
+`DOCDOC_RUN_DATABASE_URL` is needed only by the asynchronous run routes and the worker, and it has
+no default for the same reason `DOCDOC_STORE_ROOT` has none. A deployment that uses neither needs no
+database at all, and the library and the command line need one in no configuration. Apply the schema
+explicitly with `docdoc migrate`; nothing applies it on startup, because several workers booting at
+once would be several processes altering one table.
 
 Five more exist and are rarely worth touching:
 

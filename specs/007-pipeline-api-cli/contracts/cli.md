@@ -15,7 +15,13 @@ docdoc inspect --result PROCESSING_ID     # the same, read back from the store
 docdoc explain ARTIFACT_ID                # how this identity was derived, and its chain
 docdoc eval    MANIFEST --predictions DIR # score a golden set
 docdoc store   clear [--stage STAGE]      # all of it, or one stage (FR-019)
+docdoc migrate [--check]                  # apply the run-state schema (Milestone 9, FR-078)
 ```
+
+`migrate` was added by Milestone 9 and is the only command that touches a database. It is explicit
+because a schema change applied at process start is several workers racing to alter one table, and
+the winner decides what the deployment ends up with (FR-078). `--check` applies nothing and exits
+non-zero when anything is pending, which is the form a rollout gates on.
 
 `extract` and `inspect` are the same run with two renderings: `extract` reports the result,
 `inspect` reports where every value came from. Both are the Definition of Done; `inspect` is the half

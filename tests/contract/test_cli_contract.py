@@ -57,12 +57,23 @@ def run(argv: Sequence[str], capsys: pytest.CaptureFixture[str]) -> tuple[int, s
 # -- §1 the command set ------------------------------------------------------
 
 
-def test_the_command_set_is_the_six_the_contract_names() -> None:
+def test_the_command_set_is_the_seven_the_contract_names() -> None:
     parser = build_parser()
     subcommands = next(
         action for action in parser._actions if hasattr(action, "choices") and action.choices
     )
-    assert set(subcommands.choices) == {"parse", "extract", "inspect", "explain", "eval", "store"}
+    assert set(subcommands.choices) == {
+        "parse",
+        "extract",
+        "inspect",
+        "explain",
+        "eval",
+        "store",
+        # Milestone 9. The only command that touches a database, and the only one
+        # whose absence would leave a deployment's schema to whichever worker
+        # started first (FR-078).
+        "migrate",
+    }
 
 
 # -- §2 the two output forms -------------------------------------------------

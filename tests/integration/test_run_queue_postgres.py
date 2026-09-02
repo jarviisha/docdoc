@@ -1,0 +1,304 @@
+"""`PostgresRunQueue` against a real database.
+
+`tests/unit/test_claim_policy.py` already checks the *policy* against an
+in-memory fake, and this file deliberately does not repeat it. What only a real
+database can answer is whether `FOR UPDATE SKIP LOCKED` does what R8 claims when
+two workers reach for the queue at the same instant — a question no fake can
+pose, because the fake has no concurrency to lose.
+
+Skips itself when `DOCDOC_TEST_DATABASE_URL` is unset, exactly as the
+live-provider tests skip without credentials. `uv run pytest` on a machine with
+no database passes and says what it skipped.
+"""
+
+from __future__ import annotations
+
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+
+import pytest
+from tests.infra import require_database
+
+from docdoc.runs import migrations
+from docdoc.runs.errors import RunNotCancellableError, RunNotFoundError
+from docdoc.runs.identity import new_run_id
+from docdoc.runs.model import RunOutcome, RunStatus
+from docdoc.runs.postgres import PostgresRunQueue
+
+pytestmark = pytest.mark.postgres
+
+LEASE = timedelta(seconds=90)
+
+
+@dataclass
+class Spec:
+    tenant_id: str = "default"
+    blob_id: str = "sha256:blob"
+    schema_identity: str = "invoice@1"
+    request_id: str | None = None
+    idempotency_key: str | None = None
+
+
+@pytest.fixture
+def queue() -> PostgresRunQueue:
+    """A migrated, empty queue.
+
+    Truncates rather than using a transaction-per-test, because the concurrency
+    test below needs two real connections that can see each other's committed
+    work — which a shared open transaction would prevent, and would prevent in a
+    way that made `SKIP LOCKED` look like it worked.
+    """
+    psycopg = pytest.importorskip("psycopg")
+    dsn = require_database()
+
+    with psycopg.connect(dsn) as connection:
+        migrations.apply(connection, now=datetime.now(UTC))
+        connection.execute("TRUNCATE runs")
+
+    return PostgresRunQueue(lambda: psycopg.connect(dsn))
+
+
+def _submit(queue: PostgresRunQueue, *, at: datetime, **kwargs: object):
+    run = queue.submit(
+        Spec(**kwargs),  # type: ignore[arg-type]
+        run_id=new_run_id(),
+        now=at,
+        expires_at=at + timedelta(days=30),
+    )
+    return run.run_id
+
+
+def test_the_migration_is_idempotent(queue: PostgresRunQueue) -> None:
+    """FR-078: safe to re-run, because a deployment pipeline will."""
+    psycopg = pytest.importorskip("psycopg")
+    with psycopg.connect(require_database()) as connection:
+        assert migrations.apply(connection, now=datetime.now(UTC)) == []
+        assert migrations.pending(connection) == []
+
+
+def test_two_workers_racing_never_receive_the_same_run(queue: PostgresRunQueue) -> None:
+    """The question a fake cannot pose (FR-016).
+
+    Ten runs, eight threads claiming as fast as they can. If `SKIP LOCKED` were
+    absent the threads would serialise on the oldest row; if the claim were two
+    statements instead of one, two of them would win the same run.
+    """
+    now = datetime.now(UTC)
+    for offset in range(10):
+        _submit(queue, at=now + timedelta(milliseconds=offset))
+
+    def claim(worker: int):
+        return queue.claim(
+            worker_id=f"w{worker}", now=now + timedelta(minutes=1), lease=LEASE, max_attempts=3
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        claimed = [run for run in pool.map(claim, range(8)) if run is not None]
+
+    ids = [run.run_id for run in claimed]
+    assert len(ids) == 8, "eight workers, ten runs: every worker should get one"
+    assert len(set(ids)) == 8, "two workers were handed the same run"
+
+
+def test_a_locked_row_is_skipped_rather_than_waited_on(queue: PostgresRunQueue) -> None:
+    """SKIP LOCKED's actual contract: the second worker takes the *next* run."""
+    now = datetime.now(UTC)
+    first = _submit(queue, at=now)
+    second = _submit(queue, at=now + timedelta(seconds=1))
+
+    a = queue.claim(worker_id="w1", now=now, lease=LEASE, max_attempts=3)
+    b = queue.claim(worker_id="w2", now=now, lease=LEASE, max_attempts=3)
+
+    assert a is not None
+    assert b is not None
+    assert a.run_id == first
+    assert b.run_id == second
+
+
+def test_the_check_constraint_refuses_a_failed_run_with_a_result(
+    queue: PostgresRunQueue,
+) -> None:
+    """The invariant, enforced by the database and not only by the model.
+
+    The model is not the only thing that can write this row — a migration, a
+    repair script, or a future method could — so ADR-0013 §1's two identities are
+    kept distinguishable at the level that no code path can bypass.
+    """
+    psycopg = pytest.importorskip("psycopg")
+    now = datetime.now(UTC)
+    run_id = _submit(queue, at=now)
+
+    with (
+        psycopg.connect(require_database()) as connection,
+        pytest.raises(Exception, match="processing_id_belongs_to_success"),
+    ):
+        connection.execute(
+            "UPDATE runs SET status = 'failed', processing_id = 'sha256:x' WHERE run_id = %s",
+            (run_id,),
+        )
+
+
+def test_a_lapsed_lease_at_the_attempt_limit_is_abandoned_not_redelivered(
+    queue: PostgresRunQueue,
+) -> None:
+    """FR-021 and SC-006, against the real claim query."""
+    now = datetime.now(UTC)
+    run_id = _submit(queue, at=now)
+
+    at = now
+    for _ in range(3):
+        assert queue.claim(worker_id="w", now=at, lease=LEASE, max_attempts=3) is not None
+        at += LEASE + timedelta(seconds=1)
+
+    assert queue.claim(worker_id="w", now=at, lease=LEASE, max_attempts=3) is None
+
+    run = queue.get(run_id, "default")
+    assert run is not None
+    assert run.status is RunStatus.FAILED
+    assert run.error_class == "RunAbandonedError"
+
+
+def test_idempotency_is_enforced_by_the_index_not_by_a_read(
+    queue: PostgresRunQueue,
+) -> None:
+    """FR-011 under concurrency, which is the case the index exists for."""
+    now = datetime.now(UTC)
+
+    def submit(_: int):
+        return queue.submit(
+            Spec(idempotency_key="k1"),
+            run_id=new_run_id(),
+            now=now,
+            expires_at=now + timedelta(days=30),
+        ).run_id
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        ids = set(pool.map(submit, range(4)))
+
+    assert len(ids) == 1, "four concurrent retries of one key produced more than one run"
+
+
+def test_the_same_key_under_two_tenants_is_two_runs(queue: PostgresRunQueue) -> None:
+    now = datetime.now(UTC)
+    a = _submit(queue, at=now, tenant_id="acme", idempotency_key="k1")
+    b = _submit(queue, at=now, tenant_id="other", idempotency_key="k1")
+
+    assert a != b
+
+
+def test_stage_outcomes_survive_a_round_trip_through_jsonb(
+    queue: PostgresRunQueue,
+) -> None:
+    """FR-036: a failed run keeps what the completed stages produced."""
+    now = datetime.now(UTC)
+    run_id = _submit(queue, at=now)
+    queue.claim(worker_id="w1", now=now, lease=LEASE, max_attempts=3)
+
+    queue.finish(
+        run_id,
+        RunOutcome(
+            status=RunStatus.FAILED,
+            failed_stage="extract",
+            error_class="ProviderError",
+            stage_outcomes=(
+                {  # type: ignore[arg-type]
+                    "stage": "parse",
+                    "status": "executed",
+                    "artifact_id": "sha256:p",
+                    "duration_ms": 812,
+                },
+            ),
+        ),
+        now=now,
+    )
+
+    run = queue.get(run_id, "default")
+    assert run is not None
+    assert run.failed_stage == "extract"
+    assert run.error_class == "ProviderError"
+    assert len(run.stage_outcomes) == 1
+    assert run.stage_outcomes[0].artifact_id == "sha256:p"
+    assert run.stage_outcomes[0].duration_ms == 812
+
+
+def test_finishing_a_terminal_run_does_not_overwrite_its_conclusion(
+    queue: PostgresRunQueue,
+) -> None:
+    """A crash between the pipeline returning and `finish` committing is safe.
+
+    The run is redelivered and the second attempt must not overwrite what the
+    first one concluded — which is why the UPDATE is predicated on the run still
+    being claimable.
+    """
+    now = datetime.now(UTC)
+    run_id = _submit(queue, at=now)
+    queue.claim(worker_id="w1", now=now, lease=LEASE, max_attempts=3)
+    queue.finish(
+        run_id, RunOutcome(status=RunStatus.SUCCEEDED, processing_id="sha256:first"), now=now
+    )
+
+    queue.finish(run_id, RunOutcome(status=RunStatus.FAILED, error_class="Late"), now=now)
+
+    run = queue.get(run_id, "default")
+    assert run is not None
+    assert run.status is RunStatus.SUCCEEDED
+    assert run.processing_id == "sha256:first"
+
+
+# -- cancellation --------------------------------------------------------------
+
+
+def test_cancelling_a_queued_run_makes_it_unclaimable(queue: PostgresRunQueue) -> None:
+    now = datetime.now(UTC)
+    run_id = _submit(queue, at=now)
+
+    cancelled = queue.cancel(run_id, "default", now=now)
+
+    assert cancelled.status is RunStatus.CANCELLED
+    assert queue.claim(worker_id="w1", now=now, lease=LEASE, max_attempts=3) is None
+
+
+def test_cancelling_a_running_run_records_the_request_and_still_reads_running(
+    queue: PostgresRunQueue,
+) -> None:
+    """FR-029, against the column that carries it.
+
+    `status` stays `running` because a provider call already in flight completes
+    and is billed. The request lives in `cancel_requested`, which the worker
+    reads at the next stage boundary — the column data-model.md originally
+    omitted.
+    """
+    now = datetime.now(UTC)
+    run_id = _submit(queue, at=now)
+    queue.claim(worker_id="w1", now=now, lease=LEASE, max_attempts=3)
+
+    run = queue.cancel(run_id, "default", now=now)
+
+    assert run.status is RunStatus.RUNNING
+    assert queue.is_cancelled(run_id) is True
+
+
+def test_cancelling_a_terminal_run_is_refused_naming_the_state(
+    queue: PostgresRunQueue,
+) -> None:
+    now = datetime.now(UTC)
+    run_id = _submit(queue, at=now)
+    queue.claim(worker_id="w1", now=now, lease=LEASE, max_attempts=3)
+    queue.finish(run_id, RunOutcome(status=RunStatus.SUCCEEDED, processing_id="x"), now=now)
+
+    with pytest.raises(RunNotCancellableError, match="succeeded"):
+        queue.cancel(run_id, "default", now=now)
+
+
+def test_cancelling_another_tenants_run_is_indistinguishable_from_a_stranger(
+    queue: PostgresRunQueue,
+) -> None:
+    """FR-066: the same error for "not yours" and "never existed"."""
+    now = datetime.now(UTC)
+    run_id = _submit(queue, at=now, tenant_id="acme")
+
+    with pytest.raises(RunNotFoundError):
+        queue.cancel(run_id, "other", now=now)
+    with pytest.raises(RunNotFoundError):
+        queue.cancel(new_run_id(), "other", now=now)

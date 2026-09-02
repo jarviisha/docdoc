@@ -68,13 +68,13 @@ Single project: `src/docdoc/`, `tests/` at repository root, per plan.md's Struct
 
 - [X] T015 Define the `RunQueue` Protocol in `src/docdoc/runs/queue.py` with `now` and `run_id` as parameters on every method that needs them, never read inside (contracts/runs-layer.md)
 - [X] T016 [P] Implement `InMemoryRunQueue` in `tests/fixtures/run_queue.py` satisfying the same Protocol, so claim policy is testable with no database
-- [ ] T017 Write `src/docdoc/runs/migrations/0001_runs.sql`: the `runs` table, the check constraint enforcing `processing_id IS NOT NULL` **iff** `status = 'succeeded'`, and the four indexes of data-model.md. Include `tenant_id` from creation — it is the column that cannot be added later (FR-062) — and add **no index on `expires_at`**, which nothing in this milestone queries
-- [ ] T018 Implement the migration runner and `docdoc migrate [--check]` in `src/docdoc/cli/commands/migrate.py`: numbered plain-SQL files, an applied-versions table, idempotent, never run implicitly at process start (R7, FR-078)
-- [ ] T019 Implement `PostgresRunQueue.submit()` and `.get()` in `src/docdoc/runs/postgres.py`, with tenant scoping expressed **in the query** rather than as a check after the fetch (FR-063, FR-066)
-- [ ] T020 Implement `PostgresRunQueue.claim()` using the single-statement `UPDATE … WHERE run_id = (SELECT … FOR UPDATE SKIP LOCKED)` of R8 in `src/docdoc/runs/postgres.py`, with `now` passed as a parameter
-- [ ] T021 Implement `.heartbeat()` returning `False` when the lease was already lost, `.release()`, and `.finish()` in `src/docdoc/runs/postgres.py`
-- [ ] T022 Implement `.cancel()` in `src/docdoc/runs/postgres.py`: immediate for `queued`, request-only for `running`, refused with the current state named for terminal states, idempotent for `cancelled` (FR-027, FR-031, FR-034)
-- [ ] T023 Implement idempotency in `src/docdoc/runs/postgres.py` via the partial unique index on `(tenant_id, idempotency_key)`, returning the original run on conflict rather than reading first (R15, FR-011)
+- [X] T017 Write `src/docdoc/runs/migrations/0001_runs.sql`: the `runs` table, the check constraint enforcing `processing_id IS NOT NULL` **iff** `status = 'succeeded'`, and the four indexes of data-model.md. Include `tenant_id` from creation — it is the column that cannot be added later (FR-062) — and add **no index on `expires_at`**, which nothing in this milestone queries
+- [X] T018 Implement the migration runner and `docdoc migrate [--check]` in `src/docdoc/cli/commands/migrate.py`: numbered plain-SQL files, an applied-versions table, idempotent, never run implicitly at process start (R7, FR-078)
+- [X] T019 Implement `PostgresRunQueue.submit()` and `.get()` in `src/docdoc/runs/postgres.py`, with tenant scoping expressed **in the query** rather than as a check after the fetch (FR-063, FR-066)
+- [X] T020 Implement `PostgresRunQueue.claim()` using the single-statement `UPDATE … WHERE run_id = (SELECT … FOR UPDATE SKIP LOCKED)` of R8 in `src/docdoc/runs/postgres.py`, with `now` passed as a parameter
+- [X] T021 Implement `.heartbeat()` returning `False` when the lease was already lost, `.release()`, and `.finish()` in `src/docdoc/runs/postgres.py`
+- [X] T022 Implement `.cancel()` in `src/docdoc/runs/postgres.py`: immediate for `queued`, request-only for `running`, refused with the current state named for terminal states, idempotent for `cancelled` (FR-027, FR-031, FR-034)
+- [X] T023 Implement idempotency in `src/docdoc/runs/postgres.py` via the partial unique index on `(tenant_id, idempotency_key)`, returning the original run on conflict rather than reading first (R15, FR-011)
 
 ### Foundational tests
 
@@ -82,7 +82,7 @@ Single project: `src/docdoc/`, `tests/` at repository root, per plan.md's Struct
 - [X] T025 [P] Unit-test claim policy against `InMemoryRunQueue` in `tests/unit/test_claim_policy.py`: oldest-first (FR-024), lease expiry making a run eligible, attempt increment, and the attempt limit — all at arbitrary `now` values, with no database
 - [X] T026 [P] Unit-test determinism confinement in `tests/unit/test_runs_clock_confinement.py`: assert no module in `docdoc.runs` except `identity.py` imports `uuid`, `time`, `datetime`, `random`, or `secrets` (R11)
 - [X] T027 [P] Assert `uv run lint-imports` passes with the new layer and independence contracts, and that the existing `tests/unit/test_kernel_purity.py` is unmodified (FR-073)
-- [ ] T028 Integration-test `PostgresRunQueue` in `tests/integration/test_run_queue_postgres.py` under the `postgres` marker: concurrent claims never hand one run to two workers, and `SKIP LOCKED` lets a second worker claim the second-oldest rather than blocking
+- [X] T028 Integration-test `PostgresRunQueue` in `tests/integration/test_run_queue_postgres.py` under the `postgres` marker: concurrent claims never hand one run to two workers, and `SKIP LOCKED` lets a second worker claim the second-oldest rather than blocking
 
 **Checkpoint**: runs can be submitted, claimed, and finished from Python. No HTTP, no worker process yet.
 

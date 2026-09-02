@@ -25,6 +25,7 @@ store under `processing_id` (ADR-0013 §1).
 | `failed_stage` | text | yes | completion | Copied from `PipelineResult.failed_stage` |
 | `error_class` | text | yes | completion | A class **name**, never a message (FR-035, FR-037) |
 | `stage_outcomes` | jsonb | yes | completion | Projection of `PipelineResult.outcomes`; see below |
+| `cancel_requested` | boolean | no | cancel | Cancellation of a *running* run is a request, not a transition (FR-028, FR-029) — `status` stays `running`, so the request needs its own column. Added 2026-08-28, when implementing `is_cancelled` against a real table showed the model had described the behaviour without the field that carries it |
 | `request_id` | text | yes | submission | The caller's correlation id, forwarded into `pipeline.run()` unchanged |
 | `idempotency_key` | text | yes | submission | Unique per tenant when present (R15) |
 | `created_at` | timestamptz | no | `runs.identity` | |

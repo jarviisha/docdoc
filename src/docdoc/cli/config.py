@@ -71,8 +71,10 @@ if TYPE_CHECKING:
     from docdoc.ingest import Limits
 
 __all__ = [
+    "COMMAND_SCOPED",
     "ENVIRONMENT_ONLY",
     "FLAG_FOR_SETTING",
+    "RUN_DATABASE_URL_ENV",
     "STORE_ROOT_ENV",
     "Settings",
     "add_common_arguments",
@@ -86,6 +88,11 @@ STORE_ROOT_ENV = "DOCDOC_STORE_ROOT"
 _SCHEMA_PATHS_ENV = "DOCDOC_SCHEMA_PATHS"
 _ADAPTERS_ENV = "DOCDOC_MODEL_ADAPTERS"
 _ECHO_FIXTURES_ENV = "DOCDOC_ECHO_FIXTURES"
+
+#: Milestone 9. No default, for the reason ``STORE_ROOT_ENV`` has none: where run
+#: state accumulates is an operator's decision, and a command that invented a
+#: database to write to would be making it for them.
+RUN_DATABASE_URL_ENV = "DOCDOC_RUN_DATABASE_URL"
 
 #: The docstring's table, as data. Declared so the parity check can read it
 #: rather than re-parse prose, and so a flag renamed here fails that check in the
@@ -105,6 +112,23 @@ FLAG_FOR_SETTING: dict[str, str] = {
     STORE_ROOT_ENV: "--store",
     "DOCDOC_MAX_DOCUMENT_BYTES": "--max-document-bytes",
     "DOCDOC_MAX_PAGES": "--max-pages",
+    "DOCDOC_RUN_DATABASE_URL": "--run-database-url",
+}
+
+#: Settings whose flag lives on some commands and not all of them.
+#:
+#: Every setting before Milestone 9 was global -- `--store` is as meaningful to
+#: `docdoc parse` as to `docdoc extract` -- so `add_common_arguments` put each on
+#: every subcommand and the parity check asserted exactly that.
+#:
+#: `DOCDOC_RUN_DATABASE_URL` is the first that is not. Only commands that touch
+#: run state can use it, and putting `--run-database-url` on `docdoc parse` would
+#: add a flag that does nothing to the command it appears on -- which is the
+#: "second vocabulary" FR-031 exists to prevent, arriving from the other
+#: direction. So the map records the scope rather than the setting pretending to
+#: a reach it does not have.
+COMMAND_SCOPED: dict[str, tuple[str, ...]] = {
+    "DOCDOC_RUN_DATABASE_URL": ("migrate",),
 }
 
 #: Settings that deliberately have no flag, each with the reason, because an
@@ -212,6 +236,7 @@ class Settings:
     #: keeps one precedence rule instead of two — see :meth:`limits`.
     max_document_bytes: int | None = None
     max_pages: int | None = None
+    run_database_url: str | None = None
 
     @classmethod
     def resolve(cls, args: argparse.Namespace) -> Settings:
@@ -234,6 +259,11 @@ class Settings:
             ),
             max_document_bytes=getattr(args, "max_document_bytes", None),
             max_pages=getattr(args, "max_pages", None),
+            run_database_url=(
+                getattr(args, "run_database_url", None)
+                or os.environ.get(RUN_DATABASE_URL_ENV)
+                or None
+            ),
         )
 
     # -- the things a command actually asks for -------------------------------

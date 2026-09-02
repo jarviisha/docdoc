@@ -27,7 +27,7 @@ from pathlib import Path
 import pytest
 
 from docdoc.cli import EXIT_BAD_INVOCATION, build_parser, main
-from docdoc.cli.config import ENVIRONMENT_ONLY, FLAG_FOR_SETTING, Settings
+from docdoc.cli.config import COMMAND_SCOPED, ENVIRONMENT_ONLY, FLAG_FOR_SETTING, Settings
 
 # The canonical list of every configuration name the code reads. Imported rather
 # than restated: a third copy of this list is how the second and third would
@@ -92,15 +92,24 @@ def _option_strings(parser: argparse.ArgumentParser) -> set[str]:
 
 
 def test_every_mapped_flag_exists_on_the_root_parser() -> None:
-    """The map is only worth trusting if it describes the real parser."""
+    """The map is only worth trusting if it describes the real parser.
+
+    Command-scoped flags are excluded: they live on their own subparsers by
+    design, and `_option_strings` on the root sees only the shared set. The
+    subcommand test below is what checks those, from both directions.
+    """
     available = _option_strings(build_parser())
-    missing = sorted(flag for flag in FLAG_FOR_SETTING.values() if flag not in available)
+    missing = sorted(
+        flag
+        for setting, flag in FLAG_FOR_SETTING.items()
+        if setting not in COMMAND_SCOPED and flag not in available
+    )
     assert not missing, f"named in FLAG_FOR_SETTING and absent from the parser: {missing}"
 
 
 @pytest.mark.parametrize(
     "command",
-    ["parse", "extract", "inspect", "explain", "eval"],
+    ["parse", "extract", "inspect", "explain", "eval", "migrate"],
 )
 def test_every_mapped_flag_exists_on_each_subcommand(command: str) -> None:
     """`docdoc extract --store` must work as readily as `docdoc --store extract`.
@@ -116,8 +125,26 @@ def test_every_mapped_flag_exists_on_each_subcommand(command: str) -> None:
     ]
     assert subparsers, "the parser grew no subcommands"
     available = _option_strings(subparsers[0].choices[command])
-    missing = sorted(flag for flag in FLAG_FOR_SETTING.values() if flag not in available)
+
+    expected = {
+        setting: flag
+        for setting, flag in FLAG_FOR_SETTING.items()
+        if command in COMMAND_SCOPED.get(setting, ()) or setting not in COMMAND_SCOPED
+    }
+    missing = sorted(flag for flag in expected.values() if flag not in available)
     assert not missing, f"`docdoc {command}` is missing {missing}"
+
+    # The other half: a scoped flag must not leak onto commands it means nothing
+    # to. `--run-database-url` on `docdoc parse` would be a flag that does
+    # nothing to the command carrying it.
+    leaked = sorted(
+        flag
+        for setting, flag in FLAG_FOR_SETTING.items()
+        if setting in COMMAND_SCOPED
+        and command not in COMMAND_SCOPED[setting]
+        and flag in available
+    )
+    assert not leaked, f"`docdoc {command}` carries {leaked}, which it cannot use"
 
 
 # -- flag beats environment beats default, for the two new settings -----------

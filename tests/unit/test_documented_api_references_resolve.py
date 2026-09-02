@@ -238,7 +238,7 @@ CONFIG_MODULES = {
     "docdoc.extraction.adapter_registry": ("ADAPTERS_ENV", "ECHO_FIXTURES_ENV"),
     "docdoc.extraction.adapters.gemini": ("MODEL_ENV",),
     "docdoc.ingest.parsers.azure_di": ("ENDPOINT_ENV", "KEY_ENV"),
-    "docdoc.cli.config": ("STORE_ROOT_ENV",),
+    "docdoc.cli.config": ("STORE_ROOT_ENV", "RUN_DATABASE_URL_ENV"),
     "docdoc.grounding.view": ("MATCH_VIEW_CACHE_ENV",),
     # `settings`, not `app`: `app` imports FastAPI, and this check runs on a
     # base install that has no extras.

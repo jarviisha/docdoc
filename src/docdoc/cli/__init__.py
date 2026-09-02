@@ -33,7 +33,7 @@ import argparse
 import sys
 from typing import TYPE_CHECKING, Any
 
-from docdoc.cli.config import Settings, add_common_arguments
+from docdoc.cli.config import RUN_DATABASE_URL_ENV, Settings, add_common_arguments
 from docdoc.cli.render import Rendering, emit, warn
 
 if TYPE_CHECKING:
@@ -121,6 +121,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--stage", default=None, metavar="STAGE", help="parse|extract|ground|validate"
     )
     add_common_arguments(clear)
+
+    # Explicit, never on boot (FR-078). With several workers starting at once an
+    # implicit migration is several processes altering one table, and the schema
+    # a deployment ends up with depends on which container won.
+    migrate = subcommands.add_parser("migrate", help="apply the run-state schema")
+    migrate.add_argument(
+        "--check",
+        action="store_true",
+        help="report pending migrations and apply nothing; non-zero if any are pending",
+    )
+    migrate.add_argument(
+        "--run-database-url",
+        default=None,
+        metavar="URL",
+        help=f"where run state lives. Overrides ${RUN_DATABASE_URL_ENV}",
+    )
+    add_common_arguments(migrate)
 
     return parser
 
@@ -213,7 +230,10 @@ def _dispatch(args: argparse.Namespace) -> Any:
     install has to stay usable with no extras at all (FR-053, SC-013).
     """
     from docdoc.cli.commands import eval as eval_command
-    from docdoc.cli.commands import explain, extract, inspect, parse, store
+    from docdoc.cli.commands import explain, extract, inspect, migrate, parse, store
+
+    if args.command == "migrate":
+        return migrate.run
 
     if args.command == "store":
         if getattr(args, "action", None) != "clear":
