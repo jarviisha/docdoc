@@ -82,6 +82,32 @@ api = ["fastapi>=0.110", "uvicorn>=0.29"]
 # licence before it was chosen on merit, because the server-side alternative
 # would have made AGPL-3.0 a required path.
 ui = ["docdoc-ui==0.1.0"]
+# Run state for Milestone 9, and the only database this project has. An extra
+# rather than a base dependency for the reason every extra here exists: the base
+# install is the deterministic layers and nothing else (SC-013). A deployment
+# that uses neither the run routes nor a worker needs no database at all, and the
+# library and command line need none in any configuration.
+#
+# psycopg 3 rather than asyncpg because the deployment needs both shapes from one
+# package: the worker is synchronous because `pipeline.run()` is, and the API is
+# `async def` throughout. asyncpg would cover only the second (research R6).
+#
+# No ORM and no migration framework. There is one table, the queries are a
+# handful of statements, and the claim query needs `FOR UPDATE SKIP LOCKED` --
+# which an ORM obscures rather than helps. SQLAlchemy would be the largest
+# dependency in the project, arriving to manage one table (research R6, R7).
+postgres = ["psycopg[binary,pool]>=3.1"]
+# Shared object storage, so that two workers can reuse each other's artifacts.
+# Without it, each worker has a private `DOCDOC_STORE_ROOT` and scaling produces
+# correct results while silently re-paying for every parse -- the failure mode
+# SC-005 exists to catch.
+#
+# `boto3` is infrastructure the sanctioned stack names ("local filesystem or
+# S3-compatible object storage"), not a document-processing provider SDK, so
+# Principle IV's adapter-directory rule does not reach it. It is imported lazily
+# inside `S3ArtifactStore.__init__` all the same, so a base install neither
+# imports nor requires it (research R5).
+s3 = ["boto3>=1.34"]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
@@ -187,6 +213,20 @@ disallow_untyped_calls = false
 module = ["google.*"]
 ignore_missing_imports = true
 
+# boto3 ships no py.typed marker, so the lazy import inside `S3ArtifactStore`'s
+# constructor is an error under --strict. Same shape and same narrowness as the
+# `google.*` override above: this suppresses the *missing stubs* for one third
+# party, not any check on docdoc's own code. Everything `docdoc.artifacts.s3`
+# hands onward is annotated, and the client itself is `Any` at the boundary
+# exactly as the parser adapters' SDKs are.
+#
+# `boto3-stubs` was the alternative and is a large optional dependency added to
+# type-check nine call sites, which is not a trade this project has made anywhere
+# else.
+[[tool.mypy.overrides]]
+module = ["boto3", "boto3.*", "botocore.*"]
+ignore_missing_imports = true
+
 # ---------------------------------------------------------------------------
 # pytest
 # ---------------------------------------------------------------------------
@@ -198,6 +238,13 @@ markers = [
     # Live provider calls. These need credentials and network; the unit,
     # property, and contract suites must pass without them (Principle XII).
     "provider: live document-intelligence service tests (select with -m provider)",
+    # Milestone 9's infrastructure. These follow the `provider` pattern exactly:
+    # the mark labels them, and each test *skips itself* when its dependency is
+    # unconfigured, rather than being deselected by `addopts`. That is what keeps
+    # `uv run pytest` honest for a contributor with neither a database nor a
+    # bucket -- the suite runs, and says what it skipped (SC-013).
+    "postgres: needs DOCDOC_TEST_DATABASE_URL (select with -m postgres)",
+    "s3: needs DOCDOC_TEST_S3_ENDPOINT (select with -m s3)",
 ]
 
 # ---------------------------------------------------------------------------
@@ -263,10 +310,17 @@ include_external_packages = true
 # reader would reasonably guess differently.
 #
 # `artifacts` sits directly ABOVE the kernel, which is the lowest position that is
-# true: it depends on `pydantic` and two kernel hashing helpers and on nothing
-# else. It stores whole result models without importing a single one of them --
-# the caller names the model at the call site -- and that is what keeps it here
-# instead of somewhere near the top next to the code it serves.
+# true: it depends on `pydantic`, two kernel hashing helpers, and -- since
+# Milestone 9 -- `boto3`, lazily and behind the `s3` extra. It stores whole result
+# models without importing a single one of them -- the caller names the model at
+# the call site -- and that is what keeps it here instead of somewhere near the
+# top next to the code it serves.
+#
+# The `boto3` clause is new and this comment used to end "and on nothing else".
+# `S3ArtifactStore` lives here because it implements a protocol this layer
+# defines, and separating the two would force one of them to import across a
+# boundary. The import is inside the constructor, so a base install still
+# acquires neither the dependency nor the import (research R5, SC-013).
 #
 # `pipeline` sits directly ABOVE `validation`, the highest stage it drives, rather
 # than above `evaluation` where its milestone might suggest. Inserting it here
@@ -284,9 +338,22 @@ include_external_packages = true
 [[tool.importlinter.contracts]]
 name = "docdoc layers (Constitution Principle X)"
 type = "layers"
+#
+# Milestone 9 adds `runs`, and it shares a position with `recording` rather than
+# taking one of its own. It must sit below `api` and `cli` (both call it) and
+# above `pipeline` (it calls that); between those, its only neighbour is
+# `recording`, and the two share nothing. `recording` drives the pipeline to
+# produce a prediction set; `runs` drives it to serve a request. An ordered
+# position would grant a permission neither needs -- the same argument made for
+# `api : cli` below -- so they are siblings, separated by an independence
+# contract. See specs/009-asynchronous-runs/research.md R10.
+#
+# The total order then forces `runs > evaluation`, which `runs` does not import.
+# That is the same harmless artefact already noted above for `evaluation >
+# pipeline`, and preferable to a dozen pairwise contracts nobody will maintain.
 layers = [
     "docdoc.api : docdoc.cli",
-    "docdoc.recording",
+    "docdoc.recording : docdoc.runs",
     "docdoc.evaluation",
     "docdoc.pipeline",
     "docdoc.validation",
@@ -309,6 +376,61 @@ type = "independence"
 modules = [
     "docdoc.api",
     "docdoc.cli",
+]
+
+# Siblings for the same reason, one layer down. `recording` produces a prediction
+# set for evaluation; `runs` accepts a request and hands it to a worker. Neither
+# has any business importing the other, and sharing a layer position does not say
+# so on its own (specs/009 research R10, FR-070).
+[[tool.importlinter.contracts]]
+name = "recording and runs are siblings, not a stack (FR-070)"
+type = "independence"
+modules = [
+    "docdoc.recording",
+    "docdoc.runs",
+]
+
+# FR-044 has two halves and the layers contract only carries one of them.
+#
+# "The worker MUST NOT import the API layer" follows from position: `runs` is
+# below `api`. "The API MUST NOT import the worker's execution loop" does NOT --
+# `api` sits *above* `runs` and may therefore import anything in it, including
+# `worker.py`. Without this contract that half of the requirement cannot fail,
+# and a requirement that cannot fail is not a requirement. /speckit-analyze
+# raised it on exactly that ground.
+#
+# The API needs the queue and the model; it never needs the loop. An API process
+# that imported it would be one refactor away from executing runs in the request
+# it was built to stop executing runs in.
+[[tool.importlinter.contracts]]
+name = "the API cannot reach the worker's execution loop (FR-044)"
+type = "forbidden"
+source_modules = ["docdoc.api"]
+forbidden_modules = ["docdoc.runs.worker"]
+
+# FR-026 is the only functional requirement in Milestone 9 that names technology,
+# and it names it as a prohibition carried over from the constitution's
+# deferred-technology list: no message broker, no coordinator, no scheduler
+# process. The queue is a table claimed with `FOR UPDATE SKIP LOCKED`.
+#
+# Stated as a contract rather than left to review, because the constitution's
+# rationale -- "most IDP projects fail ... by building distributed infrastructure
+# before they have a correct document model" -- describes a pressure that arrives
+# later, in a PR nobody reads as closely as this one. A prohibition with no
+# automated guard is a comment.
+[[tool.importlinter.contracts]]
+name = "the run queue is a table, not a broker (FR-026)"
+type = "forbidden"
+source_modules = ["docdoc.runs"]
+forbidden_modules = [
+    "celery",
+    "kombu",
+    "redis",
+    "kafka",
+    "confluent_kafka",
+    "temporalio",
+    "rq",
+    "dramatiq",
 ]
 
 # Grounding is deterministic all the way down: no network, no credentials, no

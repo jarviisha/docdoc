@@ -1,0 +1,65 @@
+# What must not enter the build context.
+#
+# The first three groups are correctness, not size: `.venv/` holds a Python
+# built for the host and would shadow the one installed in the image, `.env`
+# holds credentials that would be baked into a layer readable by anyone who
+# pulls the image, and `.git/` carries the whole history of a repository whose
+# specs are larger than its code.
+
+.venv/
+venv/
+.env
+.env.*
+.git/
+.github/
+
+# Build and cache output. Reproducible from source, and stale in an image.
+dist/
+build/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+.import_linter_cache/
+.coverage
+htmlcov/
+# Nothing here writes one — logging goes to stdout — but a developer who
+# redirected a local run into the tree would otherwise bake its contents, which
+# include identifiers and paths, into a layer anyone pulling the image can read.
+*.log
+*.log.*
+ui/node_modules/
+ui/dist/
+
+# Design history. It governs the code and does not run.
+specs/
+docs/
+.specify/
+.claude/
+*.md
+
+# …except this one, which is a **build input**. `pyproject.toml` declares
+# `readme = "README.md"`, so hatchling reads it while building the wheel, and
+# without it `uv pip install .` fails with a file-not-found that names a path
+# the developer can see on disk — the most confusing shape a build error has.
+#
+# The exclusion above is still right: every other Markdown file in this
+# repository is design history and none of it runs. This is the one that is not
+# documentation at all from the build's point of view; it is metadata the
+# packaging backend requires.
+!README.md
+
+# Test fixtures include whole PDFs. The image runs a service; it does not run
+# the suite, and a scanned invoice is not a runtime dependency.
+tests/
+datasets/
+
+# Local editor and OS noise.
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

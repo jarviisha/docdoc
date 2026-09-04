@@ -33,7 +33,8 @@ import argparse
 import sys
 from typing import TYPE_CHECKING, Any
 
-from docdoc.cli.config import Settings, add_common_arguments
+from docdoc.artifacts.paths import DEFAULT_TENANT_ENV
+from docdoc.cli.config import RUN_DATABASE_URL_ENV, Settings, add_common_arguments
 from docdoc.cli.render import Rendering, emit, warn
 
 if TYPE_CHECKING:
@@ -122,6 +123,65 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_common_arguments(clear)
 
+    # Explicit, never on boot (FR-078). With several workers starting at once an
+    # implicit migration is several processes altering one table, and the schema
+    # a deployment ends up with depends on which container won.
+    migrate = subcommands.add_parser("migrate", help="apply the run-state schema")
+    migrate.add_argument(
+        "--check",
+        action="store_true",
+        help="report pending migrations and apply nothing; non-zero if any are pending",
+    )
+    migrate.add_argument(
+        "--run-database-url",
+        default=None,
+        metavar="URL",
+        help=f"where run state lives. Overrides ${RUN_DATABASE_URL_ENV}",
+    )
+    # On `migrate` and nowhere else. This is the command that *records* which
+    # tenant owns content written before tenants existed, so it is the one
+    # invocation where naming that tenant is an argument rather than a statement
+    # about the deployment. On `parse` or `extract` a flag would let one
+    # invocation disagree with the processes around it about where content lives
+    # — which is exactly what the recorded value exists to prevent.
+    migrate.add_argument(
+        "--default-tenant",
+        default=None,
+        metavar="TENANT",
+        help=f"who owns content written before tenants existed. Overrides ${DEFAULT_TENANT_ENV}",
+    )
+    add_common_arguments(migrate)
+
+    # One run at a time, and no --concurrency. Concurrency is replica count
+    # (FR-025): a threaded worker lets one long parse starve a sibling's
+    # heartbeat until it loses a lease it is still executing.
+    worker = subcommands.add_parser("worker", help="claim runs and execute them")
+    worker.add_argument(
+        "--lease-seconds", type=int, default=None, metavar="N", help="claim duration"
+    )
+    worker.add_argument(
+        "--max-attempts", type=int, default=None, metavar="N", help="before abandoning a run"
+    )
+    worker.add_argument(
+        "--run-database-url",
+        default=None,
+        metavar="URL",
+        help=f"where run state lives. Overrides ${RUN_DATABASE_URL_ENV}",
+    )
+    # Off unless asked for. A worker behind no load balancer has nobody to
+    # answer, and binding a port a deployment did not request is how a host
+    # network collides. No environment variable pairs with it: which port a
+    # process listens on is a property of how it was started, like the API's
+    # `uvicorn --port`, and not a setting docdoc reads.
+    worker.add_argument(
+        "--health-port",
+        type=int,
+        default=None,
+        metavar="PORT",
+        help="serve /healthz and /readyz on this port; off when absent",
+    )
+    add_common_arguments(worker)
+
     return parser
 
 
@@ -190,13 +250,30 @@ def _usage_error(args: argparse.Namespace) -> str | None:
 
 
 def _limit_usage_error(args: argparse.Namespace) -> str | None:
-    """A size limit of zero or less is an invocation error, not a run failure.
+    """A limit of zero or less is an invocation error, not a run failure.
 
-    Checked for every command that carries the flags rather than only the two
+    Checked for every command that carries the flags rather than only the ones
     that consult them, because ``docdoc explain --max-pages 0`` is just as wrong
     and telling the user so costs nothing.
+
+    Exit ``64`` and one sentence naming the flag the operator typed. The
+    alternative is what these produced before: a pydantic dump naming a field
+    nobody typed, or — for the run knobs — silence.
     """
-    flags = (("--max-document-bytes", "max_document_bytes"), ("--max-pages", "max_pages"))
+    flags = (
+        ("--max-document-bytes", "max_document_bytes"),
+        ("--max-pages", "max_pages"),
+        # The two run knobs, which were not here and needed to be. `--max-attempts
+        # -1` reached the queue unvalidated, where the claim requires
+        # `attempts < max_attempts` and the sweep abandons at
+        # `attempts >= max_attempts` — so a single cycle abandoned the whole
+        # queued backlog as `RunAbandonedError`, terminally, over documents that
+        # were fine. `--lease-seconds 0` was quieter and still wrong: it fell
+        # through to the default, so the operator got a value they did not ask
+        # for and no indication of it.
+        ("--lease-seconds", "lease_seconds"),
+        ("--max-attempts", "max_attempts"),
+    )
     for flag, attribute in flags:
         value = getattr(args, attribute, None)
         if value is not None and value <= 0:
@@ -213,7 +290,13 @@ def _dispatch(args: argparse.Namespace) -> Any:
     install has to stay usable with no extras at all (FR-053, SC-013).
     """
     from docdoc.cli.commands import eval as eval_command
-    from docdoc.cli.commands import explain, extract, inspect, parse, store
+    from docdoc.cli.commands import explain, extract, inspect, migrate, parse, store, worker
+
+    if args.command == "migrate":
+        return migrate.run
+
+    if args.command == "worker":
+        return worker.run
 
     if args.command == "store":
         if getattr(args, "action", None) != "clear":

@@ -13,6 +13,7 @@ would be asserting a property nobody can check in production.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -286,6 +287,95 @@ def test_an_unwritable_store_degrades_rather_than_failing_the_run(
     assert result.failed_stage is None
     assert result.validation is not None
     assert result.executed_count == 4, "a stage that ran must be reported as executed"
+
+
+def test_an_unwritable_store_is_logged_once_and_not_once_per_stage(
+    source: bytes,
+    registry: SchemaRegistry,
+    adapter: EchoAdapter,
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The half of FR-063 the outcome test above cannot see (US3/AC3, Edge Cases).
+
+    Both the user story and the Edge Cases say the degradation is "logged once"
+    rather than per stage, and `_Reuse._degrade` implements it with a `_degraded`
+    flag. Until this test, only the *outcome* was asserted — that the run
+    succeeds — and the "once" was a docstring.
+
+    The untested half is the operationally expensive one. A store outage across a
+    fleet of workers emits four lines per run per replica if the flag is ever
+    removed, and the symptom is a log bill rather than an error: nothing fails, so
+    nothing draws attention to it until somebody reads a graph.
+
+    Asserted on the count rather than on the presence, because presence is what
+    a once-only guard does not change.
+
+    **Counted across both loggers**, because which module emits it is not the
+    operator's problem. The pipeline has a once-only guard in `_Reuse._degrade`
+    and on the filesystem path it never fires — `FileArtifactStore` catches its
+    own `OSError`, so the pipeline never learns there was one. The guard that
+    actually does the work is the store's own, and a test that watched only
+    `docdoc.pipeline` would have reported zero lines while four were being
+    written.
+
+    **The store is made unwritable by forcing the write to fail, not by finding
+    a path the OS refuses.** Two attempts at the latter both turned out to be
+    tests of the operating system rather than of docdoc. `/proc/…` exists only on
+    Linux, so on Windows the run reached zero stages instead of four. A regular
+    file standing where the root should be looked portable and is not: on Linux
+    `mkdir` under it raises `NotADirectoryError` and the store degrades, while on
+    Windows it surfaces as `FileExistsError`, which `_create_exclusively` catches
+    first and reads as *a racing writer* — so the run died with "a different
+    result was stored under this identity concurrently", an alarming message
+    about a condition that had not occurred.
+
+    (That misreading is worth knowing about independently: only `os.link` can
+    legitimately produce `FileExistsError` there, and a `mkdir` raising it means
+    the root is malformed rather than contended. It is pre-existing and out of
+    scope here.)
+
+    Raising `OSError` from the temp-file creation reproduces the condition this
+    test is actually about — the directories exist and the write is refused,
+    which is what a permissions change or a full disk looks like — and it does it
+    identically on every platform.
+    """
+    import tempfile as _tempfile
+
+    from docdoc.artifacts import store as store_module
+
+    def refuse(*_: object, **__: object) -> tuple[int, str]:
+        raise OSError(13, "Permission denied")
+
+    monkeypatch.setattr(store_module.tempfile, "mkstemp", refuse)
+    assert _tempfile  # the real module is untouched outside this patch
+
+    unwritable = tmp_path / "store"
+
+    with caplog.at_level(logging.WARNING):
+        result = run(
+            source,
+            schema=SCHEMA,
+            registry=registry,
+            adapter=adapter,
+            store=FileArtifactStore(unwritable),
+        )
+
+    assert result.executed_count == 4, "the run must have reached every stage to count four"
+
+    degradations = [
+        record
+        for record in caplog.records
+        if "unwritable" in str(getattr(record, "event", "")) or "unwritable" in record.getMessage()
+    ]
+    assert len(degradations) == 1, (
+        f"the store degradation was logged {len(degradations)} times for a "
+        f"four-stage run; it must be once. This was four before `DegradationLog` "
+        f"existed, and a fleet riding out a store outage is where the difference "
+        f"is felt — nothing fails, so nothing draws attention to it until "
+        f"somebody reads a bill for log volume"
+    )
 
 
 def test_a_run_with_no_store_produces_the_same_result_as_one_with(

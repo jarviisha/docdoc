@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 #: position because neither may import the other.
 EXPECTED_LAYERS = [
     "docdoc.api : docdoc.cli",
-    "docdoc.recording",
+    "docdoc.recording : docdoc.runs",
     "docdoc.evaluation",
     "docdoc.pipeline",
     "docdoc.validation",
@@ -219,3 +219,78 @@ def test_the_parse_command_may_call_ingest_directly() -> None:
     assert _PARSE_IS_A_COMMAND not in _STAGE_ENTRY_POINTS
     parse_command = Path("src/docdoc/cli/commands/parse.py")
     assert "from docdoc.ingest import parse" in parse_command.read_text(encoding="utf-8")
+
+
+# -- T119: the run layer's public surface, and the one name kept out of it ----
+
+
+def test_the_run_layer_exports_the_surface_the_plan_describes() -> None:
+    """plan.md calls ``docdoc.runs`` "the public surface: submit, get, cancel, claim".
+
+    It exported nothing, which made it the only layer in the project whose
+    ``__all__`` was empty — ``artifacts`` exports ten names, ``pipeline`` twelve,
+    ``validation`` twenty. A caller following the plan's sentence to
+    ``docdoc.runs`` found an empty package and had to learn the private module
+    layout to do anything at all.
+
+    Asserted against the *protocol* rather than a hand-copied list of names, so a
+    method added to ``RunQueue`` cannot leave this test agreeing with a surface
+    that no longer exists.
+    """
+    import docdoc.runs as runs
+
+    for name in ("Run", "RunStatus", "RunQueue", "RunSpec", "RunOutcome"):
+        assert name in runs.__all__, f"docdoc.runs does not export {name}"
+        assert getattr(runs, name, None) is not None
+
+    for verb in ("submit", "get", "cancel", "claim"):
+        assert hasattr(runs.RunQueue, verb), (
+            f"plan.md names {verb!r} as part of this surface and RunQueue has no "
+            "such method; either the protocol or the plan's sentence is stale"
+        )
+
+
+def test_importing_the_run_layer_pulls_in_no_database_driver() -> None:
+    """The reason ``PostgresRunQueue`` is *not* re-exported, asserted rather than
+    trusted to a comment.
+
+    ``psycopg`` lives behind the ``postgres`` extra and a base install does not
+    have it (SC-013). Re-exporting the Postgres queue from the package root would
+    make ``import docdoc.runs`` an ``ImportError`` on that install — and the models
+    and errors a caller actually wants to reason about need no driver at all.
+
+    Run in a subprocess because ``sys.modules`` is process-global: by the time this
+    file executes, some earlier test in the session may already have imported
+    ``psycopg`` for its own reasons, and asserting against the ambient module table
+    would pass or fail on test *ordering*.
+    """
+    import subprocess
+    import sys
+
+    probe = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys, docdoc.runs;"
+            "assert 'psycopg' not in sys.modules, sorted(m for m in sys.modules"
+            " if m.startswith('psycopg'));"
+            "assert 'boto3' not in sys.modules",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert probe.returncode == 0, "importing docdoc.runs loaded a driver:\n" + probe.stderr
+
+
+def test_the_postgres_queue_is_reachable_where_it_lives() -> None:
+    """The other half: keeping it out of the root must not make it hard to find.
+
+    ``docdoc.runs.postgres`` is the import an operator writes, and it is what the
+    package docstring points at. A caller choosing a backend is already naming one.
+    """
+    pytest.importorskip("psycopg", reason="the Postgres queue needs docdoc[postgres]")
+
+    from docdoc.runs.postgres import PostgresRunQueue
+
+    assert PostgresRunQueue is not None

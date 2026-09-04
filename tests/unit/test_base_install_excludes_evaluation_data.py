@@ -87,7 +87,7 @@ def test_no_new_optional_extra_was_added_for_evaluation() -> None:
     # but cannot add *files* to a wheel everyone already installs, so opting in
     # is the only way the base install can stay free of static assets. Scoring is
     # not gated by it either, which is what this test is actually about.
-    assert extras == {"pdf", "azure", "google", "gcv", "api", "ui", "dev"}, (
+    assert extras == {"pdf", "azure", "google", "gcv", "api", "ui", "postgres", "s3", "dev"}, (
         f"the extras are now {sorted(extras)}; evaluation must need none of its own"
     )
 

@@ -238,13 +238,39 @@ CONFIG_MODULES = {
     "docdoc.extraction.adapter_registry": ("ADAPTERS_ENV", "ECHO_FIXTURES_ENV"),
     "docdoc.extraction.adapters.gemini": ("MODEL_ENV",),
     "docdoc.ingest.parsers.azure_di": ("ENDPOINT_ENV", "KEY_ENV"),
-    "docdoc.cli.config": ("STORE_ROOT_ENV",),
+    "docdoc.ingest.parsers.gcv": ("CREDENTIALS_ENV",),
+    "docdoc.cli.config": ("STORE_ROOT_ENV", "RUN_DATABASE_URL_ENV", "STORE_URL_ENV"),
     "docdoc.grounding.view": ("MATCH_VIEW_CACHE_ENV",),
     # `settings`, not `app`: `app` imports FastAPI, and this check runs on a
     # base install that has no extras.
-    "docdoc.api.settings": ("REQUEST_BYTES_ENV",),
+    #
+    # Milestone 9 adds four. `STORE_URL_ENV` is listed under `cli.config` above
+    # as well — the two front ends are declared independent and each spells the
+    # name for itself — and `_defined_env_names` keys on the *value*, so a
+    # duplicate collapses rather than colliding. What it does catch is a rename
+    # in one of them: the constant would vanish and this list would say so.
+    "docdoc.api.settings": (
+        "REQUEST_BYTES_ENV",
+        "UI_ROOT_ENV",
+        "RUN_DATABASE_URL_ENV",
+        "RUN_LEASE_SECONDS_ENV",
+        "RUN_MAX_ATTEMPTS_ENV",
+        "API_KEYS_FILE_ENV",
+    ),
     "docdoc.ingest.source": ("MAX_DOCUMENT_BYTES_ENV", "MAX_PAGES_ENV"),
+    "docdoc.artifacts.paths": ("DEFAULT_TENANT_ENV",),
 }
+
+#: Names the *suite* reads, which docdoc itself never does.
+#:
+#: Milestone 9's infrastructure tests find their database and object store here,
+#: and CONTRIBUTING.md documents both so a contributor can run them. They are
+#: excluded from the check below rather than added to CONFIG_MODULES, because
+#: CONFIG_MODULES feeds `test_cli_config_vocabulary.py` too -- and that file
+#: would then require a `--test-database-url` flag on `docdoc`, which is a
+#: command-line surface for configuring pytest. The real definitions, with their
+#: skip helpers, are in `tests/infra.py`.
+SUITE_ONLY_ENV = frozenset({"DOCDOC_TEST_DATABASE_URL", "DOCDOC_TEST_S3_ENDPOINT"})
 
 #: Wider than DOCUMENTS: configuration is described in places that carry no python
 #: block at all, and those are exactly the ones an import check cannot reach.
@@ -253,6 +279,35 @@ CONFIG_DOCUMENTS = (
     "CONTRIBUTING.md",
     "specs/003-schema-driven-extraction/data-model.md",
     "specs/003-schema-driven-extraction/research.md",
+    # Milestone 9's two. Both name settings — seven between them — and neither
+    # was checked, so a renamed constant would have left both confidently wrong
+    # with the suite green. That is precisely the drift this section exists to
+    # prevent, and it recurred in the milestone that added the section's own
+    # newest entries.
+    #
+    # `serve_api.md` is the one that matters most: it is the operator-facing
+    # document, so a setting named wrongly there is a setting somebody exports
+    # and watches do nothing.
+    "docs/concepts/runs.md",
+    "examples/serve_api.md",
+    # Three that predate Milestone 9 and were never checked either. Added rather
+    # than recorded as debt: closing the gap needed two settings registered in
+    # `CONFIG_MODULES` above — `DOCDOC_UI_ROOT` and `DOCDOC_GCV_CREDENTIALS`,
+    # both read by the code and listed in neither map — and once that was done
+    # there was nothing left to defer.
+    #
+    # The first attempt *did* record them, and this file's own new sweep rejected
+    # it: `viewer.md` had just acquired `DOCDOC_API_KEYS_FILE`, so it was no
+    # longer a pre-existing document and no longer qualified for the exemption
+    # it was being given. A guard refusing its author's shortcut is the guard
+    # working.
+    "docs/concepts/ingest.md",
+    "docs/concepts/viewer.md",
+    "examples/view_grounding.md",
+    # And one the sweep found that no hand-written list would have: an ADR names
+    # a setting too. Decision records are read by whoever is deciding whether to
+    # trust the decision, so a stale variable name there is a stale premise.
+    "docs/adr/0014-tenant-scoping-and-store-namespacing.md",
 )
 
 #: Requires at least one character after the prefix, so the `DOCDOC_*` wildcard
@@ -283,7 +338,13 @@ def test_every_documented_configuration_name_exists(document: str) -> None:
     """
     defined = _defined_env_names()
     text = pathlib.Path(document).read_text(encoding="utf-8")
-    unknown = sorted({name for name in _ENV_NAME.findall(text) if name not in defined})
+    unknown = sorted(
+        {
+            name
+            for name in _ENV_NAME.findall(text)
+            if name not in defined and name not in SUITE_ONLY_ENV
+        }
+    )
     assert not unknown, (
         f"{document} documents configuration names that no module defines: {unknown}. "
         f"Defined: {sorted(defined)}"
@@ -413,3 +474,46 @@ def test_a_quoted_overpromise_is_read_as_a_citation() -> None:
 
     assert not [p for p in _OVERPROMISES if p in _QUOTED.sub(" ", citation)]
     assert [p for p in _OVERPROMISES if p in _QUOTED.sub(" ", promise)]
+
+
+def test_no_document_names_a_setting_outside_the_checked_or_recorded_set() -> None:
+    """The blind spot itself, closed — in the direction that keeps closing it.
+
+    Every check above starts from a *list of documents*, so a document that names
+    a setting and is on no list is invisible to all of them. Two of Milestone 9's
+    own documents arrived that way, which is the third time this class of gap has
+    appeared in this file's history.
+
+    So this sweeps the documentation tree instead of reading a list: any file
+    naming a `DOCDOC_*` setting must be in `CONFIG_DOCUMENTS`. There is no
+    exemption list, deliberately — one was written and immediately became the
+    place to put a document rather than check it, which is how the gap this
+    closes came to exist in the first place.
+    """
+    checked = set(CONFIG_DOCUMENTS)
+    candidates = [
+        *pathlib.Path("docs").rglob("*.md"),
+        *pathlib.Path("examples").rglob("*.md"),
+        pathlib.Path("README.md"),
+        pathlib.Path("CONTRIBUTING.md"),
+    ]
+
+    # `as_posix()` rather than `str()`, on the discovered side only, because
+    # `CONFIG_DOCUMENTS` is written with forward slashes and `str(Path(...))`
+    # yields backslashes on Windows. Comparing the two matched nothing there, so
+    # every document in the tree read as unlisted and this failed on Windows
+    # while passing everywhere else — the test reporting a documentation gap
+    # that did not exist, which is the most expensive kind of false alarm
+    # because the message is entirely plausible.
+    unlisted = sorted(
+        path.as_posix()
+        for path in candidates
+        if path.as_posix() not in checked and _ENV_NAME.search(path.read_text(encoding="utf-8"))
+    )
+
+    assert not unlisted, (
+        f"these documents name a DOCDOC_* setting and nothing checks them: "
+        f"{unlisted}. Add each to CONFIG_DOCUMENTS — a document nothing checks "
+        f"is one that goes stale exactly when nobody is looking at it, and the "
+        f"reader who exports a renamed variable gets silence rather than an error"
+    )

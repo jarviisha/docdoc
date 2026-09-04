@@ -331,6 +331,35 @@ def test_the_pipeline_example_demonstrates_reuse_rather_than_asserting_it() -> N
     )
 
 
+def test_the_asynchronous_example_runs_with_nothing_listening() -> None:
+    """Milestone 9's example, in the mode every contributor will first hit.
+
+    It needs a running composition to do its real work, and an example that
+    crashed on a refused connection would tell a new contributor the example is
+    broken when what is true is that the service is not up. So the unreachable
+    path is part of what it teaches, and it is the path this asserts — under a
+    URL that is guaranteed to refuse, so the assertion does not depend on
+    whether the developer happens to have something on port 8000.
+    """
+    result = _run(str(EXAMPLES / "submit_async_run.py"))
+    _assert_ran(result, "submit_async_run.py")
+
+
+def test_the_asynchronous_example_names_the_commands_that_make_it_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A diagnostic that does not say what to do next is a diagnostic wasted."""
+    monkeypatch.setenv("DOCDOC_EXAMPLE_URL", "http://127.0.0.1:1")
+    result = _run(str(EXAMPLES / "submit_async_run.py"))
+    _assert_ran(result, "submit_async_run.py")
+
+    assert "docker compose" in result.stdout
+    assert "docdoc migrate" in result.stdout, (
+        "the example no longer names the migration step, which is the one thing "
+        "that is not applied automatically and the one an operator forgets"
+    )
+
+
 def test_every_committed_example_is_covered_here() -> None:
     """The assertion that keeps this file honest as examples are added.
 
@@ -348,6 +377,7 @@ def test_every_committed_example_is_covered_here() -> None:
         "evaluate_golden_set.py",
         "compare_reports.py",
         "run_pipeline.py",
+        "submit_async_run.py",
     }
     assert shipped <= covered, (
         f"these examples ship but nothing executes them: {sorted(shipped - covered)}"

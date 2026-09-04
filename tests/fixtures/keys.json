@@ -1,0 +1,20 @@
+{
+  "_comment": [
+    "Two tenants, for the isolation tests and for quickstart.md scenario 7.",
+    "The keys these hash are 'acme-test-key-not-a-secret' and",
+    "'globex-test-key-not-a-secret', and they are written down in",
+    "tests/support.py rather than here — this file holds SHA-256 hashes and",
+    "never keys, which is the whole point of the format: a leak of a real one",
+    "is not a set of working credentials."
+  ],
+  "keys": [
+    {
+      "sha256": "be4eeb04a5f1bddf0e7104c9d20fea6d6cdaa9ab5255e6c595ddd3241032ae0e",
+      "tenant_id": "acme"
+    },
+    {
+      "sha256": "01e0e5dca2c2d22d55bd2f28696f33d36f3e59589e23f607316d6c11fc397b30",
+      "tenant_id": "globex"
+    }
+  ]
+}

@@ -62,8 +62,10 @@ back. If you want one, submit the document first and use `POST /v1/documents/{bl
 
 ## Two things to know before you expose this
 
-It is **unauthenticated**, and anyone who can reach it can spend your provider budget one extraction at
-a time. And a run **continues after the page is closed** — there is no cancel, because closing the
+**By default it is unauthenticated**, and anyone who can reach it can spend your provider budget one
+extraction at a time. Setting `DOCDOC_API_KEYS_FILE` does not fix that so much as end it: `/ui` then
+requires a credential, a browser cannot send one, and the viewer becomes unavailable rather than
+protected. And a run **continues after the page is closed** — there is no cancel, because closing the
 browser stops the waiting and not the work.
 
 Both are covered in [How the viewer works](../docs/concepts/viewer.md), along with the parts of it that

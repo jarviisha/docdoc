@@ -39,8 +39,13 @@ from pydantic import BaseModel, ValidationError
 
 from docdoc.artifacts.envelope import ArtifactEnvelope, content_id_of
 from docdoc.artifacts.errors import ArtifactError
+from docdoc.artifacts.paths import (
+    DEFAULT_TENANT,
+    DegradationLog,
+    secure_mkdir,
+    tenant_root,
+)
 from docdoc.artifacts.paths import FILE_MODE as _FILE_MODE
-from docdoc.artifacts.paths import secure_mkdir
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -153,11 +158,24 @@ class FileArtifactStore:
     ``<root>/artifacts/<aa>/<full-hash>.json``, two-character fan-out because a
     flat directory of a hundred thousand entries is slow on several filesystems
     and free to avoid.
+
+    A non-default tenant is namespaced above the fan-out:
+    ``<root>/t/<tenant_id>/artifacts/<aa>/<full-hash>.json``. The **default
+    tenant keeps the unprefixed layout**, which is what lets an existing
+    deployment upgrade without moving a byte — see ``paths.tenant_root``
+    (FR-084a, ADR-0014 §3).
     """
 
-    def __init__(self, root: str | Path) -> None:
+    def __init__(self, root: str | Path, *, tenant_id: str = DEFAULT_TENANT) -> None:
         self.root = Path(root)
-        self._artifacts = self.root / "artifacts"
+        segment = tenant_root(tenant_id)
+        self._base = self.root / segment if segment else self.root
+        self._artifacts = self._base / "artifacts"
+        # ADR-0010 §4's "logs once", which was not once: a four-stage run against
+        # an unwritable store emitted four identical warnings, because the
+        # pipeline's own once-only guard never sees a failure this class handles
+        # itself. See `DegradationLog`.
+        self._degradations = DegradationLog()
 
     # -- layout ---------------------------------------------------------------
 
@@ -228,14 +246,15 @@ class FileArtifactStore:
         except OSError as error:
             # Unreadable is not the same as absent, but for a *cache* it has the
             # same correct response: proceed without it. FR-063.
-            _logger.warning(
-                "artifact store unreadable, continuing without reuse",
-                extra={
-                    "event": "artifacts.unreadable",
-                    "artifact_id": artifact_id,
-                    "error": type(error).__name__,
-                },
-            )
+            if self._degradations.first_time("unreadable"):
+                _logger.warning(
+                    "artifact store unreadable, continuing without reuse",
+                    extra={
+                        "event": "artifacts.unreadable",
+                        "artifact_id": artifact_id,
+                        "error": type(error).__name__,
+                    },
+                )
             return None
 
         try:
@@ -362,14 +381,15 @@ class FileArtifactStore:
         except FileExistsError:
             return _Write.EXISTS
         except OSError as error:
-            _logger.warning(
-                "artifact store unwritable, continuing without storing",
-                extra={
-                    "event": "artifacts.unwritable",
-                    "path": str(path),
-                    "error": type(error).__name__,
-                },
-            )
+            if self._degradations.first_time("unwritable"):
+                _logger.warning(
+                    "artifact store unwritable, continuing without storing",
+                    extra={
+                        "event": "artifacts.unwritable",
+                        "path": str(path),
+                        "error": type(error).__name__,
+                    },
+                )
             return _Write.FAILED
         finally:
             if temporary is not None:
