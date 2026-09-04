@@ -9,6 +9,172 @@ API may change in any release. `document_id` derivation is versioned separately 
 
 ## [Unreleased]
 
+Milestone 9: asynchronous runs, shared storage, and tenant scoping. **Submitting a document no longer
+means holding a connection open while four stages run.** A run is recorded, a worker claims it, and
+the caller polls — which turns a single process into a four-process topology, and most of this
+milestone is the consequences of that rather than the queue itself.
+
+This milestone changes no value docdoc produces. An asynchronous run derives a `processing_id`
+byte-identical to the synchronous one over the same document and schema, and the golden set is
+unchanged.
+
+### Added
+
+- **Two identities, and the reason there have to be two.** `run_id` names an **attempt** — opaque,
+  issued per submission, and it says nothing about what was computed. `processing_id` names a
+  **result** — content-addressed, so two runs over the same document with the same schema derive the
+  same one independently (**ADR-0013**).
+
+  Collapsing them would mean either that resubmitting a document is indistinguishable from asking
+  about the first submission, or that a retry through a flaky network looks like new work. It is also
+  what makes the equivalence above checkable at all: the unchanged `GET /v1/jobs/{id}` route serves an
+  asynchronous run's result, because by then the identity exists and means what it always meant.
+
+- **`POST /v1/runs`, `GET /v1/runs/{run_id}`, and `DELETE /v1/runs/{run_id}`.** Submission is
+  recorded and returns; it does not parse, does not call a provider, and carries **no**
+  `processing_id` — absent, not null, because a null invites sending it to a route that would answer
+  `unknown` about an identity nobody issued. An `Idempotency-Key` makes a repeat answer `200` with the
+  original run instead of `202` with a second one, so a client retrying through a flaky network learns
+  whether its first attempt landed.
+
+- **The queue is a table**, claimed with `FOR UPDATE SKIP LOCKED`. No broker, no coordinator, no
+  scheduler process — a prohibition carried from the constitution's deferred-technology list and
+  enforced by an import contract rather than by review. No ORM and no migration framework either: one
+  table, a handful of statements, and the one that matters needs `SKIP LOCKED`, which an ORM obscures
+  rather than helps.
+
+  Lease expiry is a clause in the claim, so there is no reaper process to deploy, monitor, and have
+  fail silently. Redelivery is mostly *resume*: every completed stage kept its artifact, so a
+  redelivered attempt recomputes the same `processing_id` and repeats at most the stage that was in
+  flight. Per-stage checkpointing was built for prompt-change reuse and turns out to be crash
+  recovery, because both ask the same question — what of this work is already known?
+
+- **`docdoc worker`** — claim, execute, record, one run at a time. No `--concurrency`, and the flag is
+  absent rather than accepting only `1`: PyMuPDF and `rapidfuzz` hold the GIL in bursts, so a threaded
+  worker would let one long parse starve a sibling's heartbeat until that sibling lost a lease it was
+  still executing. Concurrency is replica count.
+
+- **`docdoc migrate [--check]`** — the schema applied by an explicit step, never at process start.
+  With several workers booting at once an implicit migration is several processes racing to alter one
+  table, and it makes a deployment's schema a function of which container happened to start first.
+  `--check` exits non-zero when anything is pending and applies nothing, which is the form a
+  deployment pipeline gates on.
+
+- **S3-backed stores**, behind `docdoc[s3]`, so several workers can reuse each other's artifacts.
+  Without a shared store, scaling from one worker to three produces **correct results and silently
+  re-pays for every parse**: each worker has a private root, every lookup misses, and nothing anywhere
+  reports a problem.
+
+- **Tenant scoping, as a path prefix rather than a check after the read** (**ADR-0014**). Each
+  tenant's content lives at `<root>/t/<tenant_id>/…`, above the two-character fan-out, so per-tenant
+  deletion is a prefix operation and a store built for one tenant cannot see another's. The default
+  tenant keeps the unprefixed root — no copy, no move, no read-through fallback — which is what makes
+  upgrading a no-op.
+
+  The namespacing is not tidiness. Because identity is derived from content, a shared store lets one
+  tenant learn that another holds a document by submitting it and watching the result come back
+  instantly and free. A status code cannot close that; separate namespaces can. The price, paid
+  knowingly, is that two tenants with the same invoice pay for two parses.
+
+- **Authentication, off by default.** Point `DOCDOC_API_KEYS_FILE` at a file of SHA-256 hashes and
+  every route except the two health routes requires `Authorization: Bearer <key>`; each key resolves
+  to exactly one tenant. There is no route that creates, lists, or revokes a key — a table would
+  invite exactly the endpoint FR-061 forbids.
+
+- **`GET /healthz` and `GET /readyz`**, on both process types and answering byte-identically, so one
+  orchestrator configuration covers both. The decisions live below both front ends because the worker
+  has no FastAPI. Readiness is strict: a process that cannot reach the run-state database reports not
+  ready even though the synchronous routes would still serve every request correctly. That withdraws
+  working capacity on purpose — no probe can express "route half the traffic here", so a richer answer
+  would be one nothing could consume.
+
+- **One `run.transition` event per state change**, emitted from the queue rather than from its
+  callers, so a transition cannot happen without one. It carries identifiers, states, an attempt count
+  and a reason; never a duration, a cost, or anything from a document.
+
+- **A `compose.yml` that stands the whole topology up** — API, worker, Postgres and MinIO, plus a
+  one-shot that creates the bucket, because compose cannot declare "this bucket must exist" and a
+  first run that failed on a missing one would read as a docdoc bug rather than a setup step. With it
+  came a `Dockerfile` that had never actually built: `.dockerignore` excluded the `README.md` that
+  `pyproject.toml` declares as its readme, so `uv pip install .` failed on a file the developer could
+  see on disk.
+
+### Changed
+
+- **Cancelling a running run is a request, not a stop.** `DELETE` answers `200` with
+  `status: "running"`, and that is the honest report rather than a bug in the response. The worker
+  reads the flag at stage boundaries only, so a provider call already in flight completes and is
+  billed; a caller who saw `cancelled` would conclude the work had stopped and would be wrong about
+  their bill. A *queued* run never executes, and that half is total.
+
+- **CI runs against a real database and object store.** No job had either, so every `postgres`- and
+  `s3`-marked test skipped there: `SKIP LOCKED` claiming, redelivery, restart survival, shared-store
+  reuse, and the async-equals-sync check ran on developers' machines and nowhere else. This
+  milestone's central mechanism was unverified by the thing that gates merges.
+
+### Fixed after review
+
+Two review passes over this milestone found twenty-one defects between them, none of which failed a
+test. Three shapes recurred, and they are worth recording because they say where to look next time.
+
+- **A comment asserting behaviour the SQL does not have.** The heartbeat said a superseded worker's
+  `finish` "is a no-op because the row is no longer claimable by this attempt". The statement had no
+  ownership predicate at all, so a stalled worker's late verdict overwrote the live attempt's — and
+  the live attempt's own `finish` was then the one suppressed. Prose is not a guard, and a reviewer
+  reading the prose agrees with it.
+
+- **Two predicates that did not cover between them.** The claim required `attempts < max_attempts`;
+  the abandon sweep required `status = 'running'`; `release` left the attempt spent. A run released at
+  the cap matched neither and was invisible to every worker and to the sweep, for ever. Each predicate
+  is defensible alone — the hole is a property of the *pair*, and therefore of no single function
+  anybody reviewed.
+
+- **One value answering two questions.** `blobs.get` returned `None` for both "absent" and
+  "unreachable", and the worker reads `None` as terminal, so a five-second outage permanently failed
+  every run claimed during it over documents that were sitting in the bucket. The transition event
+  used `error_class or "completed"`, and a cancelled run has no `error_class`, so every deliberate
+  stop was logged as a completion.
+
+A fourth shape appeared only in the second pass: **a fix applied to one of several methods that
+needed it**. `finish` grew an ownership guard and `release` and `heartbeat` did not; blob reads
+learned to tell absent from unreachable and `size_of` did not; the readiness probe's short timeouts
+were restored for MinIO and not for plain AWS, which is the default cloud configuration the fix was
+written for. Each change was correct where it was applied, and the hole moved one method along.
+
+### Known gaps, recorded rather than hidden
+
+- **Revoking a key requires restarting the process.** The key file is read once, at startup. Deleting
+  a compromised key produces no error and no warning, and it keeps working until every process holding
+  the old mapping has restarted. Static credentials are what this milestone provides; revocation
+  measured in seconds is a job for a gateway in front of the service.
+
+- **A deployment that has not enabled authentication is exactly as exposed as it was before.** The
+  default is the *compatible* one, not the safe one: it exists so that upgrading breaks nothing, and
+  it means security is opt-in. With no key file configured there is no authentication on any route,
+  one implicit tenant owns everything, and anyone who can reach the service can spend the deployment's
+  provider budget.
+
+- **There is no push, no webhook, and no long poll.** A client polls, and `docs/concepts/runs.md`
+  states an interval and the reasoning behind it, because the only number in the repository was an
+  example's `POLL_SECONDS = 0.25` and a reader who copied it would make four requests per second per
+  run.
+
+- **`expires_at` is recorded and nothing acts on it.** There is deliberately no `expired` state: an
+  earlier draft had one and described a retention sweep to set it, no such sweep was built, and a
+  state no code path can reach lies to everyone who reads the enum. The column is written meanwhile so
+  that retention work inherits a deadline rather than inventing one.
+
+- **No metrics exporter.** The `run.transition` events go to standard-library logging. Binding an
+  exporter is later work; what this milestone provides is something to bind to, so that adding an
+  emission point and adding an exporter are not one change with two ways to be wrong.
+
+- **`_create_exclusively` misreads one `FileExistsError`.** Only `os.link` can legitimately raise it
+  there — a racing writer — but a `mkdir` on a malformed store root raises it too, and the store
+  reports contention that did not occur. Reachable only through a malformed root, found while making a
+  test portable, and left alone rather than widening that change.
+
+---
+
 Milestone 8: a read-only grounding viewer, and the two endpoints that make it reachable. **The
 project's central promise is now legible to someone who does not write Python.** Every guarantee the
 first seven milestones built was reachable through exactly two doors — a Python import and a terminal —
