@@ -498,10 +498,17 @@ def test_no_document_names_a_setting_outside_the_checked_or_recorded_set() -> No
         pathlib.Path("CONTRIBUTING.md"),
     ]
 
+    # `as_posix()` rather than `str()`, on the discovered side only, because
+    # `CONFIG_DOCUMENTS` is written with forward slashes and `str(Path(...))`
+    # yields backslashes on Windows. Comparing the two matched nothing there, so
+    # every document in the tree read as unlisted and this failed on Windows
+    # while passing everywhere else — the test reporting a documentation gap
+    # that did not exist, which is the most expensive kind of false alarm
+    # because the message is entirely plausible.
     unlisted = sorted(
-        str(path)
+        path.as_posix()
         for path in candidates
-        if str(path) not in checked and _ENV_NAME.search(path.read_text(encoding="utf-8"))
+        if path.as_posix() not in checked and _ENV_NAME.search(path.read_text(encoding="utf-8"))
     )
 
     assert not unlisted, (

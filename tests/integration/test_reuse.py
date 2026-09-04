@@ -294,6 +294,7 @@ def test_an_unwritable_store_is_logged_once_and_not_once_per_stage(
     registry: SchemaRegistry,
     adapter: EchoAdapter,
     caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
 ) -> None:
     """The half of FR-063 the outcome test above cannot see (US3/AC3, Edge Cases).
 
@@ -317,14 +318,24 @@ def test_an_unwritable_store_is_logged_once_and_not_once_per_stage(
     actually does the work is the store's own, and a test that watched only
     `docdoc.pipeline` would have reported zero lines while four were being
     written.
+
+    **The unwritable root is a regular file, not `/proc`.** It was `/proc`, which
+    exists only on Linux — on Windows the path resolved to nothing recognisable
+    and the run reached zero stages instead of four, so this failed there while
+    passing everywhere else. A file standing where a directory is expected fails
+    the same way on every platform: `NotADirectoryError`, which is an `OSError`,
+    which is what `_create_exclusively` catches. Same code path, no OS in it.
     """
+    unwritable = tmp_path / "a-file-where-a-store-root-should-be"
+    unwritable.write_text("not a directory", encoding="utf-8")
+
     with caplog.at_level(logging.WARNING):
         result = run(
             source,
             schema=SCHEMA,
             registry=registry,
             adapter=adapter,
-            store=FileArtifactStore("/proc/definitely-not-writable"),
+            store=FileArtifactStore(unwritable),
         )
 
     assert result.executed_count == 4, "the run must have reached every stage to count four"

@@ -190,16 +190,33 @@ jobs:
   #     suite, not of the platform, and paying the tracer's cost six times to
   #     learn the same number is waste.
   #
-  # The threshold is 93 against a measured 95 (3894 statements, 154 missed),
-  # stable at 95 under both the default and `ci` Hypothesis profiles. The two
-  # points of slack are for branch-coverage wobble across generated examples;
-  # they are not enough to hide an untested module, which is the regression this
-  # catches. Raise it when the real number rises — a ratchet only works if it
-  # turns.
+  # The threshold is 93. It was set against a measured 95 (3894 statements, 154
+  # missed) and the codebase has since more than doubled; Milestone 9 measures
+  # 93.1 (8307 statements, 456 missed) with the infrastructure below running.
+  # The slack is for branch-coverage wobble across generated examples; it is not
+  # enough to hide an untested module, which is the regression this catches.
+  # Raise it when the real number rises — a ratchet only works if it turns.
   #
   # SC-006's actual claim is narrower and is met: `kernel/document.py`, which
   # holds `locate`, `find`, `slice`, and `merge`, has 199 statements and zero
   # missed.
+  #
+  # **This job also brings up the run-state database and the object store**, and
+  # until Milestone 9 that was not merely a coverage matter. No job had either,
+  # so every `postgres`- and `s3`-marked test skipped in CI: `SKIP LOCKED`
+  # claiming, redelivery, restart survival, shared-store reuse, and SC-001's
+  # async-equals-sync check ran on developers' machines and nowhere else. The
+  # milestone's central mechanism was unverified by the thing that gates merges.
+  #
+  # The coverage number was how it surfaced — `postgres.py` at 27%, `s3.py` at
+  # 39% — but the number was the symptom. Raising the services here fixes the
+  # verification; the coverage follows.
+  #
+  # `compose.yml` rather than service containers: MinIO needs a command
+  # (`server /data`) that a service container cannot express, and the bucket has
+  # to be created before anything writes to it. Reusing the composition an
+  # operator runs also means CI exercises that file rather than a second
+  # description of the same thing that can drift from it.
   coverage:
     runs-on: ubuntu-latest
     steps:
@@ -213,13 +230,26 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --frozen
 
+      - name: Start the run-state database and the object store
+        run: |
+          docker compose -f packaging/docker/compose.yml up -d --wait postgres minio
+          docker compose -f packaging/docker/compose.yml up createbucket
+
       - name: Coverage
         env:
           HYPOTHESIS_PROFILE: ci
+          # The infrastructure-marked tests skip when these are unset, which is
+          # what kept them silent here. Both point at the composition above.
+          DOCDOC_TEST_DATABASE_URL: postgresql://docdoc:docdoc@localhost:5432/docdoc
+          DOCDOC_TEST_S3_ENDPOINT: http://localhost:9000
         run: >
           uv run pytest tests/unit tests/property tests/contract tests/integration
           -m "not perf"
           --cov=docdoc --cov-report=term-missing --cov-fail-under=93
+
+      - name: Stop the infrastructure
+        if: always()
+        run: docker compose -f packaging/docker/compose.yml down -v
 
   # The base install must stay usable with no provider SDK at all (SC-010).
   # Verified separately because the job above installs every extra.
