@@ -51,7 +51,20 @@ identity nobody issued.
 | `401` | credential absent or unrecognised, when authentication is enabled |
 | `404` | blob unknown **or** owned by another tenant — indistinguishable (FR-066) |
 | `422` | schema identity not configured |
-| `503` | run-state database unreachable; retryable (FR-057) |
+| `503` | run-state database **or** document store unreachable; retryable (FR-057) |
+
+The store's half of that `503` is the newer one, and it used to be a `404`. Asking "is this document
+here?" of an unreachable store got the same answer as asking it of a store that does not have the
+document, so a caller was told their document was gone when the store was merely down. That is the
+absent-versus-unreachable conflation this milestone removed from the blob stores, surfacing one layer
+up — `blobs.size_of` now raises rather than returning `None`, and `api.errors.status_for` maps
+`ArtifactError(reason="unavailable")` to `503`.
+
+Mapped there rather than caught at the route, so that one table decides what a typed error means over
+HTTP. A second place deciding it is how the two come to disagree.
+
+`reason="not_configured"` deliberately stays `500`. A store nobody configured is a deployment fault,
+not a transient one: `503` invites a retry, and retrying will not conjure a store.
 
 ### `GET /v1/runs/{run_id}`
 

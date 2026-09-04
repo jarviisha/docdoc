@@ -18,7 +18,7 @@ store under `processing_id` (ADR-0013 §1).
 | `blob_id` | text | no | submission | The source document's identity, unchanged from ADR-0002 |
 | `schema_identity` | text | no | submission | Stored opaquely; no code branches on its value (FR-014, gate 7) |
 | `status` | text | no | state machine | Closed set of five; see below |
-| `attempts` | int | no | claim | Incremented in the claim statement itself (R8) |
+| `attempts` | int | no | claim, release | Incremented in the claim statement itself (R8); **returned by `release`** — see below |
 | `worker_id` | text | yes | claim | Diagnostic only; nothing routes on it |
 | `lease_until` | timestamptz | yes | claim, heartbeat | Null in every terminal state |
 | `processing_id` | text | yes | completion | Present **only** when `status = 'succeeded'` (FR-004) |
@@ -57,8 +57,8 @@ of translating.
                      │                     │
                      │                     ├──► failed      (+ failed_stage, error_class)
                      │                     │
-                     │                     └──► queued      (lease expired, attempts < limit)
-                     │                              │
+                     │                     └──► queued      (lease expired or released,
+                     │                              │                attempts < limit)
                      │                              └──► failed/abandoned  (attempts = limit)
 ```
 
@@ -78,9 +78,14 @@ Five states, and the set is closed (FR-006).
    no window exists between selecting a candidate and owning it.
 2. **`running → queued`** on lease expiry, expressed as eligibility in the claim query rather than
    performed by a reaper. A worker shutting down cleanly performs it explicitly, so a rolling restart
-   costs no lease timeout (FR-043).
+   costs no lease timeout (FR-043) — **and gets the attempt back**, because the claim it is undoing
+   consumed one and a graceful release is not the evidence the limit bounds. Only the worker still
+   holding the run may do it: a superseded one that was then signalled would otherwise requeue a run
+   another worker is executing, for immediate reclaim, so the same document is processed twice.
 3. **`running → failed/abandoned`** when `attempts` has reached the limit. Distinguishable from an
-   ordinary failure by `error_class = 'RunAbandonedError'` (FR-038).
+   ordinary failure by `error_class = 'RunAbandonedError'` (FR-038). **`queued → failed/abandoned`
+   for the same reason**: the sweep covers a run stranded at the limit as well as one whose lease
+   lapsed at it, so no run can be simultaneously unclaimable and unabandonable.
 4. **`running → failed` on an unresolvable schema** is terminal at the first occurrence, never
    re-queued and never retried (FR-091). `attempts` shows the one claim that happened — the claim
    statement increments it atomically and nothing compensates — but the run is terminal, so the retry
@@ -97,13 +102,54 @@ Five states, and the set is closed (FR-006).
 7. **No transition out of a terminal state exists.** A succeeded run whose result is later cleared
    from the store stays `succeeded`; the store answers `unavailable` for the result, which is the
    existing job-route behaviour and not a run-state question.
+8. **`running → failed` with `error_class = 'ResultNotStored'`** when every stage succeeded and the
+   terminal artifact did not survive. The mirror of rule 4: that one is the terminal failure which
+   reached *no* stage, this is the one which reached them all.
+
+   It exists because both artifact stores drop a failed write and continue (FR-063). That is right
+   for the three intermediate stages, which are a cache — losing a cache entry is not a reason to
+   lose a correct result — and wrong for the last one, whose id becomes the `processing_id` and is
+   the only handle the caller is given. A denied `PutObject` on the validation stage alone produced
+   `succeeded` plus an identity that `GET /v1/jobs/{id}/result` answers `unknown` about, for ever,
+   with nothing logged as an error anywhere.
+
+   The worker confirms the artifact is retrievable before it reports success — one metadata read on
+   the success path only, cheap next to the four stages behind it. A read that *fails* counts as not
+   retrievable, deliberately: if the store cannot be reached now, the caller cannot fetch the result
+   either, so `succeeded` would describe a result nobody can get.
+
+   `failed_stage` is `validation` and that is the honest field, but the class is not a stage's:
+   validation ran and produced a result, and what failed was keeping it. Naming the stage without
+   `ResultNotStored` beside it would send a reader to look at the validator.
+
+   **Checked in the worker rather than in the pipeline**, because this is where the promise is made.
+   The synchronous route returns its result in its own response and needs no store to have kept it,
+   so a check in `pipeline.run()` would fail runs that were never making the promise.
 
 ### Invariants
 
 - `processing_id IS NOT NULL` **iff** `status = 'succeeded'`. Enforced by a check constraint, because
   it is the one place the two identities of ADR-0013 §1 could be conflated by a careless update.
 - `lease_until IS NULL` in every terminal state.
-- `attempts >= 1` in every state except `queued`-before-first-claim.
+- `attempts >= 1` in every state except `queued`. **`attempts` counts claims currently accounted
+  for, not claims that ever happened**, and the two stopped being the same thing when `release` began
+  returning the attempt it undid. A run that was claimed and then released sits in `queued` with
+  `attempts = 0`, indistinguishable from one no worker has ever taken — so this column is not a
+  history and a reader who treats it as one will misread every released run.
+
+  The decrement is deliberate. `attempts` bounds redelivery for one reason — a document that
+  terminates the worker executing it must stop after three rather than after the whole pool (FR-021,
+  SC-006) — and a graceful release is the opposite of that evidence: the worker is alive, it said so,
+  and the document proved nothing. Counting it would make a rolling restart spend the redelivery
+  budget of every run in flight, so a third restart during a backlog would abandon healthy runs with
+  `RunAbandonedError`, a word that sends an operator to look at a document that is fine.
+
+  The invariant that *does* hold, and the one worth relying on: **every non-terminal run is either
+  claimable or abandonable.** `claim` takes `queued` and lease-lapsed `running` rows below the limit;
+  the sweep takes both `queued` and lease-lapsed `running` rows at it. Nothing falls between them.
+  That was untrue while `release` left the attempt spent and the sweep looked only at `running`: a run
+  released at the limit was claimable by nobody and abandonable by nothing, and stayed `queued` for
+  ever.
 - `failed_stage IS NULL` **and** `error_class` is a schema error, for a run that failed because its
   schema identity no longer resolved (FR-091) — the one terminal failure that reached no stage.
 - A row is never deleted by any code path in this milestone. Milestone 10 owns deletion.

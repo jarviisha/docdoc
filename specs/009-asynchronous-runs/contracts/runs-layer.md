@@ -27,18 +27,59 @@ each other, and an ordered position would have implied a permission neither need
 
 ```python
 class RunQueue(Protocol):
-    def submit(self, spec: RunSpec, *, now: datetime, run_id: UUID) -> Run: ...
-    def claim(self, *, worker_id: str, now: datetime, lease: timedelta) -> Run | None: ...
-    def heartbeat(self, run_id: UUID, *, now: datetime, lease: timedelta) -> bool: ...
-    def finish(self, run_id: UUID, outcome: RunOutcome, *, now: datetime) -> None: ...
-    def release(self, run_id: UUID, *, now: datetime) -> None: ...
+    def submit(self, spec: RunSpec, *, run_id: UUID, now: datetime,
+               expires_at: datetime) -> Run: ...
+    def claim(self, *, worker_id: str, now: datetime, lease: timedelta,
+              max_attempts: int) -> Run | None: ...
+    def heartbeat(self, run_id: UUID, *, now: datetime, lease: timedelta,
+                  worker_id: str | None = None) -> bool: ...
+    def release(self, run_id: UUID, *, now: datetime,
+                worker_id: str | None = None) -> None: ...
+    def finish(self, run_id: UUID, outcome: RunOutcome, *, now: datetime,
+               worker_id: str | None = None,
+               only_from: RunStatus | None = None) -> bool: ...
     def cancel(self, run_id: UUID, tenant_id: str, *, now: datetime) -> Run: ...
     def get(self, run_id: UUID, tenant_id: str) -> Run | None: ...
     def is_cancelled(self, run_id: UUID) -> bool: ...
     def ping(self) -> None: ...
 ```
 
-The last two arrived with the code and are recorded here rather than left implicit.
+### `worker_id`, on the three methods that act on a lease
+
+**These are the fix for a defect, and this block used to publish the shape that had it.** A worker
+proves it still holds the run before it may write about it. Without that proof each of the three was
+wrong in its own way, and none of the three failed a test:
+
+- `finish` matched on status alone, and redelivery puts the row back into `running` — so a stalled
+  worker's late verdict landed on a run another worker was executing, and the live attempt's own
+  `finish` was then the one suppressed, because by then the run was terminal. The result the caller
+  received was computed by the worker that had already lost the run.
+- `release` had the same hole with a worse consequence: a superseded worker that was then signalled
+  requeued a run another worker was executing, for immediate reclaim, so the same document was
+  processed twice and the provider paid twice — and it returned the attempt while doing it.
+- `heartbeat`'s `lease_until >= now` cannot detect supersession, because redelivery *renews* the
+  lease. The old worker was told `True`, never learned to stop, and went on extending the new owner's
+  lease; had that owner then died, the lease would have been held open by a process not executing the
+  run and redelivery would never have fired.
+
+It is **optional** because not every caller is a worker. `cancel` acts on a queued run that nobody
+holds and has no claim to prove, so it omits the argument and gets the old, status-only behaviour.
+
+`only_from` narrows the accepted prior state, and exists for one caller. `cancel` reads a run's
+status and then writes; a claim landing between those two steps meant a *running* run was marked
+`cancelled` — worker and lease cleared, outcomes blanked — while the worker carried on executing it
+and paying for provider calls, which is exactly what FR-029 forbids, arriving through the path for
+queued ones. With `only_from=QUEUED` the claim either got there first or it did not, and the database
+says which.
+
+`finish` returns `bool` rather than `None`: **whether this call was the one that recorded the terminal
+state.** `cancel` needs that answer to tell "I stopped it" from "somebody claimed it first", and a
+caller left to infer it from a subsequent read would be re-opening the same race one line later.
+
+`claim` takes `max_attempts` and `submit` takes `expires_at`. Both have since the code was written;
+neither was recorded here.
+
+`is_cancelled` and `ping` arrived with the code and are recorded here rather than left implicit.
 `is_cancelled` is what the worker's `should_continue` callback reads at each stage boundary — no
 `tenant_id`, because the worker holds a lease on the row and is not answering a caller's question
 about it. `ping` is what readiness asks (FR-054); it is on the protocol rather than only on the
@@ -125,12 +166,30 @@ The transitions, and the `reason` each carries:
 | `running` | `running` | `redelivered` — a lease lapsed and another worker took it |
 | `running` | `queued` | `released` — a worker was signalled and let go (FR-043) |
 | `running` | `failed` | `RunAbandonedError` — the attempt limit, one event per run in the sweep |
-| `queued`/`running` | terminal | the error class, or `completed` |
+| `queued` | `failed` | `RunAbandonedError` — a run stranded at the limit; see below |
+| `queued`/`running` | `succeeded`/`failed` | the error class, or `completed` |
+| `queued`/`running` | `cancelled` | `cancelled` — it actually stopped |
 | `running` | `running` | `cancel_requested` — asked, not yet stopped (FR-029) |
+
+**`cancelled` and `cancel_requested` are two rows because they are two events**, and merging them is
+what the table used to do. A cancelled run carries no `error_class` — nothing refused anything — so
+the terminal row's "the error class, or `completed`" resolved to `completed` for every deliberate
+stop. An operator counting completions counted cancellations among them, in the one place built to
+make a run's history legible. `observe.reason_for` decides this now, in one function both queue
+implementations call, so a fake cannot label a transition differently from the real thing.
+
+The `queued → failed` row is the sweep reaching a run that is stranded rather than stalled. The claim
+requires `attempts < max_attempts` and the sweep once looked only at `running` rows, so a run sitting
+in `queued` at the limit matched neither and was invisible to both — for ever, with the caller polling
+and no `RunAbandonedError` ever recorded, which is the one state the attempt limit exists to produce.
+`release` no longer creates that shape and the sweep no longer ignores it; between them, the invariant
+is that **every non-terminal run is either claimable or abandonable.**
 
 Two silences are deliberate. An **idempotent replay** emits nothing, because nothing transitioned; a
 retrying client is not a queue filling up. A **redelivered attempt finishing a run the first one
-already concluded** emits nothing, for the same reason — `finish` is a no-op on a terminal run.
+already concluded** emits nothing, for the same reason — `finish` is a no-op on a terminal run, and
+since it now also refuses a worker that no longer holds the run, a *superseded* attempt's conclusion
+is silent for the same reason rather than by luck.
 
 There is **no exporter here.** Milestone 10 binds one; this milestone gives it something to bind to.
 

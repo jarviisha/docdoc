@@ -484,3 +484,118 @@ def test_every_mapped_section_exists_in_the_document() -> None:
         f"these sections are claimed here and are not in data-model.md: {absent}. "
         f"The heading was renamed and this map now describes nothing"
     )
+
+
+# -- T120: the contract's protocol block describes the protocol ----------------
+#
+# The same drift as everything above, in the file that publishes an interface for
+# other people to implement. `contracts/runs-layer.md` opens with a ```python
+# block giving `RunQueue`'s nine signatures, and five of them had fallen behind
+# the code: `finish` was shown returning `None` and without `worker_id` or
+# `only_from`, `heartbeat` and `release` without `worker_id`, `claim` without
+# `max_attempts`, `submit` without `expires_at`.
+#
+# Three of those absences were not cosmetic. `worker_id` on the three lease
+# operations *is* the fix for the ownership defects a review found — so the
+# contract was publishing precisely the surface that let a superseded worker
+# overwrite the live attempt's verdict, requeue a run another worker was
+# executing, and extend a lease it no longer held. Anyone implementing this
+# protocol from the document would have rebuilt all three.
+#
+# `test_documented_api_references_resolve.py` cannot catch it: that one checks
+# that names *resolve*, and every name here resolves. A signature can be wrong in
+# every parameter while naming only things that exist.
+
+
+#: Relative, like every other path in this file, so the check runs from the repo
+#: root the way the suite does.
+RUNS_LAYER_CONTRACT = pathlib.Path("specs/009-asynchronous-runs/contracts/runs-layer.md")
+
+
+def _documented_queue_signatures() -> dict[str, str]:
+    """The `def` lines from the contract's protocol block, one per method.
+
+    Signatures are wrapped across lines to stay inside the file's column width,
+    so they are flattened before comparison — the contract is about the surface,
+    not about where the author put the newlines.
+    """
+    import re
+
+    text = RUNS_LAYER_CONTRACT.read_text(encoding="utf-8")
+    block = text.split("```python", 1)[1].split("```", 1)[0]
+    flat = re.sub(r",\s*\n\s+", ", ", block)
+
+    found = {}
+    for line in flat.splitlines():
+        stripped = line.strip()
+        match = re.match(r"def (\w+)\(", stripped)
+        if match:
+            # Drop the `: ...` body; the signature is the whole of the claim.
+            signature = re.sub(r"\s+", " ", stripped).removesuffix(" ...").rstrip(":").strip()
+            found[match.group(1)] = signature
+    return found
+
+
+def test_the_protocol_block_is_parsed_at_all() -> None:
+    """The guard every parser in this file has, for the reason they all give.
+
+    A regex that silently matches nothing turns this check into a test that
+    always passes, which is worse than not having it.
+    """
+    documented = _documented_queue_signatures()
+
+    assert len(documented) >= 9, (
+        f"only {len(documented)} signatures were parsed out of the protocol block; "
+        "the block's shape changed and the check below is now vacuous"
+    )
+
+
+@pytest.mark.parametrize(
+    "method",
+    [
+        "submit",
+        "get",
+        "claim",
+        "heartbeat",
+        "release",
+        "finish",
+        "cancel",
+        "is_cancelled",
+        "ping",
+    ],
+)
+def test_every_documented_queue_signature_matches_the_protocol(method: str) -> None:
+    """Exact match, both directions, which is the opposite of the rule above.
+
+    The field tables are checked one-directionally — a field the code has and the
+    document does not is not a failure — because requiring exhaustiveness there
+    turns every additive change into a documentation edit. A *signature* is
+    different: an argument the code takes and the document omits is not extra
+    detail, it is a caller who cannot call the method, and an argument the
+    document shows and the code lacks is a caller who gets a `TypeError`. There
+    is no additive change to a signature that leaves the old one true.
+    """
+    import inspect
+    import re
+
+    from docdoc.runs.queue import RunQueue
+
+    documented = _documented_queue_signatures()
+    assert method in documented, (
+        f"`{method}` is on the protocol and not in the contract's block. A method "
+        "nobody documented is one an implementer will not implement"
+    )
+
+    # `from __future__ import annotations` makes every annotation a string, so
+    # `inspect.signature` renders them quoted. The quotes are an artefact of how
+    # the module defers evaluation, not part of the surface being published.
+    rendered = str(inspect.signature(getattr(RunQueue, method))).replace("'", "")
+    real = re.sub(r"\s+", " ", f"def {method}{rendered}")
+
+    assert documented[method] == real, (
+        f"the contract publishes a `{method}` the protocol does not have.\n"
+        f"  contract: {documented[method]}\n"
+        f"  code:     {real}\n"
+        "This block is what somebody implementing RunQueue reads, so a stale "
+        "signature here is a defect they will faithfully reproduce."
+    )
