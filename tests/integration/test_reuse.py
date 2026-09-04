@@ -295,6 +295,7 @@ def test_an_unwritable_store_is_logged_once_and_not_once_per_stage(
     adapter: EchoAdapter,
     caplog: pytest.LogCaptureFixture,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The half of FR-063 the outcome test above cannot see (US3/AC3, Edge Cases).
 
@@ -319,15 +320,38 @@ def test_an_unwritable_store_is_logged_once_and_not_once_per_stage(
     `docdoc.pipeline` would have reported zero lines while four were being
     written.
 
-    **The unwritable root is a regular file, not `/proc`.** It was `/proc`, which
-    exists only on Linux — on Windows the path resolved to nothing recognisable
-    and the run reached zero stages instead of four, so this failed there while
-    passing everywhere else. A file standing where a directory is expected fails
-    the same way on every platform: `NotADirectoryError`, which is an `OSError`,
-    which is what `_create_exclusively` catches. Same code path, no OS in it.
+    **The store is made unwritable by forcing the write to fail, not by finding
+    a path the OS refuses.** Two attempts at the latter both turned out to be
+    tests of the operating system rather than of docdoc. `/proc/…` exists only on
+    Linux, so on Windows the run reached zero stages instead of four. A regular
+    file standing where the root should be looked portable and is not: on Linux
+    `mkdir` under it raises `NotADirectoryError` and the store degrades, while on
+    Windows it surfaces as `FileExistsError`, which `_create_exclusively` catches
+    first and reads as *a racing writer* — so the run died with "a different
+    result was stored under this identity concurrently", an alarming message
+    about a condition that had not occurred.
+
+    (That misreading is worth knowing about independently: only `os.link` can
+    legitimately produce `FileExistsError` there, and a `mkdir` raising it means
+    the root is malformed rather than contended. It is pre-existing and out of
+    scope here.)
+
+    Raising `OSError` from the temp-file creation reproduces the condition this
+    test is actually about — the directories exist and the write is refused,
+    which is what a permissions change or a full disk looks like — and it does it
+    identically on every platform.
     """
-    unwritable = tmp_path / "a-file-where-a-store-root-should-be"
-    unwritable.write_text("not a directory", encoding="utf-8")
+    import tempfile as _tempfile
+
+    from docdoc.artifacts import store as store_module
+
+    def refuse(*_: object, **__: object) -> tuple[int, str]:
+        raise OSError(13, "Permission denied")
+
+    monkeypatch.setattr(store_module.tempfile, "mkstemp", refuse)
+    assert _tempfile  # the real module is untouched outside this patch
+
+    unwritable = tmp_path / "store"
 
     with caplog.at_level(logging.WARNING):
         result = run(
