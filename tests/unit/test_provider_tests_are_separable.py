@@ -382,7 +382,22 @@ def test_a_stray_google_credential_does_not_change_parser_availability(
     `conftest.py` now clears it, so this test — which sets it *after* that
     fixture has run — is the honest check that the clearing is what matters, not
     the ordering.
+
+    **Needs the SDK, and that is the whole reason it needs a skip.** Availability
+    is `sdk_module` importable *and* `configured` (see
+    `registry._register_service_parser`), so on a base install `gcv` is
+    unavailable however the credential is set, and the assertion below fails for
+    a reason that has nothing to do with what it tests. SC-013 runs exactly that
+    install, so without this the base-install job goes red while the full one
+    stays green — which is this file's own subject matter arriving one layer up,
+    a test whose result depends on what happens to be installed.
     """
+    pytest.importorskip(
+        "google.cloud.vision",
+        reason="gcv availability needs the SDK as well as a credential; a base "
+        "install has neither and this asserts the credential is what moves it",
+    )
+
     from docdoc.ingest.registry import default_registry
 
     before = {parser.id: parser.available for parser in default_registry().candidates_all()}
