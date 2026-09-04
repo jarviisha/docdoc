@@ -599,3 +599,115 @@ def test_every_documented_queue_signature_matches_the_protocol(method: str) -> N
         "This block is what somebody implementing RunQueue reads, so a stale "
         "signature here is a defect they will faithfully reproduce."
     )
+
+
+# -- T125: the contract's CLI block describes the commands ---------------------
+#
+# The same drift as the protocol block above, in the same file, found by the pass
+# that went looking for it *because* the protocol block had drifted. The section
+# is headed "CLI additions" and listed three of the seven flags these two
+# commands add — omitting `--run-database-url` on both, and `--health-port` and
+# `--default-tenant`, which are themselves additions of the milestone the section
+# documents.
+#
+# Compared against `argparse` rather than against `--help` text, so the check does
+# not depend on how help happens to be formatted. Shared flags are subtracted by
+# comparing against a third subcommand: anything `worker`, `migrate` *and*
+# `extract` all carry is inherited, and the contract says on purpose that it is
+# describing what these two add rather than what they inherit.
+
+
+def _command_specific_flags() -> dict[str, set[str]]:
+    """Flags `worker` and `migrate` carry that not every subcommand carries."""
+    from docdoc.cli import build_parser
+
+    parsers = {}
+    for action in build_parser()._subparsers._group_actions:  # type: ignore[union-attr]
+        parsers.update(action.choices)
+
+    def options(name: str) -> set[str]:
+        return {
+            option
+            for action in parsers[name]._actions
+            for option in action.option_strings
+            if option.startswith("--")
+        }
+
+    shared = options("worker") & options("migrate") & options("extract")
+    return {"worker": options("worker") - shared, "migrate": options("migrate") - shared}
+
+
+def _documented_cli_flags() -> set[str]:
+    """Flags the section *offers*, which is not every flag it mentions.
+
+    Read from the usage block and the first column of the table, never from the
+    prose. A blanket regex over the section swept up two things that are not
+    offers: the table's `---` separator, and `--concurrency`, which the prose
+    names precisely to say it **does not exist** ("a flag that only accepts one
+    value is an invitation to make it accept more"). A check that read the
+    argument *against* a flag as documentation of it would have forced that
+    paragraph to be deleted to go green.
+    """
+    import re
+
+    text = RUNS_LAYER_CONTRACT.read_text(encoding="utf-8")
+    section = text.split("## CLI additions", 1)[1]
+
+    usage = section.split("```bash", 1)[1].split("```", 1)[0]
+    flags = set(re.findall(r"--[a-z][a-z-]*", usage))
+
+    for line in section.splitlines():
+        if line.startswith("| `--"):
+            flags.update(re.findall(r"`(--[a-z][a-z-]*)`", line.split("|")[1]))
+    return flags
+
+
+def test_the_cli_block_is_parsed_at_all() -> None:
+    """The guard every parser in this file carries, for the reason they all give."""
+    assert len(_documented_cli_flags()) >= 6, (
+        "the CLI section's shape changed and the check below is now vacuous"
+    )
+    assert _command_specific_flags()["worker"], "no worker-specific flags were resolved"
+
+
+def test_every_flag_these_two_commands_add_is_documented() -> None:
+    """One direction only, and the asymmetry is deliberate.
+
+    A flag the contract mentions and `argparse` does not have would be a reader
+    typing something that fails, so that direction is checked below. A flag the
+    parser has and the contract omits is the failure this test was written for:
+    the section is *headed* "CLI additions", so an addition it does not name is
+    the one thing it cannot be silent about.
+    """
+    documented = _documented_cli_flags()
+    missing = {
+        f"{flag} (on {command})"
+        for command, flags in _command_specific_flags().items()
+        for flag in flags
+        if flag not in documented
+    }
+
+    assert not missing, (
+        f"these flags exist and the contract's CLI section does not name them: "
+        f"{sorted(missing)}. The section is what somebody deploying a worker "
+        f"reads, and a flag missing from it is a capability they will not know "
+        f"they have"
+    )
+
+
+def test_the_cli_block_invents_no_flag() -> None:
+    """The other direction. A documented flag `argparse` does not register is a
+    reader typing something that fails."""
+    from docdoc.cli import build_parser
+
+    every = {
+        option
+        for action in build_parser()._subparsers._group_actions  # type: ignore[union-attr]
+        for parser in action.choices.values()
+        for parser_action in parser._actions
+        for option in parser_action.option_strings
+    }
+
+    invented = {flag for flag in _documented_cli_flags() if flag not in every}
+
+    assert not invented, f"the contract documents flags that do not exist: {sorted(invented)}"
