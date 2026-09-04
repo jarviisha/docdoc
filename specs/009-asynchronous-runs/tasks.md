@@ -499,3 +499,43 @@ be the wrong direction.
 nothing about Milestone 9, while Milestones 4 through 8 each wrote a full entry. No artifact in this
 feature names it, so this command still appends no task for it. Recorded again so the omission stays
 a decision.
+
+---
+
+## Phase 15: Convergence
+
+Appended by `/speckit-converge` on 2026-09-03, after Phase 14. Three findings, none of them a
+behaviour gap. No constitution MUST principle is violated — checked this pass against the
+constitution's own 99 MUST statements rather than against plan.md's gate table, which is the
+difference between verifying a claim and reading one.
+
+Two of the three came from the **Assumptions** section, which six earlier passes had never
+enumerated. It is worth naming why that section was easy to skip and should not have been: two of its
+eleven entries are not assumptions at all but obligations in disguise — "…is **documented as a
+limitation** rather than left to be discovered" and "the **documentation states a sane interval**".
+An obligation phrased as an assumption is one nothing traces to, which is the same shape as the
+research decisions Phase 14 found and the acceptance scenarios Phase 12 found.
+
+- [X] T117 Document the key-rotation limitation where an operator reads, per spec.md's "Static credentials are sufficient for this milestone" assumption (partial). That assumption ends "**and is documented as a limitation rather than left to be discovered**", and it is documented in `src/docdoc/api/auth.py`'s docstring — which is not where anybody looks. The README's authentication section, `examples/serve_api.md`, and `docs/concepts/runs.md` each describe the key file and none says the mapping is read **once, at startup**. The consequence is worth stating plainly because it is a security one: an operator who deletes a compromised key from the file sees no error, no warning, and no change — **the revoked key keeps working until the process restarts**. Say so in the operator documentation, say that rotation means a restart, and say that issuance and runtime revocation are Milestone 10's rather than missing by accident
+- [X] T118 [P] State a polling interval where the polling is described, per spec.md's "Polling is sufficient for this milestone" assumption (partial). It says "a client polls, and **the documentation states a sane interval**", and no document states one: `docs/concepts/runs.md` says "Poll `GET /v1/runs/{run_id}`" and stops. The only number in the repository is `examples/submit_async_run.py`'s `POLL_SECONDS = 0.25`, which is right for a local demo against the echo adapter and wrong for anything else — a reader who copies it makes four requests per second per run against a shared API. Give a figure with the reason behind it: the work being waited on takes seconds to minutes, so the interval should be seconds, and `GET /v1/runs/{run_id}` is a single indexed point lookup rather than something expensive. Consider whether the example should carry the production number with a comment saying why it uses a smaller one, rather than a small number a reader will assume is the recommendation
+- [X] T119 Reconcile `src/docdoc/runs/__init__.py` with plan.md's description of it (contradicts). The plan's source tree calls it "the public surface: submit, get, cancel, claim"; the file is `__all__: tuple[str, ...] = ()` and exports nothing, which makes `docdoc.runs` the only layer in the project with an empty public surface — `artifacts` exports 10 names, `pipeline` 12, `recording` 4, `extraction` 33, `validation` 20. Every caller reaches past the package into its submodules. **The reason the file gives is real but covers only half of it**: re-exporting `PostgresRunQueue` would pull `psycopg` into the import graph of anyone importing `docdoc.runs`, and the layer must work without it. That argument does not reach `Run`, `RunStatus`, `RunOutcome`, `StageOutcomeRecord`, `RunQueue`, `RunSpec`, or the six error classes, none of which imports a driver. Re-export the driver-free surface and leave `PostgresRunQueue` to be imported from `docdoc.runs.postgres`, with a docstring line saying which is which and why — the split is the interesting part, and a reader who finds an empty `__all__` learns nothing from it
+
+**What this pass confirms rather than finds.** All eleven Assumptions hold as stated, the two above
+being obligations rather than assumptions. All seven Dependencies are satisfied: ADR-0013 and ADR-0014
+are Accepted, ADR-0010 §4 and §5 are inherited rather than restated, ADR-0012 is why `POST /v1/extract`
+has no asynchronous form, ADR-0003's derivation is untouched, and the import-contract, determinism
+scan and audit hook are unmodified and green. Of the constitution's MUST statements, the three this
+milestone could plausibly reach are each verified rather than argued: the core library runs with no
+database, no object store and no service (SC-013, measured in a venv with no extras); nothing logs a
+document, a value, a prompt or a credential (four separate tests); and no deferred technology is
+present (a `forbidden` import contract, not a review).
+
+**One plan claim is left unverified and named rather than filed.** Technical Context sets
+"claim-to-start latency under 1 s with an idle worker". It holds by construction —
+`_IDLE_SLEEP_SECONDS = 0.5` bounds the wait and the claim is one statement — and a test of it would
+be a wall-clock assertion of the kind this repository already has trouble with on a loaded machine
+(`test_kernel_perf.py` fails in whole-suite runs and passes alone). Asserting the constant would be
+asserting the constant. Recorded so the absence is a decision.
+
+**`CHANGELOG.md`, for the sixth time.** Its `[Unreleased]` section describes Milestone 8 and says
+nothing about Milestone 9. No artifact in this feature names it, so no task is appended.

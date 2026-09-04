@@ -54,6 +54,13 @@ BASE = os.environ.get("DOCDOC_EXAMPLE_URL", "http://localhost:8000").rstrip("/")
 #: A run is terminal in one of three ways, and polling stops at any of them.
 TERMINAL = {"succeeded", "failed", "cancelled"}
 
+#: **Faster than you should poll in a client, on purpose.** This is a
+#: demonstration that should finish while you are watching it, so it checks four
+#: times a second. A real client should poll every 2-5 seconds and back off:
+#: a run's duration is dominated by a provider call, so a sub-second interval
+#: issues hundreds of requests per minute *per run* to learn nothing, against the
+#: same database the workers are claiming from. See `docs/concepts/runs.md`,
+#: "How often to poll".
 POLL_SECONDS = 0.25
 POLL_LIMIT = 240  # a minute at the interval above
 

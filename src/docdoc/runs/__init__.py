@@ -33,8 +33,54 @@ down into ``pipeline`` where the determinism guard would — correctly — rejec
 **Layer position.** Above ``pipeline``, sibling of ``recording``, with an
 independence contract between them. Neither uses the other: ``recording`` drives
 the pipeline to produce a prediction set, this drives it to serve a request.
+
+**What this package exports, and the one thing it does not.** Everything below
+is I/O-free: the models, the protocol, and the errors. `PostgresRunQueue` is
+deliberately absent and must be imported from `docdoc.runs.postgres`, because
+re-exporting it would put `psycopg` in the import graph of anyone who typed
+`import docdoc.runs` — and a base install has no `psycopg`, by design (SC-013).
+
+The split is the interesting part. A caller who wants to *reason about* a run
+needs `Run`, `RunStatus`, and the errors, and needs no driver to do it; a caller
+who wants to *store* one is already choosing a backend and can say so in the
+import. The empty `__all__` this file used to carry expressed the second half and
+lost the first, which left this the only layer in the project exporting nothing —
+`artifacts` exports ten names, `pipeline` twelve, `validation` twenty.
 """
 
 from __future__ import annotations
 
-__all__: tuple[str, ...] = ()
+from docdoc.runs.errors import (
+    RunAbandonedError,
+    RunError,
+    RunNotCancellableError,
+    RunNotFoundError,
+    RunStateUnavailableError,
+    TenantAssignmentError,
+)
+from docdoc.runs.model import (
+    DEFAULT_TENANT,
+    TERMINAL_STATES,
+    Run,
+    RunOutcome,
+    RunStatus,
+    StageOutcomeRecord,
+)
+from docdoc.runs.queue import RunQueue, RunSpec
+
+__all__ = [
+    "DEFAULT_TENANT",
+    "TERMINAL_STATES",
+    "Run",
+    "RunAbandonedError",
+    "RunError",
+    "RunNotCancellableError",
+    "RunNotFoundError",
+    "RunOutcome",
+    "RunQueue",
+    "RunSpec",
+    "RunStateUnavailableError",
+    "RunStatus",
+    "StageOutcomeRecord",
+    "TenantAssignmentError",
+]

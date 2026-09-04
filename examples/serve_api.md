@@ -180,6 +180,29 @@ The file holds hashes and never keys, so a leak of it is not a set of working
 credentials. There is no flag and there never will be: `argv` is readable by
 every process on the host.
 
+### Rotating a key means restarting
+
+The key file is read once, at startup, and never re-read. Rotation is therefore a
+deploy, not an edit:
+
+```bash
+# 1. add the new key alongside the old one, then restart every process
+# 2. move callers onto the new key
+# 3. remove the old key, then restart every process again
+```
+
+**Deleting a key from the file on its own does nothing.** There is no error and
+no warning — the running process is still answering from the mapping it read at
+startup, so a compromised key keeps working until the last process holding that
+mapping has restarted. In a rolling deployment that is the length of the rollout;
+in a deployment nobody restarts, it is indefinite.
+
+That is a deliberate limit of static credentials rather than an oversight.
+Reloading on change would mean a filesystem watch or a stat on every request, and
+a deployment changing keys is restarting a process anyway, as it already does for
+every other configuration value. If you need revocation measured in seconds, the
+thing that provides it is a gateway in front of the service, not this file.
+
 Enabling it over a store that already has content in it needs one more thing.
 Pre-existing content sits at `<root>/blobs/…` with no tenant segment and stays
 there — nothing is copied or moved — so name the tenant it belongs to:

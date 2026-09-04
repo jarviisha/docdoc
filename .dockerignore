@@ -26,6 +26,11 @@ __pycache__/
 .import_linter_cache/
 .coverage
 htmlcov/
+# Nothing here writes one — logging goes to stdout — but a developer who
+# redirected a local run into the tree would otherwise bake its contents, which
+# include identifiers and paths, into a layer anyone pulling the image can read.
+*.log
+*.log.*
 ui/node_modules/
 ui/dist/
 

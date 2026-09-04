@@ -79,6 +79,33 @@ inventing one.
 A terminal state is terminal. No transition leaves `succeeded`, `failed`, or `cancelled`, and no code
 path deletes a row.
 
+### How often to poll
+
+**Poll every 2–5 seconds, and back off.** There is no push, no webhook, and no long poll; polling is
+how a client learns a run finished, so the interval is a number every caller has to pick and this is
+the one to pick.
+
+The reason it is seconds and not milliseconds is that a run's duration is dominated by a provider
+call. A document takes a few seconds to a few minutes end to end, so a 250 ms interval issues four
+requests per second to learn nothing about work that was never going to finish that fast — and it
+does it *per run*, so a hundred concurrent runs is four hundred requests a second against the same
+database the workers are claiming from.
+
+A reasonable shape:
+
+| Elapsed | Interval |
+|---------|----------|
+| first 10 s | 2 s |
+| after that | 5 s |
+| after 2 min | 15 s, up to your timeout |
+
+`examples/submit_async_run.py` polls faster than this on purpose — it is a demonstration that should
+finish while you are watching it, and it says so where the constant is defined. Copying that constant
+into a client with real traffic is the mistake this section exists to prevent.
+
+`GET /v1/runs/{run_id}` is a single indexed row read, so polling is cheap per request. It is the
+multiplication by callers and by frequency that is not.
+
 ## Redelivery, and why it is mostly "resume"
 
 A worker takes a run by claiming it, which sets a lease. It extends that lease on a timer while it
@@ -198,6 +225,12 @@ value, a credential, a tenant identifier, or a count of anything stored.
 Off by default. Point `DOCDOC_API_KEYS_FILE` at a key file and every route except the two health
 routes requires `Authorization: Bearer <key>`; each key resolves to exactly one tenant.
 
+**The key file is read once, at startup.** Removing a key from it has no effect on a running
+process — no error, no warning — so revoking a credential means restarting every process that holds
+the old mapping. Rotate by adding the new key, restarting, moving callers across, removing the old
+key, and restarting again. Credentials here are static by design; revocation in seconds is a job for
+a gateway in front of the service. See [`examples/serve_api.md`](../../examples/serve_api.md).
+
 Each tenant's content is namespaced in the store — `<root>/t/<tenant_id>/…` — **above** the
 two-character fan-out, so per-tenant deletion is a prefix operation rather than a scan. Identity is
 untouched: two tenants processing identical bytes derive identical `blob_id`s and `processing_id`s
@@ -223,6 +256,10 @@ because moving it later would strand everything at a path nothing looks at. See
   matters needs `SKIP LOCKED` — which an ORM obscures rather than helps.
 - **No run priority and no fairness policy.** Claims are oldest-first and that is the whole ordering.
 - **No retention sweep.** `expires_at` is recorded and nothing reads it yet.
+- **No key issuance and no runtime revocation.** Credentials are a file read at startup. There is no
+  route that creates, lists, or revokes a key, and that absence is a requirement rather than an
+  omission — a table invites exactly the endpoint that turns "who may call this" into something
+  callers can edit. Revoking means editing the file and restarting; see the note under *Tenants*.
 - **No metrics exporter.** One `run.transition` event per state change goes to standard-library
   logging, carrying identifiers, states, and counts — never a duration, a cost, or anything from a
   document. Binding an exporter is later work; this gives it something to bind to.

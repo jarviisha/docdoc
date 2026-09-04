@@ -232,6 +232,14 @@ SHA-256 hashes rather than keys, so a leak of it is not a set of working credent
 {"keys": [{"sha256": "…", "tenant_id": "acme"}]}
 ```
 
+**Revoking a key requires restarting the process.** The file is read once, at startup. Delete a
+compromised key from it and nothing happens — no error, no warning, no change in behaviour — and the
+key keeps working until every process holding the old mapping has restarted. Static credentials are
+what this milestone provides; if you need revocation to take effect in seconds, put a gateway that
+does in front of the service. Reloading on change was left out deliberately: it means either a
+filesystem watch or a stat on every request, and a deployment changing keys is restarting a process
+anyway, as it already does for every other configuration value.
+
 > **A deployment that has not enabled it is exactly as exposed as it was before.** The default is the
 > *compatible* one, not the safe one: it exists so that upgrading breaks nothing, and it means
 > security is opt-in. With no key file configured there is no authentication on any route, one
