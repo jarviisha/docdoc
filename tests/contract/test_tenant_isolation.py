@@ -299,9 +299,42 @@ def test_only_liveness_and_readiness_answer_without_a_credential(
     )
 
 
-def test_the_viewer_is_reachable_with_a_credential(client: TestClient) -> None:
-    """Gating must not mean breaking: a caller holding a key still gets the page."""
-    assert client.get("/ui", headers=bearer("acme")).status_code == 200
+def test_the_viewer_is_reachable_with_a_credential(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Gating must not mean breaking: a caller holding a key still gets the page.
+
+    **The assets are stubbed, and they have to be.** This asserted `200` against
+    whatever `chosen_assets()` found, which is `ui/dist` — a build output, and
+    gitignored. So it passed on any machine that had ever built the viewer and
+    returned `501` on a fresh checkout, which is to say it passed here and failed
+    in CI. `test_http_ui_endpoints.py` had already solved this by monkeypatching
+    the lookup; this file reached for the real thing and got the developer's
+    working tree.
+
+    The claim being tested is about *authentication*, not about the build: a
+    caller holding a key must reach the mount rather than be refused at the door.
+    Stubbing the assets is what isolates that claim from whether anybody has run
+    `npm build`.
+    """
+    from docdoc.api import ui as ui_module
+
+    (tmp_path / "index.html").write_text("<!doctype html><div id=root></div>", encoding="utf-8")
+    monkeypatch.setattr(ui_module, "chosen_assets", lambda: ("test", tmp_path))
+
+    served = TestClient(
+        build_app(
+            _Deployment(
+                store_root=tmp_path,
+                registry=SchemaRegistry.from_paths([Path("schemas")]),
+                keys=KeyRing.from_file(Path(KEYS_FILE)),
+            )
+        )
+    )
+
+    assert served.get("/ui/", headers=bearer("acme")).status_code == 200
+    # And the gate is still on it: the same path without a key is refused.
+    assert served.get("/ui/").status_code == 401
 
 
 def test_with_authentication_off_nothing_requires_a_credential(tmp_path: Path) -> None:
