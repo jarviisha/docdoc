@@ -29,11 +29,24 @@ COPY src/ ./src/
 
 # `--all-extras` is deliberately NOT used. The image carries what a deployment
 # runs: the HTTP interface, run state, shared storage, and the provider adapters.
-# It does not carry `docdoc[pdf]`, because PyMuPDF is AGPL-3.0 and baking it into
-# a distributed image is an obligation this project's own README warns about
-# (ADR-0001). A deployment that wants the native PDF path installs it knowingly.
-RUN uv pip install --system --no-cache \
-        ".[api,postgres,s3,google,azure,gcv]"
+# It does not carry `docdoc[pdf]` **by default**, because PyMuPDF is AGPL-3.0 and
+# baking it into a distributed image is an obligation this project's own README
+# warns about (ADR-0001).
+#
+# The consequence is worth stating, because it surprised the first person to walk
+# the quickstart against this image: **the default build can parse nothing on its
+# own.** `pdf-text` is absent, and `azure-di` and `gcv` report unavailable until
+# they have credentials. Supplying a provider credential is the manual step
+# FR-077 permits — and for a purely local walk-through there is a second option
+# that FR-077 does not cover, so it is offered here explicitly rather than left
+# for somebody to discover by editing this file:
+#
+#   docker build --build-arg DOCDOC_EXTRAS=api,postgres,s3,google,azure,gcv,pdf .
+#
+# Opt-in, named in full at the command line, and therefore a licence decision
+# somebody made rather than one this file made for them.
+ARG DOCDOC_EXTRAS=api,postgres,s3,google,azure,gcv
+RUN uv pip install --system --no-cache ".[${DOCDOC_EXTRAS}]"
 
 # ---------------------------------------------------------------------------
 
@@ -44,6 +57,14 @@ FROM python:3.11-slim-bookworm
 # (ADR-0010 §1), which is worth nothing if that account is root.
 RUN useradd --create-home --uid 10001 docdoc
 
+# The installed packages, and the one console script this image invokes by name.
+#
+# `uvicorn` is deliberately **not** copied and is invoked as `python -m uvicorn`
+# below. Copying console scripts one at a time is a list that goes stale in
+# exactly one way — silently, at container start, with `executable file not
+# found in $PATH` — and it did: the first version of this file copied `docdoc`
+# alone while `CMD` named `uvicorn`, so the worker started and the API did not.
+# A module invocation needs no entry in any list.
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin/docdoc /usr/local/bin/docdoc
 
@@ -66,4 +87,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2).status == 200 else 1)"
 
-CMD ["uvicorn", "--factory", "docdoc.api.app:create_app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "uvicorn", "--factory", "docdoc.api.app:create_app", "--host", "0.0.0.0", "--port", "8000"]

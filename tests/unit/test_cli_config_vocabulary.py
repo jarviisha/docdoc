@@ -401,6 +401,13 @@ def test_no_flag_introduces_a_second_name_for_a_setting() -> None:
         "DOCDOC_SCHEMA_PATHS": "--schema-path",  # singular: it is repeatable
         "DOCDOC_MODEL_ADAPTERS": "--adapter",  # singular, and "model" is implied
         "DOCDOC_STORE_ROOT": "--store",  # "root" is what a directory is
+        # Milestone 9. Both live only on `docdoc worker`, which already supplies
+        # the word "run": `--run-lease-seconds` on a command called `worker`
+        # reads as a second concept rather than as the same one. The variable
+        # keeps the prefix because it is read from an environment shared with
+        # `DOCDOC_RUN_DATABASE_URL`, where "which run?" is a real question.
+        "DOCDOC_RUN_LEASE_SECONDS": "--lease-seconds",
+        "DOCDOC_RUN_MAX_ATTEMPTS": "--max-attempts",
     }
     for setting, flag in FLAG_FOR_SETTING.items():
         if setting in aliases:
@@ -440,3 +447,125 @@ def test_the_multipage_fixture_still_has_pages_to_exceed(
     pytest.importorskip("pymupdf")  # SC-013: skips on a base install
     assert main(["parse", MULTIPAGE, "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["pages"] == 3
+
+
+# -- the other blind spot: a flag with no setting behind it (T102) -------------
+#
+# Every check above starts from the *environment* names and asks whether each has
+# a flag. None of them starts from the flags, so a flag introduced with no paired
+# variable is in neither `FLAG_FOR_SETTING` nor `ENVIRONMENT_ONLY` and this file
+# cannot see it at all. `--health-port` arrived that way.
+#
+# The rule these enforce is not "every flag needs a variable" — some genuinely do
+# not, and `--health-port` is one. It is that the exceptions are **declared**, so
+# a flag with no setting behind it is a decision somebody made rather than an
+# omission nobody noticed. That is the same argument `ENVIRONMENT_ONLY` makes in
+# the other direction.
+
+#: Flags that deliberately pair with no `DOCDOC_*` variable, each with the reason.
+#:
+#: Kept here rather than in `docdoc.cli.config` because these are properties of
+#: the *parser*, not settings docdoc reads: there is nothing in `config.py` for
+#: them to be an exception to.
+FLAGS_WITHOUT_A_SETTING: dict[str, str] = {
+    "--json": "an output form, chosen per invocation; there is nothing to configure",
+    "--no-store": "the negation of --store, not a second setting",
+    "--verify-cache": "a per-invocation mode, like --json",
+    "--schema": "the schema this invocation runs; the *search path* is the setting",
+    "--result": "an identity to read back, which is an argument and not a setting",
+    "--chain": "a per-invocation mode",
+    "--stage": "which subset of the store to clear; an argument",
+    "--predictions": "where one evaluation's predictions are; an argument",
+    "--check": "a per-invocation mode: report rather than apply",
+    "--health-port": (
+        "which port a process listens on is a property of how it was started, "
+        "like uvicorn's --port, and not a setting docdoc reads from anywhere"
+    ),
+    "--help": "argparse's",
+    "-h": "argparse's",
+}
+
+
+def _all_flags() -> set[str]:
+    """Every option string on the root parser and on every subcommand."""
+    parser = build_parser()
+    flags = _option_strings(parser)
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            for sub in action.choices.values():
+                flags |= _option_strings(sub)
+                # `store` has its own sub-subcommands, and `clear` carries flags.
+                for nested in sub._actions:
+                    if isinstance(nested, argparse._SubParsersAction):
+                        for deeper in nested.choices.values():
+                            flags |= _option_strings(deeper)
+    return flags
+
+
+def test_every_flag_names_a_setting_or_a_recorded_reason_not_to() -> None:
+    """The assertion this file did not have, in the direction it did not look.
+
+    A flag on neither list is the defect: it configures something, nothing
+    documents what, and the parity check that exists to catch exactly that is
+    blind to it because it enumerates variables.
+    """
+    mapped = set(FLAG_FOR_SETTING.values())
+    unexplained = sorted(_all_flags() - mapped - set(FLAGS_WITHOUT_A_SETTING))
+
+    assert not unexplained, (
+        f"these flags pair with no setting and carry no recorded reason: "
+        f"{unexplained}. If a flag genuinely configures nothing docdoc reads "
+        f"elsewhere, add it to FLAGS_WITHOUT_A_SETTING with the reason, so the "
+        f"absence is a decision rather than an oversight"
+    )
+
+
+def test_no_flag_is_both_mapped_and_excused() -> None:
+    """Both lists is as wrong as neither, and quieter — the same rule as above."""
+    both = sorted(set(FLAG_FOR_SETTING.values()) & set(FLAGS_WITHOUT_A_SETTING))
+    assert not both, f"claimed as both a setting's flag and setting-less: {both}"
+
+
+def test_every_excused_flag_exists_on_the_parser() -> None:
+    """The other direction: an excuse for a flag that was removed describes nothing."""
+    phantom = sorted(set(FLAGS_WITHOUT_A_SETTING) - _all_flags())
+    assert not phantom, f"excused here and absent from the parser: {phantom}"
+
+
+def test_every_excused_flag_carries_a_reason() -> None:
+    for flag, reason in FLAGS_WITHOUT_A_SETTING.items():
+        assert reason.strip(), f"{flag} is excused with no reason given"
+
+
+def test_the_flag_walk_reaches_the_subcommands() -> None:
+    """Guards the guard: a walk that saw only the root would excuse everything."""
+    flags = _all_flags()
+
+    assert "--lease-seconds" in flags, "the walk missed `docdoc worker`"
+    assert "--check" in flags, "the walk missed `docdoc migrate`"
+    assert "--stage" in flags, "the walk missed `docdoc store clear`"
+    assert "--health-port" in flags, "the walk missed the flag that motivated it"
+
+
+def test_the_default_tenant_flag_is_scoped_to_migrate() -> None:
+    """FR-083 satisfied without weakening what the setting is for.
+
+    It has a flag, so the requirement's "MUST gain a flag" is met literally. It
+    has one only on the command that *records* the answer, so a per-invocation
+    override of a deployment-wide fact — the disagreement the recorded value
+    exists to prevent — is still impossible everywhere else.
+    """
+    assert COMMAND_SCOPED["DOCDOC_DEFAULT_TENANT"] == ("migrate",)
+    assert FLAG_FOR_SETTING["DOCDOC_DEFAULT_TENANT"] == "--default-tenant"
+
+    subparsers = next(
+        action
+        for action in build_parser()._actions
+        if isinstance(action, argparse._SubParsersAction)
+    )
+    assert "--default-tenant" in _option_strings(subparsers.choices["migrate"])
+    for command in ("parse", "extract", "worker"):
+        assert "--default-tenant" not in _option_strings(subparsers.choices[command]), (
+            f"`docdoc {command}` can override where every other process looks for "
+            f"content, which is the disagreement DOCDOC_DEFAULT_TENANT prevents"
+        )

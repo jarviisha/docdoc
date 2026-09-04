@@ -34,7 +34,16 @@ class RunQueue(Protocol):
     def release(self, run_id: UUID, *, now: datetime) -> None: ...
     def cancel(self, run_id: UUID, tenant_id: str, *, now: datetime) -> Run: ...
     def get(self, run_id: UUID, tenant_id: str) -> Run | None: ...
+    def is_cancelled(self, run_id: UUID) -> bool: ...
+    def ping(self) -> None: ...
 ```
+
+The last two arrived with the code and are recorded here rather than left implicit.
+`is_cancelled` is what the worker's `should_continue` callback reads at each stage boundary — no
+`tenant_id`, because the worker holds a lease on the row and is not answering a caller's question
+about it. `ping` is what readiness asks (FR-054); it is on the protocol rather than only on the
+Postgres implementation because both process types probe through this surface, and because a fake
+that cannot be made unreachable is a fake readiness cannot be tested against.
 
 **`now` and `run_id` are parameters, never read inside.** This is the whole of R11 expressed as a
 signature. Every method is a pure function of `(database state, arguments)`, which is what lets the
@@ -77,8 +86,14 @@ Three properties this shape guarantees:
   the run is redelivered, every completed stage's artifact is reused, and the recomputed
   `processing_id` is identical (ADR-0013 §4). The worst case is that the last stage repeats.
 
-On `SIGTERM`: stop claiming, then either finish the current run or call `release()` so it re-queues
+On `SIGTERM`: stop claiming, and stop the run in flight at its **next stage boundary** — the shutdown
+flag joins the cancellation flag in `should_continue` — then `release()` it so it re-queues
 immediately instead of waiting out its lease (FR-042, FR-043).
+
+A run stopped this way is **not** `cancelled`. It looks identical to a cancelled one from
+`PipelineResult` — no `failed_stage`, no `processing_id` — so the two are told apart by whether
+cancellation was actually requested. Recording a shutdown as a cancellation would be terminal, and
+the work would be lost rather than delayed.
 
 ## Observability
 
@@ -94,6 +109,28 @@ One event per state change, through standard-library `logging`, following the fi
 `pipeline/observe.py` already states each run's cost once, and a second statement of it would drift.
 Nor does any document text, extracted value, prompt body, credential, or provider message (FR-093) —
 the same no-content rule every other layer's observer follows.
+
+**Emitted by the queue, not by its callers.** `PostgresRunQueue` and the in-memory fake both call
+`log_transition` from the method that performs the transition, so a transition cannot happen without
+an event. The first implementation emitted from the worker's terminal path only, and a claim, a lease
+expiry, an abandonment and a cancellation each changed a run's state and said nothing — which is what
+"one event per state change" has to be structural to prevent.
+
+The transitions, and the `reason` each carries:
+
+| From | To | `reason` |
+|---|---|---|
+| *(none)* | `queued` | `submitted` — `from_state` is `null`, since there was no previous state |
+| `queued` | `running` | `claimed` |
+| `running` | `running` | `redelivered` — a lease lapsed and another worker took it |
+| `running` | `queued` | `released` — a worker was signalled and let go (FR-043) |
+| `running` | `failed` | `RunAbandonedError` — the attempt limit, one event per run in the sweep |
+| `queued`/`running` | terminal | the error class, or `completed` |
+| `running` | `running` | `cancel_requested` — asked, not yet stopped (FR-029) |
+
+Two silences are deliberate. An **idempotent replay** emits nothing, because nothing transitioned; a
+retrying client is not a queue filling up. A **redelivered attempt finishing a run the first one
+already concluded** emits nothing, for the same reason — `finish` is a no-op on a terminal run.
 
 There is **no exporter here.** Milestone 10 binds one; this milestone gives it something to bind to.
 

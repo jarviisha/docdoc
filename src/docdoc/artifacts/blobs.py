@@ -22,7 +22,12 @@ import tempfile
 from pathlib import Path
 
 from docdoc.artifacts.errors import ArtifactError
-from docdoc.artifacts.paths import DEFAULT_TENANT, secure_mkdir, tenant_root
+from docdoc.artifacts.paths import (
+    DEFAULT_TENANT,
+    DegradationLog,
+    secure_mkdir,
+    tenant_root,
+)
 from docdoc.artifacts.paths import FILE_MODE as _FILE_MODE
 from docdoc.kernel import blob_id_for
 
@@ -44,6 +49,8 @@ class BlobStore:
         segment = tenant_root(tenant_id)
         self._base = self.root / segment if segment else self.root
         self._blobs = self._base / "blobs"
+        #: Once per condition, not once per lookup. See `DegradationLog`.
+        self._degradations = DegradationLog()
 
     def _path_for(self, blob_id: str) -> Path:
         digest = blob_id.split(":", 1)[-1]
@@ -83,14 +90,15 @@ class BlobStore:
         except FileNotFoundError:
             return None
         except OSError as error:
-            _logger.warning(
-                "blob store unreadable",
-                extra={
-                    "event": "artifacts.blob_unreadable",
-                    "blob_id": blob_id,
-                    "error": type(error).__name__,
-                },
-            )
+            if self._degradations.first_time("unreadable"):
+                _logger.warning(
+                    "blob store unreadable",
+                    extra={
+                        "event": "artifacts.blob_unreadable",
+                        "blob_id": blob_id,
+                        "error": type(error).__name__,
+                    },
+                )
             return None
 
     def size_of(self, blob_id: str) -> int | None:
@@ -99,3 +107,21 @@ class BlobStore:
             return self._path_for(blob_id).stat().st_size
         except (FileNotFoundError, OSError):
             return None
+
+    def probe(self) -> None:
+        """Reach the store and return, or raise. What readiness asks (FR-054).
+
+        A separate method rather than a call to ``size_of`` because that one
+        cannot answer this question: it swallows ``OSError`` and returns ``None``
+        for an unreadable store as well as an absent blob, which is the correct
+        behaviour for reuse — ADR-0010 §4's "run without reuse rather than fail"
+        — and useless as a probe, since every answer is the same answer.
+
+        Statting the root rather than reading a fixed key: a filesystem store's
+        root is what can vanish under it, and a missing key proves nothing about
+        a mount that is no longer there.
+
+        Reads no document and creates nothing, so a probe has no side effect and
+        costs no provider call (FR-056).
+        """
+        os.stat(self.root)

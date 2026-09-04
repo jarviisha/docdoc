@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-28
 
-**Status**: Draft
+**Status**: Implemented
 
 <!--
   Status vocabulary, and who moves it. Every spec in this repository read "Draft"

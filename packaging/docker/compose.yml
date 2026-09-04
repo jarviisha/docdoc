@@ -18,9 +18,20 @@ name: docdoc
 
 services:
   api:
-    build:
+    build: &docdoc_build
       context: ../..
       dockerfile: packaging/docker/Dockerfile
+      args:
+        # The image parses nothing without one of these, and the default omits
+        # the local one on purpose: PyMuPDF is AGPL-3.0 (ADR-0001). For a local
+        # walk-through, add `pdf` — knowingly, which is what setting it here is:
+        #
+        #   DOCDOC_EXTRAS=api,postgres,s3,google,azure,gcv,pdf \
+        #     docker compose -f packaging/docker/compose.yml up -d --build
+        #
+        # For a real deployment, supply Azure Document Intelligence or Google
+        # Cloud Vision credentials instead and leave this alone.
+        DOCDOC_EXTRAS: ${DOCDOC_EXTRAS:-api,postgres,s3,google,azure,gcv}
     depends_on:
       postgres: {condition: service_healthy}
       minio: {condition: service_healthy}
@@ -40,7 +51,40 @@ services:
       # naming it here is an explicit local choice, not a fallback.
       DOCDOC_MODEL_ADAPTERS: ${DOCDOC_MODEL_ADAPTERS:-echo}
       DOCDOC_ECHO_FIXTURES: /fixtures
+
+      # **Every credential the image can use, forwarded.** FR-077 permits one
+      # manual step beyond a schema path — supplying a provider credential — and
+      # a variable the containers never see is not a step an operator can take.
+      #
+      # The parser credentials are the ones that matter here and the ones that
+      # were missing. `echo` replaces the *model*, not the parse, and the image
+      # ships no local parser because PyMuPDF is AGPL-3.0 (ADR-0001) — so on a
+      # default build a cloud parser credential is the only route to a working
+      # deployment. Without these lines, exporting one did nothing: the
+      # composition came up, reported healthy, and refused every document with
+      # `ParserCapabilityError`.
+      #
+      # Empty by default so the composition still starts with none of them set.
+      # An unavailable parser is a parser docdoc reports as unavailable, which is
+      # the correct behaviour for a deployment that configured no parser at all.
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      DOCDOC_GEMINI_MODEL: ${DOCDOC_GEMINI_MODEL:-}
+      DOCDOC_AZURE_DI_ENDPOINT: ${DOCDOC_AZURE_DI_ENDPOINT:-}
+      DOCDOC_AZURE_DI_KEY: ${DOCDOC_AZURE_DI_KEY:-}
+      # Google Cloud Vision reads a **file**, not a value, so the variable alone
+      # is not enough — the file has to be inside the container. Mount it and
+      # point this at the mount path:
+      #
+      #   DOCDOC_GCV_CREDENTIALS=/run/secrets/gcv.json \
+      #     docker compose -f packaging/docker/compose.yml up -d
+      #
+      # with `- /path/on/host/gcv.json:/run/secrets/gcv.json:ro` added to the
+      # volumes below. Said here rather than left to be discovered, because a
+      # path that resolves on the host and not in the container is the failure
+      # that reads as a credential problem and is not one.
+      DOCDOC_GCV_CREDENTIALS: ${DOCDOC_GCV_CREDENTIALS:-}
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
       # Authentication is off by default here, exactly as it is off by default in
       # docdoc (FR-088). Point this at a key file to turn it on.
       DOCDOC_API_KEYS_FILE: ${DOCDOC_API_KEYS_FILE:-}
@@ -59,15 +103,24 @@ services:
   # loses its lease — a utilisation choice becoming a correctness bug
   # (FR-025, research R9a).
   worker:
-    build:
-      context: ../..
-      dockerfile: packaging/docker/Dockerfile
+    build: *docdoc_build
     depends_on:
       postgres: {condition: service_healthy}
       minio: {condition: service_healthy}
-    command: ["docdoc", "worker"]
+    # `--health-port` is what makes the orchestrator's configuration one
+    # configuration rather than two (FR-053, FR-054): the worker answers the same
+    # `/healthz` and `/readyz`, with the same bodies, on the same port number the
+    # API uses. No port is published — replicas are scaled and a published port
+    # cannot be — so this is reachable on the compose network, which is where a
+    # probe comes from.
+    command: ["docdoc", "worker", "--health-port", "8000"]
     environment: *docdoc_env
     volumes: *docdoc_mounts
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2).status == 200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
   postgres:
     image: postgres:16-alpine

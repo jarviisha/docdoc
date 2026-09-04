@@ -24,11 +24,28 @@ from hypothesis import HealthCheck, Verbosity, settings
 #: Credential names any adapter or parser reads. Cleared for the offline suite for
 #: the same reason as the ``DOCDOC_*`` names below: a contributor who *has*
 #: credentials must get the same result as one who does not (SC-019).
+#:
+#: **``GOOGLE_APPLICATION_CREDENTIALS`` was missing and it mattered.** It is
+#: Google's own variable, so the ``DOCDOC_`` prefix scrub below never touched it,
+#: and it is set on any machine with ``gcloud`` configured. With it set,
+#: ``default_registry()`` reports the ``gcv`` parser **available**; without it,
+#: unavailable — so routing, and therefore which parser a test exercises, differed
+#: between a contributor's machine and CI. That is exactly the failure this
+#: module's docstring describes: it breaks on the machine that is *correctly*
+#: configured for real use, and passes everywhere else.
+#:
+#: The ``DOCDOC_AZURE_DI_*`` entries are redundant with the prefix scrub and are
+#: kept: this tuple is the answer to "what is a credential", and a reader
+#: checking it should not have to also know that a second mechanism covers two of
+#: them. ``test_provider_tests_are_separable.py`` checks it against the code, so
+#: the next one added cannot go missing the same way.
 CREDENTIAL_ENV = (
     "GEMINI_API_KEY",
     "GOOGLE_API_KEY",
+    "GOOGLE_APPLICATION_CREDENTIALS",
     "DOCDOC_AZURE_DI_ENDPOINT",
     "DOCDOC_AZURE_DI_KEY",
+    "DOCDOC_GCV_CREDENTIALS",
 )
 
 #: Marks whose tests read ambient configuration as *input* rather than suffering

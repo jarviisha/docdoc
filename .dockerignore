@@ -36,6 +36,17 @@ docs/
 .claude/
 *.md
 
+# …except this one, which is a **build input**. `pyproject.toml` declares
+# `readme = "README.md"`, so hatchling reads it while building the wheel, and
+# without it `uv pip install .` fails with a file-not-found that names a path
+# the developer can see on disk — the most confusing shape a build error has.
+#
+# The exclusion above is still right: every other Markdown file in this
+# repository is design history and none of it runs. This is the one that is not
+# documentation at all from the build's point of view; it is metadata the
+# packaging backend requires.
+!README.md
+
 # Test fixtures include whole PDFs. The image runs a service; it does not run
 # the suite, and a scanned invoice is not a runtime dependency.
 tests/

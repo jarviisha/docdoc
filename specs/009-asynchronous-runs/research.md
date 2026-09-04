@@ -171,20 +171,42 @@ because it is not repeatable and cannot be tested.
 **Decision**:
 
 ```sql
-UPDATE runs SET status = 'running',
-                attempts = attempts + 1,
-                lease_until = %(now)s + %(lease)s,
-                worker_id = %(worker)s
-WHERE run_id = (
-    SELECT run_id FROM runs
-    WHERE status = 'queued'
-       OR (status = 'running' AND lease_until < %(now)s)
-    ORDER BY created_at
-    FOR UPDATE SKIP LOCKED
-    LIMIT 1
+WITH candidate AS (
+    SELECT run_id, status AS from_state
+      FROM runs
+     WHERE (status = 'queued'
+            OR (status = 'running' AND lease_until < %(now)s))
+       AND attempts < %(max_attempts)s
+     ORDER BY created_at
+       FOR UPDATE SKIP LOCKED
+     LIMIT 1
 )
-RETURNING *;
+UPDATE runs
+   SET status      = 'running',
+       attempts    = runs.attempts + 1,
+       worker_id   = %(worker_id)s,
+       lease_until = %(now)s + %(lease)s,
+       updated_at  = %(now)s
+  FROM candidate
+ WHERE runs.run_id = candidate.run_id
+RETURNING runs.*, candidate.from_state;
 ```
+
+Two things about this shape were not in the first draft of this note and are worth naming, because
+both look removable and are not.
+
+**`attempts < %(max_attempts)s` is what bounds the poison document.** Without it a run that has
+already exhausted its attempts stays eligible and is handed to worker after worker (FR-021, SC-006).
+It is paired with a set-based `UPDATE … SET status = 'failed', error_class = 'RunAbandonedError'`
+that runs immediately before this statement and clears the exhausted rows in one pass, so a backlog
+of them does not consume one claim each.
+
+**The CTE exists to carry `from_state`.** The candidate's status is read *before* the update and
+returned beside the new row, which is the only way the `run.transition` event can say what the run
+transitioned **from** (FR-092). Without it a first claim and a redelivery are indistinguishable in
+the log — and lease handoff between workers is the hardest thing in this topology to debug, so that
+distinction is the whole reason the event exists. Simplifying the CTE back into a scalar subquery
+would compile, pass every test about claiming, and silently lose it.
 
 **Rationale**: One statement, so there is no window between selecting and claiming. `SKIP LOCKED`
 makes concurrent workers step over each other's candidate rows instead of serialising on the oldest

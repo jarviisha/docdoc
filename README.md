@@ -8,11 +8,13 @@ LLM — everyone can do that. It is that every extracted value can answer:
 
 > **Where did this come from?**
 
-**Status:** Milestones 1 (kernel), 2 (parsers), 3 (extraction), 4 (grounding), 5 (validation), and
-6 (evaluation) implemented. An extracted value can be **located**, **checked**, and now **measured**:
-docdoc will tell you that an invoice's stated total does not equal the sum of its lines, point at the
-place on the page the total was read from, and tell you how often it gets that right against a golden
-set — see [Roadmap](#roadmap).
+**Status:** Milestones 1–9 implemented — kernel, parsers, extraction, grounding, validation,
+evaluation, the pipeline and HTTP interface, the grounding viewer, and asynchronous runs. An extracted
+value can be **located**, **checked**, and **measured**: docdoc will tell you that an invoice's stated
+total does not equal the sum of its lines, point at the place on the page the total was read from, and
+tell you how often it gets that right against a golden set. Since Milestone 9 it will also accept that
+invoice without holding your connection for the several minutes a long scan takes — see
+[Roadmap](#roadmap).
 
 ## What it does today
 
@@ -188,13 +190,54 @@ uvicorn --factory docdoc.api.app:create_app
 POST /v1/documents                        → the blob identity
 GET  /v1/documents/{blob_id}              → its size and media type
 POST /v1/documents/{blob_id}/extract      → the job identity, and the result
+POST /v1/extract                          → the result, storing nothing
 GET  /v1/jobs/{job_id}                    → succeeded | unavailable | unknown
 GET  /v1/jobs/{job_id}/result             → the stored result
 ```
 
-Single node, synchronous, no queue and no database. A result fetched over HTTP and the same run
-performed in-process agree on every value, verdict, location, and identity — asserted by a contract
-test that runs both and compares. There is no authentication: put docdoc behind your own gateway.
+A result fetched over HTTP and the same run performed in-process agree on every value, verdict,
+location, and identity — asserted by a contract test that runs both and compares.
+
+Three more accept work without holding the connection open, and need a database:
+
+```text
+POST   /v1/documents/{blob_id}/runs       → 202 and a run_id, before any stage runs
+GET    /v1/runs/{run_id}                  → queued | running | succeeded | failed | cancelled
+DELETE /v1/runs/{run_id}                  → requests cancellation
+```
+
+A `run_id` is not a `job_id`. A run is an *attempt* and exists the moment the request is accepted; a
+`processing_id` is a *result* and is the terminal artifact's identity, so it cannot exist until the
+stages feeding it have run. Submitting one document twice gives you two run ids and one processing
+id, and that is the answer rather than a collision. A succeeded run names its `processing_id`, and
+the unchanged job routes serve the result — see [runs](docs/concepts/runs.md).
+
+Two more are outside `/v1` and outside authentication, served by the API and every worker alike:
+
+```text
+GET /healthz    → 200, always; touches no database, no store, no provider
+GET /readyz     → 200, or 503 naming the dependency it cannot reach
+```
+
+Readiness is strict: a process that cannot reach the run-state database reports not ready even
+though the synchronous routes would still work. That withdraws working capacity on purpose, because
+no orchestrator's probe can express "route half the traffic here".
+
+**Authentication exists, and it is off by default.** Point `DOCDOC_API_KEYS_FILE` at a key file and
+every route except the two health routes requires `Authorization: Bearer <key>`; each key resolves
+to exactly one tenant, and a tenant sees only its own blobs, runs, and results. The file holds
+SHA-256 hashes rather than keys, so a leak of it is not a set of working credentials:
+
+```json
+{"keys": [{"sha256": "…", "tenant_id": "acme"}]}
+```
+
+> **A deployment that has not enabled it is exactly as exposed as it was before.** The default is the
+> *compatible* one, not the safe one: it exists so that upgrading breaks nothing, and it means
+> security is opt-in. With no key file configured there is no authentication on any route, one
+> implicit tenant owns everything, and anyone who can reach the service can spend your model provider
+> budget. Put it behind your own gateway, or turn this on. See
+> [ADR-0014](docs/adr/0014-tenant-scoping-and-store-namespacing.md).
 
 ### Installing
 
@@ -218,6 +261,8 @@ export DOCDOC_MODEL_ADAPTERS=gemini              # adapter preference order, com
 export DOCDOC_GEMINI_MODEL=gemini-3.5-flash      # which model answers
 export GEMINI_API_KEY=...                        # or GOOGLE_API_KEY
 export DOCDOC_STORE_ROOT=/var/lib/docdoc         # where artifacts and blobs land — no default
+export DOCDOC_STORE_URL=s3://bucket/prefix       # …or an object store, which is what lets two
+                                                 #   workers reuse each other's artifacts
 export DOCDOC_RUN_DATABASE_URL=postgresql://…    # run state, for asynchronous runs — no default
 ```
 
@@ -226,6 +271,36 @@ no default for the same reason `DOCDOC_STORE_ROOT` has none. A deployment that u
 database at all, and the library and the command line need one in no configuration. Apply the schema
 explicitly with `docdoc migrate`; nothing applies it on startup, because several workers booting at
 once would be several processes altering one table.
+
+`DOCDOC_STORE_URL` is the object-store form of `DOCDOC_STORE_ROOT`, and it wins when both are set —
+a deployment that named both meant the more specific one. It takes
+`s3://bucket[/prefix][?endpoint_url=…]`; the query parameter is what MinIO, R2, and every other
+S3-compatible store needs and AWS does not, and keeping it in the URL makes "where the store is" one
+value rather than three that can disagree. **Run more than one worker and you need this**, or a
+shared filesystem: with a private root per worker every lookup misses, every run is correct, and you
+pay for every parse twice with nothing anywhere reporting a problem.
+
+Three configure asynchronous runs, and only the worker reads the last two:
+
+```sh
+export DOCDOC_API_KEYS_FILE=/etc/docdoc/keys.json # turns authentication on; absent means off
+export DOCDOC_RUN_LEASE_SECONDS=90                # how long a worker's claim holds
+export DOCDOC_RUN_MAX_ATTEMPTS=3                  # claims before a run is abandoned
+```
+
+One more matters only when you enable authentication over a store that already has content in it:
+
+```sh
+export DOCDOC_DEFAULT_TENANT=acme         # who owns everything written before tenants existed
+```
+
+Content written before Milestone 9 sits at `<root>/blobs/…` with no tenant segment, and it stays
+there — nothing is copied or moved. Every other tenant lives under `<root>/t/<tenant_id>/`. This
+names the one whose namespace *is* the root, and it must be the same value in the API, in every
+worker, and in `docdoc migrate`, because it describes the store's layout rather than one
+invocation's behaviour. `docdoc migrate` records it and refuses to change it afterwards: moving it
+once content exists would leave that content at a path nothing looks at, and the symptom is not an
+error but correct answers plus a silent re-payment for every parse.
 
 Five more exist and are rarely worth touching:
 
@@ -244,14 +319,18 @@ auto-selecting a fixture adapter would turn a missing credential into a stream o
 fabricated extractions.
 
 Every setting that can change what a command does gains a flag of the same meaning — `--schema-path`,
-`--adapter`, `--echo-fixtures`, `--store`, `--max-document-bytes`, `--max-pages` — so there is no
-second vocabulary to learn. An explicit flag beats the environment, which beats the default, per
-setting.
+`--adapter`, `--echo-fixtures`, `--store`, `--store-url`, `--max-document-bytes`, `--max-pages` — so
+there is no second vocabulary to learn. An explicit flag beats the environment, which beats the
+default, per setting. Three live only on the subcommands that can use them:
+`--run-database-url` on `docdoc migrate` and `docdoc worker`, and `--lease-seconds` and
+`--max-attempts` on `docdoc worker` alone. A flag that did nothing to the command carrying it would
+be the second vocabulary arriving from the other direction.
 
-Three have no flag on purpose: `DOCDOC_MAX_REQUEST_BYTES` caps an HTTP request body and the command
+Four have no flag on purpose: `DOCDOC_MAX_REQUEST_BYTES` caps an HTTP request body and the command
 line reads none; `DOCDOC_MATCH_VIEW_CACHE` bounds a per-process cache that a single run fills with
-one entry; and `DOCDOC_GEMINI_MODEL` and the credentials are per-provider — a credential especially,
-since `argv` is readable by every process on the host.
+one entry; `DOCDOC_API_KEYS_FILE` names a credential file and enables an HTTP concern the command
+line and the library do not have; and `DOCDOC_GEMINI_MODEL` and the credentials are per-provider — a
+credential especially, since `argv` is readable by every process on the host.
 
 `DOCDOC_STORE_ROOT` has **no default**, and that is deliberate. Artifacts hold extracted values and
 blobs hold whole source documents, so where they accumulate is your decision rather than ours. With
@@ -364,9 +443,15 @@ higher-layer work merges while that property is failing or absent.
 | 6 | Evaluation: golden dataset, field accuracy, grounding rate | **Done** |
 | 7 | Pipeline, artifact store, CLI, and HTTP API | **Done** |
 | 8 | Read-only grounding viewer, and the two endpoints that reach it | **Done** |
+| 9 | Asynchronous runs, shared object storage, health routes, tenant scoping | **Done** |
 
 Milestone 8 adds no guarantee — no stage, no provider, no change to any value docdoc produces. What it
 changes is who can see the guarantees the first seven built.
+
+Milestone 9 adds none either, and that is the claim it is measured on: a result obtained through a
+worker and the same result obtained synchronously agree on every value, verdict, location, and
+identity, and the golden-set metrics do not move by a digit. What it buys is that a 400-page scan no
+longer holds an HTTP connection for the several minutes it takes.
 
 ## The browser viewer
 
@@ -379,9 +464,16 @@ Read-only: it shows which page and which rectangle each extracted value came fro
 docdoc could **not** place rather than hiding it, and edits nothing. Five things worth knowing before
 you run it anywhere real:
 
-- **It is unauthenticated, and anyone who can reach it can spend your model provider budget.** It
-  belongs on a trusted network; docdoc ships no `serve` command and cannot pick a safer bind address
-  for you.
+- **It is unauthenticated by default, and anyone who can reach it can spend your model provider
+  budget.** Milestone 9 added authentication and left it off, so this sentence is true of every
+  deployment that has not set `DOCDOC_API_KEYS_FILE`. Until then it belongs on a trusted network;
+  docdoc ships no `serve` command and cannot pick a safer bind address for you.
+- **With authentication on, the viewer does not work** — and it fails at the door rather than after
+  the page renders. `/ui` requires a credential like everything else except the two health routes,
+  and a browser has no way to send a bearer token, so the interface is unavailable to it. That is
+  the honest outcome rather than a regression: before, the shell loaded and then every `/v1` call it
+  made was refused. A viewer that works under authentication needs a session mechanism this
+  milestone deliberately does not add.
 - **A run continues after you close the page.** There is no cancel, because closing a browser stops the
   waiting and not the work. A proxy in front of it must allow a request duration at least as long as
   your slowest extraction, or it will terminate runs you have already paid for.
@@ -399,7 +491,7 @@ nothing. A deployment that previously refused every extraction for want of stora
 ## Documentation
 
 - [Constitution](.specify/memory/constitution.md) — the governing principles
-- [Architecture decisions](docs/adr/) — twelve accepted ADRs, and no open constitutional decisions
+- [Architecture decisions](docs/adr/) — fourteen accepted ADRs, and no open constitutional decisions
 - [Document concepts](docs/concepts/document.md)
 - [Identity model](docs/concepts/identity.md)
 - [Kernel API contract](specs/001-kernel-document-ir/contracts/kernel-api.md)
@@ -412,6 +504,7 @@ nothing. A deployment that previously refused every extraction for want of stora
 - [How the viewer works](docs/concepts/viewer.md) — the three geometry states, why no coordinate is transformed, and what carries no automated test
 - [The pipeline](docs/concepts/pipeline.md) — the four stages, the reuse decision, what a cached parse still pays for, and why a job needs no queue
 - [Artifacts](docs/concepts/artifacts.md) — the chain, the two hashes, which misses are errors, and the one symptom of a missed version bump
+- [Runs](docs/concepts/runs.md) — the two identities, the lifecycle, why redelivery is mostly "resume", and the exact limits of cancellation
 - [Grounding API contract](specs/004-deterministic-grounding/contracts/grounding-api.md)
 - [Validation API contract](specs/005-deterministic-validation/contracts/validation-api.md)
 - [Extraction API contract](specs/003-schema-driven-extraction/contracts/extraction-api.md)
@@ -420,6 +513,8 @@ nothing. A deployment that previously refused every extraction for want of stora
 - [HTTP API contract](specs/007-pipeline-api-cli/contracts/http-api.md) — endpoints, statuses, error shapes
 - [HTTP API additions](specs/008-grounding-viewer/contracts/http-api-additions.md) — the storeless run and the schema listing
 - [View-model contract](specs/008-grounding-viewer/contracts/view-model.md) — the viewer's tested surface, and what it does not cover
+- [Run routes and authentication](specs/009-asynchronous-runs/contracts/runs-http-api.md) — the three run routes, the two health routes, and the exemption list
+- [The runs layer](specs/009-asynchronous-runs/contracts/runs-layer.md) — the queue protocol, the worker loop, store namespacing, and the transition events
 - [Contributing](CONTRIBUTING.md)
 
 ## License

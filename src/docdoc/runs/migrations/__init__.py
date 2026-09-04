@@ -29,7 +29,16 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-__all__ = ["APPLIED_TABLE", "Migration", "apply", "discover", "pending"]
+__all__ = [
+    "APPLIED_TABLE",
+    "DEFAULT_TENANT_TABLE",
+    "Migration",
+    "apply",
+    "assign_default_tenant",
+    "discover",
+    "pending",
+    "recorded_default_tenant",
+]
 
 _HERE = Path(__file__).parent
 
@@ -90,6 +99,61 @@ def pending(connection: object) -> list[Migration]:
     connection.execute(_CREATE_APPLIED)  # type: ignore[attr-defined]
     done = _applied(connection)
     return [m for m in discover() if m.version not in done]
+
+
+#: Where the store-root owner is recorded. Named here so `docdoc migrate` and the
+#: tests refer to one string rather than three.
+DEFAULT_TENANT_TABLE = "docdoc_default_tenant"
+
+
+def recorded_default_tenant(connection: object) -> str | None:
+    """Which tenant this database says owns the unprefixed store root.
+
+    ``None`` before the assignment has been made — which includes every
+    deployment that has run ``0001`` and not ``0002``, so callers must treat it
+    as "not yet answered" rather than as "default".
+    """
+    cursor = connection.execute(  # type: ignore[attr-defined]
+        f"SELECT tenant_id FROM {DEFAULT_TENANT_TABLE} WHERE singleton"
+    )
+    row = cursor.fetchone()
+    return None if row is None else str(row[0])
+
+
+def assign_default_tenant(connection: object, tenant_id: str, *, now: object) -> str:
+    """Record who owns content written before tenants existed (FR-089).
+
+    Explicit, idempotent, and **refuses to change its mind**. Running it twice
+    with the same value is a no-op; running it with a different one raises,
+    naming both.
+
+    That refusal is the requirement's real content. The recorded value decides
+    where every read looks, so moving it after content exists strands that
+    content — and the symptom is not an error but *correct answers plus a silent
+    re-payment for every parse*, because a miss is indistinguishable from an
+    absence. Raising here turns a misconfigured deployment into a failure at
+    deploy time instead of a discovery on next month's invoice.
+
+    Returns the value that is in force, which is the existing one on a repeat.
+    """
+    from docdoc.runs.errors import TenantAssignmentError
+
+    existing = recorded_default_tenant(connection)
+    if existing is not None:
+        if existing != tenant_id:
+            raise TenantAssignmentError(existing, tenant_id)
+        return existing
+
+    connection.execute(  # type: ignore[attr-defined]
+        f"INSERT INTO {DEFAULT_TENANT_TABLE} (singleton, tenant_id, assigned_at) "
+        f"VALUES (true, %s, %s) ON CONFLICT (singleton) DO NOTHING",
+        (tenant_id, now),
+    )
+    # Re-read rather than return the argument: two `docdoc migrate` invocations
+    # racing would both see no row and both insert, and the loser must be told
+    # what actually landed rather than what it asked for.
+    landed = recorded_default_tenant(connection)
+    return tenant_id if landed is None else landed
 
 
 def apply(connection: object, *, now: object) -> Sequence[str]:

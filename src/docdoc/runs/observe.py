@@ -36,9 +36,26 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from uuid import UUID
 
-__all__ = ["EVENT_NAME", "log_transition"]
+__all__ = ["EVENT_NAME", "REASONS", "log_transition"]
 
 EVENT_NAME = "run.transition"
+
+#: The constants `reason` may take when it is not an error class name.
+#:
+#: A closed set, named here rather than spelled at each call site, because
+#: `reason` is the one field a caller could put anything into and it travels to a
+#: log line. Enumerating the constants makes "is this a class name or one of
+#: these?" a question a test can ask.
+REASONS = frozenset(
+    {
+        "submitted",  # the run came into existence
+        "claimed",  # a worker took it
+        "redelivered",  # a worker took it again after a lease lapsed
+        "released",  # a worker gave it back before its lease expired
+        "completed",  # finished with no error to name
+        "cancel_requested",  # a caller asked; the run is still running
+    }
+)
 
 _logger = logging.getLogger("docdoc.runs")
 
@@ -47,13 +64,26 @@ def log_transition(
     *,
     run_id: UUID,
     tenant_id: str,
-    from_state: str,
+    from_state: str | None,
     to_state: str,
     attempts: int,
     worker_id: str | None = None,
     reason: str | None = None,
 ) -> None:
     """Record one state change.
+
+    **Called from the queue, not from the queue's callers.** That is the whole
+    of what convergence corrected here: this function had one call site, in the
+    worker's terminal path, so a claim, a lease expiry, an abandonment, and a
+    cancellation each changed a run's state and said nothing. Emitting from the
+    implementation means a transition cannot happen without an event, whereas
+    emitting from the caller means every future caller has to remember — and the
+    five silent transitions above are what forgetting looks like.
+
+    `from_state` is ``None`` for the one event that is not a transition between
+    states: a run coming into existence. Writing it as `None` rather than as
+    `"absent"` keeps the payload honest — there was no previous state, as against
+    a previous state named "absent".
 
     `reason` is a class name or a short constant like ``"completed"`` — never a
     message, for the reason `PipelineResult` already gives about `failure_class`:

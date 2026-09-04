@@ -172,11 +172,13 @@ src/docdoc/
 ├── runs/                       # NEW LAYER — sibling of `recording`, above `pipeline`
 │   ├── __init__.py             #   the public surface: submit, get, cancel, claim
 │   ├── model.py                #   Run, RunStatus, RunFailure — pydantic, no I/O
-│   ├── identity.py             #   run_id allocation and clock reads — the ONLY place either happens
-│   ├── queue.py                #   the RunQueue protocol: submit / claim / heartbeat / finish / cancel
+│   ├── identity.py             #   run_id, clock reads, and the two tuning defaults — the ONLY place a clock is read
+│   ├── queue.py                #   the RunQueue protocol: submit / claim / heartbeat / finish / cancel / ping
 │   ├── postgres.py             #   the one implementation; raw SQL via psycopg, no ORM
 │   ├── migrations/             #   NNNN-name.sql, applied by an explicit idempotent step
-│   ├── worker.py               #   the claim → run → record loop
+│   ├── worker.py               #   the claim → run → record loop, and the worker's health server
+│   ├── health.py               #   liveness and readiness as facts, below both front ends
+│   ├── observe.py              #   one `run.transition` event per state change
 │   └── errors.py               #   RunError and its subclasses, provider-neutral
 │
 ├── artifacts/
@@ -186,11 +188,12 @@ src/docdoc/
 ├── api/
 │   ├── app.py                  # CHANGED — three run routes, two health routes, auth dependency
 │   ├── auth.py                 # NEW — static key → principal → tenant_id
-│   ├── health.py               # NEW — liveness and readiness
+│   ├── health.py               # NEW — the HTTP shape of `runs/health.py`'s answer
 │   └── settings.py             # CHANGED — new env vars, same precedence rule
 │
 ├── cli/commands/
-│   └── worker.py               # NEW — `docdoc worker`, and `docdoc migrate`
+│   ├── worker.py               # NEW — `docdoc worker`
+│   └── migrate.py              # NEW — `docdoc migrate [--check]`
 │
 └── pipeline/
     └── runner.py               # CHANGED — one additive optional parameter; see Complexity Tracking
@@ -198,25 +201,54 @@ src/docdoc/
 tests/
 ├── infra.py                            # the two variables that point the suite at real services
 ├── fixtures/
-│   └── run_queue.py                    #   InMemoryRunQueue — the claim policy without a database
+│   ├── run_queue.py                    #   InMemoryRunQueue — the claim policy without a database
+│   └── keys.json                       #   two tenants, as hashes; the keys live in support.py
 ├── unit/
 │   ├── test_run_state_machine.py       #   five states, both invariants, cancellation refusal
 │   ├── test_claim_policy.py            #   oldest-first, lease expiry, attempt limit, idempotency
-│   └── test_runs_clock_confinement.py  #   only identity.py reaches a stdlib clock (FR-072)
+│   ├── test_runs_clock_confinement.py  #   only identity.py reaches a stdlib clock (FR-072)
+│   ├── test_run_events_carry_no_content.py #  FR-092/FR-093, payload and coverage
+│   ├── test_error_class_is_a_class_name.py #  FR-037, on the projection rather than the string
+│   ├── test_idempotency_scope.py       #   SC-016, one key under one tenant and under two
+│   ├── test_health_discloses_nothing.py #  FR-058 and FR-056, over both bodies
+│   ├── test_compose_forwards_every_credential.py # FR-077, the step an operator can take
+│   ├── test_credential_never_logged.py #   FR-068, over four surfaces
+│   ├── test_cli_and_library_need_no_credential.py # FR-069, with authentication on
+│   └── test_pipeline_cancellation.py   #   R4: the default changes nothing; False stops
 ├── contract/
-│   └── test_async_matches_sync.py      #   SC-001, the criterion the milestone exists for
+│   ├── test_async_matches_sync.py      #   SC-001, the criterion the milestone exists for
+│   ├── test_submission_is_immediate.py #   SC-002, p95 with the worker pool stopped
+│   ├── test_jobs_routes_unchanged.py   #   FR-008/FR-009/FR-010, what did not change
+│   ├── test_tenant_isolation.py        #   SC-008, byte-identical to non-existence
+│   └── test_no_existence_oracle.py     #   SC-017, the half a status code cannot deliver
 └── integration/
     ├── test_run_queue_postgres.py      #   SKIP LOCKED under real concurrency; the check constraint
     ├── test_failed_run_is_recorded.py  #   three failure shapes, told apart (US2)
     ├── test_run_record_leaks_nothing.py #  SC-007 and FR-093, over the row and the log line
+    ├── test_two_runs_one_result.py     #   FR-005, counted rather than timed
+    ├── test_poison_run.py              #   SC-006, at most three workers
+    ├── test_schema_withdrawn_between_submit_and_claim.py # FR-091, terminal on first claim
     ├── test_s3_store_rules.py          #   ADR-0010 §4 and §5, over an object store
     ├── test_shared_store_reuse.py      #   SC-005, counted rather than timed
     ├── test_redelivery.py              #   SC-003/SC-004 at each of four boundaries
-    └── test_restart_survival.py        #   SC-011, nothing left needing an operator
+    ├── test_restart_survival.py        #   SC-011, nothing left needing an operator
+    ├── test_health_endpoints.py        #   SC-009, with the database genuinely unreachable
+    ├── test_worker_health_server.py    #   US4/AC3, byte-identical to the API's answers
+    ├── test_upgrade_compatibility.py   #   SC-018, before and after enabling authentication
+    ├── test_cancellation.py            #   SC-015, and the 0% that is not aborted
+    └── test_shutdown_releases_the_run.py #  FR-042/FR-043, claimable at the instant
 
 packaging/
 └── docker/        # NEW — Dockerfile (one image, two entry points) and compose.yml
 ```
+
+**`runs/health.py` was not in the original sketch, and its position is the interesting part.**
+FR-053 and FR-054 require *both* process types to answer the same two questions on the same terms,
+and only one of them has FastAPI. A health module living in `docdoc.api` alone could not be reached
+by the worker without `docdoc.runs` importing `docdoc.api`, which the layer contract forbids
+outright. So the decision lives below both front ends and each wraps it: `api/health.py` in two
+routes, `runs/worker.py` in a standard-library HTTP server. Two transports, one answer — which is
+what "on the same terms" has to mean if an orchestrator is to use one probe configuration for both.
 
 **Structure Decision**: A new top-level layer `docdoc.runs`, placed as a sibling of `docdoc.recording`
 in the `layers` contract with an `independence` contract between them. Neither imports the other —

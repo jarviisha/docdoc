@@ -33,6 +33,7 @@ from docdoc.runs.errors import (
     RunStateUnavailableError,
 )
 from docdoc.runs.model import Run, RunOutcome, RunStatus
+from docdoc.runs.observe import log_transition
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -51,6 +52,11 @@ _COLUMNS = (
     "cancel_requested, request_id, idempotency_key, created_at, updated_at, expires_at"
 )
 
+#: The same list, qualified, for the statements that ``RETURNING`` out of a join.
+#: ``UPDATE … FROM prior RETURNING run_id`` is ambiguous when both relations have
+#: the column, and Postgres says so rather than guessing.
+_QUALIFIED = ", ".join(f"runs.{column}" for column in _COLUMNS.split(", "))
+
 
 def _row_to_run(row: dict[str, Any]) -> Run:
     """One row, as the model sees it.
@@ -62,6 +68,7 @@ def _row_to_run(row: dict[str, Any]) -> Run:
     """
     data = dict(row)
     data.pop("cancel_requested", None)  # transport state, not part of the run
+    data.pop("from_state", None)  # carried for the event, not part of the run
     return Run.model_validate(data)
 
 
@@ -113,6 +120,16 @@ class PostgresRunQueue:
             raise RunStateUnavailableError(str(type(exc).__name__)) from exc
 
     # -- reading -----------------------------------------------------------
+
+    def ping(self) -> None:
+        """One trivial round trip. Raises when the database is unreachable.
+
+        ``SELECT 1`` and nothing else (research R13): it touches no table, so it
+        answers "can this process reach the database" without also answering
+        "has the schema been applied", which is a different question with a
+        different remedy and its own command (``docdoc migrate --check``).
+        """
+        self._execute("SELECT 1", fetch="one")
 
     def get(self, run_id: UUID, tenant_id: str) -> Run | None:
         """The run, or ``None`` for both "unknown" and "another tenant's".
@@ -181,9 +198,23 @@ class PostgresRunQueue:
             fetch="one",
         )
         if row is not None:
-            return _row_to_run(row)
+            created = _row_to_run(row)
+            # `from_state=None`: the run did not previously exist, which is not
+            # the same as having been in a state called "absent".
+            log_transition(
+                run_id=created.run_id,
+                tenant_id=created.tenant_id,
+                from_state=None,
+                to_state=str(created.status),
+                attempts=created.attempts,
+                reason="submitted",
+            )
+            return created
 
-        # The insert was suppressed, so a run with this key already exists.
+        # The insert was suppressed, so a run with this key already exists. **No
+        # event**: nothing transitioned. An idempotent replay is a second request
+        # about one run, and emitting here would make a retrying client look like
+        # a queue filling up.
         existing = self._execute(
             f"SELECT {_COLUMNS} FROM runs WHERE tenant_id = %s AND idempotency_key = %s",
             (spec.tenant_id, spec.idempotency_key),
@@ -223,7 +254,7 @@ class PostgresRunQueue:
         ``now`` is a parameter rather than ``now()`` in SQL, so the whole policy
         is testable at an arbitrary instant.
         """
-        self._execute(
+        abandoned = self._execute(
             """
             UPDATE runs
                SET status = 'failed',
@@ -234,29 +265,54 @@ class PostgresRunQueue:
              WHERE status = 'running'
                AND lease_until < %(now)s
                AND attempts >= %(max_attempts)s
+            RETURNING run_id, tenant_id, attempts, worker_id
             """,
             {"now": now, "max_attempts": max_attempts},
+            fetch="all",
         )
+        # One event per abandoned run, not one for the sweep. A set-based
+        # statement that abandoned four runs abandoned four runs, and an operator
+        # reading "a document is killing workers" needs to know which.
+        for gone in abandoned or ():
+            log_transition(
+                run_id=gone["run_id"],
+                tenant_id=gone["tenant_id"],
+                from_state=str(RunStatus.RUNNING),
+                to_state=str(RunStatus.FAILED),
+                attempts=gone["attempts"],
+                worker_id=gone["worker_id"],
+                reason="RunAbandonedError",
+            )
 
+        # The candidate moves into a CTE so its **prior** status survives the
+        # update. Without it the event could not say what the run transitioned
+        # *from*, and a claim and a redelivery — the two things a lease exists to
+        # tell apart — would be indistinguishable in the log.
+        #
+        # `FOR UPDATE SKIP LOCKED` is unchanged and still inside the candidate
+        # selection, which is what removes the window between choosing a row and
+        # owning it; moving it here changes where the text sits, not what it does.
         row = self._execute(
             f"""
+            WITH candidate AS (
+                SELECT run_id, status AS from_state
+                  FROM runs
+                 WHERE (status = 'queued'
+                        OR (status = 'running' AND lease_until < %(now)s))
+                   AND attempts < %(max_attempts)s
+                 ORDER BY created_at
+                   FOR UPDATE SKIP LOCKED
+                 LIMIT 1
+            )
             UPDATE runs
                SET status = 'running',
-                   attempts = attempts + 1,
+                   attempts = runs.attempts + 1,
                    worker_id = %(worker_id)s,
                    lease_until = %(now)s + %(lease)s,
                    updated_at = %(now)s
-             WHERE run_id = (
-                     SELECT run_id
-                       FROM runs
-                      WHERE (status = 'queued'
-                             OR (status = 'running' AND lease_until < %(now)s))
-                        AND attempts < %(max_attempts)s
-                      ORDER BY created_at
-                        FOR UPDATE SKIP LOCKED
-                      LIMIT 1
-                   )
-            RETURNING {_COLUMNS}
+              FROM candidate
+             WHERE runs.run_id = candidate.run_id
+            RETURNING {_QUALIFIED}, candidate.from_state
             """,
             {
                 "worker_id": worker_id,
@@ -266,7 +322,23 @@ class PostgresRunQueue:
             },
             fetch="one",
         )
-        return None if row is None else _row_to_run(row)
+        if row is None:
+            return None
+
+        claimed = _row_to_run(row)
+        log_transition(
+            run_id=claimed.run_id,
+            tenant_id=claimed.tenant_id,
+            from_state=str(row["from_state"]),
+            to_state=str(claimed.status),
+            attempts=claimed.attempts,
+            worker_id=claimed.worker_id,
+            # A run that was already `running` was taken from a worker that lost
+            # its lease. That is the hardest thing in this topology to debug and
+            # it is the reason this event exists at all.
+            reason="redelivered" if row["from_state"] == RunStatus.RUNNING else "claimed",
+        )
+        return claimed
 
     def heartbeat(self, run_id: UUID, *, now: datetime, lease: timedelta) -> bool:
         """Extend the lease. ``False`` if it was already lost.
@@ -292,14 +364,38 @@ class PostgresRunQueue:
         return row is not None
 
     def release(self, run_id: UUID, *, now: datetime) -> None:
-        """Return a claimed run to the queue immediately (FR-043)."""
-        self._execute(
+        """Return a claimed run to the queue immediately (FR-043).
+
+        What a worker calls on `SIGTERM` instead of letting the lease time out,
+        so a rolling restart costs no lease duration. The `worker_id` is captured
+        before it is cleared, because "which worker let go" is the whole content
+        of the event.
+        """
+        row = self._execute(
             """
+            WITH prior AS (
+                SELECT run_id, worker_id FROM runs WHERE run_id = %(run_id)s
+            )
             UPDATE runs
-               SET status = 'queued', worker_id = NULL, lease_until = NULL, updated_at = %s
-             WHERE run_id = %s AND status = 'running'
+               SET status = 'queued', worker_id = NULL, lease_until = NULL, updated_at = %(now)s
+              FROM prior
+             WHERE runs.run_id = prior.run_id AND runs.status = 'running'
+            RETURNING runs.run_id, runs.tenant_id, runs.attempts,
+                      prior.worker_id AS prior_worker
             """,
-            (now, run_id),
+            {"now": now, "run_id": run_id},
+            fetch="one",
+        )
+        if row is None:
+            return
+        log_transition(
+            run_id=row["run_id"],
+            tenant_id=row["tenant_id"],
+            from_state=str(RunStatus.RUNNING),
+            to_state=str(RunStatus.QUEUED),
+            attempts=row["attempts"],
+            worker_id=row["prior_worker"],
+            reason="released",
         )
 
     def finish(self, run_id: UUID, outcome: RunOutcome, *, now: datetime) -> None:
@@ -310,8 +406,11 @@ class PostgresRunQueue:
         the pipeline returning and this committing will be redelivered, and the
         second attempt must not overwrite a conclusion the first one reached.
         """
-        self._execute(
+        row = self._execute(
             """
+            WITH prior AS (
+                SELECT run_id, status, worker_id FROM runs WHERE run_id = %(run_id)s
+            )
             UPDATE runs
                SET status = %(status)s,
                    processing_id = %(processing_id)s,
@@ -321,8 +420,11 @@ class PostgresRunQueue:
                    worker_id = NULL,
                    lease_until = NULL,
                    updated_at = %(now)s
-             WHERE run_id = %(run_id)s
-               AND status IN ('queued', 'running')
+              FROM prior
+             WHERE runs.run_id = prior.run_id
+               AND runs.status IN ('queued', 'running')
+            RETURNING runs.run_id, runs.tenant_id, runs.attempts, runs.status AS to_state,
+                      prior.status AS from_state, prior.worker_id AS prior_worker
             """,
             {
                 "run_id": run_id,
@@ -335,6 +437,22 @@ class PostgresRunQueue:
                 ),
                 "now": now,
             },
+            fetch="one",
+        )
+        # No row means the run was already terminal and this call was the no-op
+        # its `status IN (…)` clause exists to make it. **No event**, because
+        # nothing transitioned — a redelivered attempt reaching a conclusion the
+        # first one already recorded must not look like a second conclusion.
+        if row is None:
+            return
+        log_transition(
+            run_id=row["run_id"],
+            tenant_id=row["tenant_id"],
+            from_state=str(row["from_state"]),
+            to_state=str(row["to_state"]),
+            attempts=row["attempts"],
+            worker_id=row["prior_worker"],
+            reason=outcome.error_class or "completed",
         )
 
     def cancel(self, run_id: UUID, tenant_id: str, *, now: datetime) -> Run:
@@ -360,10 +478,27 @@ class PostgresRunQueue:
         )
 
         if run.status is RunStatus.QUEUED:
+            # `finish` emits the queued → cancelled event, so nothing is logged
+            # here: two events for one transition is the drift this whole
+            # arrangement exists to avoid.
             self.finish(run_id, RunOutcome(status=RunStatus.CANCELLED), now=now)
             cancelled = self.get(run_id, tenant_id)
             if cancelled is None:  # pragma: no cover - the row cannot vanish
                 raise RunStateUnavailableError("run disappeared during cancellation")
             return cancelled
 
+        # A running run does **not** transition here — it keeps reading `running`
+        # until the worker reaches a stage boundary (FR-029). So this is logged
+        # as a request rather than as a change, with `from_state == to_state`,
+        # which is the honest shape: an operator reading the log sees when the
+        # request landed and, separately, when the run actually stopped.
+        log_transition(
+            run_id=run.run_id,
+            tenant_id=run.tenant_id,
+            from_state=str(run.status),
+            to_state=str(run.status),
+            attempts=run.attempts,
+            worker_id=run.worker_id,
+            reason="cancel_requested",
+        )
         return run.model_copy(update={"updated_at": now})

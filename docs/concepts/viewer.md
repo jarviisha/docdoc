@@ -37,9 +37,16 @@ by the person it would have warned.
    kept: every fact the overlay conveys is also in the value list, the list works without a pointing
    device, and no distinction — grounding status, verdict, geometry state — is carried by colour
    alone. A standard nothing here verifies would be a claim, not a guarantee.
-5. **The interface is unauthenticated, and every visitor spends your provider budget.** That second
-   half is the part you cannot infer from the first. Anyone who can load the URL can submit documents
-   through your model provider.
+5. **By default the interface is unauthenticated, and every visitor spends your provider budget.**
+   That second half is the part you cannot infer from the first. Anyone who can load the URL can
+   submit documents through your model provider. Milestone 9 added authentication and left it off, so
+   this stays true of every deployment that has not set `DOCDOC_API_KEYS_FILE`.
+
+   **Turning it on does not secure the viewer — it removes it.** `/ui` then requires a credential
+   like everything except the two health probes, and a browser cannot send a bearer token, so the
+   interface becomes unavailable rather than protected. That is the honest outcome: it never worked
+   under authentication, and it now fails at the door instead of after the page has rendered. A
+   viewer that works with authentication needs a session mechanism, and there is deliberately none.
 6. **It belongs on a trusted network.** docdoc ships no `serve` command, so it cannot choose a safer
    bind address on your behalf; that is the operator's decision and this is the note saying so.
 7. **A deployment with no store configured now serves extractions it used to refuse.** `POST

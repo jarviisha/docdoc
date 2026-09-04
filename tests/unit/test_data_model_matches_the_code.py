@@ -215,3 +215,272 @@ def test_the_check_can_actually_fail() -> None:
     available = _attributes("docdoc.evaluation:DocumentPrediction")
     assert "failed_stage" in available
     assert "a_field_that_was_never_written" not in available
+
+
+# -- Milestone 9's data model, which describes a table (T112) ------------------
+#
+# Everything above reads `specs/006-golden-set-evaluation/data-model.md` and
+# nothing else. This repository now has three data models and one of them was
+# checked, which is the shape of gap this whole file was written about: the
+# `EvaluationReport` drift survived because "nothing was reading the tables", and
+# an eighteen-row table for `Run` was in exactly that position.
+#
+# **It describes database columns, not model fields**, and the difference is not
+# cosmetic. `cancel_requested` is a column and deliberately *not* a `Run` field —
+# `PostgresRunQueue._row_to_run` pops it as transport state — so checking this
+# table against the pydantic model would fail on a row that is correct. The
+# migration is what the table describes, so the migration is what it is checked
+# against.
+#
+# The one-directional rule above is kept for the same reason it exists there: a
+# column the SQL has and the document does not is not a failure, or every
+# additive migration needs a documentation edit before the build goes green.
+
+RUNS_DATA_MODEL = pathlib.Path("specs/009-asynchronous-runs/data-model.md")
+RUNS_MIGRATION = pathlib.Path("src/docdoc/runs/migrations/0001_runs.sql")
+
+#: A column definition in the `CREATE TABLE runs` body: four leading spaces, a
+#: lowercase name, then a Postgres type. Anchored on the type so that a
+#: `CONSTRAINT` line and a continuation of a `CHECK` expression are not read as
+#: columns.
+_SQL_COLUMN = re.compile(
+    r"^    ([a-z_]+)\s+(?:uuid|text|integer|timestamptz|jsonb|boolean)\b", re.M
+)
+
+
+def _documented_run_columns() -> tuple[str, ...]:
+    """Every column the `## The Run` table names, in order.
+
+    Reuses `_ROW` and `_NAME` above rather than a second pair of patterns — the
+    table shape is the same, and two copies would be two things to keep in step.
+    """
+    text = RUNS_DATA_MODEL.read_text(encoding="utf-8")
+    section = text[text.index("## The Run") : text.index("## States")]
+
+    found: list[str] = []
+    for row in _ROW.findall(section):
+        if row.strip("`") == "Field":
+            continue
+        found.extend(_NAME.findall(row))
+    return tuple(dict.fromkeys(found))
+
+
+def _migration_columns() -> set[str]:
+    return set(_SQL_COLUMN.findall(RUNS_MIGRATION.read_text(encoding="utf-8")))
+
+
+def test_the_run_table_is_parsed_at_all() -> None:
+    """A parser that finds nothing passes for the wrong reason.
+
+    Eighteen is the count at the time of writing and is asserted as a floor
+    rather than an equality: a column added later should not fail this, it should
+    fail the check below only if the document and the SQL disagree.
+    """
+    documented = _documented_run_columns()
+
+    assert len(documented) >= 18, (
+        f"the Run table parsed to {len(documented)} columns; the section was "
+        f"restructured or the row matcher no longer matches, and this check is "
+        f"now checking nothing"
+    )
+    assert "run_id" in documented
+    assert "cancel_requested" in documented, (
+        "the column that is a column and not a model field is missing from the "
+        "parse, so the distinction this check exists to handle is untested"
+    )
+
+
+def test_the_migration_is_parsed_at_all() -> None:
+    """Guards the other half: an empty column set would make every claim pass."""
+    columns = _migration_columns()
+
+    assert len(columns) >= 18, f"only {len(columns)} columns parsed from the migration"
+    assert {"run_id", "tenant_id", "status", "cancel_requested"} <= columns
+
+
+def test_every_documented_run_column_exists_in_the_migration() -> None:
+    """The assertion. A reader following the data model must find the column.
+
+    One-directional, exactly as the evaluation half above is: this fails when the
+    document names a column the table does not have, and stays silent when the
+    table has one the document does not.
+    """
+    absent = sorted(set(_documented_run_columns()) - _migration_columns())
+
+    assert not absent, (
+        f"data-model.md names these columns and `0001_runs.sql` creates none of "
+        f"them: {absent}. A reader following the data model writes a query that "
+        f"fails, which is the drift this file exists to catch"
+    )
+
+
+def test_the_run_table_describes_columns_and_not_model_fields() -> None:
+    """The distinction that decides what this is checked against.
+
+    Pinned rather than left in a comment: if `cancel_requested` ever becomes a
+    `Run` field, the reason for checking against SQL rather than against the
+    model has gone, and somebody should re-read the choice rather than inherit
+    it.
+    """
+    from docdoc.runs.model import Run
+
+    assert "cancel_requested" not in Run.model_fields, (
+        "`cancel_requested` is now a Run field. This check compares the data "
+        "model against the migration precisely because it was not — re-examine "
+        "whether the pydantic model is the better target now"
+    )
+    assert "cancel_requested" in _migration_columns()
+
+
+# -- and its Indexes table, which is where the drift actually was --------------
+#
+# The columns matched. The *index* did not: the table specified
+# `(status, created_at)` partial and the migration creates `(created_at)` with
+# status in the predicate. Nothing compared them, so the document described an
+# index the database has never had.
+#
+# Checked on the **key columns**, because that is what was wrong and what a
+# reader planning capacity or reading a query plan would go looking for. The
+# predicate is prose in one and SQL in the other, and matching it textually would
+# be a check that fails on a reformatting.
+
+_DOC_INDEX = re.compile(r"^\|\s*`\(([^)]*)\)`", re.M)
+_SQL_INDEX = re.compile(r"^\s*ON runs \(([^)]*)\)", re.M)
+
+
+def _documented_indexes() -> set[tuple[str, ...]]:
+    text = RUNS_DATA_MODEL.read_text(encoding="utf-8")
+    section = text[text.index("## Indexes") :]
+    return {tuple(part.strip() for part in row.split(",")) for row in _DOC_INDEX.findall(section)}
+
+
+def _migration_indexes() -> set[tuple[str, ...]]:
+    """Every index the migration creates, including the primary key.
+
+    The primary key is added by hand because it is declared inline on the column
+    rather than as a `CREATE INDEX`, and the data model lists it as an index —
+    correctly, since it is the one the API's point lookup uses.
+    """
+    sql = RUNS_MIGRATION.read_text(encoding="utf-8")
+    found = {tuple(part.strip() for part in match.split(",")) for match in _SQL_INDEX.findall(sql)}
+    primary = re.search(r"^    ([a-z_]+)\s+\S+\s+PRIMARY KEY", sql, re.M)
+    assert primary, "the runs table declares no primary key"
+    found.add((primary.group(1),))
+    return found
+
+
+def test_the_index_tables_are_parsed_at_all() -> None:
+    """Guards both sides: an empty set on either makes the comparison vacuous."""
+    assert len(_documented_indexes()) == 4, (
+        f"the Indexes table parsed to {len(_documented_indexes())} rows, not four"
+    )
+    assert len(_migration_indexes()) == 4, (
+        f"the migration parsed to {len(_migration_indexes())} indexes, not four"
+    )
+
+
+def test_the_documented_indexes_are_the_indexes_the_migration_creates() -> None:
+    """The check that was missing, on the key columns.
+
+    `(status, created_at)` versus `(created_at)` is not a cosmetic difference: a
+    composite index led by `status` cannot produce globally ordered `created_at`
+    across the two values the partial predicate admits, so the claim query's
+    `ORDER BY created_at` would need a sort. The database has the right index and
+    the document described a different one for four convergence passes.
+    """
+    documented = _documented_indexes()
+    created = _migration_indexes()
+
+    assert documented == created, (
+        f"data-model.md and 0001_runs.sql disagree about the indexes.\n"
+        f"  documented and absent: {sorted(documented - created)}\n"
+        f"  created and undocumented: {sorted(created - documented)}"
+    )
+
+
+# -- every table, not just the interesting one (T115) --------------------------
+#
+# The milestone creates three tables and the data model described one. The
+# `runs` check above would never have found that: it starts from the document and
+# asks whether the code has what the document names, which says nothing about a
+# table the document forgot.
+#
+# So this asks the other question. It is the same shape as the sweep in
+# `test_documented_api_references_resolve.py` — start from the code, not the list
+# — and it exists for the same reason: a list-driven check cannot see what is
+# missing from the list.
+
+_CREATE_TABLE = re.compile(r"CREATE TABLE IF NOT EXISTS\s+\{?([a-z_]+)\}?", re.I)
+
+
+def _created_tables() -> set[str]:
+    """Every table the migrations create, including the runner's own.
+
+    `docdoc_schema_version` is created from an f-string in
+    `migrations/__init__.py` rather than from a `.sql` file, so the `{` and `}`
+    in the pattern are load-bearing: a matcher over the SQL files alone would
+    miss the table the runner itself needs and report two of three.
+    """
+    sources = [*RUNS_MIGRATION.parent.glob("*.sql"), RUNS_MIGRATION.parent / "__init__.py"]
+    found: set[str] = set()
+    for path in sources:
+        for name in _CREATE_TABLE.findall(path.read_text(encoding="utf-8")):
+            found.add("docdoc_schema_version" if name == "APPLIED_TABLE" else name)
+    return found
+
+
+def test_the_table_scan_finds_all_three() -> None:
+    """Guards the guard: a scan that found one would make the check below vacuous."""
+    tables = _created_tables()
+
+    assert tables == {"runs", "docdoc_default_tenant", "docdoc_schema_version"}, (
+        f"the migrations create {sorted(tables)}; the scan or the migrations "
+        f"changed, and the check below is now describing something else"
+    )
+
+
+#: The heading that documents each table. A map rather than a search for the
+#: table's name, because the run's section is headed "The Run" — the document
+#: describes the *entity* and the table is how it is stored, which is the right
+#: way round for a data model and the wrong way round for a substring match.
+#:
+#: Kept honest in both directions by the two checks below: a table with no entry
+#: fails, and an entry naming a heading the document does not have fails too.
+TABLE_SECTIONS = {
+    "runs": "## The Run",
+    "docdoc_default_tenant": "### `docdoc_default_tenant`",
+    "docdoc_schema_version": "### `docdoc_schema_version`",
+}
+
+
+def test_every_table_the_migrations_create_has_a_section() -> None:
+    """The direction the `runs` check cannot see.
+
+    That check starts from the document and asks whether the code has what the
+    document names, which says nothing about a table the document forgot — and
+    it forgot two of three. `docdoc_default_tenant` was the one that mattered: it
+    carries FR-089's assignment and a refusal to change that strands content if
+    it is overridden.
+    """
+    unmapped = sorted(table for table in _created_tables() if table not in TABLE_SECTIONS)
+
+    assert not unmapped, (
+        f"these tables are created and this map does not say where they are "
+        f"documented: {unmapped}. A reader comparing the document against the "
+        f"database finds something the document does not mention, which is how a "
+        f"document stops being trusted"
+    )
+
+
+def test_every_mapped_section_exists_in_the_document() -> None:
+    """The other half: an entry pointing at a heading that was renamed away."""
+    text = RUNS_DATA_MODEL.read_text(encoding="utf-8")
+
+    absent = sorted(
+        f"{table} -> {heading}" for table, heading in TABLE_SECTIONS.items() if heading not in text
+    )
+
+    assert not absent, (
+        f"these sections are claimed here and are not in data-model.md: {absent}. "
+        f"The heading was renamed and this map now describes nothing"
+    )

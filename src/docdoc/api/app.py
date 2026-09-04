@@ -35,12 +35,14 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
-from fastapi import APIRouter, FastAPI, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
 from docdoc.api import errors as api_errors
+from docdoc.api import health
+from docdoc.api.auth import AuthenticationError, KeyRing, Principal, bearer_of
 from docdoc.api.models import (
     BlobMetadata,
     JobStatus,
@@ -57,17 +59,44 @@ from docdoc.api.models import (
 from docdoc.api.settings import (
     DEFAULT_MAX_REQUEST_BYTES,
     REQUEST_BYTES_ENV,
+    RUN_DATABASE_URL_ENV,
     SCHEMA_PATHS_ENV,
     STORE_ROOT_ENV,
     STORE_URL_ENV,
-    store_from_url,
 )
+from docdoc.runs.health import LIVENESS_PATH, READINESS_PATH
+from docdoc.runs.model import DEFAULT_TENANT
 
 if TYPE_CHECKING:
     from docdoc.artifacts import ArtifactStore, BlobStore
     from docdoc.pipeline import PipelineResult
 
 __all__ = ["build_app", "create_app"]
+
+#: How long a connection attempt to the run-state database waits, in seconds.
+#: Not configurable: it bounds a probe and a request that a caller is already
+#: waiting on, and a deployment that wanted a longer one would be asking for a
+#: slower failure rather than a different outcome.
+CONNECT_TIMEOUT_SECONDS = 5
+
+#: FR-059's whole exemption list. Two paths, because a probe cannot carry a
+#: credential — kubelet, an ELB target group and Docker's `HEALTHCHECK` all issue
+#: a bare request, so requiring one here would make every authenticated
+#: deployment permanently unhealthy.
+#:
+#: Imported rather than spelled again: these are the same two strings the routes
+#: are registered under, and two copies of a path is how one of them ends up
+#: exempting something that no longer exists.
+_UNAUTHENTICATED = frozenset({LIVENESS_PATH, READINESS_PATH})
+
+#: The run layer's errors, mapped. Kept beside `api_errors.STATUS_BY_ERROR`
+#: rather than inside it, because that table is the constitution's error model
+#: and these are not part of it — see the handler's docstring.
+_RUN_ERROR_STATUS = {
+    "RunNotFoundError": 404,
+    "RunNotCancellableError": 409,
+    "RunStateUnavailableError": 503,
+}
 
 
 class _Deployment:
@@ -83,23 +112,84 @@ class _Deployment:
         *,
         store: ArtifactStore | None = None,
         blobs: BlobStore | None = None,
+        store_root: Any = None,
+        store_url: str | None = None,
         registry: Any = None,
         adapter: Any = None,
         max_request_bytes: int | None = None,
         limits: Any = None,
         runs: Any = None,
+        keys: Any = None,
     ) -> None:
+        self._store_root = store_root
+        self._store_url = store_url
+        self._by_tenant: dict[str, tuple[Any, Any]] = {}
+
+        if store is None and blobs is None and (store_root or store_url):
+            store, blobs = self._build_stores(DEFAULT_TENANT)
         self.store = store
         self.blobs = blobs
+        if store is not None or blobs is not None:
+            self._by_tenant[DEFAULT_TENANT] = (store, blobs)
+
         self._runs = runs
+        self._readiness: Any = None
         self._registry = registry
         self._adapter = adapter
         self.limits = limits
+        self.keys = keys if keys is not None else KeyRing.from_environment()
         self.max_request_bytes = max_request_bytes or _configured_request_cap()
 
     @property
     def has_store(self) -> bool:
         return self.blobs is not None
+
+    @property
+    def can_namespace(self) -> bool:
+        """Whether this deployment can build a store for a tenant it has not seen.
+
+        False when it was handed store *instances* rather than a location. That
+        is fine with authentication off — there is one tenant and those instances
+        are its stores — and it is a refusal to start with authentication on, see
+        ``build_app``.
+        """
+        return bool(self._store_root or self._store_url)
+
+    def stores_for(self, tenant_id: str) -> tuple[Any, Any]:
+        """``(artifact_store, blob_store)`` namespaced to one tenant (FR-084).
+
+        The namespacing is in the *path*, not in a check after the read: a store
+        built for tenant A cannot see tenant B's objects, so there is no moment
+        where one tenant's content exists in memory next to a decision about
+        whether it should. That is what makes FR-064 and FR-065 true by
+        construction rather than by every call site remembering a comparison.
+
+        Built once per tenant and cached. A store is a client and a path prefix,
+        so rebuilding one per request would open a connection pool per request on
+        the object-store path.
+        """
+        cached = self._by_tenant.get(tenant_id)
+        if cached is not None:
+            return cached
+        built = self._build_stores(tenant_id)
+        self._by_tenant[tenant_id] = built
+        return built
+
+    def _build_stores(self, tenant_id: str) -> tuple[Any, Any]:
+        from docdoc.artifacts import BlobStore, FileArtifactStore
+        from docdoc.artifacts.s3 import stores_from_url
+
+        if self._store_url:
+            return stores_from_url(self._store_url, tenant_id=tenant_id)
+        if self._store_root:
+            return (
+                FileArtifactStore(self._store_root, tenant_id=tenant_id),
+                BlobStore(self._store_root, tenant_id=tenant_id),
+            )
+        # No location, so nothing can be built for a tenant this deployment was
+        # not handed a store for. Returning the default tenant's stores here
+        # would be a cross-tenant leak written as a convenience.
+        return (None, None)
 
     @property
     def has_runs(self) -> bool:
@@ -115,6 +205,25 @@ class _Deployment:
         if self._runs is None:
             raise RuntimeError("no run store configured")
         return self._runs
+
+    def readiness(self) -> Any:
+        """The readiness probe over this deployment's actual dependencies.
+
+        Built once and held, so that the two-second cache is shared across
+        requests rather than being one cache per probe — an uncached check makes
+        probe traffic scale with fleet size against the component already under
+        stress (research R13).
+
+        A deployment with neither a run-state database nor a store has nothing to
+        probe and is **ready**. That is a Milestone 8 install: validly
+        configured, and it must not become permanently unready on upgrade
+        (SC-018).
+        """
+        from docdoc.runs.health import Readiness
+
+        if self._readiness is None:
+            self._readiness = Readiness(runs=self._runs, blobs=self.blobs)
+        return self._readiness
 
     def registry(self) -> Any:
         if self._registry is not None:
@@ -154,9 +263,13 @@ def _default_deployment() -> _Deployment:
     nothing configured runs every stage every time and refuses submissions. That
     is the honest behaviour: the artifacts hold extracted values and the blobs
     hold whole documents, and where those land is an operator's decision.
-    """
-    from docdoc.artifacts import BlobStore, FileArtifactStore
 
+    The *location* is held rather than a pair of store objects, because a
+    multi-tenant deployment needs one store per tenant and only a location can
+    produce one. The default tenant's stores are built from it immediately, and
+    they land exactly where a Milestone 8 deployment already wrote — unprefixed
+    (FR-084a).
+    """
     runs = _configured_run_queue()
 
     # An object store, if one was named. Checked first because a deployment that
@@ -164,13 +277,12 @@ def _default_deployment() -> _Deployment:
     # keeps working untouched for everyone who sets only it (SC-018).
     url = os.environ.get(STORE_URL_ENV, "").strip()
     if url:
-        store, blobs = store_from_url(url)
-        return _Deployment(store=store, blobs=blobs, runs=runs)  # type: ignore[arg-type]
+        return _Deployment(store_url=url, runs=runs)
 
     root = os.environ.get(STORE_ROOT_ENV, "").strip()
     if not root:
         return _Deployment(runs=runs)
-    return _Deployment(store=FileArtifactStore(root), blobs=BlobStore(root), runs=runs)
+    return _Deployment(store_root=root, runs=runs)
 
 
 def _configured_run_queue() -> Any:
@@ -186,7 +298,7 @@ def _configured_run_queue() -> Any:
     (FR-078), and an API that quietly applied a schema would defeat that from the
     other side.
     """
-    dsn = os.environ.get("DOCDOC_RUN_DATABASE_URL", "").strip()
+    dsn = os.environ.get(RUN_DATABASE_URL_ENV, "").strip()
     if not dsn:
         return None
 
@@ -203,7 +315,13 @@ def _configured_run_queue() -> Any:
 
     from docdoc.runs.postgres import PostgresRunQueue
 
-    return PostgresRunQueue(lambda: psycopg.connect(dsn))
+    # A short connect timeout, because both things that reach this connection
+    # have a deadline somebody else set: a readiness probe is polled on an
+    # interval and a submission is a request a caller is waiting on. libpq's
+    # default is to wait indefinitely, which turns "the database is down" into
+    # "the probe never answers" — and an unanswered probe is read as a hung
+    # process rather than as an unmet dependency (research R13).
+    return PostgresRunQueue(lambda: psycopg.connect(dsn, connect_timeout=CONNECT_TIMEOUT_SECONDS))
 
 
 def build_app(deployment: _Deployment | None = None) -> FastAPI:
@@ -213,11 +331,90 @@ def build_app(deployment: _Deployment | None = None) -> FastAPI:
         summary="Structured, validated, traceable data out of documents.",
         version="0.1.0",
     )
-    app.state.deployment = deployment or _default_deployment()
+    resolved = deployment or _default_deployment()
+    _refuse_unnamespaceable(resolved)
+    app.state.deployment = resolved
+    _require_credential_everywhere_else(app)
     app.include_router(_router())
+    # Before the versioned router is irrelevant to routing and relevant to
+    # reading: the health routes are not part of the document API and are
+    # registered on the application rather than on it (FR-058).
+    health.install(app, resolved.readiness())
     _install_error_handler(app)
     _mount_ui(app)
     return app
+
+
+def _require_credential_everywhere_else(app: FastAPI) -> None:
+    """FR-059's exemption list, applied to the whole application.
+
+    The router dependency covers `/v1` and resolves a `Principal` for the
+    handlers that need one. It cannot cover what is not on that router, and three
+    kinds of thing are not: the `/ui` **mount**, which inherits no dependency
+    because a mount is not a route; FastAPI's `/docs`, `/redoc` and
+    `/openapi.json`, which its constructor registers directly; and any path a
+    later change adds outside the router.
+
+    All three were open on an authenticated deployment, and the pattern is the
+    point — every one of them is a thing nobody put on a list, so the fix is a
+    rule that needs no list. FR-059 names exactly two exemptions, so this
+    enforces exactly two and refuses everything else.
+
+    **Before routing**, which means an unknown path answers 401 rather than 404
+    on an authenticated deployment. That is the better answer: a 404 would say
+    which paths exist to someone who cannot use any of them.
+
+    With authentication disabled `principal_for` returns the default tenant for
+    everyone and this is a function call per request that changes nothing —
+    Milestone 8's behaviour, including an open `/ui` (FR-088).
+    """
+
+    @app.middleware("http")
+    async def _credential(request: Request, call_next: Any) -> Response:
+        if request.url.path in _UNAUTHENTICATED:
+            return await call_next(request)  # type: ignore[no-any-return]
+        try:
+            _deployment_of(request).keys.principal_for(
+                bearer_of(request.headers.get("authorization"))
+            )
+        except AuthenticationError as refused:
+            # Assembled here rather than raised: an exception handler registered
+            # on the application does not run for one raised in middleware, which
+            # sits outside that boundary.
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "error": {
+                        "class": type(refused).__name__,
+                        "stage": None,
+                        "message": str(refused),
+                        "detail": {},
+                    }
+                },
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return await call_next(request)  # type: ignore[no-any-return]
+
+
+def _refuse_unnamespaceable(deployment: _Deployment) -> None:
+    """Refuse to start where authentication is on and the store cannot namespace.
+
+    A deployment constructed from store *objects* rather than a location has one
+    store, and one store shared by several tenants is the existence oracle
+    ADR-0014 exists to close — every tenant reading and overwriting every other
+    tenant's content at identities they can all derive independently.
+
+    Refusing at construction rather than at the first authenticated request is
+    the whole point: the alternative fails on one customer's traffic, in
+    production, after the previous version has been drained. Principle VIII's no
+    silent fallback, applied to a configuration rather than to a stage.
+    """
+    if deployment.keys.enabled and not deployment.can_namespace:
+        raise RuntimeError(
+            "authentication is enabled but this deployment was given store "
+            "objects rather than a location, so it cannot namespace one tenant "
+            "away from another. Configure DOCDOC_STORE_ROOT or DOCDOC_STORE_URL"
+        )
 
 
 def _mount_ui(app: FastAPI) -> None:
@@ -278,6 +475,20 @@ def _mount_ui(app: FastAPI) -> None:
         json.dumps({"event": "ui.assets", "source": source, "path": str(assets)})
     )
 
+    # **Behind the same credential as everything else** (FR-059), which exempts
+    # liveness and readiness and nothing further. A mount is not a route, so it
+    # does not inherit the router's dependency and had to be given one.
+    #
+    # The assets carry no tenant data, so this is not closing a leak — it is
+    # keeping one sentence true. Without it a deployment that has enabled
+    # authentication still serves the viewer's shell to anyone who can reach the
+    # port, and the reader is told the opposite.
+    #
+    # What it costs is worth stating plainly: the viewer cannot send a bearer
+    # token, so with authentication on it does not work either way. Before this
+    # it loaded and then failed on every `/v1` call it made; now it does not
+    # load. The second is the honest failure — the interface is unavailable, and
+    # it says so at the door rather than after the page has rendered.
     app.mount("/ui", StaticFiles(directory=assets, html=True), name="ui")
 
 
@@ -329,16 +540,60 @@ def _deployment_of(request: Request) -> _Deployment:
     return request.app.state.deployment  # type: ignore[no-any-return]
 
 
+async def principal_of(request: Request) -> Principal:
+    """Resolve the caller to exactly one tenant, or refuse (FR-059, FR-060).
+
+    A router-level dependency, so FastAPI resolves it **before** the endpoint
+    body runs — which is what makes FR-067 true rather than aspirational. Every
+    route in this module reads its request body inside the handler
+    (``_read_capped`` streams it), so an unauthenticated request is refused with
+    no document read, no provider called, and no store touched.
+
+    With authentication disabled this returns the default tenant for everyone and
+    is the one line that makes "one implicit tenant owning all content" a value
+    the code holds rather than an assumption three modules make separately
+    (FR-088).
+    """
+    deployment = _deployment_of(request)
+    return deployment.keys.principal_for(bearer_of(request.headers.get("authorization")))
+
+
+#: The caller, resolved before any handler body runs. Spelled as an annotated
+#: type rather than as a default argument so that `Depends(...)` is not evaluated
+#: at function definition time — the shape ruff's B008 is about, and the one
+#: FastAPI now documents.
+Caller = Annotated[Principal, Depends(principal_of)]
+
+
+def _stores_of(request: Request, principal: Principal) -> tuple[Any, Any]:
+    """This caller's artifact store and blob store, namespaced to their tenant."""
+    return _deployment_of(request).stores_for(principal.tenant_id)
+
+
 def _router() -> APIRouter:
-    router = APIRouter(prefix="/v1")
+    # The dependency is on the router rather than on each route, so that a route
+    # added later is authenticated by default. The alternative — a decorator per
+    # endpoint — makes the safe case the one somebody has to remember, and the
+    # failure is silent: the new route simply serves everyone.
+    #
+    # `/healthz` and `/readyz` are outside this router entirely (FR-058), which
+    # is why they are registered on the application in `build_app`.
+    router = APIRouter(prefix="/v1", dependencies=[Depends(principal_of)])
 
     @router.post("/documents", response_model=SubmissionResponse)
-    async def submit(request: Request) -> Any:
+    async def submit(
+        request: Request, principal: Caller
+    ) -> Any:
         """Store source bytes and return their identity.
 
         Idempotent by construction: identical bytes hash to one ``blob_id``, so
         the same document submitted twice yields one stored copy and one identity
         (FR-021).
+
+        The bytes land in **this tenant's** namespace. Two tenants submitting the
+        same document derive the same ``blob_id`` and store two copies, which is
+        ADR-0014 §4's forfeited cross-tenant reuse being paid for here, in the
+        one place it is visible.
         """
         from docdoc.ingest.source import SourceFile, detect_media_type
 
@@ -356,8 +611,9 @@ def _router() -> APIRouter:
         file = SourceFile.from_bytes(data, limits=deployment.limits)
         file.check_limits(deployment.limits or _default_limits())
 
-        assert deployment.blobs is not None
-        blob_id = deployment.blobs.put(data)
+        _, blobs = _stores_of(request, principal)
+        assert blobs is not None
+        blob_id = blobs.put(data)
         return SubmissionResponse(
             blob_id=blob_id,
             size_bytes=len(data),
@@ -365,23 +621,32 @@ def _router() -> APIRouter:
         )
 
     @router.get("/documents/{blob_id}", response_model=BlobMetadata)
-    async def document(request: Request, blob_id: str) -> Any:
-        """Identity, size, and detected media type. Never the bytes."""
+    async def document(
+        request: Request, blob_id: str, principal: Caller
+    ) -> Any:
+        """Identity, size, and detected media type. Never the bytes.
+
+        Scoped to the caller's tenant (FR-064). Another tenant's ``blob_id`` is
+        simply not in this namespace, so it produces the same 404 as one that was
+        never submitted — the same body, from the same branch, because there is
+        no second branch to give a different one (FR-066).
+        """
         from docdoc.ingest.source import detect_media_type
 
         deployment = _deployment_of(request)
         if not deployment.has_store:
             raise _no_store_configured()
 
-        assert deployment.blobs is not None
-        size = deployment.blobs.size_of(blob_id)
+        _, blobs = _stores_of(request, principal)
+        assert blobs is not None
+        size = blobs.size_of(blob_id)
         if size is None:
             return JSONResponse(
                 status_code=404,
                 content={"error": {"class": "UnknownBlob", "message": "no such document here"}},
             )
 
-        data = deployment.blobs.get(blob_id)
+        data = blobs.get(blob_id)
         return BlobMetadata(
             blob_id=blob_id,
             size_bytes=size,
@@ -389,16 +654,29 @@ def _router() -> APIRouter:
         )
 
     @router.post("/documents/{blob_id}/extract")
-    async def extract(request: Request, blob_id: str, schema: str) -> Any:
-        """Run the pipeline inside the request and return the id **and** result."""
+    async def extract(
+        request: Request,
+        blob_id: str,
+        schema: str,
+        principal: Caller,
+    ) -> Any:
+        """Run the pipeline inside the request and return the id **and** result.
+
+        Reads and writes this tenant's namespace throughout, so reuse operates
+        strictly within a tenant (FR-086) and a document another tenant has
+        already processed costs this one exactly as much as a first-ever
+        submission — which is SC-017, the half of isolation a status code cannot
+        deliver.
+        """
         from docdoc.pipeline import run as run_pipeline
 
         deployment = _deployment_of(request)
         if not deployment.has_store:
             raise _no_store_configured()
 
-        assert deployment.blobs is not None
-        data = deployment.blobs.get(blob_id)
+        store, blobs = _stores_of(request, principal)
+        assert blobs is not None
+        data = blobs.get(blob_id)
         if data is None:
             return JSONResponse(
                 status_code=404,
@@ -410,7 +688,7 @@ def _router() -> APIRouter:
             schema=schema,
             registry=deployment.registry(),
             adapter=deployment.adapter(),
-            store=deployment.artifact_store(),
+            store=_artifact_store(store),
             limits=deployment.limits,
             request_id=request.headers.get("x-request-id"),
         )
@@ -474,8 +752,16 @@ def _router() -> APIRouter:
 
         return _storeless_run_response(result)
 
+    # `status_code=202` is the *documented default* for this route; the handler
+    # returns 200 on an idempotent replay. Declared rather than omitted so the
+    # OpenAPI document names the ordinary case.
     @router.post("/documents/{blob_id}/runs", status_code=202)
-    async def submit_run(request: Request, blob_id: str, schema: str) -> Any:
+    async def submit_run(
+        request: Request,
+        blob_id: str,
+        schema: str,
+        principal: Caller,
+    ) -> Any:
         """Accept a run and return before any stage executes.
 
         The response carries a ``run_id`` and **omits** ``processing_id``, which
@@ -486,10 +772,13 @@ def _router() -> APIRouter:
         from docdoc.artifacts import ArtifactError
         from docdoc.runs.errors import RunStateUnavailableError
         from docdoc.runs.identity import DEFAULT_RETENTION, deadline, new_run_id, now
-        from docdoc.runs.model import DEFAULT_TENANT
 
         deployment = _deployment_of(request)
         if not deployment.has_runs:
+            # No `Retry-After`: this one is *not* retryable. Nothing will change
+            # until an operator configures a database, and telling a client to
+            # come back in a second would make it poll a decision nobody is
+            # making. The two 503s on this route mean different things and say so.
             return JSONResponse(
                 status_code=503,
                 content={
@@ -497,7 +786,7 @@ def _router() -> APIRouter:
                         "class": "RunStateUnavailableError",
                         "message": (
                             "this deployment accepts no asynchronous runs; set "
-                            "DOCDOC_RUN_DATABASE_URL and apply `docdoc migrate`"
+                            f"{RUN_DATABASE_URL_ENV} and apply `docdoc migrate`"
                         ),
                     }
                 },
@@ -505,16 +794,24 @@ def _router() -> APIRouter:
         if not deployment.has_store:
             raise _no_store_configured()
 
-        tenant = DEFAULT_TENANT
-        assert deployment.blobs is not None
+        # Every run records its owning tenant at creation (FR-062), which is why
+        # `tenant_id` is a column the first migration creates rather than one a
+        # later one adds: a backfill would have to invent an owner for every row.
+        tenant = principal.tenant_id
+        _, blobs = _stores_of(request, principal)
+        assert blobs is not None
         # A malformed identity and an absent one get the same 404. The store
         # raises `ArtifactError` for the first, which would surface as a 500 —
         # and "the server broke" is the wrong thing to tell a caller who typed a
         # bad identifier. The two synchronous routes still answer 500 here; that
         # is pre-existing and FR-009 requires their status codes to be unchanged,
         # so it is reported rather than fixed under this milestone.
+        #
+        # Another tenant's blob reaches the same branch by being absent from this
+        # tenant's namespace, so it gets the same body — no comparison, and
+        # therefore nothing to forget (FR-066).
         try:
-            known = deployment.blobs.get(blob_id) is not None
+            known = blobs.get(blob_id) is not None
         except ArtifactError:
             known = False
         if not known:
@@ -539,10 +836,11 @@ def _router() -> APIRouter:
             idempotency_key=request.headers.get("idempotency-key"),
         )
         started = now()
+        allocated = new_run_id()
         try:
             run = deployment.runs().submit(
                 spec,
-                run_id=new_run_id(),
+                run_id=allocated,
                 now=started,
                 expires_at=deadline(started, DEFAULT_RETENTION),
             )
@@ -550,13 +848,32 @@ def _router() -> APIRouter:
             # Refused rather than accepted and dropped (FR-057). A run that
             # cannot be recorded is work that will never be done and never be
             # reported, which is the silent failure this status exists to avoid.
+            #
+            # `Retry-After` is what makes "retryable" a fact a client can act on
+            # rather than a word in a specification. This is the transient case:
+            # the database is configured and unreachable, so coming back is the
+            # correct thing to do.
             return JSONResponse(
                 status_code=503,
                 content={"error": {"class": type(exc).__name__, "message": str(exc)}},
+                headers={"Retry-After": "1"},
             )
 
+        # **202 for a new run, 200 for one this key already produced**, per
+        # contracts/runs-http-api.md. The two codes carry the distinction the
+        # body cannot: 202 says work was queued, 200 says the caller is looking
+        # at a run that already existed. A client retrying through a flaky
+        # network learns whether its first attempt landed — which is the entire
+        # reason it sent an idempotency key.
+        #
+        # Read off the identity rather than from a flag the queue returns: the
+        # run that comes back carries the id it was created with, so a run whose
+        # id is not the one just allocated is a run that predates this request.
+        # That works identically for both queue implementations and needs no
+        # second return value to keep in step with the first.
+        replayed = run.run_id != allocated
         return JSONResponse(
-            status_code=202,
+            status_code=200 if replayed else 202,
             content=RunAcceptedResponse(
                 run_id=str(run.run_id),
                 status=str(run.status),
@@ -565,7 +882,9 @@ def _router() -> APIRouter:
         )
 
     @router.get("/runs/{run_id}", response_model=RunStateResponse)
-    async def run_state(request: Request, run_id: str) -> Any:
+    async def run_state(
+        request: Request, run_id: str, principal: Caller
+    ) -> Any:
         """One of the five states, and never the result itself.
 
         A succeeded run names its ``processing_id``; the unchanged
@@ -578,8 +897,6 @@ def _router() -> APIRouter:
         if not deployment.has_runs:
             return _unknown_run(run_id)
 
-        from docdoc.runs.model import DEFAULT_TENANT
-
         try:
             identity = UUID(run_id)
         except ValueError:
@@ -588,9 +905,66 @@ def _router() -> APIRouter:
             # enough to exist (FR-066).
             return _unknown_run(run_id)
 
-        run = deployment.runs().get(identity, DEFAULT_TENANT)
+        # The tenant is a predicate in the query, not a check after the fetch
+        # (FR-063). Another tenant's run comes back as `None` from the same
+        # branch an unknown one does, so the two cannot drift into two answers.
+        run = deployment.runs().get(identity, principal.tenant_id)
         if run is None:
             return _unknown_run(run_id)
+
+        return RunStateResponse(**run.dump_public())
+
+    @router.delete("/runs/{run_id}", response_model=RunStateResponse)
+    async def cancel_run(
+        request: Request, run_id: str, principal: Caller
+    ) -> Any:
+        """Request cancellation. Returns the run.
+
+        **A 200 on a running run means *requested*, not *stopped*** (FR-029).
+        The worker observes the request at its next stage boundary, and a
+        provider call already in flight completes and is billed — so the body
+        still reads ``running`` until that boundary is reached. Reporting
+        ``cancelled`` here would be the one lie this endpoint must not tell, and
+        saying so in the contract is cheaper than letting a caller infer that the
+        cancel failed.
+
+        A queued run is cancelled immediately and never executes. A terminal one
+        is refused with 409 naming its state (FR-031) rather than silently
+        succeeding: a succeeded run has a stored result, and calling it cancelled
+        would make a retrievable result unreachable through a lie about its
+        history. A run already cancelled is a 200, idempotently (FR-034).
+        """
+        from uuid import UUID
+
+        from docdoc.runs.errors import RunNotCancellableError, RunNotFoundError
+        from docdoc.runs.identity import now
+
+        deployment = _deployment_of(request)
+        if not deployment.has_runs:
+            return _unknown_run(run_id)
+
+        try:
+            identity = UUID(run_id)
+        except ValueError:
+            return _unknown_run(run_id)
+
+        try:
+            # Tenant-scoped in the query, so another tenant's run raises the same
+            # `RunNotFoundError` an unknown one does (FR-063, FR-066).
+            run = deployment.runs().cancel(identity, principal.tenant_id, now=now())
+        except RunNotFoundError:
+            return _unknown_run(run_id)
+        except RunNotCancellableError as exc:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": {
+                        "class": type(exc).__name__,
+                        "message": str(exc),
+                        "detail": {"status": exc.state},
+                    }
+                },
+            )
 
         return RunStateResponse(**run.dump_public())
 
@@ -609,9 +983,16 @@ def _router() -> APIRouter:
         )
 
     @router.get("/jobs/{job_id}", response_model=JobStatusResponse)
-    async def job(request: Request, job_id: str) -> Any:
-        """One of three statuses, and never ``pending`` (FR-035)."""
-        deployment = _deployment_of(request)
+    async def job(
+        request: Request, job_id: str, principal: Caller
+    ) -> Any:
+        """One of three statuses, and never ``pending`` (FR-035).
+
+        Read from the caller's own namespace, which is what makes FR-065 true:
+        another tenant's ``processing_id`` is not in this store, so it answers
+        ``unavailable`` — the identical body an identity nobody produced gets.
+        """
+        store, _ = _stores_of(request, principal)
 
         if not _well_formed(job_id):
             return JobStatusResponse(
@@ -620,7 +1001,7 @@ def _router() -> APIRouter:
                 detail="not a well-formed artifact identity, so no run produced it",
             )
 
-        if _terminal(deployment, job_id) is None:
+        if _terminal(store, job_id) is None:
             return JobStatusResponse(
                 job_id=job_id,
                 status=JobStatus.UNAVAILABLE,
@@ -634,21 +1015,23 @@ def _router() -> APIRouter:
         return JobStatusResponse(job_id=job_id, status=JobStatus.SUCCEEDED)
 
     @router.get("/jobs/{job_id}/result")
-    async def job_result(request: Request, job_id: str) -> Any:
+    async def job_result(
+        request: Request, job_id: str, principal: Caller
+    ) -> Any:
         """The stored result, and never a silent recomputation (FR-036)."""
-        deployment = _deployment_of(request)
+        store, _ = _stores_of(request, principal)
 
         if not _well_formed(job_id):
             return _status_only(job_id, JobStatus.UNKNOWN)
 
-        validation = _terminal(deployment, job_id)
+        validation = _terminal(store, job_id)
         if validation is None:
             # Deliberately not recomputed: the inputs may have moved since, and
             # returning a different result under the same id would break the one
             # promise the identity makes.
             return _status_only(job_id, JobStatus.UNAVAILABLE)
 
-        return _stored_result(deployment, job_id, validation)
+        return _stored_result(store, job_id, validation)
 
     return router
 
@@ -701,16 +1084,23 @@ def _storeless_run_response(result: PipelineResult) -> StorelessRunResponse:
     return StorelessRunResponse(**_run_fields(result))
 
 
-def _terminal(deployment: _Deployment, job_id: str) -> Any:
-    """The validation artifact this job id addresses, or ``None``."""
+def _terminal(store: Any, job_id: str) -> Any:
+    """The validation artifact this job id addresses, or ``None``.
+
+    Takes the store rather than the deployment, because *which* store is now a
+    property of the request: it is the caller's tenant's. A helper that reached
+    for `deployment.store` would read the default tenant's namespace for every
+    caller, which is the cross-tenant read FR-065 forbids — and it would do so
+    silently, returning correct-looking results.
+    """
     from docdoc.artifacts import ArtifactError
     from docdoc.pipeline.stages import Stage, spec_for
     from docdoc.validation.result import ValidationResult
 
-    if deployment.store is None:
+    if store is None:
         return None
     try:
-        return deployment.store.get(
+        return store.get(
             job_id,
             model=ValidationResult,
             artifact_format_version=spec_for(Stage.VALIDATE).artifact_format_version,
@@ -722,7 +1112,7 @@ def _terminal(deployment: _Deployment, job_id: str) -> Any:
         raise
 
 
-def _stored_result(deployment: _Deployment, job_id: str, validation: Any) -> Any:
+def _stored_result(store: Any, job_id: str, validation: Any) -> Any:
     """Rebuild a run's response from the store, walking the chain back.
 
     Each stage's artifact records the identity of its input, so the whole run is
@@ -734,7 +1124,6 @@ def _stored_result(deployment: _Deployment, job_id: str, validation: Any) -> Any
     from docdoc.pipeline.stages import Stage, spec_for
 
     provenance = validation.provenance
-    store = deployment.store
 
     def _load(artifact_id: str, model: Any, stage: Stage) -> Any:
         if store is None:
@@ -793,6 +1182,18 @@ def _well_formed(job_id: str) -> bool:
     )
 
 
+def _artifact_store(store: Any) -> Any:
+    """A store, or the one that stores nothing.
+
+    The pipeline's `store=` may not be `None`, and a deployment with no store
+    configured is an ordinary deployment rather than a broken one: every stage
+    runs every time and nothing is written (FR-017).
+    """
+    from docdoc.artifacts import NullArtifactStore
+
+    return store or NullArtifactStore()
+
+
 def _default_limits() -> Any:
     from docdoc.ingest.source import Limits
 
@@ -836,6 +1237,54 @@ async def _read_capped(request: Request, cap: int) -> bytes:
 def _install_error_handler(app: FastAPI) -> None:
     """One boundary, so that no untyped exception reaches a caller (FR-051)."""
     from docdoc.kernel.errors import DocdocError
+    from docdoc.runs.errors import RunError
+
+    @app.exception_handler(AuthenticationError)
+    async def _unauthenticated(request: Request, error: AuthenticationError) -> Response:
+        """401, with the same body for absent, malformed, and unrecognised.
+
+        `AuthenticationError` carries no distinction to serialise, which is the
+        point: a body that said "malformed" for one and "unknown" for another
+        would tell an attacker which guesses are worth refining.
+
+        `WWW-Authenticate` because a 401 without it is not a 401 — RFC 7235
+        requires the header, and a client library that follows the specification
+        will not retry with a credential it was never told to send.
+        """
+        return JSONResponse(
+            status_code=401,
+            content={
+                "error": {
+                    "class": type(error).__name__,
+                    "stage": None,
+                    "message": str(error),
+                    "detail": {},
+                }
+            },
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    @app.exception_handler(RunError)
+    async def _run_error(request: Request, error: RunError) -> Response:
+        """The run layer's errors, which are not `DocdocError`s.
+
+        Deliberately not: the constitution's error model describes documents,
+        parsers, schemas, and stages — the things that go wrong *inside* a run —
+        and "your database is unreachable" is none of them. So they need their
+        own clause here rather than inheriting one that would put them under a
+        taxonomy they do not belong to.
+        """
+        return JSONResponse(
+            status_code=_RUN_ERROR_STATUS.get(type(error).__name__, 500),
+            content={
+                "error": {
+                    "class": type(error).__name__,
+                    "stage": None,
+                    "message": str(error),
+                    "detail": {},
+                }
+            },
+        )
 
     @app.exception_handler(DocdocError)
     async def _typed(request: Request, error: DocdocError) -> Response:

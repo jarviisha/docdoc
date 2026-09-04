@@ -29,13 +29,19 @@ in-memory fake at any instant, with no database and no sleeping.
 
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import UTC, datetime, timedelta
 
 __all__ = [
     "DEFAULT_LEASE",
+    "DEFAULT_MAX_ATTEMPTS",
     "DEFAULT_RETENTION",
+    "LEASE_SECONDS_ENV",
+    "MAX_ATTEMPTS_ENV",
     "RunId",
+    "configured_lease",
+    "configured_max_attempts",
     "deadline",
     "new_run_id",
     "now",
@@ -57,6 +63,61 @@ DEFAULT_LEASE = timedelta(seconds=90)
 #: a populated table later is the migration problem `tenant_id` has, and
 #: Milestone 10's retention work will act on it.
 DEFAULT_RETENTION = timedelta(days=30)
+
+#: How many times a run may be claimed before it is abandoned. Three, because
+#: the failure this bounds is the poison document, and a document that terminates
+#: three workers will terminate thirty (research R9).
+DEFAULT_MAX_ATTEMPTS = 3
+
+#: The two knobs a deployment may move, and the reason they are read *here*.
+#:
+#: Both are worker settings, and the worker is a subcommand of the CLI while the
+#: names are documented as part of the service's configuration. `docdoc.api` and
+#: `docdoc.cli` are declared independent of each other, so a precedence rule
+#: living in either is one the other cannot call — and two copies of a
+#: precedence rule is how the two eventually disagree. This module already owns
+#: both defaults, so it owns the resolution as well. `docdoc.api.settings`
+#: re-exports these under the names the HTTP layer's readers look for.
+LEASE_SECONDS_ENV = "DOCDOC_RUN_LEASE_SECONDS"
+MAX_ATTEMPTS_ENV = "DOCDOC_RUN_MAX_ATTEMPTS"
+
+
+def configured_lease(explicit: int | None = None) -> timedelta:
+    """The claim duration: explicit argument, then environment, then default.
+
+    The precedence FR-083 requires of every setting, in one place rather than at
+    each call site that needs it.
+    """
+    if explicit:
+        return timedelta(seconds=explicit)
+    seconds = _positive_int(os.environ.get(LEASE_SECONDS_ENV, ""))
+    return DEFAULT_LEASE if seconds is None else timedelta(seconds=seconds)
+
+
+def configured_max_attempts(explicit: int | None = None) -> int:
+    """How many claims a run gets before abandonment. Same precedence."""
+    if explicit:
+        return explicit
+    configured = _positive_int(os.environ.get(MAX_ATTEMPTS_ENV, ""))
+    return DEFAULT_MAX_ATTEMPTS if configured is None else configured
+
+
+def _positive_int(raw: str) -> int | None:
+    """A positive integer, or ``None`` for absent **and** for unreadable.
+
+    A malformed value falls back to the default rather than refusing to start. A
+    worker that dies over a typo in a tuning knob turns a cosmetic mistake into
+    an outage, and neither knob can change what a run produces — which is the
+    distinction `Limits` does not get to make and this one does.
+    """
+    text = raw.strip()
+    if not text:
+        return None
+    try:
+        value = int(text)
+    except ValueError:
+        return None
+    return value if value > 0 else None
 
 
 def new_run_id() -> RunId:

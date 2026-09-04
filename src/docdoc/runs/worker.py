@@ -32,11 +32,11 @@ from typing import TYPE_CHECKING, Any
 
 from docdoc.runs import identity
 from docdoc.runs.errors import RunStateUnavailableError
-from docdoc.runs.identity import DEFAULT_LEASE
+from docdoc.runs.identity import DEFAULT_LEASE, DEFAULT_MAX_ATTEMPTS
 from docdoc.runs.model import RunOutcome, RunStatus
-from docdoc.runs.observe import log_transition
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from datetime import datetime, timedelta
 
     from docdoc.artifacts import ArtifactStore, BlobStore
@@ -44,11 +44,11 @@ if TYPE_CHECKING:
     from docdoc.runs.model import Run
     from docdoc.runs.queue import RunQueue
 
+#: ``DEFAULT_MAX_ATTEMPTS`` is re-exported rather than defined here. It moved to
+#: `identity.py` when `DOCDOC_RUN_MAX_ATTEMPTS` arrived, so that a default and
+#: the environment override of it sit in one module instead of two. The name
+#: stays importable from here because that is where callers already look for it.
 __all__ = ["DEFAULT_MAX_ATTEMPTS", "Worker", "execute_one"]
-
-#: Three, because the failure this bounds is the poison document, and a document
-#: that terminates three workers will terminate thirty (research R9).
-DEFAULT_MAX_ATTEMPTS = 3
 
 #: A third of the lease, so a live worker misses two ticks before losing a run it
 #: still holds.
@@ -72,12 +72,20 @@ def execute_one(
     adapter: Any,
     now: datetime,
     limits: Any = None,
+    stopping: Callable[[], bool] | None = None,
 ) -> PipelineResult | None:
     """Execute one claimed run and record what happened.
 
     Returns the `PipelineResult` when the pipeline ran, and `None` when it never
     got that far — a withdrawn schema or a missing blob, both of which are
     terminal without reaching a stage.
+
+    `stopping` reports that **this process** is shutting down, and it is what
+    makes FR-042's "finish or relinquish" have a second branch. Without it the
+    only thing that stops a run between stages is a caller's cancellation, so a
+    signalled worker had to run the current document to completion — minutes,
+    against an orchestrator's grace period of seconds — and then be killed
+    mid-run anyway, leaving the run to wait out its whole lease.
 
     Extracted from the loop so that a test can drive exactly one run without a
     thread, a signal handler, or a sleep. `tests/contract/test_async_matches_sync.py`
@@ -123,23 +131,63 @@ def execute_one(
         store=store,
         limits=limits,
         request_id=run.request_id,
+        # Consulted at stage boundaries only (R4, contracts/runs-layer.md). One
+        # query per boundary — three per run — against a row this worker already
+        # holds a lease on, which is cheap next to the stage it decides whether
+        # to start.
+        #
+        # A query rather than a flag passed in at claim time: cancellation
+        # arrives *while* the run is executing, so anything read once at the
+        # start would answer the question that was not asked.
+        #
+        # An unreachable database means "keep going". The alternative — treating
+        # a failed read as a cancellation — would stop every running run in the
+        # fleet during a database blip, which is a far more expensive way to be
+        # wrong than finishing a run somebody asked to stop.
+        #
+        # Shutdown is the second reason to stop, and it is checked first because
+        # it costs nothing: it is a flag in this process, where the other is a
+        # round trip.
+        should_continue=lambda: not (stopping and stopping())
+        and not _cancellation_requested(queue, run),
     )
 
-    _finish(queue, run, RunOutcome.of(result), now=now)
+    outcome = RunOutcome.of(result)
+
+    # **Stopped between stages with nobody having asked.** The only other thing
+    # that stops a run at a boundary is this process shutting down, so the run is
+    # not cancelled — it is unfinished, and it belongs back in the queue rather
+    # than in a terminal state naming a cancellation nobody requested.
+    #
+    # `release` rather than letting the lease lapse is FR-043: a rolling restart
+    # should cost nothing, and waiting out a ninety-second lease per replica is
+    # not nothing. Every completed stage kept its artifact, so the worker that
+    # picks it up resumes rather than restarts.
+    if outcome.status is RunStatus.CANCELLED and not _cancellation_requested(queue, run):
+        queue.release(run.run_id, now=now)
+        return result
+
+    queue.finish(run.run_id, outcome, now=now)
     return result
 
 
+def _cancellation_requested(queue: RunQueue, run: Run) -> bool:
+    """Whether this run has been asked to stop, tolerating an outage."""
+    try:
+        return queue.is_cancelled(run.run_id)
+    except RunStateUnavailableError:
+        return False
+
+
 def _finish(queue: RunQueue, run: Run, outcome: RunOutcome, *, now: datetime) -> None:
+    """Record a terminal state.
+
+    The event that used to be emitted here now comes from the queue, which is
+    where the transition happens — see `docdoc.runs.observe.log_transition`. This
+    wrapper survives because it is the one place `execute_one`'s two
+    never-reached-a-stage paths converge.
+    """
     queue.finish(run.run_id, outcome, now=now)
-    log_transition(
-        run_id=run.run_id,
-        tenant_id=run.tenant_id,
-        from_state=str(run.status),
-        to_state=str(outcome.status),
-        attempts=run.attempts,
-        worker_id=run.worker_id,
-        reason=outcome.error_class or "completed",
-    )
 
 
 class Worker:
@@ -162,6 +210,7 @@ class Worker:
         lease: timedelta = DEFAULT_LEASE,
         max_attempts: int = DEFAULT_MAX_ATTEMPTS,
         limits: Any = None,
+        health_port: int | None = None,
     ) -> None:
         self._queue = queue
         self._blobs = blobs
@@ -172,7 +221,9 @@ class Worker:
         self._lease = lease
         self._max_attempts = max_attempts
         self._limits = limits
+        self._health_port = health_port
         self._stopping = threading.Event()
+        self._health: _HealthServer | None = None
 
     def stop(self) -> None:
         """Ask the loop to finish its current run and exit."""
@@ -190,6 +241,14 @@ class Worker:
 
     def run_forever(self) -> None:
         """The loop. Returns when `stop()` has been called and work is done."""
+        self._serve_health()
+        try:
+            self._claim_forever()
+        finally:
+            if self._health is not None:
+                self._health.stop()
+
+    def _claim_forever(self) -> None:
         while not self._stopping.is_set():
             try:
                 claimed = self._queue.claim(
@@ -212,6 +271,31 @@ class Worker:
 
             self._execute_with_heartbeat(claimed)
 
+    def _serve_health(self) -> None:
+        """Answer the same two routes the API does, when asked to (FR-053).
+
+        Off unless a port is given, and that is the honest default: a worker
+        behind no load balancer has nobody to answer, and binding a port a
+        deployment did not ask for is the kind of thing that collides on a host
+        network. `docker compose` and the CLI both pass one.
+
+        The server runs on its own thread. That makes two threads in a process
+        whose docstring says the heartbeat is the only one — and the exception is
+        narrow enough to state rather than to hide: this thread executes no run,
+        touches no lease, and holds nothing the pipeline can see. The reason
+        there is no *worker pool* is that PyMuPDF and `rapidfuzz` hold the GIL in
+        bursts and would starve a heartbeat; a thread that answers two constant
+        questions cannot starve anything.
+        """
+        if self._health_port is None:
+            return
+        from docdoc.runs.health import Readiness
+
+        self._health = _HealthServer(
+            Readiness(runs=self._queue, blobs=self._blobs), port=self._health_port
+        )
+        self._health.start()
+
     def _execute_with_heartbeat(self, run: Run) -> None:
         heartbeat = _Heartbeat(self._queue, run, self._lease)
         heartbeat.start()
@@ -225,15 +309,102 @@ class Worker:
                 adapter=self._adapter,
                 now=identity.now(),
                 limits=self._limits,
+                # FR-042's "finish or relinquish". `execute_one` stops the
+                # pipeline at the next stage boundary once this reads True, and
+                # releases the run so it re-queues immediately (FR-043).
+                stopping=self._stopping.is_set,
             )
         finally:
             heartbeat.stop()
 
-        if self._stopping.is_set():
-            # Shutting down between runs. `release` is unnecessary here — the run
-            # just finished — and is what the loop would call if it were stopping
-            # with one still claimed (FR-043).
-            return
+
+class _HealthServer:
+    """`/healthz` and `/readyz` on a worker, from the standard library.
+
+    **Not FastAPI**, and that is the requirement rather than a preference. A
+    worker runs on a base install plus `docdoc[postgres]`; importing the HTTP
+    framework here would make `docdoc[api]` a dependency of running a worker, and
+    it would make `docdoc.runs` import `docdoc.api`, which the layer contract
+    forbids outright.
+
+    The bodies come from `docdoc.runs.health`, so the two process types answer
+    byte-identically. An orchestrator configures one probe for both, which is the
+    whole point of FR-053 saying "both process types".
+    """
+
+    def __init__(self, readiness: Any, *, port: int, host: str = "0.0.0.0") -> None:
+        self._readiness = readiness
+        self._port = port
+        self._host = host
+        self._server: Any = None
+        self._thread: threading.Thread | None = None
+
+    @property
+    def bound_port(self) -> int:
+        """The port actually listening, which is not always the one requested.
+
+        Port `0` means "any free one", and without this there is no way to find
+        out which — so a test either hard-codes a port and races whatever else on
+        the machine wants it, or does not run. The whole of this server was
+        untested for exactly that reason.
+
+        Useful beyond the suite: an operator who passed `--health-port 0` has the
+        same question, and a process that cannot say which port it bound is one
+        nothing can probe.
+        """
+        if self._server is None:
+            raise RuntimeError("the health server has not started")
+        return int(self._server.server_address[1])
+
+    def start(self) -> None:
+        import json as _json
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        from docdoc.runs.health import (
+            LIVENESS_PATH,
+            READINESS_PATH,
+            liveness_body,
+            readiness_body,
+        )
+
+        readiness = self._readiness
+
+        class _Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # the standard library's spelling, not ours
+                if self.path == LIVENESS_PATH:
+                    self._answer(200, liveness_body())
+                    return
+                if self.path == READINESS_PATH:
+                    unmet = readiness.unmet()
+                    self._answer(200 if not unmet else 503, readiness_body(unmet))
+                    return
+                # A worker serves no API. Anything else is 404 with no body
+                # naming what does exist, because this port is reachable by
+                # whoever can reach the worker and should describe nothing.
+                self._answer(404, {"status": "not_found"})
+
+            def _answer(self, status: int, body: dict[str, Any]) -> None:
+                payload = _json.dumps(body).encode("utf-8")
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+                # Silenced deliberately. `BaseHTTPRequestHandler` writes a line
+                # to stderr per request, and a probe every five seconds per
+                # replica would drown every run event this process emits.
+                return
+
+        self._server = ThreadingHTTPServer((self._host, self._port), _Handler)
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        if self._server is not None:
+            self._server.shutdown()
+            self._server.server_close()
 
 
 class _Heartbeat:

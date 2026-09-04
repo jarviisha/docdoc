@@ -111,9 +111,22 @@ Requests cancellation. Returns the run.
 | `409` | already `succeeded` or `failed`, naming the state (FR-031) |
 | `404` | unknown or another tenant's |
 
-The `200` for a running run means *requested*, not *stopped*. A provider call already in flight
-completes and is billed (FR-029). The response body carries `status: "running"` until the boundary is
-reached, and the documentation says why rather than letting a caller infer that the cancel failed.
+**The `200` for a running run means *requested*, not *stopped*** (FR-029). This is the one place
+this contract is likely to be misread, so it is stated three times — here, in `docs/concepts/runs.md`,
+and in the route's own docstring — rather than left to be inferred:
+
+- The response body carries `status: "running"`, not `"cancelled"`. Reporting `cancelled` would be
+  the one lie this endpoint must not tell: the work has not stopped yet.
+- The worker observes the request at its **next stage boundary**. A stage already executing runs to
+  completion, so a provider call in flight is completed *and billed*. Nothing is aborted — SC-015
+  measures that at 0%.
+- What stops is the stage that had not started. Cancelling before the extract stage is the case with
+  an economic point, because that is where the model call is.
+- Poll `GET /v1/runs/{run_id}` to observe the run reach `cancelled`. A cancelled run carries no
+  `processing_id`, because no terminal artifact was produced, and it carries no `failed_stage`
+  either: a cancellation is not a failure and no stage refused anything.
+
+A **queued** run is different and total: it moves to `cancelled` immediately and is never claimed.
 
 ### `GET /healthz` and `GET /readyz`
 
@@ -138,6 +151,13 @@ values, credentials, tenant identifiers, or counts of stored content.
 Disabled by default (FR-088). Enabled by pointing `DOCDOC_API_KEYS_FILE` at a key file; then every
 route except `/healthz` and `/readyz` requires `Authorization: Bearer <key>`.
 
+- **Every** route requires one, and the exemption list is exactly `/healthz` and `/readyz`. That
+  includes the `/ui` mount and FastAPI's `/docs`, `/redoc` and `/openapi.json`, none of which is on
+  the `/v1` router and all of which were open until convergence found them. The consequence is worth
+  stating: a browser cannot send a bearer token, so the viewer is unavailable on an authenticated
+  deployment — it fails at the door rather than after the page has rendered.
+- On an authenticated deployment an unknown path answers `401`, not `404`. The credential is checked
+  before routing, and a `404` would say which paths exist to somebody who cannot use any of them.
 - A key resolves to a principal carrying exactly one `tenant_id` (FR-060).
 - Rejection happens **before** any document is read, any provider is called, or any store is touched
   (FR-067).

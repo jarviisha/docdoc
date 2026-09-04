@@ -213,6 +213,20 @@ disallow_untyped_calls = false
 module = ["google.*"]
 ignore_missing_imports = true
 
+# boto3 ships no py.typed marker, so the lazy import inside `S3ArtifactStore`'s
+# constructor is an error under --strict. Same shape and same narrowness as the
+# `google.*` override above: this suppresses the *missing stubs* for one third
+# party, not any check on docdoc's own code. Everything `docdoc.artifacts.s3`
+# hands onward is annotated, and the client itself is `Any` at the boundary
+# exactly as the parser adapters' SDKs are.
+#
+# `boto3-stubs` was the alternative and is a large optional dependency added to
+# type-check nine call sites, which is not a trade this project has made anywhere
+# else.
+[[tool.mypy.overrides]]
+module = ["boto3", "boto3.*", "botocore.*"]
+ignore_missing_imports = true
+
 # ---------------------------------------------------------------------------
 # pytest
 # ---------------------------------------------------------------------------

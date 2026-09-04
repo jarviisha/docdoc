@@ -11,9 +11,20 @@ Setting                        Flag                       Default
 ``DOCDOC_MODEL_ADAPTERS``      ``--adapter``              adapter registry's own
 ``DOCDOC_ECHO_FIXTURES``       ``--echo-fixtures``        none
 ``DOCDOC_STORE_ROOT``          ``--store``                **no store**
+``DOCDOC_STORE_URL``           ``--store-url``            **no store**
 ``DOCDOC_MAX_DOCUMENT_BYTES``  ``--max-document-bytes``   50 MiB
 ``DOCDOC_MAX_PAGES``           ``--max-pages``            1000
+``DOCDOC_RUN_DATABASE_URL``    ``--run-database-url``     **none** (scoped)
+``DOCDOC_RUN_LEASE_SECONDS``   ``--lease-seconds``        90 (scoped)
+``DOCDOC_RUN_MAX_ATTEMPTS``    ``--max-attempts``         3 (scoped)
+``DOCDOC_DEFAULT_TENANT``      ``--default-tenant``       ``default`` (scoped)
 =============================  =========================  =====================
+
+The four marked *scoped* live on the subcommands that can use them rather than
+on every one, and ``COMMAND_SCOPED`` below records which. A
+``--run-database-url`` on ``docdoc parse`` would be a flag that does nothing to
+the command carrying it, which is the second vocabulary FR-031 forbids arriving
+from the other direction.
 
 **There is no default store root**, and that is the one row worth reading twice.
 The artifacts hold extracted values and the blobs hold whole source documents, so
@@ -21,11 +32,11 @@ a default location would be docdoc choosing where somebody's documents pile up
 (FR-017, FR-044). ``--no-store`` therefore names the behaviour you already have;
 ``--store`` is the opt-in.
 
-**Three settings are deliberately environment-only**, and the exclusions are
+**Six settings are deliberately environment-only**, and the exclusions are
 listed here rather than left to be noticed, because FR-031 as first written read
 as though every variable gained a flag and two documents went on to say so. The
 amendment of 2026-08-25 narrows it to the settings that can change an
-invocation's outcome, and these three cannot:
+invocation's outcome, and these six cannot:
 
 ``DOCDOC_MAX_REQUEST_BYTES``
     Caps an HTTP request body while it is being read. The command line reads no
@@ -44,6 +55,21 @@ invocation's outcome, and these three cannot:
     credential must never be passed as an argument at all: ``argv`` is readable
     by any process on the host, which would defeat FR-042 far more thoroughly
     than an environment variable does.
+
+``DOCDOC_API_KEYS_FILE``
+    Names a credential file and turns HTTP authentication on. The command line
+    and the in-process library require no credential in any configuration
+    (FR-069), so a flag here would be a flag for a concern this surface does not
+    have.
+
+``DOCDOC_UI_ROOT``
+    Says where the browser client's built assets are. The command line serves
+    none, so the flag would name a directory nothing reads — the same shape of
+    exclusion as ``DOCDOC_MAX_REQUEST_BYTES``.
+
+``DOCDOC_GCV_CREDENTIALS``
+    Per-provider, and a credential. On most deployments it names a file rather
+    than holding a secret, which makes it no less one: the file is the secret.
 
 The rule that survives is the one FR-031 exists for: **no second vocabulary.**
 Nothing here is named differently on the command line than in the environment,
@@ -76,6 +102,7 @@ __all__ = [
     "FLAG_FOR_SETTING",
     "RUN_DATABASE_URL_ENV",
     "STORE_ROOT_ENV",
+    "STORE_URL_ENV",
     "Settings",
     "add_common_arguments",
     "empty_registry_message",
@@ -85,6 +112,18 @@ __all__ = [
 #: rather than in a style of its own.
 STORE_ROOT_ENV = "DOCDOC_STORE_ROOT"
 
+#: Milestone 9's second way to say *where*. A directory or an ``s3://`` URL, and
+#: the URL wins when both are set — a deployment that named both meant the more
+#: specific one, and ``DOCDOC_STORE_ROOT`` keeps working untouched for everyone
+#: who sets only it (SC-018).
+#:
+#: The command line needs this as much as the service does: the worker is a CLI
+#: subcommand, and a worker with a private directory is the multi-worker failure
+#: SC-005 exists to catch. Spelled as a literal although
+#: ``docdoc.api.settings`` defines the same name — the two front ends are
+#: declared independent and neither may import the other's constant.
+STORE_URL_ENV = "DOCDOC_STORE_URL"
+
 _SCHEMA_PATHS_ENV = "DOCDOC_SCHEMA_PATHS"
 _ADAPTERS_ENV = "DOCDOC_MODEL_ADAPTERS"
 _ECHO_FIXTURES_ENV = "DOCDOC_ECHO_FIXTURES"
@@ -93,6 +132,32 @@ _ECHO_FIXTURES_ENV = "DOCDOC_ECHO_FIXTURES"
 #: state accumulates is an operator's decision, and a command that invented a
 #: database to write to would be making it for them.
 RUN_DATABASE_URL_ENV = "DOCDOC_RUN_DATABASE_URL"
+
+#: How a worker's claim and redelivery behave. Read through
+#: ``docdoc.api.settings.run_lease`` / ``run_max_attempts``, which hold the one
+#: copy of the precedence rule; these literals exist so the flag map can name
+#: them without importing across the front-end boundary.
+_RUN_LEASE_SECONDS_ENV = "DOCDOC_RUN_LEASE_SECONDS"
+_RUN_MAX_ATTEMPTS_ENV = "DOCDOC_RUN_MAX_ATTEMPTS"
+
+#: The key file that enables HTTP authentication. Listed here only so the
+#: exclusion below can state a reason; nothing on the command line reads it, and
+#: FR-069 requires that to stay true.
+_API_KEYS_FILE_ENV = "DOCDOC_API_KEYS_FILE"
+
+#: Which tenant owns the unprefixed store root. Same reason for the literal:
+#: ``docdoc.artifacts.paths`` defines and reads it, and this map needs the name
+#: without reaching for the module that owns it.
+_DEFAULT_TENANT_ENV = "DOCDOC_DEFAULT_TENANT"
+
+#: Two settings that were read by the code and classified nowhere until Milestone
+#: 9's convergence. Neither is new — `DOCDOC_UI_ROOT` arrived with the viewer and
+#: `DOCDOC_GCV_CREDENTIALS` with the image OCR path — and both were invisible to
+#: the parity check below because that check reads a hand-maintained list of
+#: modules, and neither module was on it. The list is now checked against the
+#: code, so a third cannot hide the same way.
+_UI_ROOT_ENV = "DOCDOC_UI_ROOT"
+_GCV_CREDENTIALS_ENV = "DOCDOC_GCV_CREDENTIALS"
 
 #: The docstring's table, as data. Declared so the parity check can read it
 #: rather than re-parse prose, and so a flag renamed here fails that check in the
@@ -110,9 +175,18 @@ FLAG_FOR_SETTING: dict[str, str] = {
     _ADAPTERS_ENV: "--adapter",
     _ECHO_FIXTURES_ENV: "--echo-fixtures",
     STORE_ROOT_ENV: "--store",
+    STORE_URL_ENV: "--store-url",
     "DOCDOC_MAX_DOCUMENT_BYTES": "--max-document-bytes",
     "DOCDOC_MAX_PAGES": "--max-pages",
     "DOCDOC_RUN_DATABASE_URL": "--run-database-url",
+    # Spelled without the `run-` the variable carries, because `docdoc worker`
+    # already supplies that word and `--run-lease-seconds` on a command called
+    # `worker` reads as a second concept. Recorded in
+    # `test_cli_config_vocabulary.py`'s alias map, which is where a deliberate
+    # difference between a variable and its flag has to be declared.
+    _RUN_LEASE_SECONDS_ENV: "--lease-seconds",
+    _RUN_MAX_ATTEMPTS_ENV: "--max-attempts",
+    _DEFAULT_TENANT_ENV: "--default-tenant",
 }
 
 #: Settings whose flag lives on some commands and not all of them.
@@ -129,6 +203,15 @@ FLAG_FOR_SETTING: dict[str, str] = {
 #: a reach it does not have.
 COMMAND_SCOPED: dict[str, tuple[str, ...]] = {
     "DOCDOC_RUN_DATABASE_URL": ("migrate", "worker"),
+    # Narrower still: only a process that *claims* runs has a lease or an
+    # attempt limit. `docdoc migrate` touches the same database and neither.
+    _RUN_LEASE_SECONDS_ENV: ("worker",),
+    _RUN_MAX_ATTEMPTS_ENV: ("worker",),
+    # Narrower again, and for a different reason than the two above. Those are
+    # meaningless outside a worker; this one is meaningful in *every* process and
+    # must be the same in all of them, so the flag belongs only on the command
+    # that records it. See `docdoc.artifacts.paths.DEFAULT_TENANT_ENV`.
+    _DEFAULT_TENANT_ENV: ("migrate",),
 }
 
 #: Settings that deliberately have no flag, each with the reason, because an
@@ -141,6 +224,18 @@ ENVIRONMENT_ONLY: dict[str, str] = {
     "DOCDOC_GEMINI_MODEL": "per-provider; a vendor's vocabulary belongs to its adapter",
     "DOCDOC_AZURE_DI_ENDPOINT": "per-provider; a vendor's vocabulary belongs to its adapter",
     "DOCDOC_AZURE_DI_KEY": "a credential; argv is readable by any process on the host (FR-042)",
+    _API_KEYS_FILE_ENV: (
+        "names a credential file and enables HTTP authentication; the command line "
+        "and the library require no credential in any configuration (FR-069)"
+    ),
+    _UI_ROOT_ENV: (
+        "says where the browser client's built assets are; the command line serves "
+        "none, so the flag would name a directory nothing reads"
+    ),
+    _GCV_CREDENTIALS_ENV: (
+        "a credential; argv is readable by any process on the host (FR-042). It "
+        "names a file on most deployments, which makes it no less a credential"
+    ),
 }
 
 
@@ -183,6 +278,12 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         metavar="DIR",
         help=f"artifact store root. Overrides ${STORE_ROOT_ENV}. There is no default",
+    )
+    parser.add_argument(
+        "--store-url",
+        default=None,
+        metavar="URL",
+        help=f"object store, as s3://bucket[/prefix][?endpoint_url=…]. Overrides ${STORE_URL_ENV}",
     )
     parser.add_argument(
         "--no-store",
@@ -229,6 +330,10 @@ class Settings:
     schema_paths: tuple[Path, ...] = ()
     adapters: tuple[str, ...] = ()
     store_root: Path | None = None
+    #: An ``s3://`` URL, when the store is an object store rather than a
+    #: directory. Wins over ``store_root`` when both are given, and ``--no-store``
+    #: still beats both.
+    store_url: str | None = None
     verify_cache: bool = False
     echo_fixtures: Path | None = None
     #: ``None`` means "no flag was given", not "no limit". The environment and
@@ -253,6 +358,7 @@ class Settings:
             ),
             adapters=_names(getattr(args, "adapter", None), os.environ.get(_ADAPTERS_ENV, "")),
             store_root=_store_root(args),
+            store_url=_store_url(args),
             verify_cache=bool(getattr(args, "verify_cache", False)),
             echo_fixtures=_one_path(
                 getattr(args, "echo_fixtures", None), os.environ.get(_ECHO_FIXTURES_ENV, "")
@@ -324,13 +430,39 @@ class Settings:
         """The artifact store, which is the null one unless somebody said where."""
         from docdoc.artifacts import FileArtifactStore, NullArtifactStore
 
+        if self.store_url:
+            store, _ = self._object_stores()
+            return store  # type: ignore[no-any-return]
         if self.store_root is None:
             return NullArtifactStore()
         return FileArtifactStore(self.store_root)
 
+    def blobs(self) -> Any:
+        """Where submitted source bytes live, or ``None`` if nowhere.
+
+        Paired with :meth:`store` deliberately: artifacts in an object store and
+        blobs on a local disk are two halves of a store that cannot see each
+        other, which is SC-005's multi-worker failure arriving by configuration.
+        One decision, resolved in one place.
+        """
+        from docdoc.artifacts import BlobStore
+
+        if self.store_url:
+            _, blobs = self._object_stores()
+            return blobs
+        if self.store_root is None:
+            return None
+        return BlobStore(self.store_root)
+
+    def _object_stores(self) -> tuple[Any, Any]:
+        from docdoc.artifacts.s3 import stores_from_url
+
+        assert self.store_url is not None
+        return stores_from_url(self.store_url)
+
     @property
     def has_store(self) -> bool:
-        return self.store_root is not None
+        return self.store_root is not None or self.store_url is not None
 
 
 def _store_root(args: argparse.Namespace) -> Path | None:
@@ -348,6 +480,22 @@ def _store_root(args: argparse.Namespace) -> Path | None:
         return Path(explicit).expanduser()
     from_env = os.environ.get(STORE_ROOT_ENV, "").strip()
     return Path(from_env).expanduser() if from_env else None
+
+
+def _store_url(args: argparse.Namespace) -> str | None:
+    """``--no-store`` wins outright, then ``--store-url``, then the environment.
+
+    The same shape as ``_store_root`` and for the same reason: the flag that
+    turns a thing *off* is the one a user reaches for when unsure, and the safer
+    reading of an ambiguous invocation is the one that writes nothing.
+    """
+    if getattr(args, "no_store", False):
+        return None
+    explicit = getattr(args, "store_url", None)
+    if explicit:
+        return str(explicit)
+    from_env = os.environ.get(STORE_URL_ENV, "").strip()
+    return from_env or None
 
 
 def _one_path(flag: str | None, env: str) -> Path | None:

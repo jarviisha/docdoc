@@ -19,8 +19,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from docdoc.runs.errors import RunNotCancellableError
+from docdoc.runs.errors import (
+    RunNotCancellableError,
+    RunNotFoundError,
+    RunStateUnavailableError,
+)
 from docdoc.runs.model import Run, RunOutcome, RunStatus
+from docdoc.runs.observe import log_transition
 
 if TYPE_CHECKING:
     from datetime import datetime, timedelta
@@ -37,8 +42,19 @@ class InMemoryRunQueue:
     def __init__(self) -> None:
         self._runs: dict[UUID, Run] = {}
         self._cancel_requested: set[UUID] = set()
+        #: Set by a test to make every call fail the way an unreachable database
+        #: does. Faithfulness again: readiness cannot be tested against a fake
+        #: that is always up.
+        self.unreachable = False
 
     # -- reading -----------------------------------------------------------
+
+    def ping(self) -> None:
+        self._check_reachable()
+
+    def _check_reachable(self) -> None:
+        if self.unreachable:
+            raise RunStateUnavailableError("the fake queue was told it is unreachable")
 
     def get(self, run_id: UUID, tenant_id: str) -> Run | None:
         run = self._runs.get(run_id)
@@ -62,6 +78,7 @@ class InMemoryRunQueue:
         now: datetime,
         expires_at: datetime,
     ) -> Run:
+        self._check_reachable()
         if spec.idempotency_key is not None:
             for existing in self._runs.values():
                 if (
@@ -83,6 +100,14 @@ class InMemoryRunQueue:
             expires_at=expires_at,
         )
         self._runs[run_id] = run
+        log_transition(
+            run_id=run.run_id,
+            tenant_id=run.tenant_id,
+            from_state=None,
+            to_state=str(run.status),
+            attempts=run.attempts,
+            reason="submitted",
+        )
         return run
 
     def claim(
@@ -93,10 +118,32 @@ class InMemoryRunQueue:
         lease: timedelta,
         max_attempts: int,
     ) -> Run | None:
+        # **First, abandon what has run out of attempts** — every one of them,
+        # not just the oldest. `PostgresRunQueue.claim` does this as a separate
+        # set-based UPDATE before the claim query, so a backlog clears at once
+        # and, crucially, an abandoned run does not consume the claim.
+        #
+        # This fake used to abandon the oldest and then `return None`, which made
+        # a poison document *block the runs behind it* for one round each — a
+        # behaviour the real queue does not have. That is the failure mode this
+        # file's docstring warns about, arriving from the unexpected direction:
+        # not a fake that is easier to satisfy, but one that is differently
+        # wrong, and therefore describes a system nobody deployed.
+        for run in list(self._runs.values()):
+            if run.lease_expired_at(now) and run.attempts >= max_attempts:
+                # `finish` emits the running -> failed event, exactly as the
+                # Postgres sweep does. One event per abandoned run.
+                self.finish(
+                    run.run_id,
+                    RunOutcome(status=RunStatus.FAILED, error_class="RunAbandonedError"),
+                    now=now,
+                )
+
         eligible = [
             run
             for run in self._runs.values()
-            if run.status is RunStatus.QUEUED or run.lease_expired_at(now)
+            if (run.status is RunStatus.QUEUED or run.lease_expired_at(now))
+            and run.attempts < max_attempts
         ]
         if not eligible:
             return None
@@ -105,17 +152,6 @@ class InMemoryRunQueue:
         # tie-break: with no priority classes nothing is ever unequal, so
         # creation order is the whole ordering.
         run = min(eligible, key=lambda r: r.created_at)
-
-        if run.attempts >= max_attempts:
-            # The lease lapsed for the last permitted time. Finishing it here
-            # rather than handing it out again is what bounds the poison
-            # document to `max_attempts` workers instead of all of them.
-            self.finish(
-                run.run_id,
-                RunOutcome(status=RunStatus.FAILED, error_class="RunAbandonedError"),
-                now=now,
-            )
-            return None
 
         claimed = run.model_copy(
             update={
@@ -127,6 +163,17 @@ class InMemoryRunQueue:
             }
         )
         self._runs[run.run_id] = claimed
+        log_transition(
+            run_id=claimed.run_id,
+            tenant_id=claimed.tenant_id,
+            from_state=str(run.status),
+            to_state=str(claimed.status),
+            attempts=claimed.attempts,
+            worker_id=claimed.worker_id,
+            # A run that was already `running` was taken from a worker that lost
+            # its lease, which is what a lease exists to make visible.
+            reason="redelivered" if run.status is RunStatus.RUNNING else "claimed",
+        )
         return claimed
 
     def heartbeat(self, run_id: UUID, *, now: datetime, lease: timedelta) -> bool:
@@ -148,9 +195,20 @@ class InMemoryRunQueue:
                 "updated_at": now,
             }
         )
+        log_transition(
+            run_id=run.run_id,
+            tenant_id=run.tenant_id,
+            from_state=str(run.status),
+            to_state=str(RunStatus.QUEUED),
+            attempts=run.attempts,
+            worker_id=run.worker_id,
+            reason="released",
+        )
 
     def finish(self, run_id: UUID, outcome: RunOutcome, *, now: datetime) -> None:
         run = self._runs.get(run_id)
+        # Already terminal: the no-op its Postgres counterpart's
+        # `status IN (…)` clause makes, and no event, because nothing changed.
         if run is None or run.is_terminal:
             return
         self._runs[run_id] = run.model_copy(
@@ -164,11 +222,24 @@ class InMemoryRunQueue:
                 "updated_at": now,
             }
         )
+        log_transition(
+            run_id=run.run_id,
+            tenant_id=run.tenant_id,
+            from_state=str(run.status),
+            to_state=str(outcome.status),
+            attempts=run.attempts,
+            worker_id=run.worker_id,
+            reason=outcome.error_class or "completed",
+        )
 
     def cancel(self, run_id: UUID, tenant_id: str, *, now: datetime) -> Run:
         run = self.get(run_id, tenant_id)
         if run is None:
-            raise KeyError(run_id)
+            # `RunNotFoundError`, not `KeyError`: the fake raised the latter
+            # until the cancel route needed one answer for "unknown" and
+            # "another tenant's", and a fake that fails differently from the
+            # real thing is a fake the route cannot be tested against.
+            raise RunNotFoundError(str(run_id))
 
         if run.status is RunStatus.CANCELLED:
             return run  # FR-034
@@ -183,4 +254,16 @@ class InMemoryRunQueue:
         # Running: the request is recorded and the run keeps reading `running`
         # until the worker reaches a stage boundary. Returning `cancelled` here
         # would be the one lie this endpoint must not tell (FR-029).
+        #
+        # Logged as a request rather than as a change, with `from_state ==
+        # to_state`, which is the honest shape: nothing transitioned yet.
+        log_transition(
+            run_id=run.run_id,
+            tenant_id=run.tenant_id,
+            from_state=str(run.status),
+            to_state=str(run.status),
+            attempts=run.attempts,
+            worker_id=run.worker_id,
+            reason="cancel_requested",
+        )
         return run

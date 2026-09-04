@@ -10,16 +10,32 @@ are one way to check it.
 
 ```bash
 uv sync --all-extras
-docker compose -f packaging/docker/compose.yml up -d     # api, worker, postgres, minio
+DOCDOC_EXTRAS=api,postgres,s3,google,azure,gcv,pdf \
+  docker compose -f packaging/docker/compose.yml up -d --build   # api, worker, postgres, minio
+docker compose -f packaging/docker/compose.yml exec api docdoc migrate
 ```
 
-No cloud credentials are needed except a model provider key, and not even that for scenarios 1–3,
-which run against the offline `echo` adapter:
+**Why `DOCDOC_EXTRAS` carries `pdf`, and why it is not the default.** The image
+does not install PyMuPDF by default, because it is AGPL-3.0 and baking it into a
+distributed image is an obligation this project's README warns about (ADR-0001).
+The consequence is the thing to know before the first run: **the default image
+can parse nothing on its own** — `pdf-text` is absent, and `azure-di` and `gcv`
+report unavailable until they have credentials. A local walk-through wants the
+native path, so it is opted into explicitly above; a real deployment leaves it
+alone and supplies a cloud parser's credentials instead.
+
+The `echo` adapter replaces the *model*, not the *parser*. That distinction is
+what this paragraph exists for: an earlier version of this document said
+scenarios 1–3 needed no credentials at all, and they needed a parser.
+
+Everything else runs with no cloud account. The composition already sets these
+inside the containers; export them too if you are driving anything from the host:
 
 ```bash
 export DOCDOC_MODEL_ADAPTERS=echo
 export DOCDOC_ECHO_FIXTURES=./tests/fixtures/echo
 export DOCDOC_SCHEMA_PATHS=./schemas
+export DOCDOC_RUN_DATABASE_URL=postgresql://docdoc:docdoc@localhost:5432/docdoc
 ```
 
 Migrations are explicit and never applied by a process starting (FR-078):
@@ -28,6 +44,13 @@ Migrations are explicit and never applied by a process starting (FR-078):
 docdoc migrate            # idempotent; safe to re-run
 docdoc migrate --check    # exits non-zero if anything is pending
 ```
+
+`docdoc migrate` also records which tenant owns content written before tenants
+existed, and refuses to change that answer afterwards — see scenario 7.
+
+**If port 5432 is taken** by a Postgres you already run, the composition will
+refuse to start. `DOCDOC_PG_PORT=55432 docker compose … up -d`, and point
+`DOCDOC_RUN_DATABASE_URL` at the same port.
 
 ---
 
@@ -121,8 +144,15 @@ next one.
 **Checks SC-008 and SC-017.**
 
 ```bash
-export DOCDOC_API_KEYS_FILE=./tests/fixtures/keys.json   # two tenants
-uv run pytest tests/contract/test_tenant_isolation.py
+uv run pytest tests/contract/test_tenant_isolation.py tests/contract/test_no_existence_oracle.py
+```
+
+Both build their own two-tenant deployment from `tests/fixtures/keys.json`, so
+neither reads `DOCDOC_API_KEYS_FILE` — that variable is what turns authentication
+on in a *service*, and the composition takes it the same way:
+
+```bash
+DOCDOC_API_KEYS_FILE=/schemas/../keys.json docker compose … up -d api
 ```
 
 **Expected**, in two halves:
@@ -139,12 +169,17 @@ uv run pytest tests/contract/test_tenant_isolation.py
 **Checks SC-009.**
 
 ```bash
-docker compose stop postgres
+docker compose -f packaging/docker/compose.yml stop postgres
 curl -s -o /dev/null -w '%{http_code}\n' localhost:8000/healthz     # 200
 curl -s localhost:8000/readyz | jq                                  # 503, names the dependency
-curl -s -o /dev/null -w '%{http_code}\n' \
-     -X POST "localhost:8000/v1/documents/$BLOB/runs?schema=invoice@1"   # 503, retryable
+curl -sD - -o /dev/null \
+     -X POST "localhost:8000/v1/documents/$BLOB/runs?schema=invoice@1"   # 503 + Retry-After: 1
 ```
+
+`-D -` rather than `-w '%{http_code}'`, because "retryable" is a header and not a
+status: a 503 without `Retry-After` tells a client to give up. The other 503 this
+route can return — no database *configured* — deliberately omits it, because
+nothing will change until an operator acts.
 
 **Expected**: liveness passes, readiness fails naming `run-state-database`, and submission is refused
 rather than accepted and lost. Note that the synchronous routes would still work — readiness fails
@@ -178,3 +213,28 @@ uv run pytest tests/unit tests/property               # green with no database a
 the offline suite passes with neither `docdoc[postgres]` nor `docdoc[s3]` installed. This milestone
 touches no stage, so a moved metric is not a regression to investigate — it is evidence the scope
 escaped.
+
+---
+
+## What this walk actually took, and what it corrected
+
+Walked end to end on 2026-09-03 against a clean build of the composition. The
+ten-minute claim holds once the image is built; **the build itself is the long
+pole** — several minutes on a cold Docker cache, and the ten minutes describes
+the walk rather than the download.
+
+Three things were wrong in the artifacts and are fixed rather than worked around:
+
+- `.dockerignore` excluded `*.md`, which took `README.md` with it — and
+  `pyproject.toml` declares it as the project readme, so the wheel build failed
+  and **the image had never built at all**. The pattern now carries a `!README.md`
+  negation with the reason.
+- The `Dockerfile` copied only the `docdoc` console script into the runtime image
+  while `CMD` named `uvicorn`, so the worker started and the API died at
+  `executable file not found in $PATH`. The API now starts as `python -m uvicorn`,
+  which needs no entry in any list.
+- These prerequisites claimed scenarios 1–3 needed no credentials. They needed a
+  *parser*: the `echo` adapter replaces the model and not the parse, and the
+  default image ships no local parser because PyMuPDF is AGPL-3.0. The
+  `DOCDOC_EXTRAS` build argument above is the opt-in, and the paragraph beside it
+  is the correction.

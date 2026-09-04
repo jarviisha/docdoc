@@ -21,9 +21,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from docdoc.artifacts.paths import root_tenant
 from docdoc.cli.render import Rendering
 from docdoc.runs import migrations
-from docdoc.runs.errors import RunStateUnavailableError
+from docdoc.runs.errors import RunError, RunStateUnavailableError
 from docdoc.runs.identity import now as clock
 
 if TYPE_CHECKING:
@@ -68,8 +69,22 @@ def run(args: argparse.Namespace, settings: Settings) -> Rendering:
                     ),
                 )
 
-            applied = list(migrations.apply(connection, now=clock()))
-    except RunStateUnavailableError:
+            now = clock()
+            applied = list(migrations.apply(connection, now=now))
+            # The explicit step FR-089 asks for, run after the schema exists and
+            # in the same command. Separate from the SQL because SQL cannot read
+            # an environment, and a value hard-coded in a migration file would be
+            # the inferred owner the requirement forbids.
+            owner = migrations.assign_default_tenant(
+                connection,
+                root_tenant(getattr(args, "default_tenant", None)),
+                now=now,
+            )
+    except RunError:
+        # `assign_default_tenant` refusing to move the store root, or the queue
+        # reporting the database unreachable. Both are already typed and both
+        # already say what happened; re-wrapping either would replace an
+        # explanation with a category.
         raise
     except Exception as exc:
         # Same boundary rule as `PostgresRunQueue._execute`: no driver exception
@@ -78,6 +93,9 @@ def run(args: argparse.Namespace, settings: Settings) -> Rendering:
 
     return Rendering(
         code=0,
-        data={"pending": [], "applied": applied},
-        lines=([f"applied: {', '.join(applied)}"] if applied else ["nothing to apply"]),
+        data={"pending": [], "applied": applied, "default_tenant": owner},
+        lines=(
+            [f"applied: {', '.join(applied)}"] if applied else ["nothing to apply"]
+        )
+        + [f"store root belongs to tenant: {owner}"],
     )

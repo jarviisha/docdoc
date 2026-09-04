@@ -33,6 +33,7 @@ import argparse
 import sys
 from typing import TYPE_CHECKING, Any
 
+from docdoc.artifacts.paths import DEFAULT_TENANT_ENV
 from docdoc.cli.config import RUN_DATABASE_URL_ENV, Settings, add_common_arguments
 from docdoc.cli.render import Rendering, emit, warn
 
@@ -137,6 +138,18 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="URL",
         help=f"where run state lives. Overrides ${RUN_DATABASE_URL_ENV}",
     )
+    # On `migrate` and nowhere else. This is the command that *records* which
+    # tenant owns content written before tenants existed, so it is the one
+    # invocation where naming that tenant is an argument rather than a statement
+    # about the deployment. On `parse` or `extract` a flag would let one
+    # invocation disagree with the processes around it about where content lives
+    # — which is exactly what the recorded value exists to prevent.
+    migrate.add_argument(
+        "--default-tenant",
+        default=None,
+        metavar="TENANT",
+        help=f"who owns content written before tenants existed. Overrides ${DEFAULT_TENANT_ENV}",
+    )
     add_common_arguments(migrate)
 
     # One run at a time, and no --concurrency. Concurrency is replica count
@@ -154,6 +167,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="URL",
         help=f"where run state lives. Overrides ${RUN_DATABASE_URL_ENV}",
+    )
+    # Off unless asked for. A worker behind no load balancer has nobody to
+    # answer, and binding a port a deployment did not request is how a host
+    # network collides. No environment variable pairs with it: which port a
+    # process listens on is a property of how it was started, like the API's
+    # `uvicorn --port`, and not a setting docdoc reads.
+    worker.add_argument(
+        "--health-port",
+        type=int,
+        default=None,
+        metavar="PORT",
+        help="serve /healthz and /readyz on this port; off when absent",
     )
     add_common_arguments(worker)
 

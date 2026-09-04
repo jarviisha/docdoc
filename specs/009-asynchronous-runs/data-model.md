@@ -113,9 +113,17 @@ Five states, and the set is closed (FR-006).
 | Index | Purpose |
 |---|---|
 | `(run_id)` primary key | point lookup by the API |
-| `(status, created_at)` partial `WHERE status IN ('queued','running')` | the claim query's candidate scan (R8); partial so terminal rows, which dominate over time, are not indexed |
+| `(created_at)` partial `WHERE status IN ('queued','running')` | the claim query's candidate scan (R8); partial so terminal rows, which dominate over time, are not indexed |
 | `(tenant_id, idempotency_key)` unique partial `WHERE idempotency_key IS NOT NULL` | FR-011 and SC-016 (R15) |
 | `(tenant_id, created_at)` | tenant-scoped listing |
+
+**`status` is in the predicate and not in the key**, and this row said otherwise until the fourth
+convergence pass compared it against `0001_runs.sql`. Putting `status` first would be redundant — the
+partial predicate already pins it to two values — and it would be actively worse: a composite
+`(status, created_at)` cannot produce globally ordered `created_at` across both values, so the claim
+query's `ORDER BY created_at` would need a sort the one-column index avoids. The index the database
+has is the right one; the description was wrong, and
+`tests/unit/test_data_model_matches_the_code.py` now compares the two so it cannot drift again.
 
 No index on `expires_at`. Nothing queries it in this milestone, and an index with no reader is write
 amplification on every insert; Milestone 10 adds it alongside the sweep that needs it.
@@ -126,12 +134,52 @@ amplification on every insert; Milestone 10 adds it alongside the sweep that nee
   make the database a second place a run's outcome lives, and ADR-0013 §2 refuses that in both
   directions.
 - **No tenants table.** A tenant is what a credential resolves to (R14); it has no attributes this
-  milestone reads. A table would be an entity created to hold a foreign key.
+  milestone reads. A table would be an entity created to hold a foreign key. `docdoc_default_tenant`
+  below is not one: it holds a single row of *deployment configuration* — which tenant owns the
+  unprefixed store root — and no per-tenant entity, no row per tenant, and no key anything references.
 - **No retention sweep and no `expired` state.** See transition rule 6.
 - **No priority, no queue name, no scheduled-for column.** Out of Scope, and each would be a column
   nothing reads.
 - **No worker table.** `worker_id` is a diagnostic string. Worker liveness is the lease, and a
   registry of workers would be a second source of truth about which are alive.
+
+## The other two tables
+
+The milestone creates three tables and only one of them is the run. Both of these are described here
+because a data model that documents one table of three sends a reader to `\dt` to find out what else
+is there, and what they find has no explanation attached.
+
+### `docdoc_default_tenant`
+
+| Field | Type | Null | Set by | Notes |
+|---|---|---|---|---|
+| `singleton` | boolean | no | the migration's default | Primary key, `CHECK (singleton)`. One row, enforced — a second row would be a second answer to a question that has one |
+| `tenant_id` | text | no | `docdoc migrate` | Who owns content written before tenants existed (FR-089). `CHECK` against `[a-z0-9_-]{1,64}`, restated here because this row is written by a command rather than by an authenticated request, and the auth boundary is the only other place it is validated |
+| `assigned_at` | timestamptz | no | `docdoc migrate` | Passed in, never `now()` in SQL (FR-072) |
+
+**Written by a command, not by a migration, and that is the point.** SQL cannot read an environment,
+so a value hard-coded in `0002_default_tenant.sql` would be the inferred owner FR-089 forbids.
+`docdoc migrate` reads `DOCDOC_DEFAULT_TENANT` and records it.
+
+**It refuses to change once recorded**, and that refusal is load-bearing rather than defensive. The
+value decides where every read looks, so moving it after content exists strands everything written
+under the old tenant — and the symptom is not an error but *correct answers plus a silent re-payment
+for every parse*, because a miss is indistinguishable from an absence. `assign_default_tenant` raises
+`TenantAssignmentError` naming both tenants, which turns a misconfigured second deployment into a
+failure at deploy time instead of a discovery on next month's invoice.
+
+### `docdoc_schema_version`
+
+| Field | Type | Null | Set by | Notes |
+|---|---|---|---|---|
+| `version` | text | no | the migration runner | Primary key. The `.sql` file's stem, e.g. `0001_runs` |
+| `applied_at` | timestamptz | no | the migration runner | Passed in, never `now()` in SQL (FR-072) |
+
+Bookkeeping, and deliberately the smallest thing that answers "have any been applied" — which is
+unanswerable otherwise, and an empty database is the normal first case rather than an error. Created
+by `migrations.pending()` before anything else, so the first run is not a special case. Nothing
+hashes file contents, which is a real gap and a smaller one than a checksum table that fires on a
+whitespace change.
 
 ## Relationship to existing models
 

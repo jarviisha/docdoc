@@ -55,6 +55,10 @@ ROUTES = {
     # and still carry three statuses, none of them `pending`.
     ("POST", "/v1/documents/{blob_id}/runs"),
     ("GET", "/v1/runs/{run_id}"),
+    # Cancellation is a DELETE on the run rather than a POST to an action,
+    # because what it removes is the *attempt* — the result, if one was already
+    # produced, is content-addressed, immutable, and untouched by this.
+    ("DELETE", "/v1/runs/{run_id}"),
 }
 
 
@@ -251,7 +255,7 @@ def test_a_deployment_with_no_schemas_returns_an_empty_list_and_not_an_error() -
 # -- FR-031, FR-060 what must never accumulate -------------------------------
 
 
-def test_the_route_set_is_exactly_these_nine(storeless: TestClient) -> None:
+def test_the_route_set_is_exactly_these_ten(storeless: TestClient) -> None:
     """FR-031, FR-060 — an exhaustive list is the only way to assert an absence.
 
     A route added without a decision shows up here, which is the point: this

@@ -60,7 +60,7 @@ from docdoc.pipeline.stages import (
 from docdoc.validation.result import ValidationResult
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
     from docdoc.artifacts import ArtifactStore
     from docdoc.ingest.source import Limits, SourceFile
@@ -183,6 +183,7 @@ def run(
     validation_options: Any = None,
     request_id: str | None = None,
     verify: bool = False,
+    should_continue: Callable[[], bool] | None = None,
 ) -> PipelineResult:
     """Run the four stages over one document.
 
@@ -214,6 +215,28 @@ def run(
             been read back. Without it a processor whose output drifted without
             its version moving is only ever caught by a cache miss that happens
             not to occur (FR-064).
+        should_continue: Consulted **at stage boundaries only**, never inside a
+            stage. Returning ``False`` stops the run before the next stage
+            begins; stages already completed keep their artifacts, and the result
+            carries no ``processing_id`` because no terminal artifact was
+            produced. ``None`` — what every existing caller passes by omission —
+            preserves current behaviour byte for byte.
+
+            This is Milestone 9's one deviation from FR-040, recorded in that
+            plan's Complexity Tracking with the three alternatives rejected. It
+            exists because ``run()`` executes four stages behind one call and
+            offers no interposition point, so without it the only cancellable
+            moment is *before* a run starts — and the boundary worth catching is
+            the one before the model call, which is where the money is
+            (research R4).
+
+            **It does not make the pipeline non-deterministic.** A cancelled run
+            produces no terminal artifact, so there is no identity under which
+            two different results could ever be observed. Determinism guarantees
+            that identical inputs yield identical outputs *under the same
+            identity*, and cancellation produces no identity at all — the same
+            reason ADR-0012 §3 omits ``job_id`` from a storeless response rather
+            than nulling it.
 
     Returns:
         One ``PipelineResult``, whether or not every stage succeeded.
@@ -247,6 +270,7 @@ def run(
             grounding_options=grounding_options,
             validation_options=validation_options,
             request_id=request_id,
+            should_continue=should_continue,
         )
 
 
@@ -264,6 +288,7 @@ def _run(
     grounding_options: Any,
     validation_options: Any,
     request_id: str | None,
+    should_continue: Callable[[], bool] | None = None,
 ) -> PipelineResult:
     """The run itself, inside the correlation scope ``run`` established.
 
@@ -279,7 +304,18 @@ def _run(
     extraction = grounding = validation = None
     failed_stage: Stage | None = None
 
+    def _boundary(stage: Stage) -> None:
+        """Consulted between stages, and nowhere else.
+
+        Raising rather than returning a flag, so that the check is one line at
+        each boundary instead of a condition wrapped around each stage's block.
+        The exception never leaves this function.
+        """
+        if should_continue is not None and not should_continue():
+            raise _CancelledError(stage)
+
     try:
+        _boundary(Stage.PARSE)
         if parsed is None:
             clock = _Clock()
             # `run` has already refused the both-absent case, so a source exists
@@ -327,6 +363,7 @@ def _run(
             "options_hash": parsed.provenance.options_hash,
         }
 
+        _boundary(Stage.EXTRACT)
         clock = _Clock()
         # The id this stage *will* produce if the provider answers with the
         # model it was asked for. See `plan.py`: the extract options hash folds
@@ -378,6 +415,7 @@ def _run(
             outcomes.append(_executed(Stage.EXTRACT, extraction, clock))
         processors[Stage.EXTRACT.value] = _processor_record(Stage.EXTRACT, extraction)
 
+        _boundary(Stage.GROUND)
         clock = _Clock()
         expected = ground_artifact_id(extraction.artifact_id, options=grounding_options)
         cached = reuse.get(expected, GroundingResult, _format(Stage.GROUND))
@@ -397,6 +435,7 @@ def _run(
             outcomes.append(_executed(Stage.GROUND, grounding, clock))
         processors[Stage.GROUND.value] = _processor_record(Stage.GROUND, grounding)
 
+        _boundary(Stage.VALIDATE)
         clock = _Clock()
         expected = validate_artifact_id(
             grounding.artifact_id,
@@ -428,6 +467,18 @@ def _run(
             outcomes.append(_executed(Stage.VALIDATE, validation, clock))
         processors[Stage.VALIDATE.value] = _processor_record(Stage.VALIDATE, validation)
 
+    except _CancelledError as stop:
+        # Asked to stop between stages. **Not a failure**: no stage refused
+        # anything and the document is fine, so `failed_stage` stays None and no
+        # `failure_class` is recorded. What comes back is a partial result whose
+        # completed stages kept their artifacts, and whose `processing_id` is
+        # absent because no terminal artifact was produced.
+        #
+        # The remaining stages are recorded as skipped rather than omitted, for
+        # the reason `_skipped_after` already gives: a missing outcome and a
+        # skipped one read the same and mean different things.
+        outcomes.extend(_skipped_from(stop.stage))
+        _emit(outcomes, extraction=extraction, terminal=None)
     except PipelineError:
         # Sequencing itself failed. Not a stage's error, and not something to
         # record as one.
@@ -647,6 +698,35 @@ def _retyped(extraction: ExtractionResult, *, schema: str, registry: Any) -> Ext
             },
         )
         return extraction
+
+
+class _CancelledError(Exception):
+    """`should_continue` returned False at a stage boundary.
+
+    Private and never propagated: `_run` catches it, and no caller of `run()`
+    can observe an exception type for something that is not an error. A
+    cancellation is a *result* — a partial one, with no `processing_id` — which
+    is why it comes back as a value rather than being raised.
+    """
+
+    def __init__(self, stage: Stage) -> None:
+        super().__init__(f"cancelled before {stage.value}")
+        self.stage = stage
+
+
+def _skipped_from(stopped: Stage) -> list[StageOutcome]:
+    """The stage that was about to run, and every one after it.
+
+    From rather than after, which is the difference between this and
+    `_skipped_after`: a cancellation stops *before* the named stage, so that
+    stage was never attempted either. A failure happens *at* the named stage, so
+    that one has its own FAILED outcome already.
+    """
+    order = list(Stage)
+    return [
+        StageOutcome(stage=stage, status=StageStatus.SKIPPED)
+        for stage in order[order.index(stopped) :]
+    ]
 
 
 def _skipped_after(failed: Stage) -> list[StageOutcome]:

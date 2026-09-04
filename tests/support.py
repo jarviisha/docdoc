@@ -215,3 +215,24 @@ def make_extraction(
             usage=ModelUsage(),
         ),
     )
+
+
+# -- Milestone 9: the two tenants the isolation tests use ---------------------
+#
+# The keys live here and their hashes live in `tests/fixtures/keys.json`, which
+# is the same split a real deployment has: the file holds hashes and the keys
+# are held by whoever presents them. Written down at all only because a test has
+# to present one.
+
+#: Bearer tokens for `tests/fixtures/keys.json`, by tenant.
+TENANT_KEYS = {
+    "acme": "acme-test-key-not-a-secret",
+    "globex": "globex-test-key-not-a-secret",
+}
+
+KEYS_FILE = "tests/fixtures/keys.json"
+
+
+def bearer(tenant: str) -> dict[str, str]:
+    """The `Authorization` header for one of the fixture tenants."""
+    return {"Authorization": f"Bearer {TENANT_KEYS[tenant]}"}

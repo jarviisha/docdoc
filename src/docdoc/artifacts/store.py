@@ -39,7 +39,12 @@ from pydantic import BaseModel, ValidationError
 
 from docdoc.artifacts.envelope import ArtifactEnvelope, content_id_of
 from docdoc.artifacts.errors import ArtifactError
-from docdoc.artifacts.paths import DEFAULT_TENANT, secure_mkdir, tenant_root
+from docdoc.artifacts.paths import (
+    DEFAULT_TENANT,
+    DegradationLog,
+    secure_mkdir,
+    tenant_root,
+)
 from docdoc.artifacts.paths import FILE_MODE as _FILE_MODE
 
 if TYPE_CHECKING:
@@ -166,6 +171,11 @@ class FileArtifactStore:
         segment = tenant_root(tenant_id)
         self._base = self.root / segment if segment else self.root
         self._artifacts = self._base / "artifacts"
+        # ADR-0010 §4's "logs once", which was not once: a four-stage run against
+        # an unwritable store emitted four identical warnings, because the
+        # pipeline's own once-only guard never sees a failure this class handles
+        # itself. See `DegradationLog`.
+        self._degradations = DegradationLog()
 
     # -- layout ---------------------------------------------------------------
 
@@ -236,14 +246,15 @@ class FileArtifactStore:
         except OSError as error:
             # Unreadable is not the same as absent, but for a *cache* it has the
             # same correct response: proceed without it. FR-063.
-            _logger.warning(
-                "artifact store unreadable, continuing without reuse",
-                extra={
-                    "event": "artifacts.unreadable",
-                    "artifact_id": artifact_id,
-                    "error": type(error).__name__,
-                },
-            )
+            if self._degradations.first_time("unreadable"):
+                _logger.warning(
+                    "artifact store unreadable, continuing without reuse",
+                    extra={
+                        "event": "artifacts.unreadable",
+                        "artifact_id": artifact_id,
+                        "error": type(error).__name__,
+                    },
+                )
             return None
 
         try:
@@ -370,14 +381,15 @@ class FileArtifactStore:
         except FileExistsError:
             return _Write.EXISTS
         except OSError as error:
-            _logger.warning(
-                "artifact store unwritable, continuing without storing",
-                extra={
-                    "event": "artifacts.unwritable",
-                    "path": str(path),
-                    "error": type(error).__name__,
-                },
-            )
+            if self._degradations.first_time("unwritable"):
+                _logger.warning(
+                    "artifact store unwritable, continuing without storing",
+                    extra={
+                        "event": "artifacts.unwritable",
+                        "path": str(path),
+                        "error": type(error).__name__,
+                    },
+                )
             return _Write.FAILED
         finally:
             if temporary is not None:

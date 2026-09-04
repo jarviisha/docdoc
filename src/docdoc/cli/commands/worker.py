@@ -23,8 +23,8 @@ from typing import TYPE_CHECKING
 
 from docdoc.cli.render import Rendering
 from docdoc.runs.errors import RunStateUnavailableError
-from docdoc.runs.identity import DEFAULT_LEASE
-from docdoc.runs.worker import DEFAULT_MAX_ATTEMPTS, Worker
+from docdoc.runs.identity import configured_lease, configured_max_attempts
+from docdoc.runs.worker import Worker
 
 if TYPE_CHECKING:
     import argparse
@@ -52,13 +52,17 @@ def run(args: argparse.Namespace, settings: Settings) -> Rendering:
             "no run-state database configured; set DOCDOC_RUN_DATABASE_URL or pass "
             "--run-database-url"
         )
-    if settings.store_root is None:
+    if not settings.has_store:
         # A worker with no store would execute every run from scratch and write
         # nothing, so the next run over the same document would too. That is not
         # a degraded mode worth having: it is the reuse guarantee silently off.
+        #
+        # It is also worse than that here: the blobs a worker reads are written
+        # by the API's submission route, so a worker with no store cannot reach
+        # the document at all and would fail every run it claimed.
         raise RunStateUnavailableError(
-            "no store configured; a worker needs DOCDOC_STORE_ROOT or --store, or "
-            "every run pays for every stage again"
+            "no store configured; a worker needs DOCDOC_STORE_ROOT, DOCDOC_STORE_URL, "
+            "--store, or --store-url, or it cannot reach the documents it claims"
         )
 
     try:
@@ -68,25 +72,19 @@ def run(args: argparse.Namespace, settings: Settings) -> Rendering:
             "psycopg is not installed; run state needs `pip install docdoc[postgres]`"
         ) from exc
 
-    from docdoc.artifacts import BlobStore
     from docdoc.runs.postgres import PostgresRunQueue
-
-    lease = DEFAULT_LEASE
-    if getattr(args, "lease_seconds", None):
-        from datetime import timedelta
-
-        lease = timedelta(seconds=args.lease_seconds)
 
     worker = Worker(
         queue=PostgresRunQueue(lambda: psycopg.connect(dsn)),
-        blobs=BlobStore(settings.store_root),
+        blobs=settings.blobs(),
         store=settings.store(),
         registry=settings.registry(),
         adapter=settings.adapter(),
         worker_id=_worker_id(),
-        lease=lease,
-        max_attempts=getattr(args, "max_attempts", None) or DEFAULT_MAX_ATTEMPTS,
+        lease=configured_lease(getattr(args, "lease_seconds", None)),
+        max_attempts=configured_max_attempts(getattr(args, "max_attempts", None)),
         limits=settings.limits(),
+        health_port=getattr(args, "health_port", None),
     )
     worker.install_signal_handlers()
     worker.run_forever()

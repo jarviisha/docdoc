@@ -137,3 +137,13 @@ class RunQueue(Protocol):
     def is_cancelled(self, run_id: UUID) -> bool:
         """Whether cancellation has been requested. Read at stage boundaries."""
         ...
+
+    def ping(self) -> None:
+        """Reach the store and return, or raise.
+
+        What readiness asks (FR-054). On the protocol rather than only on the
+        Postgres implementation because both process types probe through this
+        surface, and because a fake that cannot be made unreachable is a fake
+        readiness cannot be tested against.
+        """
+        ...
