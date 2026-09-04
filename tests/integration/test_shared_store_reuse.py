@@ -90,7 +90,7 @@ def shared(request: pytest.FixtureRequest):
     from docdoc.artifacts.s3 import S3ArtifactStore, S3BlobStore, s3_client
 
     dsn = require_database()
-    with psycopg.connect(dsn) as connection:
+    with psycopg.connect(dsn, autocommit=True) as connection:
         migrations.apply(connection, now=datetime.now(UTC))
         connection.execute("TRUNCATE runs")
 

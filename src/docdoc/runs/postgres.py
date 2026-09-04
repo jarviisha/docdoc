@@ -33,7 +33,7 @@ from docdoc.runs.errors import (
     RunStateUnavailableError,
 )
 from docdoc.runs.model import Run, RunOutcome, RunStatus
-from docdoc.runs.observe import log_transition
+from docdoc.runs.observe import log_transition, reason_for
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -244,6 +244,20 @@ class PostgresRunQueue:
         time (FR-021, SC-006). Set-based, so a backlog of them clears at once
         rather than one per claim.
 
+        The sweep covers ``queued`` rows at the cap as well as expired ``running``
+        ones, and that second case is not hypothetical. It closes a hole between
+        the two predicates below: a ``queued`` run whose ``attempts`` had reached
+        the cap matched *neither* the claim (which requires
+        ``attempts < max_attempts``) nor a sweep scoped to ``running``. It was
+        invisible to every worker and to this statement, forever — the caller
+        polling ``queued`` until they gave up, and no ``RunAbandonedError`` ever
+        recorded, which is the one state the attempt limit exists to produce.
+
+        The invariant worth stating, because it is the thing that was untrue:
+        **every non-terminal run is either claimable or abandonable here.**
+        ``release`` no longer leaves one that is neither (see its docstring), and
+        this clause means no other path can either.
+
         **Then claim, in a single statement.** The ``SELECT`` inside the
         ``UPDATE`` is what removes the window between choosing a candidate and
         owning it; ``SKIP LOCKED`` makes concurrent workers step over each
@@ -256,16 +270,25 @@ class PostgresRunQueue:
         """
         abandoned = self._execute(
             """
+            WITH doomed AS (
+                SELECT run_id, status AS from_state, worker_id
+                  FROM runs
+                 WHERE attempts >= %(max_attempts)s
+                   AND (
+                         (status = 'running' AND lease_until < %(now)s)
+                      OR status = 'queued'
+                       )
+            )
             UPDATE runs
                SET status = 'failed',
                    error_class = 'RunAbandonedError',
                    worker_id = NULL,
                    lease_until = NULL,
                    updated_at = %(now)s
-             WHERE status = 'running'
-               AND lease_until < %(now)s
-               AND attempts >= %(max_attempts)s
-            RETURNING run_id, tenant_id, attempts, worker_id
+              FROM doomed
+             WHERE runs.run_id = doomed.run_id
+            RETURNING runs.run_id, runs.tenant_id, runs.attempts,
+                      doomed.worker_id AS prior_worker, doomed.from_state
             """,
             {"now": now, "max_attempts": max_attempts},
             fetch="all",
@@ -277,10 +300,10 @@ class PostgresRunQueue:
             log_transition(
                 run_id=gone["run_id"],
                 tenant_id=gone["tenant_id"],
-                from_state=str(RunStatus.RUNNING),
+                from_state=str(gone["from_state"]),
                 to_state=str(RunStatus.FAILED),
                 attempts=gone["attempts"],
-                worker_id=gone["worker_id"],
+                worker_id=gone["prior_worker"],
                 reason="RunAbandonedError",
             )
 
@@ -370,6 +393,22 @@ class PostgresRunQueue:
         so a rolling restart costs no lease duration. The `worker_id` is captured
         before it is cleared, because "which worker let go" is the whole content
         of the event.
+
+        **It gives the attempt back too**, and that is not bookkeeping tidiness.
+        `attempts` bounds redelivery for one reason — a document that terminates
+        the worker executing it must stop after three rather than after the whole
+        pool (FR-021, SC-006) — and a graceful release is the opposite of that
+        evidence: the worker is alive, it said so, and the document proved
+        nothing. Counting it would make a rolling restart spend the redelivery
+        budget of every run in flight, so a third restart during a backlog would
+        abandon healthy runs with `RunAbandonedError`, a word that sends an
+        operator to look at a document that is fine.
+
+        It also closed a deadlock. `release` left `attempts` incremented while
+        `claim` requires `attempts < max_attempts` and the sweep only touched
+        `running` rows, so a run released at the cap was claimable by nobody and
+        abandonable by nothing. The sweep now covers that shape as well; between
+        them, a run cannot become invisible.
         """
         row = self._execute(
             """
@@ -377,7 +416,16 @@ class PostgresRunQueue:
                 SELECT run_id, worker_id FROM runs WHERE run_id = %(run_id)s
             )
             UPDATE runs
-               SET status = 'queued', worker_id = NULL, lease_until = NULL, updated_at = %(now)s
+               SET status = 'queued',
+                   worker_id = NULL,
+                   lease_until = NULL,
+                   -- The claim that is being undone incremented this. `GREATEST`
+                   -- rather than a bare subtraction so the column cannot go
+                   -- negative if this is ever reached by a path that did not
+                   -- claim; the check constraint would reject it and a shutdown
+                   -- is the worst moment to discover that.
+                   attempts = GREATEST(runs.attempts - 1, 0),
+                   updated_at = %(now)s
               FROM prior
              WHERE runs.run_id = prior.run_id AND runs.status = 'running'
             RETURNING runs.run_id, runs.tenant_id, runs.attempts,
@@ -398,16 +446,44 @@ class PostgresRunQueue:
             reason="released",
         )
 
-    def finish(self, run_id: UUID, outcome: RunOutcome, *, now: datetime) -> None:
-        """Record a terminal state.
+    def finish(
+        self,
+        run_id: UUID,
+        outcome: RunOutcome,
+        *,
+        now: datetime,
+        worker_id: str | None = None,
+        only_from: RunStatus | None = None,
+    ) -> bool:
+        """Record a terminal state. ``True`` if this call is the one that did.
 
         ``status IN ('queued','running')`` makes this idempotent for a run
         already terminal — which matters because a worker that crashes between
         the pipeline returning and this committing will be redelivered, and the
         second attempt must not overwrite a conclusion the first one reached.
+
+        **``worker_id`` is the ownership guard, and without it the status clause
+        above was not enough.** `heartbeat` returning ``False`` is defined to mean
+        a worker has been superseded and "must abandon what it is doing rather
+        than write a result for work that is being redone" (``queue.py``), and the
+        worker's lease-lost branch says the ``finish`` that follows is a no-op
+        because the row is no longer claimable by this attempt. It was not a
+        no-op. After redelivery the row is ``running`` again, so a stalled
+        worker's late verdict matched and overwrote the live attempt's — and then
+        the live attempt's own ``finish`` was the one suppressed, because by then
+        the run was terminal. The result that reached the caller was the one
+        computed by the worker that had already lost the run.
+
+        Passing it makes this conditional on *still holding the lease*. Omitting
+        it is for callers that are not workers — `cancel` acts on a queued run
+        that no worker owns — so the guard is opt-in by the only party that has
+        something to prove.
+
+        ``only_from`` narrows the accepted prior state. `cancel` uses it to make
+        its queued-run path atomic; see there.
         """
         row = self._execute(
-            """
+            f"""
             WITH prior AS (
                 SELECT run_id, status, worker_id FROM runs WHERE run_id = %(run_id)s
             )
@@ -422,7 +498,12 @@ class PostgresRunQueue:
                    updated_at = %(now)s
               FROM prior
              WHERE runs.run_id = prior.run_id
-               AND runs.status IN ('queued', 'running')
+               AND {
+                "runs.status = %(only_from)s"
+                if only_from
+                else "runs.status IN ('queued', 'running')"
+            }
+               {"AND runs.worker_id = %(worker_id)s" if worker_id is not None else ""}
             RETURNING runs.run_id, runs.tenant_id, runs.attempts, runs.status AS to_state,
                       prior.status AS from_state, prior.worker_id AS prior_worker
             """,
@@ -436,15 +517,17 @@ class PostgresRunQueue:
                     [record.model_dump(mode="json") for record in outcome.stage_outcomes]
                 ),
                 "now": now,
+                "worker_id": worker_id,
+                "only_from": None if only_from is None else str(only_from),
             },
             fetch="one",
         )
-        # No row means the run was already terminal and this call was the no-op
-        # its `status IN (…)` clause exists to make it. **No event**, because
-        # nothing transitioned — a redelivered attempt reaching a conclusion the
-        # first one already recorded must not look like a second conclusion.
+        # No row means this call changed nothing: the run was already terminal,
+        # or this worker no longer holds it. **No event**, because nothing
+        # transitioned — a redelivered attempt reaching a conclusion the first one
+        # already recorded must not look like a second conclusion.
         if row is None:
-            return
+            return False
         log_transition(
             run_id=row["run_id"],
             tenant_id=row["tenant_id"],
@@ -452,8 +535,9 @@ class PostgresRunQueue:
             to_state=str(row["to_state"]),
             attempts=row["attempts"],
             worker_id=row["prior_worker"],
-            reason=outcome.error_class or "completed",
+            reason=reason_for(outcome),
         )
+        return True
 
     def cancel(self, run_id: UUID, tenant_id: str, *, now: datetime) -> Run:
         """Request cancellation.
@@ -478,14 +562,46 @@ class PostgresRunQueue:
         )
 
         if run.status is RunStatus.QUEUED:
+            # `only_from` is what makes this safe, and the unguarded version was a
+            # time-of-check-to-time-of-use bug with a real cost. The status came
+            # from the `get` above; between that read and this write a worker can
+            # claim the run, and `finish` accepts a `running` row. So the run went
+            # to `cancelled` — worker_id cleared, lease cleared, stage outcomes
+            # blanked — while the worker kept executing it and kept paying for
+            # provider calls. That is exactly what FR-029 says must not happen for
+            # a running run, arriving through the path for queued ones.
+            #
+            # Conditioning on `status = 'queued'` moves the decision into the
+            # statement. The claim either got there first or it did not, and the
+            # database says which.
+            #
             # `finish` emits the queued → cancelled event, so nothing is logged
             # here: two events for one transition is the drift this whole
             # arrangement exists to avoid.
-            self.finish(run_id, RunOutcome(status=RunStatus.CANCELLED), now=now)
-            cancelled = self.get(run_id, tenant_id)
-            if cancelled is None:  # pragma: no cover - the row cannot vanish
+            if self.finish(
+                run_id,
+                RunOutcome(status=RunStatus.CANCELLED),
+                now=now,
+                only_from=RunStatus.QUEUED,
+            ):
+                cancelled = self.get(run_id, tenant_id)
+                if cancelled is None:  # pragma: no cover - the row cannot vanish
+                    raise RunStateUnavailableError("run disappeared during cancellation")
+                return cancelled
+
+            # Lost the race: it was claimed in the moment between the read and
+            # the write. `cancel_requested` is already set, so this is now
+            # precisely the running case below — the worker will observe it at
+            # the next stage boundary. Re-read rather than reuse `run`, which
+            # describes a state that is no longer true.
+            claimed = self.get(run_id, tenant_id)
+            if claimed is None:  # pragma: no cover - the row cannot vanish
                 raise RunStateUnavailableError("run disappeared during cancellation")
-            return cancelled
+            if claimed.is_terminal:
+                # A concurrent cancel finished it. Idempotent (FR-034), and no
+                # event: this call transitioned nothing.
+                return claimed
+            run = claimed
 
         # A running run does **not** transition here — it keeps reading `running`
         # until the worker reaches a stage boundary (FR-029). So this is logged

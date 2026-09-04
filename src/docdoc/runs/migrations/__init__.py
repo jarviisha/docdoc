@@ -165,9 +165,27 @@ def apply(connection: object, *, now: object) -> Sequence[str]:
     makes the operation safe to retry without anybody reasoning about where it
     stopped.
 
+    **That holds only on an autocommit connection, and the caller must supply
+    one.** On a connection in the default mode, ``pending()``'s
+    ``CREATE TABLE IF NOT EXISTS`` has already opened an implicit transaction by
+    the time this runs, so ``connection.transaction()`` emits a SAVEPOINT inside
+    it and nothing commits until the caller's ``with`` block ends. A failure in
+    the third migration then discards the first two, and the promise above is
+    exactly inverted. ``docdoc migrate`` connects with ``autocommit=True`` for
+    this reason; the assertion below refuses to run without it rather than
+    quietly providing the weaker guarantee.
+
     ``now`` is passed in rather than read here: this module is not
     ``identity.py``, and FR-072 applies to it like everything else.
     """
+    if getattr(connection, "autocommit", True) is False:
+        raise RuntimeError(
+            "migrations need an autocommit connection, or each one runs in a "
+            "savepoint of the caller's transaction and a later failure discards "
+            "the earlier successes. Connect with psycopg.connect(dsn, "
+            "autocommit=True)"
+        )
+
     applied: list[str] = []
     for migration in pending(connection):
         with connection.transaction():  # type: ignore[attr-defined]

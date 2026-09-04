@@ -72,7 +72,7 @@ def _queue():  # type: ignore[no-untyped-def]
     from docdoc.runs import migrations
     from docdoc.runs.postgres import PostgresRunQueue
 
-    with psycopg.connect(dsn) as connection:
+    with psycopg.connect(dsn, autocommit=True) as connection:
         migrations.apply(connection, now=datetime.now(UTC))
         connection.execute("TRUNCATE runs")
     return PostgresRunQueue(lambda: psycopg.connect(dsn))
@@ -115,9 +115,7 @@ def test_submission_returns_under_the_budget_at_p95(client: TestClient) -> None:
     timings: list[float] = []
     for _ in range(SAMPLES):
         started = time.perf_counter()
-        response = client.post(
-            f"/v1/documents/{blob_id}/runs", params={"schema": SCHEMA}
-        )
+        response = client.post(f"/v1/documents/{blob_id}/runs", params={"schema": SCHEMA})
         timings.append((time.perf_counter() - started) * 1000)
         assert response.status_code == 202, response.text
 
@@ -156,10 +154,8 @@ def test_no_run_completed_during_the_measurement(client: TestClient) -> None:
     )
 
 
-def test_a_larger_document_does_not_cost_more_to_submit(
-    client: TestClient, tmp_path: Path
-) -> None:
-    """"Regardless of document size" is the half a single fixture cannot show.
+def test_a_larger_document_does_not_cost_more_to_submit(client: TestClient, tmp_path: Path) -> None:
+    """ "Regardless of document size" is the half a single fixture cannot show.
 
     A submission that read or parsed the document would scale with it, and that
     is exactly the regression this milestone must not acquire: the whole point is
@@ -176,9 +172,7 @@ def test_a_larger_document_does_not_cost_more_to_submit(
         for _ in range(SAMPLES // 2):
             started = time.perf_counter()
             assert (
-                client.post(
-                    f"/v1/documents/{blob_id}/runs", params={"schema": SCHEMA}
-                ).status_code
+                client.post(f"/v1/documents/{blob_id}/runs", params={"schema": SCHEMA}).status_code
                 == 202
             )
             timings.append((time.perf_counter() - started) * 1000)

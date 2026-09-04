@@ -408,8 +408,17 @@ def _refuse_unnamespaceable(deployment: _Deployment) -> None:
     the whole point: the alternative fails on one customer's traffic, in
     production, after the previous version has been drained. Principle VIII's no
     silent fallback, applied to a configuration rather than to a stage.
+
+    **``has_store`` is in the condition because a deployment with no store at all
+    is a supported one**, and this refused to start it. There is nothing to
+    namespace when there is nothing stored: the synchronous routes return their
+    results in the response, so no tenant can read another's anything. Without
+    that clause, turning authentication on for a storeless deployment raised —
+    with a message describing a "given store objects" case that had not
+    occurred, which is worse than the refusal, because it sends the operator to
+    configure something that was never the problem.
     """
-    if deployment.keys.enabled and not deployment.can_namespace:
+    if deployment.keys.enabled and deployment.has_store and not deployment.can_namespace:
         raise RuntimeError(
             "authentication is enabled but this deployment was given store "
             "objects rather than a location, so it cannot namespace one tenant "
@@ -581,9 +590,7 @@ def _router() -> APIRouter:
     router = APIRouter(prefix="/v1", dependencies=[Depends(principal_of)])
 
     @router.post("/documents", response_model=SubmissionResponse)
-    async def submit(
-        request: Request, principal: Caller
-    ) -> Any:
+    async def submit(request: Request, principal: Caller) -> Any:
         """Store source bytes and return their identity.
 
         Idempotent by construction: identical bytes hash to one ``blob_id``, so
@@ -621,9 +628,7 @@ def _router() -> APIRouter:
         )
 
     @router.get("/documents/{blob_id}", response_model=BlobMetadata)
-    async def document(
-        request: Request, blob_id: str, principal: Caller
-    ) -> Any:
+    async def document(request: Request, blob_id: str, principal: Caller) -> Any:
         """Identity, size, and detected media type. Never the bytes.
 
         Scoped to the caller's tenant (FR-064). Another tenant's ``blob_id`` is
@@ -882,9 +887,7 @@ def _router() -> APIRouter:
         )
 
     @router.get("/runs/{run_id}", response_model=RunStateResponse)
-    async def run_state(
-        request: Request, run_id: str, principal: Caller
-    ) -> Any:
+    async def run_state(request: Request, run_id: str, principal: Caller) -> Any:
         """One of the five states, and never the result itself.
 
         A succeeded run names its ``processing_id``; the unchanged
@@ -915,9 +918,7 @@ def _router() -> APIRouter:
         return RunStateResponse(**run.dump_public())
 
     @router.delete("/runs/{run_id}", response_model=RunStateResponse)
-    async def cancel_run(
-        request: Request, run_id: str, principal: Caller
-    ) -> Any:
+    async def cancel_run(request: Request, run_id: str, principal: Caller) -> Any:
         """Request cancellation. Returns the run.
 
         **A 200 on a running run means *requested*, not *stopped*** (FR-029).
@@ -983,9 +984,7 @@ def _router() -> APIRouter:
         )
 
     @router.get("/jobs/{job_id}", response_model=JobStatusResponse)
-    async def job(
-        request: Request, job_id: str, principal: Caller
-    ) -> Any:
+    async def job(request: Request, job_id: str, principal: Caller) -> Any:
         """One of three statuses, and never ``pending`` (FR-035).
 
         Read from the caller's own namespace, which is what makes FR-065 true:
@@ -1015,9 +1014,7 @@ def _router() -> APIRouter:
         return JobStatusResponse(job_id=job_id, status=JobStatus.SUCCEEDED)
 
     @router.get("/jobs/{job_id}/result")
-    async def job_result(
-        request: Request, job_id: str, principal: Caller
-    ) -> Any:
+    async def job_result(request: Request, job_id: str, principal: Caller) -> Any:
         """The stored result, and never a silent recomputation (FR-036)."""
         store, _ = _stores_of(request, principal)
 

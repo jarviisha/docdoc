@@ -58,7 +58,7 @@ class Spec:
 def queue() -> PostgresRunQueue:
     psycopg = pytest.importorskip("psycopg")
     dsn = require_database()
-    with psycopg.connect(dsn) as connection:
+    with psycopg.connect(dsn, autocommit=True) as connection:
         migrations.apply(connection, now=datetime.now(UTC))
         connection.execute("TRUNCATE runs")
     return PostgresRunQueue(lambda: psycopg.connect(dsn))

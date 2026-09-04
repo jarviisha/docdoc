@@ -83,9 +83,18 @@ def stores_from_url(url: str, *, tenant_id: str = "default") -> tuple[Any, Any]:
     bucket = parsed.netloc
     prefix = parsed.path.strip("/")
 
+    # `endpoint_url` is passed on as well as being baked into `client`, and it is
+    # not redundant: it is the only thing that lets a store build the *probe*
+    # client, whose timeouts are seconds where this one's are tens of them.
+    # Without it every store built here probed with the pipeline's client, and
+    # the readiness variant was unreachable code in production.
     return (
-        S3ArtifactStore(bucket, client=client, prefix=prefix, tenant_id=tenant_id),
-        S3BlobStore(bucket, client=client, prefix=prefix, tenant_id=tenant_id),
+        S3ArtifactStore(
+            bucket, client=client, prefix=prefix, tenant_id=tenant_id, endpoint_url=endpoint
+        ),
+        S3BlobStore(
+            bucket, client=client, prefix=prefix, tenant_id=tenant_id, endpoint_url=endpoint
+        ),
     )
 
 
@@ -206,12 +215,22 @@ class _S3Base:
         self._client = client if client is not None else s3_client(endpoint_url=endpoint_url)
         # Built lazily and only where `probe()` is actually called, so a
         # deployment that never serves a readiness route never opens a second
-        # connection pool. `endpoint_url` is kept for that construction: a
-        # caller who injected a client gave us no way to rebuild one, and in
-        # that case the probe reuses what it was given — which is what a test
-        # supplying a stub wants anyway.
+        # connection pool.
+        #
+        # **Seeded only when there is no way to build one.** This used to be
+        # seeded with `client` unconditionally, and since `stores_from_url`
+        # always injects a client, `_probing()` always returned the *pipeline's*
+        # client: ten-second connect, thirty-second read, three retries. So every
+        # deployment probed with the timeouts the `PROBE_*` constants exist to
+        # avoid, and the readiness variant was code nothing reached — the exact
+        # thread-accumulation failure research R13 describes, still present after
+        # the fix for it had been written.
+        #
+        # An injected client with no endpoint is a test stub, and there the probe
+        # reuses it because nothing else can be built. That is the case the
+        # seeding was for; it just was not the only case it caught.
         self._endpoint_url = endpoint_url
-        self._probe_client: Any = client
+        self._probe_client: Any = client if endpoint_url is None else None
         # `tenant_root` returns "" for the default tenant, so an existing
         # deployment's objects stay exactly where they are (FR-084a). Do not
         # "tidy" this into an unconditional prefix; see that function's docstring.
@@ -256,8 +275,25 @@ class S3BlobStore(_S3Base):
         return blob_id
 
     def get(self, blob_id: str) -> bytes | None:
+        """The stored bytes, ``None`` if absent, and it **raises** if unreachable.
+
+        The three-way answer is the point. ADR-0010 §4's "run without reuse
+        rather than fail" is a rule about the *artifact* store, which is a cache;
+        a blob is the document itself, and a caller that cannot read one cannot
+        do the work at all.
+
+        Collapsing the last two used to make an outage indistinguishable from a
+        deleted document, and `worker.execute_one` reads `None` as terminal. A
+        five-second blip therefore finished every run claimed during it as
+        `failed / UnknownBlob` — permanently, never redelivered, for documents
+        that were sitting in the bucket — and sent whoever read it to look for a
+        file that was there. Raising instead lets the lease lapse, which is the
+        mechanism that already exists for exactly this.
+        """
         try:
             response = self._client.get_object(Bucket=self._bucket, Key=self._key_for(blob_id))
+        except ArtifactError:
+            raise
         except Exception as error:
             if _is_missing(error):
                 return None
@@ -270,7 +306,13 @@ class S3BlobStore(_S3Base):
                         "error": type(error).__name__,
                     },
                 )
-            return None
+            raise ArtifactError(
+                "the blob store could not be reached; this is not the same as the "
+                "document being absent, and the caller must not treat it as such",
+                reason="unavailable",
+                artifact_id=blob_id,
+                root=self.root,
+            ) from error
         return bytes(response["Body"].read())
 
     def size_of(self, blob_id: str) -> int | None:

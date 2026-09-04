@@ -61,8 +61,18 @@ def install(app: FastAPI, readiness: Readiness) -> None:
         return JSONResponse(status_code=200, content=liveness_body())
 
     @app.get(READINESS_PATH, include_in_schema=False)
-    async def readyz() -> JSONResponse:
+    def readyz() -> JSONResponse:
         """Ready, or 503 naming the unmet dependency (FR-055).
+
+        **Not ``async``, and the difference is the whole process.**
+        ``Readiness.unmet`` is blocking I/O — a psycopg connect and an S3
+        ``head_object`` — and an ``async def`` handler runs on the event loop,
+        so every uncached probe froze the loop for the duration. Under an outage
+        that duration is the connect timeout, and it arrives on every probe
+        interval, so the readiness route took down the synchronous routes it
+        exists to report on. A plain ``def`` sends it to FastAPI's threadpool,
+        where blocking work belongs. ``healthz`` may stay ``async`` because it
+        touches nothing.
 
         **Strict**: a process that cannot reach the run-state database reports
         not ready even though the synchronous routes would still serve every

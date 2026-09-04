@@ -30,6 +30,7 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any
 
+from docdoc.artifacts.errors import ArtifactError
 from docdoc.runs import identity
 from docdoc.runs.errors import RunStateUnavailableError
 from docdoc.runs.identity import DEFAULT_LEASE, DEFAULT_MAX_ATTEMPTS
@@ -113,6 +114,12 @@ def execute_one(
         )
         return None
 
+    # A blob that is *absent* is terminal — nothing will make it appear. A blob
+    # store that cannot be *reached* is not, and conflating the two is how a
+    # five-second outage used to fail every run claimed during it, permanently,
+    # with an error class that sends the operator to look for a document that is
+    # sitting right there. `StoreUnavailable` propagates instead, so the lease
+    # lapses and the run is redelivered — which is what the lease is for.
     data = blobs.get(run.blob_id)
     if data is None:
         _finish(
@@ -148,8 +155,9 @@ def execute_one(
         # Shutdown is the second reason to stop, and it is checked first because
         # it costs nothing: it is a flag in this process, where the other is a
         # round trip.
-        should_continue=lambda: not (stopping and stopping())
-        and not _cancellation_requested(queue, run),
+        should_continue=lambda: (
+            not (stopping and stopping()) and not _cancellation_requested(queue, run)
+        ),
     )
 
     outcome = RunOutcome.of(result)
@@ -167,8 +175,61 @@ def execute_one(
         queue.release(run.run_id, now=now)
         return result
 
-    queue.finish(run.run_id, outcome, now=now)
+    # **A `processing_id` is a promise that the identity resolves**, and until
+    # this check it was one the worker could not keep. Both artifact stores
+    # degrade rather than fail when a write is dropped (FR-063) — right for the
+    # three intermediate stages, which are a cache, and wrong for the last one,
+    # whose id becomes `processing_id` and is the only handle the caller is given
+    # on the result. A denied `PutObject` on the validation stage alone produced
+    # `succeeded` plus an id that `GET /v1/jobs/{id}/result` answers `unknown`
+    # about, for ever, with nothing logged as an error anywhere.
+    #
+    # Checked here rather than in the pipeline because this is where the promise
+    # is made: the synchronous route returns the result in its own response and
+    # needs no store to have kept it.
+    if outcome.status is RunStatus.SUCCEEDED and outcome.processing_id is not None:
+        outcome = _demand_the_result_is_retrievable(store, outcome)
+
+    # `worker_id` makes this conditional on still holding the lease. Without it a
+    # worker that stalled past its lease could overwrite the verdict of the worker
+    # that superseded it — see `RunQueue.finish`.
+    queue.finish(run.run_id, outcome, now=now, worker_id=run.worker_id)
     return result
+
+
+def _demand_the_result_is_retrievable(store: ArtifactStore, outcome: RunOutcome) -> RunOutcome:
+    """The same outcome, or a failed one when the result did not survive.
+
+    One metadata read against a store this process has just written to, on the
+    success path only. That is cheap next to the four stages behind it, and it is
+    the only thing standing between "the store dropped the write" and a caller
+    holding an identity that resolves to nothing.
+
+    A read that *fails* counts as not retrievable, and deliberately so: if the
+    store cannot be reached now, the result cannot be fetched by the caller
+    either, so reporting `succeeded` would be describing a result nobody can get.
+    """
+    try:
+        stored = store.envelope(outcome.processing_id or "")
+    except Exception:
+        # Broad on purpose: every way this can fail — unreachable, corrupt,
+        # refused — means the caller cannot retrieve the result either.
+        stored = None
+    if stored is not None:
+        return outcome
+
+    _logger.error(
+        '{"event": "runs.result_not_stored", "processing_id": "%s"}',
+        outcome.processing_id,
+    )
+    return RunOutcome(
+        status=RunStatus.FAILED,
+        failed_stage="validation",
+        # Not a stage failure: validation ran and produced a result. What failed
+        # is keeping it, and the class says so rather than blaming the document.
+        error_class="ResultNotStored",
+        stage_outcomes=outcome.stage_outcomes,
+    )
 
 
 def _cancellation_requested(queue: RunQueue, run: Run) -> bool:
@@ -186,8 +247,11 @@ def _finish(queue: RunQueue, run: Run, outcome: RunOutcome, *, now: datetime) ->
     where the transition happens — see `docdoc.runs.observe.log_transition`. This
     wrapper survives because it is the one place `execute_one`'s two
     never-reached-a-stage paths converge.
+
+    Passes `worker_id` for the same reason the success path does: only the worker
+    that holds the run may conclude it.
     """
-    queue.finish(run.run_id, outcome, now=now)
+    queue.finish(run.run_id, outcome, now=now, worker_id=run.worker_id)
 
 
 class Worker:
@@ -211,10 +275,16 @@ class Worker:
         max_attempts: int = DEFAULT_MAX_ATTEMPTS,
         limits: Any = None,
         health_port: int | None = None,
+        stores_for: Callable[[str], tuple[Any, Any]] | None = None,
     ) -> None:
         self._queue = queue
         self._blobs = blobs
         self._store = store
+        #: How to reach one tenant's namespace. Without it a worker executes
+        #: every run against the stores it was constructed with, which are the
+        #: **default** tenant's — see `_stores_for`.
+        self._store_factory = stores_for
+        self._by_tenant: dict[str, tuple[Any, Any]] = {}
         self._registry = registry
         self._adapter = adapter
         self._worker_id = worker_id
@@ -269,7 +339,26 @@ class Worker:
                 self._stopping.wait(_IDLE_SLEEP_SECONDS)
                 continue
 
-            self._execute_with_heartbeat(claimed)
+            try:
+                self._execute_with_heartbeat(claimed)
+            except ArtifactError as unavailable:
+                if unavailable.reason != "unavailable":
+                    # A corrupt or conflicting artifact is a fault to surface,
+                    # not to sleep through. Same distinction the pipeline makes.
+                    raise
+                # The store went away mid-run. The run is **not** finished, so
+                # its lease lapses and another attempt picks it up with every
+                # completed stage's artifact intact — the redelivery path, used
+                # for the thing it was built for.
+                #
+                # Not `release`: that would requeue it instantly and this worker
+                # would claim it again immediately, spinning against a store that
+                # is still down. Waiting out the lease is the backoff.
+                _logger.warning(
+                    '{"event": "runs.store_unavailable", "run_id": "%s"}',
+                    claimed.run_id,
+                )
+                self._stopping.wait(_IDLE_SLEEP_SECONDS)
 
     def _serve_health(self) -> None:
         """Answer the same two routes the API does, when asked to (FR-053).
@@ -296,15 +385,46 @@ class Worker:
         )
         self._health.start()
 
+    def _stores_for(self, tenant_id: str) -> tuple[Any, Any]:
+        """The stores for one tenant's namespace (FR-084, FR-086).
+
+        **The worker used to ignore `run.tenant_id` entirely** and execute every
+        run against the pair it was constructed with. With authentication on that
+        is wrong in both directions at once, and neither is loud. Tenant `acme`'s
+        blob is written by the API at `<root>/t/acme/blobs/…`; the worker looked
+        under `<root>/blobs/…`, found nothing, and finished the run `failed /
+        UnknownBlob` — so no non-default tenant could complete an asynchronous run
+        at all. Where a blob *was* found, the artifacts went to the unprefixed
+        root, which is the shared namespace ADR-0014 exists to abolish: one
+        tenant's results reusable by another at identities both derive from
+        content.
+
+        Cached per tenant, as `_Deployment.stores_for` is and for the same reason
+        — a store is a client and a prefix, and rebuilding one per run would open
+        a connection pool per run on the object-store path.
+
+        Falls back to the constructed pair when no factory was given. That keeps
+        every single-tenant caller and every test working unchanged, and it is
+        honest: with one tenant, those *are* its stores.
+        """
+        if self._store_factory is None:
+            return (self._store, self._blobs)
+        cached = self._by_tenant.get(tenant_id)
+        if cached is None:
+            cached = self._store_factory(tenant_id)
+            self._by_tenant[tenant_id] = cached
+        return cached
+
     def _execute_with_heartbeat(self, run: Run) -> None:
+        store, blobs = self._stores_for(run.tenant_id)
         heartbeat = _Heartbeat(self._queue, run, self._lease)
         heartbeat.start()
         try:
             execute_one(
                 run,
                 queue=self._queue,
-                blobs=self._blobs,
-                store=self._store,
+                blobs=blobs,
+                store=store,
                 registry=self._registry,
                 adapter=self._adapter,
                 now=identity.now(),

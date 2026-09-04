@@ -84,7 +84,15 @@ class BlobStore:
         return blob_id
 
     def get(self, blob_id: str) -> bytes | None:
-        """The stored bytes, or ``None`` if this deployment does not have them."""
+        """The stored bytes, ``None`` if absent, and it **raises** if unreadable.
+
+        Three answers rather than two, matching ``S3BlobStore.get``. A missing
+        file means this deployment does not have the document; an ``OSError``
+        means the mount is gone or the permissions changed, and a caller told
+        ``None`` for that concludes the document does not exist. In the worker
+        that conclusion is terminal and irreversible, which is far too strong a
+        thing to infer from a disk that went away for a moment.
+        """
         try:
             return self._path_for(blob_id).read_bytes()
         except FileNotFoundError:
@@ -99,7 +107,13 @@ class BlobStore:
                         "error": type(error).__name__,
                     },
                 )
-            return None
+            raise ArtifactError(
+                "the blob store could not be read; this is not the same as the "
+                "document being absent, and the caller must not treat it as such",
+                reason="unavailable",
+                artifact_id=blob_id,
+                root=str(self.root),
+            ) from error
 
     def size_of(self, blob_id: str) -> int | None:
         """The stored size in bytes, for metadata without reading the document."""

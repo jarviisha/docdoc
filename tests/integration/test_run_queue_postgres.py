@@ -52,7 +52,7 @@ def queue() -> PostgresRunQueue:
     psycopg = pytest.importorskip("psycopg")
     dsn = require_database()
 
-    with psycopg.connect(dsn) as connection:
+    with psycopg.connect(dsn, autocommit=True) as connection:
         migrations.apply(connection, now=datetime.now(UTC))
         connection.execute("TRUNCATE runs")
 
@@ -72,7 +72,7 @@ def _submit(queue: PostgresRunQueue, *, at: datetime, **kwargs: object):
 def test_the_migration_is_idempotent(queue: PostgresRunQueue) -> None:
     """FR-078: safe to re-run, because a deployment pipeline will."""
     psycopg = pytest.importorskip("psycopg")
-    with psycopg.connect(require_database()) as connection:
+    with psycopg.connect(require_database(), autocommit=True) as connection:
         assert migrations.apply(connection, now=datetime.now(UTC)) == []
         assert migrations.pending(connection) == []
 
@@ -302,3 +302,200 @@ def test_cancelling_another_tenants_run_is_indistinguishable_from_a_stranger(
         queue.cancel(run_id, "other", now=now)
     with pytest.raises(RunNotFoundError):
         queue.cancel(new_run_id(), "other", now=now)
+
+
+# -- the review findings, against the SQL that carries them --------------------
+#
+# `tests/unit/test_review_findings.py` asks these of `InMemoryRunQueue`, which is
+# the right place for the *policy*. Every one of them was a defect in a SQL
+# predicate, though, and a fake cannot be wrong in the way a `WHERE` clause is
+# wrong -- so the statements themselves are checked here, against a database.
+
+
+def test_release_returns_the_attempt_it_undid(queue: PostgresRunQueue) -> None:
+    """`GREATEST(attempts - 1, 0)`, and why the row must not be left at the cap.
+
+    A rolling restart releases every in-flight run. Counting those releases
+    against `max_attempts` spent the redelivery budget of runs that had met no
+    fault at all.
+    """
+    at = datetime(2026, 3, 1, tzinfo=UTC)
+    run_id = _submit(queue, at=at)
+
+    claimed = queue.claim(worker_id="w1", now=at, lease=LEASE, max_attempts=3)
+    assert claimed is not None
+    assert claimed.attempts == 1
+
+    queue.release(run_id, now=at)
+
+    after = queue.get(run_id, "default")
+    assert after is not None
+    assert after.status is RunStatus.QUEUED
+    assert after.attempts == 0
+
+
+def test_a_queued_run_at_the_attempt_cap_does_not_vanish(queue: PostgresRunQueue) -> None:
+    """The deadlock, driven through the statements that produced it.
+
+    Three graceful releases used to leave `attempts = 3` on a `queued` row. The
+    claim requires `attempts < max_attempts` and the sweep only touched `running`
+    rows, so the run matched neither predicate and no worker or sweep could ever
+    see it again.
+    """
+    at = datetime(2026, 3, 1, tzinfo=UTC)
+    run_id = _submit(queue, at=at)
+
+    for _ in range(4):
+        claimed = queue.claim(worker_id="w1", now=at, lease=LEASE, max_attempts=3)
+        assert claimed is not None, "a released run became invisible to the queue"
+        queue.release(run_id, now=at)
+
+    after = queue.get(run_id, "default")
+    assert after is not None
+    assert after.status is RunStatus.QUEUED
+
+
+def test_the_sweep_also_reaches_a_stranded_queued_run(queue: PostgresRunQueue) -> None:
+    """The safety net, reached directly rather than through `release`.
+
+    The invariant is stronger than "no current path strands one": **every
+    non-terminal run is either claimable or abandonable.** Asserted by putting a
+    row into the stranded shape by hand, which is what a future path would do.
+    """
+    psycopg = pytest.importorskip("psycopg")
+    at = datetime(2026, 3, 1, tzinfo=UTC)
+    run_id = _submit(queue, at=at)
+
+    with psycopg.connect(require_database(), autocommit=True) as connection:
+        connection.execute("UPDATE runs SET attempts = 3 WHERE run_id = %s", (run_id,))
+
+    assert queue.claim(worker_id="w1", now=at, lease=LEASE, max_attempts=3) is None
+
+    after = queue.get(run_id, "default")
+    assert after is not None
+    assert after.status is RunStatus.FAILED
+    assert after.error_class == "RunAbandonedError"
+
+
+def test_a_superseded_worker_cannot_write_over_the_live_attempt(
+    queue: PostgresRunQueue,
+) -> None:
+    """The ownership predicate, which the statement did not have.
+
+    `worker._Heartbeat` asserted in a comment that a superseded worker's `finish`
+    would be a no-op "because the row is no longer claimable by this attempt".
+    The `WHERE` clause checked only the status, and after redelivery the status
+    is `running` again — so the stale verdict matched, landed, and made the live
+    attempt's own `finish` the one that was suppressed.
+    """
+    at = datetime(2026, 3, 1, tzinfo=UTC)
+    later = at + LEASE + timedelta(seconds=1)
+    run_id = _submit(queue, at=at)
+
+    stalled = queue.claim(worker_id="w1", now=at, lease=LEASE, max_attempts=3)
+    assert stalled is not None
+    live = queue.claim(worker_id="w2", now=later, lease=LEASE, max_attempts=3)
+    assert live is not None
+    assert live.worker_id == "w2"
+
+    applied = queue.finish(
+        run_id,
+        RunOutcome(status=RunStatus.FAILED, failed_stage="extract", error_class="Timeout"),
+        now=later,
+        worker_id="w1",
+    )
+
+    assert applied is False
+    current = queue.get(run_id, "default")
+    assert current is not None
+    assert current.status is RunStatus.RUNNING, (
+        "the run w2 is still executing was concluded by the worker that lost it"
+    )
+
+    # And w2, which does hold it, still can.
+    assert queue.finish(
+        run_id,
+        RunOutcome(status=RunStatus.SUCCEEDED, processing_id="sha256:" + "a" * 64),
+        now=later,
+        worker_id="w2",
+    )
+
+
+def test_cancelling_cannot_stop_a_run_claimed_a_moment_earlier(
+    queue: PostgresRunQueue,
+) -> None:
+    """`only_from`, which closes `cancel`'s time-of-check-to-time-of-use window.
+
+    `cancel` read the status and then called a `finish` that accepted `running`.
+    A claim landing in between meant the run went to `cancelled` — worker and
+    lease cleared, outcomes blanked — while the worker kept executing it and kept
+    paying for provider calls, which is what FR-029 forbids for a running run.
+    """
+    at = datetime(2026, 3, 1, tzinfo=UTC)
+    run_id = _submit(queue, at=at)
+
+    claimed = queue.claim(worker_id="w1", now=at, lease=LEASE, max_attempts=3)
+    assert claimed is not None
+
+    stopped = queue.finish(
+        run_id,
+        RunOutcome(status=RunStatus.CANCELLED),
+        now=at,
+        only_from=RunStatus.QUEUED,
+    )
+
+    assert stopped is False
+    current = queue.get(run_id, "default")
+    assert current is not None
+    assert current.status is RunStatus.RUNNING
+
+
+def test_cancelling_a_running_run_leaves_the_worker_holding_it(
+    queue: PostgresRunQueue,
+) -> None:
+    """The end-to-end shape of the same thing, through the public method.
+
+    The run keeps its `worker_id` and its lease. Before the fix a `cancel` racing
+    a claim cleared both, so the worker executing the document held a lease on a
+    row that said nobody had it.
+    """
+    at = datetime(2026, 3, 1, tzinfo=UTC)
+    run_id = _submit(queue, at=at)
+    claimed = queue.claim(worker_id="w1", now=at, lease=LEASE, max_attempts=3)
+    assert claimed is not None
+
+    answered = queue.cancel(run_id, "default", now=at)
+
+    assert answered.status is RunStatus.RUNNING
+    current = queue.get(run_id, "default")
+    assert current is not None
+    assert current.worker_id == "w1"
+    assert current.lease_until is not None
+    assert queue.is_cancelled(run_id)
+
+
+def test_a_cancellation_is_logged_as_one(
+    queue: PostgresRunQueue, caplog: pytest.LogCaptureFixture
+) -> None:
+    """`reason` said `completed` for every run that stopped on request.
+
+    A cancelled run carries no `error_class`, so `error_class or "completed"` had
+    no case for it, and deliberate stops were indistinguishable from successes in
+    the one place built to make a run's history legible.
+    """
+    import json
+    import logging
+
+    at = datetime(2026, 3, 1, tzinfo=UTC)
+    run_id = _submit(queue, at=at)
+
+    with caplog.at_level(logging.INFO, logger="docdoc.runs"):
+        queue.cancel(run_id, "default", now=at)
+
+    reasons = [
+        json.loads(record.getMessage()).get("reason")
+        for record in caplog.records
+        if '"run.transition"' in record.getMessage()
+    ]
+    assert "cancelled" in reasons, f"the cancellation was logged as {reasons}"
+    assert "completed" not in reasons

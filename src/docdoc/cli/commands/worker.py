@@ -85,6 +85,12 @@ def run(args: argparse.Namespace, settings: Settings) -> Rendering:
         max_attempts=configured_max_attempts(getattr(args, "max_attempts", None)),
         limits=settings.limits(),
         health_port=getattr(args, "health_port", None),
+        # A worker executes whatever it claims, and what it claims belongs to
+        # whichever tenant submitted it. Without this it would run every tenant's
+        # document against the default tenant's namespace — finding no blob for
+        # any of them, and writing artifacts where another tenant could reuse
+        # them (FR-084, FR-086).
+        stores_for=settings.stores_for,
     )
     worker.install_signal_handlers()
     worker.run_forever()

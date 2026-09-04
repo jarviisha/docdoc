@@ -460,6 +460,32 @@ class Settings:
         assert self.store_url is not None
         return stores_from_url(self.store_url)
 
+    def stores_for(self, tenant_id: str) -> tuple[Any, Any]:
+        """``(artifact_store, blob_store)`` namespaced to one tenant (FR-084).
+
+        What the worker needs and :meth:`store`/:meth:`blobs` cannot give it:
+        those build the **default** tenant's pair, which is right for every
+        command that acts on a document the caller just named and wrong for a
+        process that executes whatever it claims. A worker handles every tenant's
+        runs, so the namespace is a property of the run rather than of the
+        process.
+
+        Same shape as ``_Deployment.stores_for`` on the API side, deliberately.
+        Both front ends face the same question, and answering it differently in
+        the two places is how one of them ends up namespacing and the other not.
+        """
+        from docdoc.artifacts import BlobStore, FileArtifactStore
+        from docdoc.artifacts.s3 import stores_from_url
+
+        if self.store_url:
+            return stores_from_url(self.store_url, tenant_id=tenant_id)
+        if self.store_root is None:
+            return (None, None)
+        return (
+            FileArtifactStore(self.store_root, tenant_id=tenant_id),
+            BlobStore(self.store_root, tenant_id=tenant_id),
+        )
+
     @property
     def has_store(self) -> bool:
         return self.store_root is not None or self.store_url is not None

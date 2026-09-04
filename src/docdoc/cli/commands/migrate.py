@@ -58,7 +58,16 @@ def run(args: argparse.Namespace, settings: Settings) -> Rendering:
         ) from exc
 
     try:
-        with psycopg.connect(dsn) as connection:
+        # `autocommit=True` is what makes `migrations.apply`'s promise true.
+        # Without it, `pending()`'s `CREATE TABLE IF NOT EXISTS` opens an implicit
+        # transaction, so `apply`'s `with connection.transaction()` emits a
+        # SAVEPOINT rather than starting one — and nothing commits until this
+        # `with` block exits. A failure in the second migration then rolled back
+        # the first one *and* its bookkeeping row, leaving the database at
+        # version zero while the module's docstring promised "a failure half way
+        # through a set leaves the ones before it applied". Re-running could not
+        # resume, because there was nothing recorded to resume from.
+        with psycopg.connect(dsn, autocommit=True) as connection:
             if getattr(args, "check", False):
                 outstanding = [m.version for m in migrations.pending(connection)]
                 return Rendering(
@@ -94,8 +103,6 @@ def run(args: argparse.Namespace, settings: Settings) -> Rendering:
     return Rendering(
         code=0,
         data={"pending": [], "applied": applied, "default_tenant": owner},
-        lines=(
-            [f"applied: {', '.join(applied)}"] if applied else ["nothing to apply"]
-        )
+        lines=([f"applied: {', '.join(applied)}"] if applied else ["nothing to apply"])
         + [f"store root belongs to tenant: {owner}"],
     )

@@ -31,12 +31,12 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from uuid import UUID
 
-__all__ = ["EVENT_NAME", "REASONS", "log_transition"]
+__all__ = ["EVENT_NAME", "REASONS", "log_transition", "reason_for"]
 
 EVENT_NAME = "run.transition"
 
@@ -46,6 +46,12 @@ EVENT_NAME = "run.transition"
 #: `reason` is the one field a caller could put anything into and it travels to a
 #: log line. Enumerating the constants makes "is this a class name or one of
 #: these?" a question a test can ask.
+#:
+#: `"cancelled"` was missing and the omission was not cosmetic. A cancelled run
+#: carries no `error_class`, because nothing refused anything, so the
+#: `error_class or "completed"` both queues used reported every cancellation as
+#: a completion. Deliberate stops were indistinguishable in the log from
+#: successful ones — in the one place built to make a run's history legible.
 REASONS = frozenset(
     {
         "submitted",  # the run came into existence
@@ -53,11 +59,31 @@ REASONS = frozenset(
         "redelivered",  # a worker took it again after a lease lapsed
         "released",  # a worker gave it back before its lease expired
         "completed",  # finished with no error to name
+        "cancelled",  # it actually stopped, as against the request below
         "cancel_requested",  # a caller asked; the run is still running
     }
 )
 
 _logger = logging.getLogger("docdoc.runs")
+
+
+def reason_for(outcome: Any) -> str:
+    """What the transition event calls one ending.
+
+    Here rather than in either queue because both need it and they must not
+    answer differently: a fake that labels a transition differently from the
+    real implementation is a fake nothing can be tested against.
+
+    A cancelled run has no ``error_class`` — nothing refused anything — so the
+    ``error_class or "completed"`` both queues used labelled every cancellation
+    a completion. An operator counting completions counted deliberate stops
+    among them, in the one place built to make a run's history legible.
+    """
+    from docdoc.runs.model import RunStatus
+
+    if outcome.status is RunStatus.CANCELLED:
+        return "cancelled"
+    return str(outcome.error_class or "completed")
 
 
 def log_transition(

@@ -25,7 +25,11 @@ from docdoc.runs.errors import (
     RunStateUnavailableError,
 )
 from docdoc.runs.model import Run, RunOutcome, RunStatus
-from docdoc.runs.observe import log_transition
+
+# `reason_for` is imported rather than reimplemented, so the fake cannot
+# describe a transition differently from the real queue -- which is the whole
+# contract of this file.
+from docdoc.runs.observe import log_transition, reason_for
 
 if TYPE_CHECKING:
     from datetime import datetime, timedelta
@@ -129,8 +133,16 @@ class InMemoryRunQueue:
         # file's docstring warns about, arriving from the unexpected direction:
         # not a fake that is easier to satisfy, but one that is differently
         # wrong, and therefore describes a system nobody deployed.
+        #
+        # `queued` rows at the cap are swept too, matching the real statement.
+        # That case exists because `release` used to leave one — claimable by
+        # nobody, since the claim below requires `attempts < max_attempts`, and
+        # abandonable by nothing, since this loop only looked at expired leases.
+        # `release` no longer creates the shape and this no longer ignores it.
         for run in list(self._runs.values()):
-            if run.lease_expired_at(now) and run.attempts >= max_attempts:
+            if run.attempts >= max_attempts and (
+                run.lease_expired_at(now) or run.status is RunStatus.QUEUED
+            ):
                 # `finish` emits the running -> failed event, exactly as the
                 # Postgres sweep does. One event per abandoned run.
                 self.finish(
@@ -192,6 +204,11 @@ class InMemoryRunQueue:
                 "status": RunStatus.QUEUED,
                 "worker_id": None,
                 "lease_until": None,
+                # The claim being undone incremented this, and a graceful release
+                # is not the evidence `max_attempts` bounds. See
+                # `PostgresRunQueue.release` for why this is correctness rather
+                # than tidiness.
+                "attempts": max(run.attempts - 1, 0),
                 "updated_at": now,
             }
         )
@@ -200,17 +217,34 @@ class InMemoryRunQueue:
             tenant_id=run.tenant_id,
             from_state=str(run.status),
             to_state=str(RunStatus.QUEUED),
-            attempts=run.attempts,
+            attempts=run.attempts - 1,
             worker_id=run.worker_id,
             reason="released",
         )
 
-    def finish(self, run_id: UUID, outcome: RunOutcome, *, now: datetime) -> None:
+    def finish(
+        self,
+        run_id: UUID,
+        outcome: RunOutcome,
+        *,
+        now: datetime,
+        worker_id: str | None = None,
+        only_from: RunStatus | None = None,
+    ) -> bool:
         run = self._runs.get(run_id)
         # Already terminal: the no-op its Postgres counterpart's
         # `status IN (…)` clause makes, and no event, because nothing changed.
         if run is None or run.is_terminal:
-            return
+            return False
+        # The same two guards the real statement carries, and for the same
+        # reasons. This fake used to have neither, so the ownership hole was
+        # invisible to every test that used it — a fake that is *differently*
+        # wrong describes a system nobody deployed, which is the failure this
+        # file's docstring warns about.
+        if only_from is not None and run.status is not only_from:
+            return False
+        if worker_id is not None and run.worker_id != worker_id:
+            return False
         self._runs[run_id] = run.model_copy(
             update={
                 "status": outcome.status,
@@ -218,6 +252,7 @@ class InMemoryRunQueue:
                 "failed_stage": outcome.failed_stage,
                 "error_class": outcome.error_class,
                 "stage_outcomes": outcome.stage_outcomes,
+                "worker_id": None,
                 "lease_until": None,
                 "updated_at": now,
             }
@@ -229,8 +264,9 @@ class InMemoryRunQueue:
             to_state=str(outcome.status),
             attempts=run.attempts,
             worker_id=run.worker_id,
-            reason=outcome.error_class or "completed",
+            reason=reason_for(outcome),
         )
+        return True
 
     def cancel(self, run_id: UUID, tenant_id: str, *, now: datetime) -> Run:
         run = self.get(run_id, tenant_id)

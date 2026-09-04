@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from datetime import datetime, timedelta
     from uuid import UUID
 
-    from docdoc.runs.model import Run, RunOutcome
+    from docdoc.runs.model import Run, RunOutcome, RunStatus
 
 __all__ = ["RunQueue", "RunSpec"]
 
@@ -112,11 +112,37 @@ class RunQueue(Protocol):
 
         What a worker calls on `SIGTERM` instead of letting the lease time out,
         so a rolling restart costs no lease duration (FR-043).
+
+        **Gives the attempt back.** The claim being undone consumed one, and a
+        graceful release is not the evidence `max_attempts` bounds — the worker
+        is alive and the document proved nothing. See `PostgresRunQueue.release`.
         """
         ...
 
-    def finish(self, run_id: UUID, outcome: RunOutcome, *, now: datetime) -> None:
-        """Record a terminal state. Idempotent for a run already terminal."""
+    def finish(
+        self,
+        run_id: UUID,
+        outcome: RunOutcome,
+        *,
+        now: datetime,
+        worker_id: str | None = None,
+        only_from: RunStatus | None = None,
+    ) -> bool:
+        """Record a terminal state. `True` if this call is the one that did.
+
+        Idempotent for a run already terminal, which is what the `False` return
+        reports rather than leaving a caller to infer it.
+
+        `worker_id`, when given, requires the run to **still be held by that
+        worker**. A worker that lost its lease mid-run must not write a verdict
+        for work another worker is redoing — `heartbeat` returning `False` says
+        so, and this is what makes the saying true. Callers that are not workers
+        omit it.
+
+        `only_from`, when given, requires that prior state exactly. `cancel` uses
+        it so that stopping a queued run cannot stop one that was claimed a
+        microsecond earlier.
+        """
         ...
 
     def cancel(self, run_id: UUID, tenant_id: str, *, now: datetime) -> Run:

@@ -56,7 +56,7 @@ def _fresh_queue() -> PostgresRunQueue:
 @pytest.fixture
 def clean_database() -> None:
     psycopg = pytest.importorskip("psycopg")
-    with psycopg.connect(require_database()) as connection:
+    with psycopg.connect(require_database(), autocommit=True) as connection:
         migrations.apply(connection, now=datetime.now(UTC))
         connection.execute("TRUNCATE runs")
 

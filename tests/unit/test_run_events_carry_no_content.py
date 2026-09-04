@@ -115,18 +115,55 @@ def test_the_reason_field_cannot_smuggle_a_document(
     **It moved once and this test is why it was noticed.** The emission used to
     live in `worker._finish`; convergence moved it into the queue, where the
     transition actually happens, and this assertion failed on the old path
-    immediately. Both implementations are checked, because a fake that let a
-    message through would make every test written against it worthless.
-    """
-    import inspect
+    immediately.
 
-    from docdoc.runs import postgres
+    **It moved a second time, and the assertion needed re-aiming rather than
+    reverting.** This searched both queues' source for the literal text
+    ``reason=outcome.error_class or``, which was the right check while that
+    expression was duplicated in two modules. It is now one function,
+    ``observe.reason_for``, and both queues call it — so the property is
+    checkable directly instead of by grep, and a grep for a spelling would have
+    failed on a refactor that made the thing it guards *more* true.
+
+    Asserted over every terminal outcome shape, because the case that motivated
+    the extraction was one this grep could never have caught: a cancelled run
+    carries no ``error_class``, so ``error_class or "completed"`` labelled it a
+    completion, and the literal text was present and correct throughout.
+    """
+    from docdoc.runs.model import RunOutcome, RunStatus
+    from docdoc.runs.observe import REASONS, reason_for
     from tests.fixtures import run_queue
 
-    for module in (postgres, run_queue):
-        source = inspect.getsource(module)
-        assert "reason=outcome.error_class or" in source, (
-            f"{module.__name__} no longer passes a class name as `reason`. "
+    # A message, of the kind that can quote a document. If one of these ever
+    # reaches `reason`, FR-037's rule is broken.
+    smuggled = "ValueError: could not parse 'Acme Corp invoice 4471'"
+
+    succeeded = RunOutcome(status=RunStatus.SUCCEEDED, processing_id="sha256:" + "a" * 64)
+    assert reason_for(succeeded) in REASONS
+    assert reason_for(RunOutcome(status=RunStatus.CANCELLED)) in REASONS
+    assert reason_for(RunOutcome(status=RunStatus.CANCELLED)) != "completed", (
+        "a cancellation is reported as a completion. Nothing refused anything, "
+        "so there is no `error_class` to name, and `error_class or 'completed'` "
+        "made deliberate stops indistinguishable from successes in the one place "
+        "built to make a run's history legible"
+    )
+
+    # A failure names its class and nothing else. The value passed through is
+    # whatever `PipelineResult` reduced to a class name; this pins that the
+    # function does not decorate, prefix, or explain it.
+    named = reason_for(RunOutcome(status=RunStatus.FAILED, error_class="SchemaNotFound"))
+    assert named == "SchemaNotFound"
+    assert smuggled not in named
+
+    # Both implementations route through it, which is what stops the fake from
+    # describing a transition differently from the real queue.
+    for module in ("docdoc.runs.postgres", run_queue.__name__):
+        import importlib
+        import inspect
+
+        source = inspect.getsource(importlib.import_module(module))
+        assert "reason=reason_for(outcome)" in source, (
+            f"{module} no longer routes `reason` through `observe.reason_for`. "
             f"Whatever it passes instead is now the thing that reaches a log "
             f"line, and FR-037's rule — the class name, never the message — has "
             f"to be re-argued for it"
