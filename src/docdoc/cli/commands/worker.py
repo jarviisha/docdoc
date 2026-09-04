@@ -33,6 +33,11 @@ if TYPE_CHECKING:
 
 __all__ = ["run"]
 
+#: How long to wait for the database to answer a connection attempt. The same
+#: value `docdoc.api.app` uses, for the same reason: an untimed connect blocks
+#: for the OS default, which is minutes.
+CONNECT_TIMEOUT_SECONDS = 5
+
 
 def _worker_id() -> str:
     """Host and pid, which is enough.
@@ -75,7 +80,16 @@ def run(args: argparse.Namespace, settings: Settings) -> Rendering:
     from docdoc.runs.postgres import PostgresRunQueue
 
     worker = Worker(
-        queue=PostgresRunQueue(lambda: psycopg.connect(dsn)),
+        # `connect_timeout` matters more here than on the API, which already sets
+        # it. A black-holed database — a security group change, a failover that
+        # left an address answering nothing — makes an untimed `connect` block
+        # for the OS default, and in this process that hangs the claim loop, the
+        # heartbeat thread, and the `/readyz` handler all at once. `/healthz`
+        # keeps answering, because it touches nothing, so an orchestrator sees a
+        # live process that is doing no work and reports nothing about why.
+        queue=PostgresRunQueue(
+            lambda: psycopg.connect(dsn, connect_timeout=CONNECT_TIMEOUT_SECONDS)
+        ),
         blobs=settings.blobs(),
         store=settings.store(),
         registry=settings.registry(),

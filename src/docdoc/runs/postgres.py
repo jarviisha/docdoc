@@ -363,30 +363,47 @@ class PostgresRunQueue:
         )
         return claimed
 
-    def heartbeat(self, run_id: UUID, *, now: datetime, lease: timedelta) -> bool:
+    def heartbeat(
+        self, run_id: UUID, *, now: datetime, lease: timedelta, worker_id: str | None = None
+    ) -> bool:
         """Extend the lease. ``False`` if it was already lost.
 
         The ``lease_until >= now`` predicate is what makes the answer meaningful:
         a worker whose lease lapsed while it was busy has been superseded, and
         must learn that here rather than by writing a result for work another
         worker is redoing.
+
+        **``lease_until >= now`` alone was not enough**, because redelivery
+        renews it. Once another worker claimed the run, the row is ``running``
+        with a fresh lease, so the superseded worker's heartbeat matched — it was
+        told ``True``, never logged ``runs.lease_lost``, and went on extending
+        *the new owner's* lease. Two consequences, both bad in the quiet way:
+        the old worker never learns to stop, and if the new owner then dies its
+        lease is held open by a process that is not executing the run, so
+        redelivery never fires and the run sits ``running`` until its attempts
+        are swept.
+
+        With ``worker_id``, "do I still hold this?" is the question actually
+        asked. Omitting it keeps the old behaviour for callers that are not
+        workers.
         """
         row = self._execute(
-            """
+            f"""
             UPDATE runs
                SET lease_until = %(now)s + %(lease)s,
                    updated_at = %(now)s
              WHERE run_id = %(run_id)s
                AND status = 'running'
                AND lease_until >= %(now)s
+               {"AND worker_id = %(worker_id)s" if worker_id is not None else ""}
             RETURNING run_id
             """,
-            {"run_id": run_id, "now": now, "lease": lease},
+            {"run_id": run_id, "now": now, "lease": lease, "worker_id": worker_id},
             fetch="one",
         )
         return row is not None
 
-    def release(self, run_id: UUID, *, now: datetime) -> None:
+    def release(self, run_id: UUID, *, now: datetime, worker_id: str | None = None) -> None:
         """Return a claimed run to the queue immediately (FR-043).
 
         What a worker calls on `SIGTERM` instead of letting the lease time out,
@@ -409,9 +426,17 @@ class PostgresRunQueue:
         `running` rows, so a run released at the cap was claimable by nobody and
         abandonable by nothing. The sweep now covers that shape as well; between
         them, a run cannot become invisible.
+
+        **``worker_id`` guards it for the same reason ``finish`` needs one, and
+        the consequence here is worse.** A worker that stalled past its lease,
+        was superseded, and then received `SIGTERM` would release a run *another
+        worker is executing* — requeueing it for immediate reclaim while the live
+        attempt carries on, so the same document is processed twice and paid for
+        twice. It would refund the attempt as well, which is exactly the wrong
+        direction: the run the live worker holds would look younger than it is.
         """
         row = self._execute(
-            """
+            f"""
             WITH prior AS (
                 SELECT run_id, worker_id FROM runs WHERE run_id = %(run_id)s
             )
@@ -427,11 +452,13 @@ class PostgresRunQueue:
                    attempts = GREATEST(runs.attempts - 1, 0),
                    updated_at = %(now)s
               FROM prior
-             WHERE runs.run_id = prior.run_id AND runs.status = 'running'
+             WHERE runs.run_id = prior.run_id
+               AND runs.status = 'running'
+               {"AND runs.worker_id = %(worker_id)s" if worker_id is not None else ""}
             RETURNING runs.run_id, runs.tenant_id, runs.attempts,
                       prior.worker_id AS prior_worker
             """,
-            {"now": now, "run_id": run_id},
+            {"now": now, "run_id": run_id, "worker_id": worker_id},
             fetch="one",
         )
         if row is None:

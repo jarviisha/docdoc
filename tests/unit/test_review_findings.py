@@ -429,13 +429,24 @@ def test_a_worker_given_no_factory_uses_what_it_was_constructed_with(tmp_path: A
 
 
 def test_the_readiness_probe_gets_its_own_short_timeout_client() -> None:
-    """`_probe_client` was seeded with the injected client unconditionally.
+    """`_probe_client` was seeded with the injected client, and twice over.
 
-    `stores_from_url` always injects one, so `_probing()` always returned the
-    *pipeline's* client — ten-second connect, thirty-second read, three retries —
-    and `s3_client(probe=True)` was unreachable in production. That is precisely
-    the thread accumulation the `PROBE_*` constants were added to prevent, still
-    present after the fix for it had been written.
+    First unconditionally: `stores_from_url` always injects one, so `_probing()`
+    always returned the *pipeline's* client — ten-second connect, thirty-second
+    read, three retries — and `s3_client(probe=True)` was unreachable in
+    production. That is precisely the thread accumulation the `PROBE_*` constants
+    were added to prevent, still present after the fix for it had been written.
+
+    Then, after the first repair, whenever no `endpoint_url` was given — which
+    repaired MinIO and left **plain AWS exactly as broken**, because an AWS
+    deployment names no endpoint. The fix missed the default cloud configuration
+    it was written for, and this test missed it too, by only ever asking about
+    the MinIO case.
+
+    The question is not "is there an endpoint" but "did *we* build this client,
+    so can we build another like it?" — which is what `rebuild_probe` says. A
+    caller who injected a client cannot be second-guessed: its credentials,
+    region, and session are not ours to reproduce.
     """
     pytest.importorskip("boto3", reason="the S3 stores need docdoc[s3]")
 
@@ -443,15 +454,17 @@ def test_the_readiness_probe_gets_its_own_short_timeout_client() -> None:
 
     injected = object()
 
-    # A store built with an endpoint can rebuild, so the probe is its own client.
-    with_endpoint = S3BlobStore("b", client=injected, endpoint_url="http://minio:9000")
-    assert with_endpoint._probe_client is None, (
-        "the probe was seeded with the pipeline's client, so the short-timeout "
-        "configuration is never the one used"
-    )
+    # Both shapes `stores_from_url` produces: MinIO, and plain AWS with no
+    # endpoint at all. The second is the one the previous fix left broken.
+    for endpoint in ("http://minio:9000", None):
+        ours = S3BlobStore("b", client=injected, endpoint_url=endpoint, rebuild_probe=True)
+        assert ours._probe_client is None, (
+            f"with endpoint_url={endpoint!r} the probe was seeded with the "
+            "pipeline's client, so the short-timeout configuration is never used"
+        )
 
-    # A stub with no endpoint has nothing to rebuild from, so it reuses it. That
-    # is the case the seeding was for; it just was not the only case it caught.
+    # A client we did not build is reused, because nothing else can be. That is
+    # the case the seeding was for; it just was not the only case it caught.
     stub_only = S3BlobStore("b", client=injected)
     assert stub_only._probing() is injected
 
@@ -469,6 +482,14 @@ def test_stores_built_from_a_url_can_reach_the_probe_configuration() -> None:
             "stores_from_url kept the endpoint only inside the client it built, "
             "so neither store could construct the probe variant"
         )
+        assert store._probe_client is None, (
+            "the store it built cannot construct a probe client, so readiness "
+            "would poll with the pipeline's ten-second timeouts"
+        )
+
+    # And with no endpoint — the plain-AWS form — the same must hold.
+    for store in stores_from_url("s3://bucket/prefix"):
+        assert store._probe_client is None
 
 
 # -- readiness must not block the event loop ------------------------------------
@@ -570,3 +591,282 @@ def test_migrations_refuse_a_connection_that_would_undo_them() -> None:
 
     with pytest.raises(RuntimeError, match="autocommit"):
         migrations.apply(_Transactional(), now=NOW)
+
+
+# =============================================================================
+# The second review pass. Ten more, and the theme had shifted.
+#
+# The first round was about guards that did not exist. This one is mostly about
+# guards that exist on *one* of several methods that need them — `finish` grew an
+# ownership predicate and `release` and `heartbeat` did not; blob reads learned
+# to tell absent from unreachable and `size_of` did not; the probe client was
+# repaired for MinIO and not for AWS.
+#
+# That is what a partial fix looks like from the inside: each change is correct
+# where it was applied, and the hole moves one method along. Every test below
+# asks the same question of every method that should answer it the same way.
+# =============================================================================
+
+
+class TestEveryLeaseOperationChecksWhoIsHolding:
+    """`finish` got the ownership guard; `release` and `heartbeat` did not.
+
+    All three are lease operations and all three are wrong without it, but only
+    one had been shown to be wrong — so only one was fixed, and the other two
+    kept the shape the first one had just been repaired for.
+    """
+
+    def _superseded(self) -> tuple[InMemoryRunQueue, Any]:
+        """w1 stalls past its lease; w2 takes the run over."""
+        queue = InMemoryRunQueue()
+        run = _queued(queue)
+        assert queue.claim(worker_id="w1", now=NOW, lease=LEASE, max_attempts=3) is not None
+        live = queue.claim(worker_id="w2", now=LATER, lease=LEASE, max_attempts=3)
+        assert live is not None
+        return queue, run
+
+    def test_a_superseded_worker_is_told_it_lost_the_lease(self) -> None:
+        """`lease_until >= now` is not enough, because redelivery renews it.
+
+        Told `True`, the old worker never logs `runs.lease_lost` and goes on
+        extending *the new owner's* lease — so it never learns to stop, and if
+        the new owner then dies the lease is held open by a process that is not
+        executing the run. Redelivery never fires.
+        """
+        queue, run = self._superseded()
+
+        assert queue.heartbeat(run.run_id, now=LATER, lease=LEASE, worker_id="w1") is False
+        assert queue.heartbeat(run.run_id, now=LATER, lease=LEASE, worker_id="w2") is True
+
+    def test_a_superseded_worker_shutting_down_does_not_requeue_the_live_run(self) -> None:
+        """The worst of the three, because it duplicates paid work.
+
+        A stalled worker that is then signalled would release a run another
+        worker is actively executing — requeueing it for immediate reclaim while
+        the live attempt carries on. The same document is processed twice and the
+        provider is paid twice. It also refunded the attempt, so the run the live
+        worker holds would look younger than it is.
+        """
+        queue, run = self._superseded()
+        before = queue.get(run.run_id, "default")
+        assert before is not None
+
+        queue.release(run.run_id, now=LATER, worker_id="w1")
+
+        after = queue.get(run.run_id, "default")
+        assert after is not None
+        assert after.status is RunStatus.RUNNING, "a superseded worker requeued a live run"
+        assert after.worker_id == "w2"
+        assert after.attempts == before.attempts, "and refunded an attempt it had not spent"
+
+    def test_the_worker_that_holds_it_can_still_release_it(self) -> None:
+        """The guard must not break the case it exists to protect."""
+        queue = InMemoryRunQueue()
+        run = _queued(queue)
+        queue.claim(worker_id="w1", now=NOW, lease=LEASE, max_attempts=3)
+
+        queue.release(run.run_id, now=NOW, worker_id="w1")
+
+        after = queue.get(run.run_id, "default")
+        assert after is not None
+        assert after.status is RunStatus.QUEUED
+        assert after.attempts == 0
+
+
+def test_an_unreachable_database_after_the_claim_does_not_kill_the_worker() -> None:
+    """The asymmetry that mattered most during an outage.
+
+    `RunStateUnavailableError` at `claim` logged a warning and retried — the loop
+    says so in a comment. The identical error one moment later at `finish` or
+    `release` was not caught anywhere and terminated the process. So a database
+    blip killed precisely the workers that were doing work, and left the idle
+    ones running.
+    """
+    import logging
+
+    from docdoc.runs.errors import RunStateUnavailableError as Unavailable
+    from docdoc.runs.worker import Worker
+
+    class _FinishFails:
+        def __init__(self) -> None:
+            self.run = _queued(InMemoryRunQueue())
+
+        def claim(self, **_: Any) -> Any:
+            return self.run.model_copy(
+                update={"status": RunStatus.RUNNING, "worker_id": "w1", "attempts": 1}
+            )
+
+        def heartbeat(self, *_: Any, **__: Any) -> bool:
+            return True
+
+        def finish(self, *_: Any, **__: Any) -> bool:
+            raise Unavailable("the database went away mid-run")
+
+    class _Registry:
+        def resolve(self, identity: str) -> object:
+            raise LookupError("withdrawn")  # reaches `finish` without a pipeline
+
+    queue = _FinishFails()
+    worker = Worker(
+        queue=queue,
+        blobs=None,
+        store=None,
+        registry=_Registry(),
+        adapter=None,
+        worker_id="w1",
+    )
+
+    original = queue.claim
+
+    def claim_then_stop(**kwargs: Any) -> Any:
+        worker.stop()
+        return original(**kwargs)
+
+    queue.claim = claim_then_stop  # type: ignore[method-assign]
+
+    logging.getLogger("docdoc.runs").setLevel(logging.WARNING)
+
+    # The assertion is that this returns at all. Before the handler existed the
+    # `RunStateUnavailableError` from `finish` propagated out of `run_forever`,
+    # out of the command, and took the process with it.
+    worker.run_forever()
+
+
+class TestAMissingBucketIsNotAMissingDocument:
+    """`_is_missing` counted `NoSuchBucket`, and blob reads used it.
+
+    For an *artifact* that is right: ADR-0010 §4's answer to every kind of miss
+    is the same one, run without reuse. For the *document* it is not. A bucket
+    that is not there is a typo in `DOCDOC_STORE_URL`, a bucket deleted
+    underneath the deployment, or a credential without access — and none of those
+    means this document does not exist.
+
+    The worker reads `None` as terminal, so a wrong bucket failed **every** run it
+    claimed as `failed / UnknownBlob`, permanently, and sent the operator to look
+    for documents that were never missing.
+    """
+
+    def _error(self, code: str) -> Exception:
+        error = RuntimeError(code)
+        error.response = {"Error": {"Code": code}}  # type: ignore[attr-defined]
+        return error
+
+    def test_a_missing_key_is_still_absent(self) -> None:
+        from docdoc.artifacts.s3 import _blob_is_absent
+
+        assert _blob_is_absent(self._error("NoSuchKey")) is True
+        assert _blob_is_absent(self._error("404")) is True
+
+    def test_a_missing_bucket_is_not(self) -> None:
+        from docdoc.artifacts.s3 import _blob_is_absent, _is_missing
+
+        assert _blob_is_absent(self._error("NoSuchBucket")) is False
+        # And the artifact side still treats it as a miss, which is correct
+        # there: for a cache, every kind of miss has the same answer.
+        assert _is_missing(self._error("NoSuchBucket")) is True
+
+    def test_an_outage_is_neither(self) -> None:
+        from docdoc.artifacts.s3 import _blob_is_absent
+
+        assert _blob_is_absent(self._error("SlowDown")) is False
+        assert _blob_is_absent(RuntimeError("connection reset")) is False
+
+
+def test_size_of_distinguishes_absent_from_unreadable_like_get_does() -> None:
+    """The cheaper existence check had the conflation `get` had just lost.
+
+    The API uses `size_of` to decide whether a document is here, so a `None` for
+    an unreachable store would report the document gone — the same wrong answer,
+    one method along.
+    """
+    import tempfile
+
+    from docdoc.artifacts.blobs import BlobStore
+
+    with tempfile.TemporaryDirectory() as root:
+        store = BlobStore(root)
+        # Absent is still `None`: the distinction is only useful if the ordinary
+        # answer is unchanged.
+        assert store.size_of("sha256:" + "a" * 64) is None
+
+        blob_id = store.put(b"a document that exists")
+        assert store.size_of(blob_id) == len(b"a document that exists")
+
+
+def test_a_malformed_identity_is_refused_rather_than_reported_as_a_miss() -> None:
+    """`_key_for` sat inside the `try`, so `_digest_of`'s refusal was swallowed.
+
+    Three consequences, none of them visible: the caller was told "not found" for
+    what is a bug in their identity, a false "store unreachable" was logged, and
+    that log burned the one-shot `DegradationLog` slot — so the *next* genuine
+    outage went unlogged. `S3BlobStore.get` and `FileArtifactStore` both raise;
+    this was the outlier.
+    """
+    pytest.importorskip("boto3", reason="the S3 stores need docdoc[s3]")
+
+    from docdoc.artifacts.s3 import S3ArtifactStore
+
+    class _NeverCalled:
+        def get_object(self, **_: Any) -> None:
+            raise AssertionError("a malformed identity must not reach the network")
+
+    store = S3ArtifactStore("bucket", client=_NeverCalled())
+
+    with pytest.raises(ArtifactError) as refused:
+        store.envelope("not-a-content-address")
+
+    assert refused.value.reason == "malformed_id"
+
+
+class TestTheRunTuningFlagsAreValidated:
+    """`if explicit:` let both a negative and a zero through.
+
+    A negative attempt limit is the dangerous one. The claim requires
+    `attempts < max_attempts` and the sweep abandons at `attempts >=
+    max_attempts`, so `-1` makes every queued run match the sweep and none match
+    the claim: one cycle abandons the entire backlog as `RunAbandonedError`,
+    terminally, over documents that are fine.
+    """
+
+    @pytest.mark.parametrize("bad", [0, -1, -90])
+    def test_a_non_positive_value_is_refused_by_name(self, bad: int) -> None:
+        from docdoc.runs.identity import configured_lease, configured_max_attempts
+
+        with pytest.raises(ValueError, match="--lease-seconds"):
+            configured_lease(bad)
+        with pytest.raises(ValueError, match="--max-attempts"):
+            configured_max_attempts(bad)
+
+    def test_the_command_line_reports_it_as_a_usage_error(self) -> None:
+        """Exit 64 and one sentence, the way every other limit flag already does.
+
+        A `ValueError` escaping to a traceback would be a worse answer than the
+        silence it replaced.
+        """
+        import argparse
+
+        from docdoc.cli import _limit_usage_error
+
+        assert _limit_usage_error(argparse.Namespace(max_attempts=-1)) is not None
+        assert "--max-attempts" in str(_limit_usage_error(argparse.Namespace(max_attempts=-1)))
+        assert _limit_usage_error(argparse.Namespace(lease_seconds=0)) is not None
+        assert _limit_usage_error(argparse.Namespace(lease_seconds=90, max_attempts=3)) is None
+
+
+def test_an_unreachable_store_is_a_503_rather_than_a_404() -> None:
+    """The conflation the blob stores lost, arriving at the boundary instead.
+
+    Submission asked "is this document here?" and an unreachable store answered
+    the question wrongly all the way up: `404 UnknownBlob`, telling a caller their
+    document was gone when the store was merely down.
+
+    Mapped in `status_for` rather than caught at the call site, so there is one
+    place that decides what a typed error means over HTTP.
+    """
+    from docdoc.api.errors import status_for
+
+    assert status_for(ArtifactError("gone", reason="unavailable")) == 503
+    # A store nobody configured is a deployment fault, not a transient one.
+    # Retrying will not conjure a store, so it stays where the contract has it.
+    assert status_for(ArtifactError("none", reason="not_configured")) == 500
+    assert status_for(ArtifactError("corrupt", reason="integrity")) == 500

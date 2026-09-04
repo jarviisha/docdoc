@@ -90,10 +90,20 @@ def stores_from_url(url: str, *, tenant_id: str = "default") -> tuple[Any, Any]:
     # the readiness variant was unreachable code in production.
     return (
         S3ArtifactStore(
-            bucket, client=client, prefix=prefix, tenant_id=tenant_id, endpoint_url=endpoint
+            bucket,
+            client=client,
+            prefix=prefix,
+            tenant_id=tenant_id,
+            endpoint_url=endpoint,
+            rebuild_probe=True,
         ),
         S3BlobStore(
-            bucket, client=client, prefix=prefix, tenant_id=tenant_id, endpoint_url=endpoint
+            bucket,
+            client=client,
+            prefix=prefix,
+            tenant_id=tenant_id,
+            endpoint_url=endpoint,
+            rebuild_probe=True,
         ),
     )
 
@@ -196,7 +206,35 @@ def _is_missing(error: Exception) -> bool:
     if not isinstance(response, dict):
         return False
     code = str(response.get("Error", {}).get("Code", ""))
-    return code in {"NoSuchKey", "404", "NoSuchBucket"}
+    return code in _MISSING_CODES
+
+
+#: What "not there" means for an *artifact*, which is a cache. A missing bucket
+#: counts, because ADR-0010 §4's answer to every kind of miss is the same one:
+#: run without reuse.
+_MISSING_CODES = frozenset({"NoSuchKey", "404", "NoSuchBucket"})
+
+#: What it means for a *blob*, which is the document itself. `NoSuchBucket` is
+#: deliberately absent. A bucket that is not there is a store this process cannot
+#: reach — a typo in `DOCDOC_STORE_URL`, a bucket deleted underneath it, a
+#: credential without access — and none of those means "this document does not
+#: exist". Counting it as a miss made the worker finish *every* run it claimed as
+#: `failed / UnknownBlob`, terminally, over documents that were never missing,
+#: which is the conflation `S3BlobStore.get`'s own docstring forbids.
+_ABSENT_BLOB_CODES = frozenset({"NoSuchKey", "404"})
+
+
+def _blob_is_absent(error: Exception) -> bool:
+    """Whether a boto3 error means this document is not here.
+
+    Narrower than `_is_missing` and the difference is the point: for a cache,
+    "no bucket" and "no key" both mean run without reuse; for the document, only
+    one of them means the document is absent.
+    """
+    response = getattr(error, "response", None)
+    if not isinstance(response, dict):
+        return False
+    return str(response.get("Error", {}).get("Code", "")) in _ABSENT_BLOB_CODES
 
 
 class _S3Base:
@@ -210,6 +248,7 @@ class _S3Base:
         prefix: str = "",
         tenant_id: str = "default",
         endpoint_url: str | None = None,
+        rebuild_probe: bool = False,
     ) -> None:
         self._bucket = bucket
         self._client = client if client is not None else s3_client(endpoint_url=endpoint_url)
@@ -217,20 +256,23 @@ class _S3Base:
         # deployment that never serves a readiness route never opens a second
         # connection pool.
         #
-        # **Seeded only when there is no way to build one.** This used to be
-        # seeded with `client` unconditionally, and since `stores_from_url`
-        # always injects a client, `_probing()` always returned the *pipeline's*
-        # client: ten-second connect, thirty-second read, three retries. So every
-        # deployment probed with the timeouts the `PROBE_*` constants exist to
-        # avoid, and the readiness variant was code nothing reached — the exact
-        # thread-accumulation failure research R13 describes, still present after
-        # the fix for it had been written.
+        # **`rebuild_probe` is the discriminator, and getting it wrong twice is
+        # what earned it a parameter.** This was seeded with `client`
+        # unconditionally, so `_probing()` always returned the *pipeline's*
+        # client — ten-second connect, thirty-second read, three retries — and
+        # `s3_client(probe=True)` was unreachable in production. The first fix
+        # keyed off `endpoint_url is None`, which repaired MinIO and left plain
+        # AWS exactly as broken, because AWS deployments name no endpoint: the
+        # default cloud configuration the fix was written for was the one case it
+        # still missed.
         #
-        # An injected client with no endpoint is a test stub, and there the probe
-        # reuses it because nothing else can be built. That is the case the
-        # seeding was for; it just was not the only case it caught.
+        # The real question is not "is there an endpoint" but "did *we* build
+        # this client, so can we build another like it?". `stores_from_url` can
+        # and says so; a caller who injected a client cannot be second-guessed,
+        # because its credentials, region, and session are not ours to reproduce,
+        # so the probe reuses what it was given.
         self._endpoint_url = endpoint_url
-        self._probe_client: Any = client if endpoint_url is None else None
+        self._probe_client: Any = None if rebuild_probe else client
         # `tenant_root` returns "" for the default tenant, so an existing
         # deployment's objects stay exactly where they are (FR-084a). Do not
         # "tidy" this into an unconditional prefix; see that function's docstring.
@@ -295,7 +337,7 @@ class S3BlobStore(_S3Base):
         except ArtifactError:
             raise
         except Exception as error:
-            if _is_missing(error):
+            if _blob_is_absent(error):
                 return None
             if self._degradations.first_time("blob_unreadable"):
                 _logger.warning(
@@ -318,13 +360,27 @@ class S3BlobStore(_S3Base):
     def size_of(self, blob_id: str) -> int | None:
         try:
             response = self._client.head_object(Bucket=self._bucket, Key=self._key_for(blob_id))
+        except ArtifactError:
+            raise
         except Exception as error:
-            if not _is_missing(error) and self._degradations.first_time("blob_unreadable"):
+            if _blob_is_absent(error):
+                return None
+            if self._degradations.first_time("blob_unreadable"):
                 _logger.warning(
                     "blob store unreachable",
                     extra={"event": "artifacts.blob_unreadable", "blob_id": blob_id},
                 )
-            return None
+            # Raises for the same reason `get` does. This is the cheaper of the
+            # two existence checks and the API uses it, so a caller that got
+            # `None` here would report a document absent because the store was
+            # unreachable -- the identical conflation, one method along.
+            raise ArtifactError(
+                "the blob store could not be reached; this is not the same as the "
+                "document being absent, and the caller must not treat it as such",
+                reason="unavailable",
+                artifact_id=blob_id,
+                root=self.root,
+            ) from error
         return int(response["ContentLength"])
 
     def probe(self) -> None:
@@ -418,8 +474,16 @@ class S3ArtifactStore(_S3Base):
         envelope for any reason — including explaining a derivation — cannot
         return one whose bytes are not what was written.
         """
+        # Outside the `try`, because `_digest_of` raises `ArtifactError` for a
+        # malformed identity and that is a caller's bug rather than a miss. Inside
+        # it, the refusal was swallowed as "not found", logged once as "store
+        # unreachable" -- which was false -- and burned the one-shot
+        # `DegradationLog` slot, so the *next* genuine outage went unlogged.
+        # `S3BlobStore.get` and `FileArtifactStore` both raise; this was the
+        # outlier.
+        key = self._key_for(artifact_id)
         try:
-            response = self._client.get_object(Bucket=self._bucket, Key=self._key_for(artifact_id))
+            response = self._client.get_object(Bucket=self._bucket, Key=key)
             raw = response["Body"].read().decode("utf-8")
         except Exception as error:
             if _is_missing(error):

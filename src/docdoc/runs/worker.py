@@ -172,7 +172,7 @@ def execute_one(
     # not nothing. Every completed stage kept its artifact, so the worker that
     # picks it up resumes rather than restarts.
     if outcome.status is RunStatus.CANCELLED and not _cancellation_requested(queue, run):
-        queue.release(run.run_id, now=now)
+        queue.release(run.run_id, now=now, worker_id=run.worker_id)
         return result
 
     # **A `processing_id` is a promise that the identity resolves**, and until
@@ -341,6 +341,22 @@ class Worker:
 
             try:
                 self._execute_with_heartbeat(claimed)
+            except RunStateUnavailableError:
+                # The database went away *after* the claim — while finishing or
+                # releasing. Survivable for exactly the reason the claim's own
+                # handler gives above, and it was not handled here: the run is
+                # left unfinished, so its lease lapses and another attempt picks
+                # it up with every completed stage's artifact intact.
+                #
+                # Untreated, this was the asymmetry that mattered most in an
+                # outage: an unreachable database at `claim` logged a warning and
+                # retried, and the identical error one moment later at `finish`
+                # terminated the process. A database blip therefore killed
+                # precisely the workers that were doing work.
+                _logger.warning(
+                    '{"event": "runs.queue_unavailable", "run_id": "%s"}', claimed.run_id
+                )
+                self._stopping.wait(_IDLE_SLEEP_SECONDS)
             except ArtifactError as unavailable:
                 if unavailable.reason != "unavailable":
                     # A corrupt or conflicting artifact is a fault to surface,
@@ -555,7 +571,14 @@ class _Heartbeat:
         while not self._stopping.wait(self._interval):
             try:
                 held = self._queue.heartbeat(
-                    self._run.run_id, now=identity.now(), lease=self._lease
+                    self._run.run_id,
+                    now=identity.now(),
+                    lease=self._lease,
+                    # Without this the answer is about the *run*, not about this
+                    # worker's claim on it: a superseded worker matched the
+                    # `running` row the new owner had just renewed, was told
+                    # `True`, and went on extending somebody else's lease.
+                    worker_id=self._run.worker_id,
                 )
             except RunStateUnavailableError:
                 continue

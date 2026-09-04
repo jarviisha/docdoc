@@ -116,20 +116,44 @@ class BlobStore:
             ) from error
 
     def size_of(self, blob_id: str) -> int | None:
-        """The stored size in bytes, for metadata without reading the document."""
+        """The stored size in bytes, for metadata without reading the document.
+
+        Three answers, like `get`: a size, ``None`` for absent, and a raise for a
+        store that cannot be read. It is the cheaper of the two existence checks
+        and the API uses it for exactly that, so collapsing the last two here
+        would let an unreachable mount be reported to a caller as "no such
+        document" — the conflation this class fixed one method along.
+        """
         try:
             return self._path_for(blob_id).stat().st_size
-        except (FileNotFoundError, OSError):
+        except FileNotFoundError:
             return None
+        except OSError as error:
+            if self._degradations.first_time("unreadable"):
+                _logger.warning(
+                    "blob store unreadable",
+                    extra={
+                        "event": "artifacts.blob_unreadable",
+                        "blob_id": blob_id,
+                        "error": type(error).__name__,
+                    },
+                )
+            raise ArtifactError(
+                "the blob store could not be read; this is not the same as the "
+                "document being absent, and the caller must not treat it as such",
+                reason="unavailable",
+                artifact_id=blob_id,
+                root=str(self.root),
+            ) from error
 
     def probe(self) -> None:
         """Reach the store and return, or raise. What readiness asks (FR-054).
 
-        A separate method rather than a call to ``size_of`` because that one
-        cannot answer this question: it swallows ``OSError`` and returns ``None``
-        for an unreadable store as well as an absent blob, which is the correct
-        behaviour for reuse — ADR-0010 §4's "run without reuse rather than fail"
-        — and useless as a probe, since every answer is the same answer.
+        A separate method rather than a call to ``size_of`` because the two ask
+        different questions. ``size_of`` asks about a *document* and needs one to
+        name; readiness asks whether the store is there at all, and a deployment
+        with an empty store is perfectly ready. Statting the root answers the
+        second without inventing an identity to look up.
 
         Statting the root rather than reading a fixed key: a filesystem store's
         root is what can vanish under it, and a missing key proves nothing about

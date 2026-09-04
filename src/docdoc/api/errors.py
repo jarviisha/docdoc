@@ -87,12 +87,33 @@ _UNSUPPORTED_BY_REASON = {
 }
 
 
+#: ``ArtifactError`` is the same shape of problem: one class, several conditions,
+#: and one of them is not a server fault at all. A store that cannot be *reached*
+#: is a dependency outage — retryable, and the caller should be told so — while a
+#: corrupt envelope or a divergent write really is a 500.
+#:
+#: Without this, an unreachable store surfaced as ``500`` from the metadata route
+#: and as ``404 UnknownBlob`` from run submission, which told a caller their
+#: document was gone when the store was merely down. The blob stores stopped
+#: conflating absent with unreachable; this is the same distinction arriving at
+#: the boundary that reports it.
+#: `not_configured` is deliberately **not** here, and the existing contract test
+#: was right to refuse it. A store nobody configured is a deployment fault, not a
+#: transient one: 503 tells the caller to retry, and retrying will not conjure a
+#: store. That stays 500, which is what `contracts/http-api.md` §6 documents.
+_ARTIFACT_BY_REASON = {
+    "unavailable": 503,
+}
+
+
 def status_for(error: BaseException) -> int:
     """The HTTP status this typed error maps to."""
     name = type(error).__name__
+    reason = str(getattr(error, "reason", "") or "")
     if name == "UnsupportedDocumentError":
-        reason = str(getattr(error, "reason", "") or "")
         return _UNSUPPORTED_BY_REASON.get(reason, 415)
+    if name == "ArtifactError" and reason in _ARTIFACT_BY_REASON:
+        return _ARTIFACT_BY_REASON[reason]
     return STATUS_BY_ERROR.get(name, _DEFAULT_STATUS)
 
 

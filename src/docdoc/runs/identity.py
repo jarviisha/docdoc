@@ -87,19 +87,45 @@ def configured_lease(explicit: int | None = None) -> timedelta:
 
     The precedence FR-083 requires of every setting, in one place rather than at
     each call site that needs it.
+
+    **An explicit value is validated; an environment one is not**, and the
+    asymmetry is deliberate. A malformed variable falls back to the default
+    because a worker that dies over a typo in a tuning knob turns a cosmetic
+    mistake into an outage. A flag typed on the command line is different: the
+    operator is present, is watching, and silently getting the default is the one
+    outcome that wastes their time. `--lease-seconds 0` used to do exactly that.
     """
-    if explicit:
-        return timedelta(seconds=explicit)
+    if explicit is not None:
+        return timedelta(seconds=_demand_positive(explicit, "--lease-seconds"))
     seconds = _positive_int(os.environ.get(LEASE_SECONDS_ENV, ""))
     return DEFAULT_LEASE if seconds is None else timedelta(seconds=seconds)
 
 
 def configured_max_attempts(explicit: int | None = None) -> int:
-    """How many claims a run gets before abandonment. Same precedence."""
-    if explicit:
-        return explicit
+    """How many claims a run gets before abandonment. Same precedence.
+
+    Validated for a reason worse than a wasted afternoon. `--max-attempts -1`
+    passed straight through, and the claim requires ``attempts < max_attempts``
+    while the sweep abandons at ``attempts >= max_attempts`` — so a negative
+    value makes *every queued run* match the sweep and nothing match the claim.
+    One cycle abandons the entire backlog as `RunAbandonedError`, terminally, and
+    the word sends the operator to look at documents that are fine.
+    """
+    if explicit is not None:
+        return _demand_positive(explicit, "--max-attempts")
     configured = _positive_int(os.environ.get(MAX_ATTEMPTS_ENV, ""))
     return DEFAULT_MAX_ATTEMPTS if configured is None else configured
+
+
+def _demand_positive(value: int, flag: str) -> int:
+    """An explicitly-given tuning value, or a refusal naming the flag."""
+    if value <= 0:
+        raise ValueError(
+            f"{flag} must be a positive integer, not {value}. A lease of zero "
+            "expires before it is taken and a negative attempt limit abandons "
+            "every queued run on the first claim cycle"
+        )
+    return value
 
 
 def _positive_int(raw: str) -> int | None:

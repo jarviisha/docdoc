@@ -98,16 +98,23 @@ class RunQueue(Protocol):
         """
         ...
 
-    def heartbeat(self, run_id: UUID, *, now: datetime, lease: timedelta) -> bool:
+    def heartbeat(
+        self, run_id: UUID, *, now: datetime, lease: timedelta, worker_id: str | None = None
+    ) -> bool:
         """Extend the lease. `False` if it was already lost.
 
         A worker that reads `False` has been superseded — another worker claimed
         the run after its lease lapsed — and must abandon what it is doing rather
         than write a result for work that is being redone.
+
+        `worker_id`, when given, makes that answer true. Without it a superseded
+        worker is told `True` and keeps extending *the new owner's* lease, so it
+        never learns to stop and the run cannot be redelivered if the new owner
+        dies too.
         """
         ...
 
-    def release(self, run_id: UUID, *, now: datetime) -> None:
+    def release(self, run_id: UUID, *, now: datetime, worker_id: str | None = None) -> None:
         """Return a claimed run to the queue immediately.
 
         What a worker calls on `SIGTERM` instead of letting the lease time out,
@@ -116,6 +123,10 @@ class RunQueue(Protocol):
         **Gives the attempt back.** The claim being undone consumed one, and a
         graceful release is not the evidence `max_attempts` bounds — the worker
         is alive and the document proved nothing. See `PostgresRunQueue.release`.
+
+        `worker_id`, when given, requires the run to still be held by that
+        worker. A superseded worker shutting down would otherwise requeue a run
+        another worker is executing — and refund its attempt.
         """
         ...
 

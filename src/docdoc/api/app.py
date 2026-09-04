@@ -774,7 +774,6 @@ def _router() -> APIRouter:
         from stage outputs (ADR-0013 §1). That is the whole reason this is a new
         resource rather than a ``pending`` status on ``GET /v1/jobs``.
         """
-        from docdoc.artifacts import ArtifactError
         from docdoc.runs.errors import RunStateUnavailableError
         from docdoc.runs.identity import DEFAULT_RETENTION, deadline, new_run_id, now
 
@@ -815,11 +814,23 @@ def _router() -> APIRouter:
         # Another tenant's blob reaches the same branch by being absent from this
         # tenant's namespace, so it gets the same body — no comparison, and
         # therefore nothing to forget (FR-066).
-        try:
-            known = blobs.get(blob_id) is not None
-        except ArtifactError:
-            known = False
-        if not known:
+        # `size_of` rather than `get`: this asks whether the document is here,
+        # and `get` answered it by reading the whole thing into the API process
+        # and discarding it. The metadata route already uses `size_of` for the
+        # same question. On a fifty-megabyte scan that is fifty megabytes of
+        # resident memory per concurrent submission, bought to compare against
+        # `None`.
+        #
+        # An unreachable store is **not** a 404. That conflation is the one this
+        # milestone fixed inside the blob stores, and answering "no such document
+        # here" for an outage would reintroduce it one layer up — telling a
+        # caller their document is gone when the store is merely down.
+        # An unreachable store raises rather than answering `None`, and it is
+        # deliberately *not* caught here: `api.errors.status_for` maps
+        # `ArtifactError(reason="unavailable")` to 503, so the outage is reported
+        # as one from the single place that maps every typed error. Catching it
+        # here would be a second such place, and the two would drift.
+        if blobs.size_of(blob_id) is None:
             return JSONResponse(
                 status_code=404,
                 content={"error": {"class": "UnknownBlob", "message": "no such document here"}},

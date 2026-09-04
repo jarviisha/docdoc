@@ -250,13 +250,30 @@ def _usage_error(args: argparse.Namespace) -> str | None:
 
 
 def _limit_usage_error(args: argparse.Namespace) -> str | None:
-    """A size limit of zero or less is an invocation error, not a run failure.
+    """A limit of zero or less is an invocation error, not a run failure.
 
-    Checked for every command that carries the flags rather than only the two
+    Checked for every command that carries the flags rather than only the ones
     that consult them, because ``docdoc explain --max-pages 0`` is just as wrong
     and telling the user so costs nothing.
+
+    Exit ``64`` and one sentence naming the flag the operator typed. The
+    alternative is what these produced before: a pydantic dump naming a field
+    nobody typed, or — for the run knobs — silence.
     """
-    flags = (("--max-document-bytes", "max_document_bytes"), ("--max-pages", "max_pages"))
+    flags = (
+        ("--max-document-bytes", "max_document_bytes"),
+        ("--max-pages", "max_pages"),
+        # The two run knobs, which were not here and needed to be. `--max-attempts
+        # -1` reached the queue unvalidated, where the claim requires
+        # `attempts < max_attempts` and the sweep abandons at
+        # `attempts >= max_attempts` — so a single cycle abandoned the whole
+        # queued backlog as `RunAbandonedError`, terminally, over documents that
+        # were fine. `--lease-seconds 0` was quieter and still wrong: it fell
+        # through to the default, so the operator got a value they did not ask
+        # for and no indication of it.
+        ("--lease-seconds", "lease_seconds"),
+        ("--max-attempts", "max_attempts"),
+    )
     for flag, attribute in flags:
         value = getattr(args, attribute, None)
         if value is not None and value <= 0:

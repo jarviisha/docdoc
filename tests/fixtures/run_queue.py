@@ -188,16 +188,30 @@ class InMemoryRunQueue:
         )
         return claimed
 
-    def heartbeat(self, run_id: UUID, *, now: datetime, lease: timedelta) -> bool:
+    def heartbeat(
+        self, run_id: UUID, *, now: datetime, lease: timedelta, worker_id: str | None = None
+    ) -> bool:
         run = self._runs.get(run_id)
         if run is None or run.status is not RunStatus.RUNNING or run.lease_expired_at(now):
+            return False
+        # Redelivery renews the lease, so the two checks above pass for a worker
+        # that has already been superseded. Only this one tells it so.
+        if worker_id is not None and run.worker_id != worker_id:
             return False
         self._runs[run_id] = run.model_copy(update={"lease_until": now + lease, "updated_at": now})
         return True
 
-    def release(self, run_id: UUID, *, now: datetime) -> None:
+    def release(self, run_id: UUID, *, now: datetime, worker_id: str | None = None) -> None:
         run = self._runs.get(run_id)
         if run is None or run.is_terminal:
+            return
+        # `status = 'running'` is a predicate in the real statement, and the fake
+        # accepted a queued run — so a double release looked fine here and did
+        # nothing there, which is the direction that hides a bug rather than
+        # inventing one.
+        if run.status is not RunStatus.RUNNING:
+            return
+        if worker_id is not None and run.worker_id != worker_id:
             return
         self._runs[run_id] = run.model_copy(
             update={
@@ -284,8 +298,20 @@ class InMemoryRunQueue:
 
         self._cancel_requested.add(run_id)
         if run.status is RunStatus.QUEUED:
-            self.finish(run_id, RunOutcome(status=RunStatus.CANCELLED), now=now)
-            return self._runs[run_id]
+            # `only_from` exactly as the real `cancel` passes it. Without it the
+            # claim-race branch below is unreachable through this fake, so the
+            # guard that closes the race could be deleted and every test here
+            # would still pass.
+            if self.finish(
+                run_id,
+                RunOutcome(status=RunStatus.CANCELLED),
+                now=now,
+                only_from=RunStatus.QUEUED,
+            ):
+                return self._runs[run_id]
+            run = self._runs[run_id]
+            if run.is_terminal:
+                return run
 
         # Running: the request is recorded and the run keeps reading `running`
         # until the worker reaches a stage boundary. Returning `cancelled` here

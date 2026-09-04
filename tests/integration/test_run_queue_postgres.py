@@ -499,3 +499,56 @@ def test_a_cancellation_is_logged_as_one(
     ]
     assert "cancelled" in reasons, f"the cancellation was logged as {reasons}"
     assert "completed" not in reasons
+
+
+# -- the second review pass, against the statements ---------------------------
+
+
+def test_heartbeat_tells_a_superseded_worker_it_lost_the_run(queue: PostgresRunQueue) -> None:
+    """`lease_until >= now` is not enough, because redelivery renews it.
+
+    Once w2 claims, the row is `running` with a fresh lease, so w1's heartbeat
+    matched: it was told `True`, never logged `runs.lease_lost`, and went on
+    extending *w2's* lease. If w2 then died, that lease would be held open by a
+    process not executing the run, and redelivery would never fire.
+    """
+    at = datetime(2026, 3, 1, tzinfo=UTC)
+    later = at + LEASE + timedelta(seconds=1)
+    run_id = _submit(queue, at=at)
+
+    assert queue.claim(worker_id="w1", now=at, lease=LEASE, max_attempts=3) is not None
+    assert queue.claim(worker_id="w2", now=later, lease=LEASE, max_attempts=3) is not None
+
+    assert queue.heartbeat(run_id, now=later, lease=LEASE, worker_id="w1") is False
+    assert queue.heartbeat(run_id, now=later, lease=LEASE, worker_id="w2") is True
+
+
+def test_release_refuses_a_run_this_worker_no_longer_holds(queue: PostgresRunQueue) -> None:
+    """The worst of the three missing guards, because it duplicates paid work.
+
+    A worker that stalled past its lease, was superseded, and was then signalled
+    would requeue a run w2 is actively executing — for immediate reclaim, so the
+    same document is processed twice and the provider paid twice — and refund the
+    attempt while doing it.
+    """
+    at = datetime(2026, 3, 1, tzinfo=UTC)
+    later = at + LEASE + timedelta(seconds=1)
+    run_id = _submit(queue, at=at)
+
+    assert queue.claim(worker_id="w1", now=at, lease=LEASE, max_attempts=3) is not None
+    live = queue.claim(worker_id="w2", now=later, lease=LEASE, max_attempts=3)
+    assert live is not None
+
+    queue.release(run_id, now=later, worker_id="w1")
+
+    current = queue.get(run_id, "default")
+    assert current is not None
+    assert current.status is RunStatus.RUNNING, "a superseded worker requeued a live run"
+    assert current.worker_id == "w2"
+    assert current.attempts == live.attempts, "and refunded an attempt it had not spent"
+
+    # w2, which does hold it, still can.
+    queue.release(run_id, now=later, worker_id="w2")
+    released = queue.get(run_id, "default")
+    assert released is not None
+    assert released.status is RunStatus.QUEUED
