@@ -250,8 +250,18 @@ def test_no_credential_reaches_an_offline_test() -> None:
 SOURCE = pathlib.Path("src/docdoc")
 
 
-def _constants() -> dict[str, str]:
+def _constants() -> dict[str, set[str]]:
     """Every module-level ``NAME = "VALUE"`` string in ``src/docdoc``.
+
+    **A set of values per name, because names are not unique across modules.**
+    This returned one value per name and the last `rglob` to yield won, so two
+    modules defining the same identifier silently erased one of them. That is
+    exactly what happened: `docdoc.telemetry` and `docdoc.ingest.parsers.azure_di`
+    both define `ENDPOINT_ENV`, and `DOCDOC_AZURE_DI_ENDPOINT` vanished from the
+    scan on whichever machine walked the tree in the other order — passing on
+    Linux and failing on macOS and Windows, for a difference that has nothing to
+    do with either platform. Directory order is not a fact about the code, so a
+    check that depends on it is not checking the code.
 
     Needed because the code reads through a constant — `os.environ[KEY_ENV]`,
     not `os.environ["DOCDOC_AZURE_DI_KEY"]` — so the scan returns the identifier
@@ -263,7 +273,7 @@ def _constants() -> dict[str, str]:
     that one unresolved and reported the *identifier* as an unscrubbed credential,
     which is a confusing way to be right.
     """
-    resolved: dict[str, str] = {}
+    resolved: dict[str, set[str]] = {}
     for path in SOURCE.rglob("*.py"):
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -278,7 +288,7 @@ def _constants() -> dict[str, str]:
                 continue
             for target in targets:
                 if isinstance(target, ast.Name):
-                    resolved[target.id] = value.value
+                    resolved.setdefault(target.id, set()).add(value.value)
     return resolved
 
 
@@ -295,7 +305,10 @@ def _credentials_the_code_reads() -> set[str]:
     found: set[str] = set()
     for source in SOURCE.rglob("*.py"):
         for name in _credentials_read(source):
-            found.add(constants.get(name, name))
+            # Every value the identifier takes anywhere. An ambiguous name is
+            # reported under both, which is noisier than picking one and is the
+            # only reading that cannot drop a credential.
+            found |= constants.get(name, {name})
     return found
 
 
@@ -308,7 +321,9 @@ def _environment_names_the_code_reads() -> set[str]:
     still changes what the offline suite does.
     """
     constants = _constants()
-    found = {value for name, value in constants.items() if name.endswith("_ENV")}
+    found = {
+        value for name, values in constants.items() if name.endswith("_ENV") for value in values
+    }
     found |= _credentials_the_code_reads()
     return found
 

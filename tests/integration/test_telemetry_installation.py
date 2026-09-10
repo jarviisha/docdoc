@@ -118,6 +118,50 @@ def test_an_occupied_slot_is_not_displaced(occupy: str, caplog: pytest.LogCaptur
     ), "and it said so, once"
 
 
+# -- the fourth outcome, which nothing here asserted --------------------------
+#
+# Three of the four were covered from the day this landed. `installed` — the one
+# an operator is actually asking for — was not, so nothing checked that both
+# slots receive the same emitter or that the success is reported at all. That is
+# the same shape as the `trace.get_tracer` defect: the failure paths were
+# tested, and the working path was assumed.
+
+
+def test_both_slots_receive_the_same_emitter(caplog: pytest.LogCaptureFixture) -> None:
+    """One emitter in two slots, and it says so.
+
+    Two would double every span the pipeline produced inside a run; installing
+    into one would export half a deployment's events with no way to notice which
+    half.
+    """
+    emitted: list[dict] = []
+
+    with caplog.at_level("INFO", logger="docdoc.runs"):
+        outcome = install_bridge(lambda: emitted.append, endpoint="http://localhost:4318/v1/traces")
+
+    assert outcome == "installed"
+    assert runs_observe.observer() is pipeline_observe.observer() is not None
+    events = {getattr(record, "docdoc", {}).get("event") for record in caplog.records}
+    assert "telemetry.installed" in events
+
+
+def test_a_builder_that_cannot_import_its_exporter_is_reported_and_fatal_to_nothing() -> None:
+    """The `unavailable` outcome, without needing the extra to be absent.
+
+    The test above it can only run on a base install, so on every job that
+    installs `docdoc[otel]` — including the one that measures coverage — this
+    branch was never executed. A builder that raises is what a missing exporter
+    looks like from here, and the slots must be left empty.
+    """
+
+    def _cannot():
+        raise ImportError("no module named 'opentelemetry'")
+
+    assert install_bridge(_cannot, endpoint="http://localhost:4318/v1/traces") == "unavailable"
+    assert runs_observe.observer() is None
+    assert pipeline_observe.observer() is None
+
+
 def test_the_log_says_which_of_the_four_happened(caplog: pytest.LogCaptureFixture) -> None:
     """Each outcome is something an operator would otherwise infer from an
     absence of traces, which is the hardest thing to debug there is."""

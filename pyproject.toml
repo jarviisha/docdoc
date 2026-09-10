@@ -288,7 +288,19 @@ source = ["src/docdoc"]
 branch = true
 
 [tool.coverage.report]
-exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:", "raise NotImplementedError"]
+# `...` is a Protocol's body — a type-only declaration, for the same reason
+# `if TYPE_CHECKING:` and `raise NotImplementedError` are already here. Nothing
+# can execute one: a Protocol is never instantiated, and the implementations
+# that satisfy it structurally never call through it. Counting 41 of them as
+# "uncovered" made the number report a shortfall no test could ever close, and
+# `runs/queue.py` -- 16 method declarations and no code at all -- read as 64%
+# covered, which is a measurement saying something untrue about the file.
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    '^\s*\.\.\.$',
+]
 
 # ---------------------------------------------------------------------------
 # import-linter — Constitution Principle X, machine-checked layer direction
