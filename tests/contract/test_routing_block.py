@@ -19,6 +19,10 @@ import json
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+import pytest
+
+pytest.importorskip("fastapi", reason="the HTTP interface lives behind the docdoc[api] extra")
+
 from fastapi.testclient import TestClient
 from tests.fixtures.run_queue import InMemoryRunQueue
 

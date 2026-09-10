@@ -132,6 +132,7 @@ def span_for(payload: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
     and that is how a future emission point's new field leaves the deployment
     without anybody deciding it should.
     """
+    allowed: tuple[str, ...]
     event = payload.get("event")
     if event == _STAGE_EVENT:
         name, allowed = f"stage.{payload.get('step_id')}", _STAGE_ATTRIBUTES
@@ -366,8 +367,23 @@ def configure_logging(level: int = logging.INFO) -> str:
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(_JsonLines())
     logger.addHandler(handler)
-    # Not to the root logger's handlers as well: this one already formats them
-    # as JSON, and a second copy in a different shape is how one event becomes
-    # two facts that disagree.
-    logger.propagate = False
+    # **`propagate` is left alone**, and the version that set it to `False` was
+    # wrong twice.
+    #
+    # It was defending against a second copy of each record reaching the root
+    # logger's handlers in a different shape — but this branch is only reached
+    # when the root logger has *no* handlers, so there was nothing to defend
+    # against. `logging.lastResort` fires only when no handler anywhere in the
+    # chain took the record, and the one added above takes it.
+    #
+    # What it did instead was permanent: `propagate = False` on a
+    # process-global logger outlives the call, and `caplog` puts its handler on
+    # the root — so the first test that built an app silenced docdoc for every
+    # caplog-based test after it, and three telemetry tests failed on CI while
+    # passing locally, because the local command deselected the marks that
+    # changed the ordering.
+    #
+    # That is the second time this function leaked global state into later
+    # callers. The rule it should have followed from the start: touch the
+    # `docdoc` logger, and nothing else.
     return "installed"

@@ -71,8 +71,16 @@ class Routable(Protocol):
     six it does not.
     """
 
-    grounding: Any
-    validation: Any
+    #: Read-only properties rather than plain attributes, so a **frozen**
+    #: carrier satisfies this. A Protocol member written as a variable is
+    #: implicitly settable, and mypy then rejects `StoredResult` — which is
+    #: frozen precisely because a routing input nobody can mutate is one nobody
+    #: can mutate *between* the decision and the response.
+    @property
+    def grounding(self) -> Any: ...
+
+    @property
+    def validation(self) -> Any: ...
 
 
 @dataclass(frozen=True)

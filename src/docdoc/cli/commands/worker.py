@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import os
 import socket
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from docdoc.cli.render import Rendering
 from docdoc.runs.errors import RunStateUnavailableError
@@ -61,7 +61,7 @@ def _worker_id() -> str:
     return f"{socket.gethostname()}:{os.getpid()}"
 
 
-def _deliverer(queue: object) -> object | None:
+def _deliverer(queue: Any) -> Any:
     """A deliverer, or ``None`` when nothing is configured to sign with.
 
     **No secrets file means no deliverer**, and that is the honest wiring rather

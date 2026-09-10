@@ -106,7 +106,7 @@ def test_an_occupied_slot_is_not_displaced(occupy: str, caplog: pytest.LogCaptur
     module = pipeline_observe if occupy == "pipeline" else runs_observe
     module.set_observer(_mine)
 
-    with caplog.at_level("INFO"):
+    with caplog.at_level("INFO", logger="docdoc.runs"):
         outcome = install_bridge(_build, endpoint="http://localhost:4318/v1/traces")
 
     assert outcome == "occupied"
@@ -123,7 +123,7 @@ def test_the_log_says_which_of_the_four_happened(caplog: pytest.LogCaptureFixtur
     absence of traces, which is the hardest thing to debug there is."""
     pipeline_observe.set_observer(lambda _: None)
 
-    with caplog.at_level("INFO"):
+    with caplog.at_level("INFO", logger="docdoc.runs"):
         install_bridge(_build, endpoint="http://localhost:4318/v1/traces")
 
     events = {getattr(record, "docdoc", {}).get("event") for record in caplog.records}

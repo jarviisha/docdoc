@@ -279,6 +279,7 @@ def test_no_route_returns_a_signing_secret_after_registration() -> None:
     and the URL and nothing else. Checked against the route table rather than by
     trying a URL, because an absence needs an exhaustive check.
     """
+    pytest.importorskip("fastapi", reason="the HTTP interface lives behind the docdoc[api] extra")
     from fastapi.testclient import TestClient
 
     from docdoc.api.app import _Deployment, build_app

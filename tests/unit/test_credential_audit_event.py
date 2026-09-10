@@ -22,6 +22,9 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
+
+pytest.importorskip("fastapi", reason="the HTTP interface lives behind the docdoc[api] extra")
+
 from fastapi.testclient import TestClient
 
 from docdoc.api.app import _Deployment, build_app

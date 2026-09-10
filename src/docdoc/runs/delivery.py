@@ -69,6 +69,7 @@ __all__ = [
     "Callback",
     "Deliverer",
     "Delivery",
+    "DeliveryError",
     "DeliveryState",
     "Destination",
     "PostgresDeliverer",
@@ -379,19 +380,20 @@ class _PinnedHTTPS(http.client.HTTPSConnection):
     """
 
     def __init__(self, destination: Destination, *, timeout: int) -> None:
-        super().__init__(
-            destination.hostname,
-            destination.port,
-            timeout=timeout,
-            context=ssl.create_default_context(),
-        )
+        # Held under our own name as well. `HTTPSConnection` keeps it as the
+        # private `_context`, which typeshed does not declare, so reading it back
+        # is an attribute mypy cannot see and a detail the stdlib is free to
+        # rename.
+        context = ssl.create_default_context()
+        super().__init__(destination.hostname, destination.port, timeout=timeout, context=context)
+        self._ssl_context = context
         self._address = destination.address
 
     def connect(self) -> None:
         sock = socket.create_connection((self._address, self.port), self.timeout)
         # `server_hostname` and `Host` both stay the registered name: the address
         # is where we go, the name is who we expect to find.
-        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+        self.sock = self._ssl_context.wrap_socket(sock, server_hostname=self.host)
 
 
 class _PinnedHTTP(http.client.HTTPConnection):
