@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parents[2]
 EXPECTED_LAYERS = [
     "docdoc.api : docdoc.cli",
     "docdoc.recording : docdoc.runs",
-    "docdoc.evaluation",
+    "docdoc.evaluation : docdoc.telemetry",
     "docdoc.pipeline",
     "docdoc.validation",
     "docdoc.grounding",

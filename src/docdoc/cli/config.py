@@ -139,6 +139,8 @@ RUN_DATABASE_URL_ENV = "DOCDOC_RUN_DATABASE_URL"
 #: them without importing across the front-end boundary.
 _RUN_LEASE_SECONDS_ENV = "DOCDOC_RUN_LEASE_SECONDS"
 _RUN_MAX_ATTEMPTS_ENV = "DOCDOC_RUN_MAX_ATTEMPTS"
+_RUN_RETENTION_DAYS_ENV = "DOCDOC_RUN_RETENTION_DAYS"
+_RUN_SWEEP_BATCH_ENV = "DOCDOC_RUN_SWEEP_BATCH"
 
 #: The key file that enables HTTP authentication. Listed here only so the
 #: exclusion below can state a reason; nothing on the command line reads it, and
@@ -187,6 +189,11 @@ FLAG_FOR_SETTING: dict[str, str] = {
     _RUN_LEASE_SECONDS_ENV: "--lease-seconds",
     _RUN_MAX_ATTEMPTS_ENV: "--max-attempts",
     _DEFAULT_TENANT_ENV: "--default-tenant",
+    # Milestone 10, and spelled the way the two above are: the unit is in the
+    # variable's name because that is how this project has always avoided a
+    # setting whose value could be read as "1h" by one reader and "1" by another.
+    _RUN_RETENTION_DAYS_ENV: "--retention-days",
+    _RUN_SWEEP_BATCH_ENV: "--batch",
 }
 
 #: Settings whose flag lives on some commands and not all of them.
@@ -202,7 +209,6 @@ FLAG_FOR_SETTING: dict[str, str] = {
 #: direction. So the map records the scope rather than the setting pretending to
 #: a reach it does not have.
 COMMAND_SCOPED: dict[str, tuple[str, ...]] = {
-    "DOCDOC_RUN_DATABASE_URL": ("migrate", "worker"),
     # Narrower still: only a process that *claims* runs has a lease or an
     # attempt limit. `docdoc migrate` touches the same database and neither.
     _RUN_LEASE_SECONDS_ENV: ("worker",),
@@ -212,6 +218,13 @@ COMMAND_SCOPED: dict[str, tuple[str, ...]] = {
     # must be the same in all of them, so the flag belongs only on the command
     # that records it. See `docdoc.artifacts.paths.DEFAULT_TENANT_ENV`.
     _DEFAULT_TENANT_ENV: ("migrate",),
+    # Milestone 10. `sweep` is the only command that removes anything, and the
+    # worker's automatic tick reads the same two variables -- it has no flags at
+    # all, because a process that sweeps between claims is configured by the
+    # deployment rather than by an invocation.
+    "DOCDOC_RUN_DATABASE_URL": ("migrate", "worker", "sweep"),
+    _RUN_RETENTION_DAYS_ENV: ("sweep",),
+    _RUN_SWEEP_BATCH_ENV: ("sweep",),
 }
 
 #: Settings that deliberately have no flag, each with the reason, because an
@@ -232,9 +245,98 @@ ENVIRONMENT_ONLY: dict[str, str] = {
         "says where the browser client's built assets are; the command line serves "
         "none, so the flag would name a directory nothing reads"
     ),
+    "DOCDOC_LIMIT_SUBMISSIONS_PER_MINUTE": (
+        "a per-tenant limit enforced at HTTP submission; the command line "
+        "submits nothing and the worker enforces nothing (FR-045)"
+    ),
+    "DOCDOC_LIMIT_CONCURRENT_RUNS": "the same, and counted from the runs table",
+    "DOCDOC_LIMIT_RUNS_PER_PERIOD": "the same",
+    "DOCDOC_LIMIT_TOKENS_PER_PERIOD": "the same",
+    "DOCDOC_LIMITS_FILE": (
+        "per-tenant overrides for the four above. A file rather than a flag for "
+        "the reason the key file is one: a per-tenant table is a list, and a "
+        "flag cannot carry one"
+    ),
+    "DOCDOC_RUN_STARVATION_SECONDS": (
+        "how long a run waits before it outranks everything in the claim "
+        "(FR-089). Read by whichever process claims, and it must be the same in "
+        "all of them, so it belongs to the deployment rather than to an "
+        "invocation -- and `docdoc sweep` and `docdoc erase` claim nothing"
+    ),
+    "DOCDOC_RUN_CREDENTIAL_TTL_SECONDS": (
+        "how long an authenticating process caches a credential resolution, and "
+        "therefore how long a revocation takes to reach it (FR-028). Every "
+        "process that authenticates must agree on it, so it belongs to the "
+        "deployment rather than to an invocation -- and the command line "
+        "authenticates nothing in any configuration (FR-069)"
+    ),
     _GCV_CREDENTIALS_ENV: (
         "a credential; argv is readable by any process on the host (FR-042). It "
         "names a file on most deployments, which makes it no less a credential"
+    ),
+    # Milestone 10, Phase 7. Delivery is configured by the deployment and
+    # performed by whichever worker ticks, so every one of these must be the same
+    # in every process -- and none of them is meaningful to a command a person
+    # types. `docdoc sweep` delivers nothing and `docdoc extract` has no run to
+    # notify anybody about.
+    "DOCDOC_DELIVERY_MAX_ATTEMPTS": (
+        "how many times one delivery is attempted before it comes to rest at "
+        "`failed` (FR-057). Read by whichever process ticks, and it must be the "
+        "same in all of them"
+    ),
+    "DOCDOC_DELIVERY_TIMEOUT_SECONDS": (
+        "how long one attempt may take. It is half of SC-024's bound on how long "
+        "a maintenance tick can delay a claim, so it belongs to the deployment"
+    ),
+    "DOCDOC_DELIVERY_BACKOFF_SECONDS": "the retry schedule's base; the same reasoning",
+    "DOCDOC_MAINTENANCE_INTERVAL_SECONDS": (
+        "how often a worker performs the unrequested work between claims. A "
+        "property of the loop rather than of an invocation, and it must agree "
+        "across replicas or one of them sweeps continuously"
+    ),
+    "DOCDOC_MAINTENANCE_BUDGET_MS": (
+        "how long one tick may take. Half of SC-024's bound on how long a "
+        "maintenance tick can delay a claim, so it belongs to the deployment"
+    ),
+    "DOCDOC_MAINTENANCE_DELIVERY_BATCH": (
+        "how many due deliveries one tick attempts. A property of the worker "
+        "loop, which has no flags at all -- a process that delivers between "
+        "claims is configured by the deployment rather than by an invocation"
+    ),
+    "DOCDOC_DELIVERY_ALLOW_PRIVATE": (
+        "turns off the destination policy that refuses loopback, link-local, and "
+        "private addresses (FR-060). A guard against server-side request forgery "
+        "must not be reachable from a command line somebody is improvising on"
+    ),
+    "DOCDOC_DELIVERY_SECRETS_FILE": (
+        "names the file holding webhook signing secrets; a credential by another "
+        "name, and argv is readable by any process on the host (FR-042)"
+    ),
+    # Phase 8. Both are read at startup by the API and the worker, and neither is
+    # a per-invocation decision: a collector endpoint that differed between two
+    # processes would split one deployment's traces in two.
+    "DOCDOC_OTLP_ENDPOINT": (
+        "where spans are exported. Read at startup by every long-running "
+        "process, and the command line runs no process long enough to trace"
+    ),
+    "DOCDOC_OTLP_HEADERS": "authenticates to that collector; a credential, and the same reason",
+    # Phase 9. A ceiling a client could raise is not a ceiling, and neither is
+    # one an operator can raise for one invocation.
+    "DOCDOC_PRIORITY_CEILING": (
+        "the highest priority a tenant may be granted (FR-087b). Enforced at "
+        "HTTP submission, and the command line submits nothing"
+    ),
+    # Phase 10. Both configure what the HTTP surface does with a completed run.
+    "DOCDOC_ROUTING_POLICY": (
+        "names the routing policy document read at startup. A decision is "
+        "recorded against a policy version, so a per-invocation override would "
+        "make two processes disagree about what `default@3` means"
+    ),
+    "DOCDOC_CORRECTION_RETENTION_DAYS": (
+        "how long a correction is kept (FR-013). Read by whichever process "
+        "sweeps and by the route that records one, so it belongs to the "
+        "deployment -- and `docdoc sweep`'s own `--retention-days` is the run's, "
+        "which is a different deadline on purpose"
     ),
 }
 
@@ -459,6 +561,34 @@ class Settings:
 
         assert self.store_url is not None
         return stores_from_url(self.store_url)
+
+    def run_queue(self, explicit: str | None = None) -> Any:
+        """The Postgres run queue, or a typed refusal naming what is missing.
+
+        One home for four commands. `migrate`, `sweep`, `erase`, and `credential`
+        each need the same three lines -- resolve the DSN, import psycopg behind
+        its extra, build the queue -- and three of them had written them out
+        separately by the time a review noticed.
+        """
+        from docdoc.runs.errors import RunStateUnavailableError
+
+        dsn = explicit or self.run_database_url
+        if not dsn:
+            raise RunStateUnavailableError(
+                "no run-state database configured; set DOCDOC_RUN_DATABASE_URL or "
+                "pass --run-database-url. There is no default, because where run "
+                "state accumulates is your decision"
+            )
+        try:
+            import psycopg
+        except ImportError as exc:  # pragma: no cover - guarded by the extra
+            raise RunStateUnavailableError(
+                "psycopg is not installed; run state needs `pip install docdoc[postgres]`"
+            ) from exc
+
+        from docdoc.runs.postgres import PostgresRunQueue
+
+        return PostgresRunQueue(lambda: psycopg.connect(dsn))
 
     def stores_for(self, tenant_id: str) -> tuple[Any, Any]:
         """``(artifact_store, blob_store)`` namespaced to one tenant (FR-084).

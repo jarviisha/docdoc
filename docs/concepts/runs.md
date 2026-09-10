@@ -226,10 +226,19 @@ Off by default. Point `DOCDOC_API_KEYS_FILE` at a key file and every route excep
 routes requires `Authorization: Bearer <key>`; each key resolves to exactly one tenant.
 
 **The key file is read once, at startup.** Removing a key from it has no effect on a running
-process — no error, no warning — so revoking a credential means restarting every process that holds
-the old mapping. Rotate by adding the new key, restarting, moving callers across, removing the old
-key, and restarting again. Credentials here are static by design; revocation in seconds is a job for
-a gateway in front of the service. See [`examples/serve_api.md`](../../examples/serve_api.md).
+process — no error, no warning — so revoking a *file* key still means restarting every process that
+holds the old mapping.
+
+**Milestone 10 added credentials with a lifetime, and they are the answer for anything revocable.**
+`docdoc credential issue|revoke|list` writes to a table in the run database; a revocation reaches
+every process within `DOCDOC_RUN_CREDENTIAL_TTL_SECONDS` (default 30), with no restart. The file is
+consulted first, so both sources work at once and no key stops working because a table appeared.
+
+Two consequences worth knowing before you rely on it. **This is where credential management acquired
+a database**: a deployment serving only the synchronous routes needed none before and needs one for
+this. And **an operator can revoke every administrative credential and lock themselves out of the
+routes** — recovery is `docdoc credential issue --admin`, which is also the only way the first one
+comes into existence. See [`examples/serve_api.md`](../../examples/serve_api.md).
 
 Each tenant's content is namespaced in the store — `<root>/t/<tenant_id>/…` — **above** the
 two-character fan-out, so per-tenant deletion is a prefix operation rather than a scan. Identity is
@@ -290,3 +299,68 @@ Two non-events are deliberate. An idempotent replay emits nothing, because
 nothing transitioned — a retrying client is not a queue filling up. And a
 redelivered attempt that finishes a run the first one already concluded emits
 nothing, for the same reason.
+
+## Exporting to a tracing backend
+
+The events above reach an operator's collector when one is configured, and reach
+nothing when one is not.
+
+```bash
+pip install 'docdoc[otel]'
+export DOCDOC_OTLP_ENDPOINT=http://collector:4318/v1/traces
+export DOCDOC_OTLP_HEADERS='authorization=Bearer …'     # k=v,k=v
+```
+
+Both the API and the worker install the bridge at startup. The worker matters
+more than it looks: a claim, a lease expiry, and a redelivery all happen there,
+so a deployment tracing only the API would be tracing the half that never fails.
+
+**Unset means nothing is exported and no telemetry dependency is required.** The
+base install acquires neither the SDK nor the exporter, and the offline suite
+passes with both absent.
+
+**An exporter never displaces one you installed.** docdoc's pipeline has a single
+observer slot, documented as a decision — a deployment that wants two writes a
+function that calls two — so the bridge is installed only when both slots are
+empty, and the log says which of four things happened: `unconfigured`,
+`installed`, `occupied`, or `unavailable`. Each is otherwise something you would
+have to infer from an absence of traces, which is the hardest thing there is to
+debug.
+
+**Installing it changes no existing emission point.** The log lines above stay
+byte-identical, field for field; the bridge is handed the same mapping the log
+serialises rather than a richer one. An exporter that enriched a payload
+"harmlessly" is how a deployment's log parsing breaks at the same moment its
+tracing starts working.
+
+**An unreachable collector fails no run and blocks no stage**, and reports once
+per outage rather than once per event.
+
+Span attributes carry identifiers, hashes, states, counts, durations, and class
+names only — the same rule the log lines follow, and it is a list rather than a
+dump so that a field added to an event later reaches a collector only once
+somebody has decided it should. Token counts are deliberately not among them: a
+count is an enforcement counter, and a tracing backend is not where an invoice
+starts.
+
+## What a deployment running no worker does not do
+
+The worker is where unrequested work happens, so a deployment that runs none
+**sweeps nothing and delivers nothing**. Runs still submit, and they queue for
+ever because nothing claims them.
+
+Credentials are the exception, and the difference is worth stating: a revocation
+still takes effect on time in every API process, because that is a **cache
+lifetime** and not a scheduled task. Nothing has to run for a cached resolution
+to expire.
+
+So the three capabilities divide like this:
+
+| Capability | Needs a worker? |
+|---|---|
+| retention sweeps | yes |
+| webhook delivery | yes |
+| limit-counter expiry | yes |
+| credential revocation | **no** — it is a TTL |
+| limit enforcement | no — it is checked at submission |
+| routing decisions | no — computed when a run is read |

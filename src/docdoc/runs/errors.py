@@ -17,6 +17,10 @@ from __future__ import annotations
 from docdoc.kernel.errors import DocdocError
 
 __all__ = [
+    "CredentialError",
+    "DeliveryError",
+    "LimitExceededError",
+    "RetentionError",
     "RunAbandonedError",
     "RunError",
     "RunNotCancellableError",
@@ -118,4 +122,88 @@ class RunAbandonedError(RunError):
     withdrawn schema fails once and terminally under FR-091, precisely so that
     this word keeps naming only the poison-document case. An operator who reads
     `RunAbandonedError` should go and look at the document.
+    """
+
+
+# -- Milestone 10 ------------------------------------------------------------
+#
+# Four names, each a `RunError` so every handler that already catches one keeps
+# working, and each added to the constitution's enumerated error model by
+# amendment v1.8.0 rather than by arriving in code and being noticed later.
+#
+# None of them carries a credential, document content, a provider message, or a
+# webhook receiver's response body. That is the no-content rule every observer in
+# this project follows, and an error body is the surface where it is easiest to
+# forget.
+
+
+class RetentionError(RunError):
+    """A sweep or an erasure could not proceed.
+
+    Two situations reach here and they are different in kind.
+
+    An **unreachable store** stops the sweep before a single run row is removed.
+    That is not caution: the run row holds the `stage_outcomes` naming what still
+    needs deleting, so removing it while the content survives loses the only
+    record of the work (ADR-0015 §3).
+
+    A **refused store root** is the guard of ADR-0015 §5. The default tenant's
+    namespace is the store root itself, so a prefix delete of it removes
+    everything written before authentication was enabled and everything the
+    command line ever wrote. The refusal is the correct answer; `--purge-store-root`
+    is the other one, and it is typed deliberately.
+    """
+
+
+class CredentialError(RunError):
+    """Issuance, revocation, or listing was impossible or refused.
+
+    **Not** the class for a failed authentication. An absent, malformed,
+    unrecognised, or revoked credential produces one indistinguishable refusal
+    from `AuthenticationError`, and the whole point of that class is that there is
+    nowhere to put the distinction. This one is for an operator asking to *manage*
+    credentials and being unable to — including the file-backed `KeyRing`, which
+    resolves and cannot issue.
+    """
+
+
+class LimitExceededError(RunError):
+    """A configured limit was reached, and the submission was refused.
+
+    Carries what the caller needs to act: which limit, what was observed, what is
+    allowed, and when to retry. That is the opposite of an authentication refusal,
+    which says nothing at all — being over a quota is not a secret, and a client
+    told only "no" retries immediately and forever.
+
+    Refused at submission and nowhere else (FR-045). No limit aborts, cancels, or
+    discards a run already executing, because that reintroduces the paid-and-
+    discarded failure Milestone 9 was built to remove.
+    """
+
+    def __init__(
+        self,
+        limit: str,
+        *,
+        observed: int,
+        allowed: int,
+        retry_after_seconds: int,
+    ) -> None:
+        super().__init__(f"limit {limit!r} reached: {observed} against an allowance of {allowed}")
+        self.limit = limit
+        self.observed = observed
+        self.allowed = allowed
+        self.retry_after_seconds = retry_after_seconds
+
+
+class DeliveryError(RunError):
+    """A webhook delivery could not be attempted.
+
+    Raised for a destination the policy refuses and for a host that will not
+    resolve — that is, for the cases where docdoc declines to open the connection.
+    A receiver that answers with an error is **not** this: that is a delivery
+    attempt that failed, recorded on the delivery row and retried, and it changes
+    no run state (FR-063).
+
+    Carries no response body. A receiver's body is somebody else's content, and
+    `last_error` on the delivery row holds a class name for the same reason.
     """

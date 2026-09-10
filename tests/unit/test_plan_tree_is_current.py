@@ -84,6 +84,12 @@ EXTRA_PLANS: tuple[pathlib.Path, ...] = (
     # eight files per layer and this one is still being built. Registering the
     # plan keeps every test traceable meanwhile.
     pathlib.Path("specs/009-asynchronous-runs/plan.md"),
+    # Milestone 10, on the same terms. Several of its tests reach `runs` through
+    # a deployment that needs a schema registry to accept a submission at all,
+    # so an import graph attributes them to `extraction` -- which is not what
+    # they exercise. Registering the plan is what keeps the traceability rule
+    # honest without teaching the heuristic a special case.
+    pathlib.Path("specs/010-operations-and-corrections/plan.md"),
 )
 
 #: `docdoc.recording` is deliberately **not** listed, though it is a layer and it

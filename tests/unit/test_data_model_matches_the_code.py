@@ -237,6 +237,11 @@ def test_the_check_can_actually_fail() -> None:
 # additive migration needs a documentation edit before the build goes green.
 
 RUNS_DATA_MODEL = pathlib.Path("specs/009-asynchronous-runs/data-model.md")
+
+#: Milestone 10's six tables are documented in their own milestone's data model,
+#: not retrofitted into Milestone 9's. A document describing a schema it did not
+#: design is a document nobody updates.
+OPERATIONS_DATA_MODEL = pathlib.Path("specs/010-operations-and-corrections/data-model.md")
 RUNS_MIGRATION = pathlib.Path("src/docdoc/runs/migrations/0001_runs.sql")
 
 #: A column definition in the `CREATE TABLE runs` body: four leading spaces, a
@@ -433,7 +438,18 @@ def test_the_table_scan_finds_all_three() -> None:
     """Guards the guard: a scan that found one would make the check below vacuous."""
     tables = _created_tables()
 
-    assert tables == {"runs", "docdoc_default_tenant", "docdoc_schema_version"}, (
+    assert tables == {
+        "runs",
+        "docdoc_default_tenant",
+        "docdoc_schema_version",
+        # Milestone 10.
+        "run_tombstones",
+        "credentials",
+        "limit_counters",
+        "callbacks",
+        "deliveries",
+        "corrections",
+    }, (
         f"the migrations create {sorted(tables)}; the scan or the migrations "
         f"changed, and the check below is now describing something else"
     )
@@ -446,10 +462,32 @@ def test_the_table_scan_finds_all_three() -> None:
 #:
 #: Kept honest in both directions by the two checks below: a table with no entry
 #: fails, and an entry naming a heading the document does not have fails too.
+#: Where each created table is documented. The value is a heading; the document
+#: it lives in is `SECTION_DOCUMENTS` below, because Milestone 10 added six tables
+#: and putting them in Milestone 9's data model would make that document describe
+#: a schema it did not design.
 TABLE_SECTIONS = {
     "runs": "## The Run",
     "docdoc_default_tenant": "### `docdoc_default_tenant`",
     "docdoc_schema_version": "### `docdoc_schema_version`",
+    "run_tombstones": "## `run_tombstones`",
+    "credentials": "## `credentials`",
+    "limit_counters": "## `limit_counters`",
+    "callbacks": "## `callbacks`",
+    "deliveries": "## `deliveries`",
+    "corrections": "## `corrections`",
+}
+
+SECTION_DOCUMENTS = {
+    "runs": RUNS_DATA_MODEL,
+    "docdoc_default_tenant": RUNS_DATA_MODEL,
+    "docdoc_schema_version": RUNS_DATA_MODEL,
+    "run_tombstones": OPERATIONS_DATA_MODEL,
+    "credentials": OPERATIONS_DATA_MODEL,
+    "limit_counters": OPERATIONS_DATA_MODEL,
+    "callbacks": OPERATIONS_DATA_MODEL,
+    "deliveries": OPERATIONS_DATA_MODEL,
+    "corrections": OPERATIONS_DATA_MODEL,
 }
 
 
@@ -474,10 +512,15 @@ def test_every_table_the_migrations_create_has_a_section() -> None:
 
 def test_every_mapped_section_exists_in_the_document() -> None:
     """The other half: an entry pointing at a heading that was renamed away."""
-    text = RUNS_DATA_MODEL.read_text(encoding="utf-8")
+    texts = {
+        document: document.read_text(encoding="utf-8")
+        for document in set(SECTION_DOCUMENTS.values())
+    }
 
     absent = sorted(
-        f"{table} -> {heading}" for table, heading in TABLE_SECTIONS.items() if heading not in text
+        f"{table} -> {heading}"
+        for table, heading in TABLE_SECTIONS.items()
+        if heading not in texts[SECTION_DOCUMENTS[table]]
     )
 
     assert not absent, (

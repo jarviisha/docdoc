@@ -172,7 +172,15 @@ def test_the_storeless_route_has_no_asynchronous_variant(client: TestClient) -> 
     assert "/v1/extract/runs" not in paths
     assert "/v1/runs" not in paths, "there is no collection route that submits a run"
     run_routes = {path for path in paths if "runs" in path}
-    assert run_routes == {"/v1/documents/{blob_id}/runs", "/v1/runs/{run_id}"}, (
+    assert run_routes == {
+        "/v1/documents/{blob_id}/runs",
+        "/v1/runs/{run_id}",
+        # Milestone 10. Sub-resources of a run that already exists, which is why
+        # they do not weaken the claim above: neither creates a run, and both are
+        # reachable only through an identity the submission route issued.
+        "/v1/runs/{run_id}/delivery",
+        "/v1/runs/{run_id}/corrections",
+    }, (
         f"an unexpected run route exists: {sorted(run_routes)}. Every asynchronous "
         f"route is anchored to a stored blob, because a run nobody is waiting for "
         f"needs somewhere its input already lives"

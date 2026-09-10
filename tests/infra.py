@@ -26,6 +26,10 @@ DATABASE_URL_ENV = "DOCDOC_TEST_DATABASE_URL"
 #: Where the `s3`-marked tests find an S3-compatible endpoint. Unset means skip.
 S3_ENDPOINT_ENV = "DOCDOC_TEST_S3_ENDPOINT"
 
+#: Where the `otel`-marked tests find a collector. Unset means skip — and unlike
+#: the two above, the `otel` extra can also be absent, which skips them as well.
+OTLP_ENDPOINT_ENV = "DOCDOC_TEST_OTLP_ENDPOINT"
+
 
 def require_database() -> str:
     """The configured DSN, or skip with a reason naming what to set."""
@@ -45,5 +49,35 @@ def require_s3_endpoint() -> str:
         pytest.skip(
             f"no {S3_ENDPOINT_ENV} configured; "
             "`docker compose -f packaging/docker/compose.yml up -d minio`"
+        )
+    return endpoint
+
+
+def require_otlp_endpoint() -> str:
+    """The configured collector, or skip with a reason naming both prerequisites.
+
+    **Two conditions, not one**, which is what makes this different from its two
+    siblings: the `otel` tests need a collector *and* the `docdoc[otel]` extra.
+    Either being absent is a skip, and the message says which — a contributor who
+    started a collector and still saw a skip would otherwise have no way to learn
+    that the extra was what was missing.
+
+    This helper did not exist for a while and the marker it serves marked
+    nothing: `pyproject.toml` registered `otel`, this module defined
+    `OTLP_ENDPOINT_ENV`, and no test carried either. A marker that marks nothing
+    is the same defect as a documented variable nothing reads, which this
+    milestone corrected eight of in `compose.yml` — found by `/speckit-converge`
+    and closed by T181.
+    """
+    import importlib.util
+
+    if importlib.util.find_spec("opentelemetry") is None:
+        pytest.skip("the `otel` extra is not installed; `uv sync --extra otel`")
+
+    endpoint = os.environ.get(OTLP_ENDPOINT_ENV)
+    if not endpoint:
+        pytest.skip(
+            f"no {OTLP_ENDPOINT_ENV} configured; point it at an OTLP/HTTP "
+            "collector, e.g. http://localhost:4318/v1/traces"
         )
     return endpoint

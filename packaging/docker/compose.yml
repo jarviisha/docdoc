@@ -36,6 +36,19 @@ services:
       postgres: {condition: service_healthy}
       minio: {condition: service_healthy}
     ports: ["8000:8000"]
+    # **So a container can reach a service on the host**, which two of this
+    # milestone's capabilities need in development: a webhook receiver and an
+    # OTLP collector, both of which the operator runs and neither of which the
+    # composition adds (FR-023, FR-116).
+    #
+    # Docker Desktop resolves `host.docker.internal` on its own; **plain Docker on
+    # Linux does not**, and this repository's CI and most contributors are Linux.
+    # `quickstart.md` told the reader to point a callback and an exporter at that
+    # name, and inside these containers it failed with `Name or service not
+    # known` — a scenario that could not work as written, on the platform it was
+    # written for. Verified by resolving it in the container, before and after.
+    extra_hosts: &docdoc_hosts
+      - "host.docker.internal:host-gateway"
     environment: &docdoc_env
       DOCDOC_RUN_DATABASE_URL: postgresql://docdoc:docdoc@postgres:5432/docdoc
       DOCDOC_STORE_URL: s3://docdoc?endpoint_url=http://minio:9000
@@ -88,9 +101,67 @@ services:
       # Authentication is off by default here, exactly as it is off by default in
       # docdoc (FR-088). Point this at a key file to turn it on.
       DOCDOC_API_KEYS_FILE: ${DOCDOC_API_KEYS_FILE:-}
+      # Which tenant owns the unprefixed store root. **Forwarded because it must
+      # be the same in every process**: `docdoc.artifacts.paths` reads it in the
+      # api, in every worker, and in `docdoc migrate`, and it describes the
+      # store's layout rather than one invocation's behaviour.
+      #
+      # It was absent, and running this composition is what found that. `docdoc
+      # migrate` records the answer in `docdoc_default_tenant` and refuses on a
+      # later disagreement -- so a deployment upgrading a store that already held
+      # pre-tenant content could be told, correctly, that it disagreed with
+      # itself, and had no way to say otherwise from here.
+      DOCDOC_DEFAULT_TENANT: ${DOCDOC_DEFAULT_TENANT:-}
+      # --- Milestone 10, and every one of them is unset on purpose -------------
+      #
+      # Each capability is off by default (FR-101): a Milestone 9 deployment that
+      # changes nothing here observes no behavioural difference at all -- nothing
+      # swept, counted, refused, exported, routed, or delivered (SC-002). That is
+      # the claim this composition is the first place to check.
+      #
+      # NO FIFTH SERVICE is added below for any of this. The composition still
+      # contains api, worker, postgres, and object storage, which is what the
+      # constitution's scope constraint permits and what SC-025 asserts. The OTLP
+      # collector, if you run one, is yours.
+      DOCDOC_RUN_RETENTION_DAYS: ${DOCDOC_RUN_RETENTION_DAYS:-}
+      DOCDOC_RUN_SWEEP_BATCH: ${DOCDOC_RUN_SWEEP_BATCH:-}
+      DOCDOC_RUN_CREDENTIAL_TTL_SECONDS: ${DOCDOC_RUN_CREDENTIAL_TTL_SECONDS:-}
+      DOCDOC_LIMIT_SUBMISSIONS_PER_MINUTE: ${DOCDOC_LIMIT_SUBMISSIONS_PER_MINUTE:-}
+      DOCDOC_LIMIT_CONCURRENT_RUNS: ${DOCDOC_LIMIT_CONCURRENT_RUNS:-}
+      DOCDOC_LIMIT_RUNS_PER_PERIOD: ${DOCDOC_LIMIT_RUNS_PER_PERIOD:-}
+      DOCDOC_LIMIT_TOKENS_PER_PERIOD: ${DOCDOC_LIMIT_TOKENS_PER_PERIOD:-}
+      DOCDOC_PRIORITY_CEILING: ${DOCDOC_PRIORITY_CEILING:-}
+      DOCDOC_RUN_STARVATION_SECONDS: ${DOCDOC_RUN_STARVATION_SECONDS:-}
+      DOCDOC_DELIVERY_MAX_ATTEMPTS: ${DOCDOC_DELIVERY_MAX_ATTEMPTS:-}
+      DOCDOC_DELIVERY_TIMEOUT_SECONDS: ${DOCDOC_DELIVERY_TIMEOUT_SECONDS:-}
+      DOCDOC_DELIVERY_BACKOFF_SECONDS: ${DOCDOC_DELIVERY_BACKOFF_SECONDS:-}
+      DOCDOC_DELIVERY_ALLOW_PRIVATE: ${DOCDOC_DELIVERY_ALLOW_PRIVATE:-}
+      # Unset means this deployment delivers nothing, and that is the whole of
+      # FR-064: every delivery is signed, so with nothing to sign with there is
+      # no deliverer, no due query, and no socket (T112a).
+      DOCDOC_DELIVERY_SECRETS_FILE: ${DOCDOC_DELIVERY_SECRETS_FILE:-}
+      DOCDOC_LIMITS_FILE: ${DOCDOC_LIMITS_FILE:-}
+      DOCDOC_ROUTING_POLICY: ${DOCDOC_ROUTING_POLICY:-}
+      DOCDOC_CORRECTION_RETENTION_DAYS: ${DOCDOC_CORRECTION_RETENTION_DAYS:-}
+      DOCDOC_MAINTENANCE_INTERVAL_SECONDS: ${DOCDOC_MAINTENANCE_INTERVAL_SECONDS:-}
+      DOCDOC_MAINTENANCE_BUDGET_MS: ${DOCDOC_MAINTENANCE_BUDGET_MS:-}
+      DOCDOC_MAINTENANCE_DELIVERY_BATCH: ${DOCDOC_MAINTENANCE_DELIVERY_BATCH:-}
+      DOCDOC_OTLP_ENDPOINT: ${DOCDOC_OTLP_ENDPOINT:-}
+      DOCDOC_OTLP_HEADERS: ${DOCDOC_OTLP_HEADERS:-}
     volumes: &docdoc_mounts
       - ../../schemas:/schemas:ro
       - ../../tests/fixtures/echo:/fixtures:ro
+      # **Where an operator's own files go**: a key file, webhook signing
+      # secrets, a routing policy. Read-only, gitignored, and empty until
+      # somebody puts something in it — see `secrets/README.md`.
+      #
+      # Added because there was no way to get one in. Three quickstart scenarios
+      # need an operator-supplied file, and the documented alternative --
+      # `docker cp` then `docker compose up -d` -- **cannot work**: changing an
+      # environment variable recreates the container and takes the copied file
+      # with it, after which the API refuses to start on an unreadable key file.
+      # That was found by following the instructions.
+      - ./secrets:/secrets:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2).status == 200 else 1)"]
       interval: 10s
@@ -114,6 +185,9 @@ services:
     # cannot be — so this is reachable on the compose network, which is where a
     # probe comes from.
     command: ["docdoc", "worker", "--health-port", "8000"]
+    # The worker needs it more than the API does: it is the process that attempts
+    # deliveries and the one whose `run.transition` spans an operator most wants.
+    extra_hosts: *docdoc_hosts
     environment: *docdoc_env
     volumes: *docdoc_mounts
     healthcheck:

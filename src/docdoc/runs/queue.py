@@ -27,10 +27,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
     from datetime import datetime, timedelta
     from uuid import UUID
 
-    from docdoc.runs.model import Run, RunOutcome, RunStatus
+    from docdoc.runs.model import Run, RunOutcome, RunStatus, Tombstone
 
 __all__ = ["RunQueue", "RunSpec"]
 
@@ -48,6 +49,18 @@ class RunSpec(Protocol):
     schema_identity: str
     request_id: str | None
     idempotency_key: str | None
+
+    #: Milestone 10, and both are read with a default rather than required. A
+    #: structural type has no way to be optional, so `submit` reads them with
+    #: `getattr` and falls back to what the column already means — which is what
+    #: keeps a Milestone 9 caller building a spec of four strings and getting the
+    #: run it always got (FR-101).
+    #:
+    #: `priority` is granted rather than requested: the route clamps it to the
+    #: tenant's ceiling before it reaches here, so nothing below this line can be
+    #: used to escalate past another tenant's queue (FR-087b).
+    priority: int
+    callback_id: UUID | None
 
 
 class RunQueue(Protocol):
@@ -81,6 +94,7 @@ class RunQueue(Protocol):
         now: datetime,
         lease: timedelta,
         max_attempts: int,
+        starvation: timedelta | None = None,
     ) -> Run | None:
         """Take the oldest eligible run, or `None`.
 
@@ -173,6 +187,123 @@ class RunQueue(Protocol):
 
     def is_cancelled(self, run_id: UUID) -> bool:
         """Whether cancellation has been requested. Read at stage boundaries."""
+        ...
+
+    # -- retention (Milestone 10, ADR-0015) -----------------------------------
+    #
+    # Three methods and not one, because the sweep computes a **difference** and
+    # a difference needs both sides. They are on the protocol rather than in
+    # `postgres.py` alone for the reason `claim` is: the policy is what is worth
+    # testing, and a fake that cannot be swept is a fake retention cannot be
+    # tested against.
+
+    def expiring(
+        self,
+        *,
+        now: datetime,
+        limit: int,
+        exclude: Collection[UUID] = (),
+    ) -> tuple[Run, ...]:
+        """Terminal runs past their retention deadline, oldest first.
+
+        Never returns a run that is queued, running, or holding an unexpired
+        lease (FR-003): a retention policy that can delete work in flight is a
+        policy that loses paid work.
+
+        `exclude` carries the runs a live correction pins (FR-013). Passed in
+        rather than joined here, because which runs are pinned is the corrections
+        store's question and this layer does not own that table.
+
+        `limit` is what makes a year of accumulated rows progress across many
+        ticks instead of one unbounded transaction (FR-015).
+        """
+        ...
+
+    def retained_ids_for(
+        self, tenant_id: str, *, excluding: Collection[UUID]
+    ) -> tuple[frozenset[str], frozenset[str]]:
+        """`(artifact_ids, blob_ids)` the tenant's **surviving** runs still name.
+
+        The `survivors` half of ADR-0015 §1, and **both halves in one read**. An
+        earlier draft returned artifacts only and deleted a removed run's blob
+        outright — which is wrong whenever two runs of a tenant were submitted
+        against the same document, the single most ordinary thing a tenant does.
+        A blob survives on exactly the terms an artifact does.
+
+        Artifact ids come from `stage_outcomes`, which already records one per
+        stage; blob ids come from the `blob_id` column. Nothing is re-derived,
+        and re-deriving would need a parser version a reconfigured deployment no
+        longer has.
+
+        `excluding` is the batch being removed, so a caller does not have to
+        subtract it afterwards and cannot forget to.
+        """
+        ...
+
+    def entomb(self, runs: Collection[Run], *, now: datetime, policy: str) -> int:
+        """Write a tombstone per run and remove the rows. Returns the count.
+
+        **Last**, after the content is gone (ADR-0015 §3). A run row holds the
+        `stage_outcomes` naming what still needs deleting, so removing it while
+        the content survives loses the only record of the work — and the next
+        sweep would have nothing to resume from.
+        """
+        ...
+
+    def purge_tenant_rows(self, tenant_id: str) -> dict[str, int]:
+        """Remove every row this milestone's tables hold for a tenant.
+
+        Corrections, callbacks, deliveries, and limit counters (FR-086). Returns
+        counts by table.
+
+        **`corrections` is why this exists.** It is the one table Milestone 10
+        adds that can hold a value taken from a document — a reviewer states the
+        predicted value and the corrected one — so an erasure that removed blobs,
+        artifacts, and run rows and left it behind would answer "erased" about
+        data that is still there.
+
+        The other three carry no document content and go with it anyway: a
+        callback's URL, a delivery's history, and a counter are all facts about a
+        customer who has asked to be gone.
+
+        Tombstones are **not** removed. They carry an identity, a tenant, a time,
+        and a policy, and they are what lets the owner be told their run was here
+        and is not (FR-011).
+        """
+        ...
+
+    def purge_rows_for(self, run_ids: Collection[UUID]) -> dict[str, int]:
+        """Remove the corrections and deliveries these runs own (FR-086).
+
+        The narrower half of `purge_tenant_rows`, for erasing **one document**:
+        the tenant is not being erased, so its callbacks and its counters stay,
+        and what goes is what belonged to the runs over that document.
+        """
+        ...
+
+    def runs_for(
+        self,
+        tenant_id: str,
+        *,
+        blob_id: str | None = None,
+        limit: int,
+    ) -> tuple[Run, ...]:
+        """A tenant's runs, or only those over one document. Bounded.
+
+        What erasure works from (FR-005). Unlike `expiring` this returns runs in
+        **every** state, because an erasure request is about a customer's data
+        and a run that is still queued is still theirs — FR-010 requires those to
+        be cancelled rather than skipped.
+        """
+        ...
+
+    def tombstone(self, run_id: UUID, tenant_id: str) -> Tombstone | None:
+        """What remains of a removed run, for the tenant that owned it.
+
+        Scoped in the query rather than checked after the fetch, exactly as `get`
+        is: another tenant asking gets `None`, which the route renders
+        identically to an identifier that never existed (FR-011).
+        """
         ...
 
     def ping(self) -> None:

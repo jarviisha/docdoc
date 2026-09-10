@@ -54,7 +54,19 @@ CREDENTIAL_ENV = (
 #: would otherwise delete a moment before the test looked for it -- leaving every
 #: infrastructure test permanently skipped on a correctly configured machine, and
 #: silently so.
-AMBIENT_MARKS = ("provider", "postgres", "s3")
+#:
+#: **Milestone 10 added the fourth, and the paragraph above predicted it exactly.**
+#: `otel` was registered as a marker, given a `require_otlp_endpoint()` helper and
+#: four tests, and left out of this tuple -- so with the extra installed, a
+#: collector listening, and ``DOCDOC_TEST_OTLP_ENDPOINT`` exported, all four still
+#: reported *"no DOCDOC_TEST_OTLP_ENDPOINT configured"*. The scrub had deleted it
+#: a moment before `require_otlp_endpoint` looked.
+#:
+#: That is the same failure, one marker along, and the message it produces is the
+#: worst kind: true from inside the test and false from outside it. Whoever adds
+#: the fifth mark should come here first -- a mark that reads ambient
+#: configuration and is absent from this tuple is a suite that can never run.
+AMBIENT_MARKS = ("provider", "postgres", "s3", "otel")
 
 
 @pytest.fixture(autouse=True)

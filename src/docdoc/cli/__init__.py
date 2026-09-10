@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Any
 from docdoc.artifacts.paths import DEFAULT_TENANT_ENV
 from docdoc.cli.config import RUN_DATABASE_URL_ENV, Settings, add_common_arguments
 from docdoc.cli.render import Rendering, emit, warn
+from docdoc.runs.identity import RETENTION_DAYS_ENV, SWEEP_BATCH_ENV
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -151,6 +152,100 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"who owns content written before tenants existed. Overrides ${DEFAULT_TENANT_ENV}",
     )
     add_common_arguments(migrate)
+
+    # Milestone 10. The worker sweeps between claims (T046a), so this command is
+    # for the two cases that needs: an operator who wants one *now*, and a
+    # deployment running no worker, which would otherwise never sweep (FR-117).
+    sweep = subcommands.add_parser("sweep", help="remove expired runs and their content")
+    sweep.add_argument(
+        "--retention-days",
+        type=int,
+        default=None,
+        metavar="N",
+        help=f"how long a run is kept, in days. Overrides ${RETENTION_DAYS_ENV}. "
+        "Unset anywhere means nothing is swept",
+    )
+    sweep.add_argument(
+        "--batch",
+        type=int,
+        default=None,
+        metavar="N",
+        help=f"runs removed per pass. Overrides ${SWEEP_BATCH_ENV}",
+    )
+    sweep.add_argument(
+        "--all",
+        action="store_true",
+        help="keep sweeping until a pass finds nothing, rather than one batch",
+    )
+    sweep.add_argument(
+        "--run-database-url",
+        default=None,
+        metavar="URL",
+        help=f"where run state lives. Overrides ${RUN_DATABASE_URL_ENV}",
+    )
+    add_common_arguments(sweep)
+
+    # `--admin` exists here and at no URL (FR-032). A route that could mint an
+    # administrative credential is a route that needs no credential, which is the
+    # hole this feature exists to close.
+    credential = subcommands.add_parser("credential", help="issue, revoke, or list credentials")
+    credential_actions = credential.add_subparsers(dest="action", metavar="ACTION")
+
+    issue = credential_actions.add_parser("issue", help="issue one; prints it once")
+    issue.add_argument("--tenant", required=True, metavar="TENANT", help="who it authenticates as")
+    issue.add_argument("--label", default=None, metavar="TEXT", help="what it is for")
+    issue.add_argument(
+        "--admin",
+        action="store_true",
+        help="grant the administrative scope. The only way one comes into existence",
+    )
+    issue.add_argument(
+        "--run-database-url", default=None, metavar="URL", help="where credentials live"
+    )
+    add_common_arguments(issue)
+
+    revoke = credential_actions.add_parser("revoke", help="revoke one; idempotent")
+    revoke.add_argument("credential_id", metavar="CREDENTIAL_ID")
+    revoke.add_argument(
+        "--run-database-url", default=None, metavar="URL", help="where credentials live"
+    )
+    add_common_arguments(revoke)
+
+    listing = credential_actions.add_parser("list", help="what a tenant holds; never the key")
+    listing.add_argument("--tenant", required=True, metavar="TENANT")
+    listing.add_argument(
+        "--run-database-url", default=None, metavar="URL", help="where credentials live"
+    )
+    add_common_arguments(listing)
+
+    # The one place `--purge-store-root` exists. It is on the command line and at
+    # no URL, because the default tenant's namespace is the store root and that
+    # reading of "erase the tenant" has to be typed rather than routed to
+    # (ADR-0015 section 5).
+    erase = subcommands.add_parser("erase", help="remove a tenant's or a document's data")
+    erase.add_argument("--tenant", required=True, metavar="TENANT", help="whose data to remove")
+    erase.add_argument(
+        "--document",
+        default=None,
+        metavar="BLOB_ID",
+        help="only the runs over this document, rather than the whole tenant",
+    )
+    erase.add_argument(
+        "--purge-store-root",
+        action="store_true",
+        help=(
+            "for the default tenant only: remove the whole store, including "
+            "content no run ever produced. Without this, only run-derived "
+            "content goes"
+        ),
+    )
+    erase.add_argument(
+        "--run-database-url",
+        default=None,
+        metavar="URL",
+        help=f"where run state lives. Overrides ${RUN_DATABASE_URL_ENV}",
+    )
+    add_common_arguments(erase)
 
     # One run at a time, and no --concurrency. Concurrency is replica count
     # (FR-025): a threaded worker lets one long parse starve a sibling's
@@ -297,6 +392,23 @@ def _dispatch(args: argparse.Namespace) -> Any:
 
     if args.command == "worker":
         return worker.run
+
+    if args.command == "sweep":
+        from docdoc.cli.commands import sweep
+
+        return sweep.run
+
+    if args.command == "erase":
+        from docdoc.cli.commands import erase
+
+        return erase.run
+
+    if args.command == "credential":
+        from docdoc.cli.commands import credential
+
+        if getattr(args, "action", None) not in {"issue", "revoke", "list"}:
+            raise ValueError("usage: docdoc credential issue|revoke|list")
+        return credential.run
 
     if args.command == "store":
         if getattr(args, "action", None) != "clear":

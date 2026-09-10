@@ -24,7 +24,8 @@ from docdoc.runs.errors import (
     RunNotFoundError,
     RunStateUnavailableError,
 )
-from docdoc.runs.model import Run, RunOutcome, RunStatus
+from docdoc.runs.identity import DEFAULT_FAIRNESS_WINDOW, DEFAULT_STARVATION
+from docdoc.runs.model import Run, RunOutcome, RunStatus, Tombstone
 
 # `reason_for` is imported rather than reimplemented, so the fake cannot
 # describe a transition differently from the real queue -- which is the whole
@@ -32,6 +33,7 @@ from docdoc.runs.model import Run, RunOutcome, RunStatus
 from docdoc.runs.observe import log_transition, reason_for
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
     from datetime import datetime, timedelta
     from uuid import UUID
 
@@ -45,6 +47,15 @@ class InMemoryRunQueue:
 
     def __init__(self) -> None:
         self._runs: dict[UUID, Run] = {}
+        self._tombstones: dict[UUID, Tombstone] = {}
+        #: `{table: {row_key: tenant_id}}`. Enough to assert an erasure left
+        #: nothing behind without modelling four tables this fake never reads.
+        self._side_tables: dict[str, dict[str, str]] = {
+            "corrections": {},
+            "callbacks": {},
+            "deliveries": {},
+            "limit_counters": {},
+        }
         self._cancel_requested: set[UUID] = set()
         #: Set by a test to make every call fail the way an unreachable database
         #: does. Faithfulness again: readiness cannot be tested against a fake
@@ -52,6 +63,105 @@ class InMemoryRunQueue:
         self.unreachable = False
 
     # -- reading -----------------------------------------------------------
+
+    # -- retention (Milestone 10) ---------------------------------------------
+    #
+    # Here for the reason `claim` is here: what is worth testing about retention
+    # is the *policy* -- which runs are candidates, what the difference computes,
+    # what order things go in -- and none of that needs a database.
+
+    def expiring(
+        self,
+        *,
+        now: datetime,
+        limit: int,
+        exclude: Collection[UUID] = (),
+    ) -> tuple[Run, ...]:
+        self._check_reachable()
+        excluded = set(exclude)
+        candidates = [
+            run
+            for run in self._runs.values()
+            if run.is_terminal and run.expires_at <= now and run.run_id not in excluded
+        ]
+        candidates.sort(key=lambda run: run.expires_at)
+        return tuple(candidates[:limit])
+
+    def retained_ids_for(
+        self, tenant_id: str, *, excluding: Collection[UUID]
+    ) -> tuple[frozenset[str], frozenset[str]]:
+        self._check_reachable()
+        doomed = set(excluding)
+        survivors = [
+            run
+            for run in self._runs.values()
+            if run.tenant_id == tenant_id and run.run_id not in doomed
+        ]
+        artifacts = {
+            outcome.artifact_id
+            for run in survivors
+            for outcome in run.stage_outcomes
+            if outcome.artifact_id is not None
+        }
+        return frozenset(artifacts), frozenset(run.blob_id for run in survivors)
+
+    def entomb(self, runs: Collection[Run], *, now: datetime, policy: str) -> int:
+        self._check_reachable()
+        removed = 0
+        for run in runs:
+            if self._runs.pop(run.run_id, None) is None:
+                continue
+            self._tombstones[run.run_id] = Tombstone(
+                run_id=run.run_id,
+                tenant_id=run.tenant_id,
+                deleted_at=now,
+                policy=policy,
+            )
+            removed += 1
+        return removed
+
+    def purge_tenant_rows(self, tenant_id: str) -> dict[str, int]:
+        self._check_reachable()
+        counts = {}
+        for table, rows in self._side_tables.items():
+            owned = [key for key, owner in rows.items() if owner == tenant_id]
+            for key in owned:
+                del rows[key]
+            counts[table] = len(owned)
+        return counts
+
+    def purge_rows_for(self, run_ids: Collection[UUID]) -> dict[str, int]:
+        self._check_reachable()
+        wanted = {str(run_id) for run_id in run_ids}
+        counts = {}
+        for table in ("corrections", "deliveries"):
+            rows = self._side_tables[table]
+            owned = [key for key in rows if key.split("@")[-1] in wanted]
+            for key in owned:
+                del rows[key]
+            counts[table] = len(owned)
+        return counts
+
+    def runs_for(
+        self,
+        tenant_id: str,
+        *,
+        blob_id: str | None = None,
+        limit: int,
+    ) -> tuple[Run, ...]:
+        self._check_reachable()
+        found = [
+            run
+            for run in self._runs.values()
+            if run.tenant_id == tenant_id and (blob_id is None or run.blob_id == blob_id)
+        ]
+        found.sort(key=lambda run: run.created_at)
+        return tuple(found[:limit])
+
+    def tombstone(self, run_id: UUID, tenant_id: str) -> Tombstone | None:
+        self._check_reachable()
+        found = self._tombstones.get(run_id)
+        return found if found is not None and found.tenant_id == tenant_id else None
 
     def ping(self) -> None:
         self._check_reachable()
@@ -102,6 +212,13 @@ class InMemoryRunQueue:
             created_at=now,
             updated_at=now,
             expires_at=expires_at,
+            # Read with the column's own default, exactly as `PostgresRunQueue`
+            # does: `RunSpec` is a structural type, so a caller written against
+            # Milestone 9 supplies neither and must keep getting the run it
+            # always got (FR-101). A fake that required them would be a fake the
+            # real queue's callers could not be tested against.
+            priority=int(getattr(spec, "priority", 0) or 0),
+            callback_id=getattr(spec, "callback_id", None),
         )
         self._runs[run_id] = run
         log_transition(
@@ -121,6 +238,7 @@ class InMemoryRunQueue:
         now: datetime,
         lease: timedelta,
         max_attempts: int,
+        starvation: timedelta | None = None,
     ) -> Run | None:
         # **First, abandon what has run out of attempts** — every one of them,
         # not just the oldest. `PostgresRunQueue.claim` does this as a separate
@@ -139,6 +257,8 @@ class InMemoryRunQueue:
         # nobody, since the claim below requires `attempts < max_attempts`, and
         # abandonable by nothing, since this loop only looked at expired leases.
         # `release` no longer creates the shape and this no longer ignores it.
+        bound = DEFAULT_STARVATION if starvation is None else starvation
+
         for run in list(self._runs.values()):
             if run.attempts >= max_attempts and (
                 run.lease_expired_at(now) or run.status is RunStatus.QUEUED
@@ -160,10 +280,33 @@ class InMemoryRunQueue:
         if not eligible:
             return None
 
-        # FR-024, and the reason it is `min` rather than a scan with a
-        # tie-break: with no priority classes nothing is ever unequal, so
-        # creation order is the whole ordering.
-        run = min(eligible, key=lambda r: r.created_at)
+        # The same four-term ordering `PostgresRunQueue.claim` uses (research
+        # R10, corrected). Written out rather than left as `min(created_at)`
+        # because the *policy* is what is worth testing, and a fake that ordered
+        # differently would describe a system nobody deployed.
+        #
+        # `recent` is the fairness term and it is a **deficit**, not a position.
+        # The first version ranked each tenant's queued runs and looked like
+        # round-robin; it is not, because the rank recomputes over what is still
+        # waiting, so a tenant with a backlog always has another rank-0 run and
+        # it is always the older one. Preferring the tenant served *least
+        # recently* is what actually alternates.
+        window = DEFAULT_FAIRNESS_WINDOW
+        recent: dict[str, int] = {}
+        for other in self._runs.values():
+            if other.status is not RunStatus.QUEUED and other.updated_at > now - window:
+                recent[other.tenant_id] = recent.get(other.tenant_id, 0) + 1
+
+        run = min(
+            eligible,
+            key=lambda r: (
+                # Past the bound, a run outranks everything (FR-089).
+                not (r.created_at < now - bound),
+                recent.get(r.tenant_id, 0),
+                -int(r.priority),
+                r.created_at,
+            ),
+        )
 
         claimed = run.model_copy(
             update={

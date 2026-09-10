@@ -68,6 +68,35 @@ STATUS_BY_ERROR: dict[str, int] = {
     # sequenced. Both are this deployment's fault.
     "ArtifactError": 500,
     "PipelineError": 500,
+    # Milestone 10.
+    #
+    # `LimitExceededError` is 429 and NOT 403, and the difference is the point:
+    # being over a quota is not a secret, so this refusal names the limit and
+    # says when to come back. An authentication refusal says nothing at all, and
+    # the two must not be confusable by a client deciding whether to retry
+    # (FR-043).
+    "LimitExceededError": 429,
+    # A destination the policy refuses, or a host that will not resolve. The
+    # caller supplied it, so this is 422 rather than 500 — but the body names the
+    # *class* of refusal and never the addresses it resolved to, which would make
+    # the route a resolver for an unauthenticated caller (FR-060, ADR-0018 §4).
+    "DeliveryError": 422,
+    # An operator asked to manage credentials and could not — including the
+    # file-backed ring, which resolves and cannot issue. Never a failed
+    # authentication: that is `AuthenticationError`, and it is deliberately
+    # indistinguishable across absent, malformed, unrecognised, and revoked.
+    "CredentialError": 409,
+    # A sweep or erasure that could not proceed: an unreachable store, or the
+    # refused store root. The second is a deliberate guard rather than a fault,
+    # and 409 says "not in this state" rather than blaming the caller's input.
+    "RetentionError": 409,
+    #
+    # **There is deliberately no entry for 410.** A tombstone hit is not an error
+    # and there is no `RunErasedError`: the route looks the run up, misses, looks
+    # the tombstone up, and returns what it found. FR-011 requires the two
+    # responses to differ *in kind* rather than in a field of one shape, and two
+    # lookups with two outcomes is that — an exception class would make "your run
+    # was erased" a failure of the request rather than the answer to it.
 }
 
 #: Anything typed but unmapped. 500 rather than 400, deliberately: an error class

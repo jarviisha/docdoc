@@ -34,11 +34,147 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from uuid import UUID
 
-__all__ = ["EVENT_NAME", "REASONS", "log_transition", "reason_for"]
+__all__ = [
+    "EVENT_NAME",
+    "REASONS",
+    "install_bridge",
+    "log_transition",
+    "observer",
+    "reason_for",
+    "set_observer",
+]
 
 EVENT_NAME = "run.transition"
+
+#: A deployment's bridge to whatever it uses. **One slot**, mirroring
+#: `pipeline/observe.py` exactly — same signature, return value ignored, a
+#: raising observer cannot fail a run — so a deployment learns one pattern rather
+#: than two that are nearly the same.
+#:
+#: It did not exist until Milestone 10, and its absence was not cosmetic: this
+#: module only called `logging`, so `run.transition` could not reach an exporter
+#: at all. FR-017 asks that a transition be visible in an operator's tracing
+#: backend, and a requirement cannot bind to something that does not exist
+#: (research R4).
+_OBSERVER: list[Callable[[dict[str, Any]], None]] = []
+
+
+def set_observer(callback: Callable[[dict[str, Any]], None] | None) -> None:
+    """Install, or remove, the span bridge.
+
+    One observer, not a list. The argument is `pipeline/observe.py`'s and is
+    inherited rather than restated: a deployment that wants two can write a
+    function that calls two, and a registry of subscribers would be an event bus
+    — infrastructure with no present-tense reason to exist (Principle XI).
+
+    **Nothing installs this on its own behalf.** `docdoc.telemetry` returns a
+    bridge and does not call this; the API and the worker install it, and only
+    when the slot is empty, so an exporter cannot silently take a slot from
+    whatever a deployment already had in it.
+    """
+    _OBSERVER.clear()
+    if callback is not None:
+        _OBSERVER.append(callback)
+
+
+def observer() -> Callable[[dict[str, Any]], None] | None:
+    """The installed bridge, if any. What the "is the slot empty?" check reads."""
+    return _OBSERVER[0] if _OBSERVER else None
+
+
+def install_bridge(
+    build: Callable[[], Callable[[dict[str, Any]], None]] | None,
+    *,
+    endpoint: str | None,
+) -> str:
+    """Install an exporter into both observer slots, if both are empty.
+
+    Returns ``"unconfigured"``, ``"installed"``, ``"occupied"``, or
+    ``"unavailable"``, and **logs which, once** — each of the four is otherwise
+    something an operator has to infer from an absence of traces, which is the
+    hardest thing there is to debug.
+
+    **`build` is passed in rather than imported, and the layer graph is why.**
+    Three arrangements were tried. Putting this whole function in
+    `docdoc.telemetry` failed because deciding whether to install means reading
+    *this* module's slot, and `telemetry` sits below `runs`. Importing
+    `docdoc.telemetry` from here failed differently and more usefully: the
+    "outbound HTTP is confined" contract enumerates this package's modules, and
+    `postgres` imports `observe`, so the exporter became reachable from the queue
+    through two hops. Both refusals are the contracts working.
+
+    What is left is the arrangement that was true all along — the *front end*
+    composes them. `docdoc.api.app` and `docdoc.cli.commands.worker` each hand
+    this `telemetry.bridge`; this module owns the policy and knows nothing about
+    what an exporter is, and `telemetry` owns the exporter and knows nothing
+    about slots.
+
+    **The slot check is the point** (research R4). `pipeline/observe.py` argues
+    the single slot as a decision, so an exporter that called `set_observer`
+    unconditionally would take it from whatever a deployment had installed —
+    making "tracing started working" mean "somebody else's observability
+    stopped". Declining on *either* slot being occupied is deliberate: filling
+    the empty one would leave a deployment with half its events exported and no
+    way to notice which half.
+    """
+    from docdoc.pipeline import observe as pipeline_observe
+
+    if not (endpoint or "").strip() or build is None:
+        return "unconfigured"
+
+    occupied = [
+        where
+        for where, current in (
+            ("pipeline", pipeline_observe.observer()),
+            ("runs", observer()),
+        )
+        if current is not None
+    ]
+    if occupied:
+        _logger.info(
+            "an observer is already installed; the OTLP bridge was not installed",
+            extra={"docdoc": {"event": "telemetry.not_installed", "occupied": occupied}},
+        )
+        return "occupied"
+
+    try:
+        emit = build()
+    except ImportError:
+        # An operator who set an endpoint asked for export. Answering that with
+        # silence would be the worst outcome; refusing to boot would be nearly as
+        # bad, for a capability no run depends on.
+        _logger.warning(
+            "an OTLP endpoint is configured but the exporter is not installed",
+            extra={"docdoc": {"event": "telemetry.unavailable", "extra": "docdoc[otel]"}},
+        )
+        return "unavailable"
+
+    pipeline_observe.set_observer(emit)
+    set_observer(emit)
+    _logger.info("the OTLP bridge is installed", extra={"docdoc": {"event": "telemetry.installed"}})
+    return "installed"
+
+
+def _notify(payload: dict[str, Any]) -> None:
+    """Hand the event to the deployment's bridge, and survive it.
+
+    A tracing exporter that raises must not fail a run whose transition has
+    already happened — the row is written by the time this is called, so the
+    alternative would be an exception thrown about a state change that is
+    already a fact.
+    """
+    for callback in _OBSERVER:
+        try:
+            callback(payload)
+        except Exception:
+            _logger.warning(
+                "runs observer raised; the run is unaffected",
+                extra={"docdoc": {"event": "runs.observer_failed"}},
+            )
+
 
 #: The constants `reason` may take when it is not an error class name.
 #:
@@ -120,17 +256,20 @@ def log_transition(
     It is nonetheless absent from every HTTP response (`Run.dump_public`), where
     emitting it would give one tenant a value to compare against another's.
     """
-    _logger.info(
-        json.dumps(
-            {
-                "event": EVENT_NAME,
-                "run_id": str(run_id),
-                "tenant_id": tenant_id,
-                "from_state": from_state,
-                "to_state": to_state,
-                "attempts": attempts,
-                "worker_id": worker_id,
-                "reason": reason,
-            }
-        )
-    )
+    payload = {
+        "event": EVENT_NAME,
+        "run_id": str(run_id),
+        "tenant_id": tenant_id,
+        "from_state": from_state,
+        "to_state": to_state,
+        "attempts": attempts,
+        "worker_id": worker_id,
+        "reason": reason,
+    }
+    # **The log line is unchanged, byte for byte.** FR-024 forbids export from
+    # altering an existing emission point, and an exporter that enriched this
+    # payload "harmlessly" is how a deployment's log parsing breaks at the same
+    # moment its tracing starts working. The bridge is handed the same mapping
+    # this line serialises; it is not given a richer one.
+    _logger.info(json.dumps(payload))
+    _notify(payload)

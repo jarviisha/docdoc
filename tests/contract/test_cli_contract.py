@@ -57,7 +57,7 @@ def run(argv: Sequence[str], capsys: pytest.CaptureFixture[str]) -> tuple[int, s
 # -- §1 the command set ------------------------------------------------------
 
 
-def test_the_command_set_is_the_eight_the_contract_names() -> None:
+def test_the_command_set_is_the_eleven_the_contract_names() -> None:
     parser = build_parser()
     subcommands = next(
         action for action in parser._actions if hasattr(action, "choices") and action.choices
@@ -77,6 +77,20 @@ def test_the_command_set_is_the_eight_the_contract_names() -> None:
         # takes no --concurrency: one run per process, concurrency is replicas
         # (FR-025).
         "worker",
+        # Milestone 10. The worker sweeps between claims, so this exists for the
+        # two cases that does not cover: an operator who wants a sweep *now*, and
+        # a deployment running no worker, which would otherwise never sweep at
+        # all (FR-117).
+        "sweep",
+        # Also Milestone 10, and the only home of `--purge-store-root`. The HTTP
+        # route refuses the default tenant and points here, because erasing the
+        # store root is a thing an operator types rather than a thing a URL does
+        # (ADR-0015 section 5).
+        "erase",
+        # Also Milestone 10. `--admin` lives on `issue` and at no URL: a route
+        # that could mint an administrative credential is a route that needs no
+        # credential (FR-032).
+        "credential",
     }
 
 

@@ -18,8 +18,10 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from docdoc.artifacts.errors import ArtifactError
 from docdoc.artifacts.paths import (
@@ -30,6 +32,9 @@ from docdoc.artifacts.paths import (
 )
 from docdoc.artifacts.paths import FILE_MODE as _FILE_MODE
 from docdoc.kernel import blob_id_for
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 __all__ = ["BlobStore"]
 
@@ -61,6 +66,49 @@ class BlobStore:
                 artifact_id=blob_id,
             )
         return self._blobs / digest[:2] / digest
+
+    def _all_paths(self) -> Iterator[Path]:
+        if not self._blobs.is_dir():
+            return
+        yield from sorted(self._blobs.glob("*/*"))
+
+    # -- deletion (Milestone 10, ADR-0015) ------------------------------------
+
+    def delete(self, blob_id: str) -> bool:
+        """Remove one blob, reporting whether it was there (FR-012)."""
+        try:
+            self._path_for(blob_id).unlink()
+        except FileNotFoundError:
+            return False
+        except OSError as error:
+            raise ArtifactError(
+                f"could not delete {blob_id!r}",
+                reason="delete_failed",
+                artifact_id=blob_id,
+            ) from error
+        return True
+
+    def delete_prefix(self, *, allow_store_root: bool = False) -> int:
+        """Remove this tenant's blob subtree (ADR-0015 §5).
+
+        Same guard as ``FileArtifactStore.delete_prefix`` and for a sharper
+        reason: these are whole source documents. The default tenant's namespace
+        is the store root, so this would remove every document submitted before
+        authentication was enabled — none of which belongs to the customer being
+        erased.
+        """
+        if self._base == self.root and not allow_store_root:
+            raise ArtifactError(
+                "refusing to delete the store root: this tenant's namespace is "
+                "the root itself, so this would remove every source document "
+                "stored before authentication was enabled (ADR-0014 §3, "
+                "ADR-0015 §5)",
+                reason="store_root_refused",
+                root=str(self.root),
+            )
+        removed = sum(1 for _ in self._all_paths())
+        shutil.rmtree(self._blobs, ignore_errors=True)
+        return removed
 
     def put(self, data: bytes) -> str:
         """Store bytes and return their identity. Idempotent."""

@@ -108,6 +108,28 @@ postgres = ["psycopg[binary,pool]>=3.1"]
 # inside `S3ArtifactStore.__init__` all the same, so a base install neither
 # imports nor requires it (research R5).
 s3 = ["boto3>=1.34"]
+# Telemetry export for Milestone 10. The constitution's Observability paragraph
+# already says "OpenTelemetry where practical", so this needs no amendment -- it
+# is observability infrastructure the sanctioned stack names, not a
+# document-processing provider SDK, and Principle IV's adapter-directory rule
+# does not reach it (any more than it reaches `boto3`).
+#
+# The HTTP/protobuf exporter rather than gRPC: smaller dependency tree, traverses
+# the proxies operators already have, and a collector accepts both (research R5).
+#
+# Imported *inside* `docdoc.telemetry.bridge()`, so a base install neither imports
+# nor requires it, and the offline suite passes with this extra absent (SC-021).
+#
+# NOTE: webhook delivery, which lands in the same milestone, deliberately adds
+# NOTHING here. It uses `http.client`, `hmac`, and `hashlib` from the standard
+# library, because the destination policy needs to connect to an address it has
+# already validated while presenting the original Host header -- and both
+# high-level clients hide that behind a transport that would have to be
+# subclassed (research R6, R8).
+otel = [
+    "opentelemetry-sdk>=1.25",
+    "opentelemetry-exporter-otlp-proto-http>=1.25",
+]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
@@ -245,6 +267,9 @@ markers = [
     # bucket -- the suite runs, and says what it skipped (SC-013).
     "postgres: needs DOCDOC_TEST_DATABASE_URL (select with -m postgres)",
     "s3: needs DOCDOC_TEST_S3_ENDPOINT (select with -m s3)",
+    # Milestone 10's exporter, following the same pattern for the same reason: a
+    # contributor with no collector runs the suite and is told what it skipped.
+    "otel: needs the `otel` extra and DOCDOC_TEST_OTLP_ENDPOINT (select with -m otel)",
 ]
 
 # ---------------------------------------------------------------------------
@@ -348,13 +373,43 @@ type = "layers"
 # `api : cli` below -- so they are siblings, separated by an independence
 # contract. See specs/009-asynchronous-runs/research.md R10.
 #
-# The total order then forces `runs > evaluation`, which `runs` does not import.
-# That is the same harmless artefact already noted above for `evaluation >
-# pipeline`, and preferable to a dozen pairwise contracts nobody will maintain.
+# The total order then forces `runs > evaluation`. Through Milestone 9 that was a
+# harmless artefact -- `runs` imported nothing from `evaluation` -- and this
+# comment said so. **Milestone 10 makes the edge real**: `docdoc.runs.corrections`
+# imports `docdoc.evaluation.corrections.Correction`, because the correction model
+# is Milestone 6's and is not redefined.
+#
+# The direction was forced rather than chosen. The "evaluation reaches no network
+# and no provider" contract below bars `socket`, `urllib`, `http`, and
+# `docdoc.artifacts` from that layer, so a database-backed correction store cannot
+# live there, and weakening that contract to host one would trade a
+# machine-checked property for a convenience (specs/010 research R13).
+#
+# Corrected here rather than left standing, for the reason the `artifacts`
+# "nothing else" clause above was corrected in Milestone 9: a comment that lies is
+# worse than one that is absent.
+#
+# Milestone 10 adds `telemetry`, and it was going to be argued out of this list.
+# specs/010's plan and its layer contract both said it is "not a layer and gains no
+# position -- it imports nothing of docdoc's, so a position would assert a
+# dependency that does not exist". That reasoning is fine and the conclusion was
+# wrong, and `tests/unit/test_layer_boundaries.py` said so on the first run:
+# **every package on disk must be named here**, because one that is not is
+# unconstrained -- free to import anything, in any direction, with CI still green.
+#
+# Its position is the one that is true. It sits BELOW `runs`, because `api` and
+# `runs.worker` install the bridge; it sits ABOVE `pipeline`, because nothing at or
+# below the pipeline may reach an exporter. Sharing a position with `evaluation`
+# says neither imports the other, which is the case.
+#
+# The alternative considered and rejected: making it `telemetry.py`, a module
+# rather than a package, which passes the test because the test walks directories.
+# That is the shape of fix specs/010's own FR-096a warns about -- a change written
+# to make a guard pass which also removes what the guard was watching.
 layers = [
     "docdoc.api : docdoc.cli",
     "docdoc.recording : docdoc.runs",
-    "docdoc.evaluation",
+    "docdoc.evaluation : docdoc.telemetry",
     "docdoc.pipeline",
     "docdoc.validation",
     "docdoc.grounding",
@@ -431,6 +486,80 @@ forbidden_modules = [
     "temporalio",
     "rq",
     "dramatiq",
+]
+
+# Milestone 10 gives docdoc an outbound network call for the first time -- webhook
+# delivery -- and an exporter. Both are confined here rather than trusted to stay
+# put (FR-099).
+#
+# `source_modules` ENUMERATES the runs submodules other than `delivery`, which
+# looks clumsy beside a contract on `docdoc.runs` plus `ignore_imports` for the
+# two exceptions. The clumsy form is the working one: an ignore-list contract
+# passes the moment a *new* module reaches the network, because the contract never
+# named it. This one fails until somebody adds the module here on purpose, which
+# is the whole point of having it (specs/010 tasks T002).
+#
+# `docdoc.runs.delivery` and `docdoc.telemetry` are absent from the list, and that
+# absence is the permission.
+#
+# Two further absences, both found by running the contract rather than by reasoning
+# about it, and both recorded here so nobody adds them back:
+#
+#   `docdoc.runs.worker` imports `http.server` for the health listener Milestone 9
+#   shipped (worker.py:497). That is an INBOUND server, and this contract is about
+#   outbound calls; FR-098 also says Milestone 9's arrangements are untouched. The
+#   worker still cannot reach a socket directly -- it reaches delivery through
+#   `maintenance`, which is in the list above.
+#
+#   `docdoc.artifacts` imports `urllib.parse` to split an S3 endpoint into its
+#   parts (s3.py:71). Parsing a URL is not fetching one, and `artifacts` predates
+#   this milestone. It has no `http` or `socket` import and gains none here.
+#
+#   `docdoc.runs.observe` is still in the list, and keeping it there is what
+#   forced `install_bridge`'s shape. That function holds the decision to install
+#   the OTLP exporter, so the obvious implementation imports `docdoc.telemetry`,
+#   which imports `opentelemetry`. This contract went red -- through
+#   `postgres -> observe -> telemetry -> opentelemetry`, two hops from the queue.
+#   The available edits were to drop `observe` from this list, to add an
+#   `ignore_imports` entry, or to change the code. The first two would have kept
+#   the name while making the list mean nothing about it; the third turned out to
+#   be the smaller change and the more accurate one, because the composition of
+#   "a slot" and "an exporter" belongs to the front end that has both. So
+#   `install_bridge` takes the factory as a parameter, `observe` imports no
+#   telemetry, and this list is unchanged. The contract found a design defect,
+#   which is what a contract is for.
+[[tool.importlinter.contracts]]
+name = "outbound HTTP is confined to delivery and telemetry (FR-099)"
+type = "forbidden"
+source_modules = [
+    "docdoc.runs.retention",
+    "docdoc.runs.keys",
+    "docdoc.runs.limits",
+    "docdoc.runs.routing",
+    "docdoc.runs.corrections",
+    "docdoc.runs.maintenance",
+    "docdoc.runs.queue",
+    "docdoc.runs.postgres",
+    "docdoc.runs.model",
+    "docdoc.runs.observe",
+    "docdoc.runs.identity",
+    "docdoc.runs.health",
+    "docdoc.runs.errors",
+    "docdoc.pipeline",
+    "docdoc.validation",
+    "docdoc.grounding",
+    "docdoc.ingest",
+    "docdoc.kernel",
+]
+forbidden_modules = [
+    # `http` and not `http.client`: import-linter rejects subpackages of external
+    # packages outright, which the first draft of this contract discovered by
+    # failing to load at all. The broader name is what the grounding, validation,
+    # and evaluation contracts above already use.
+    "http",
+    "socket",
+    "urllib",
+    "opentelemetry",
 ]
 
 # Grounding is deterministic all the way down: no network, no credentials, no
