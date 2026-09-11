@@ -177,3 +177,141 @@ def test_the_keys_setting_names_a_file_and_not_a_key() -> None:
     from docdoc.api.settings import API_KEYS_FILE_ENV
 
     assert API_KEYS_FILE_ENV.endswith("_FILE")
+
+
+# -- T178: the other secret this milestone introduced -------------------------
+#
+# Everything above is about an API key. Milestone 10 added a second secret with
+# the same properties and a different lifecycle: a **webhook signing secret**.
+# FR-066 puts it under the same rule, and SC-007's sweep names it alongside the
+# credential — but the coverage stopped at API keys, so the surface FR-066 is
+# actually about had none.
+#
+# It is a sharper case than the API key, because a signing secret is *supplied*
+# on a route (`POST /v1/callbacks`) rather than issued by one. A registration
+# that echoed back what it was given would leak it in the most ordinary way
+# there is, and the response is the first place to check.
+
+#: Seeded so a match is unambiguous. A generic value could appear by accident.
+SIGNING_SECRET = "whsec_a_distinctive_signing_secret_for_this_test_only"
+
+
+def test_a_callback_carries_a_digest_and_never_the_secret() -> None:
+    """FR-066. The row holds `sha256(secret)` — enough to tell two registrations
+    apart, and not enough to sign with."""
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from docdoc.runs.delivery import Callback
+    from docdoc.runs.principal import digest_of
+
+    callback = Callback(
+        callback_id=uuid4(),
+        tenant_id="acme",
+        url="https://hooks.example.com/docdoc",
+        secret_digest=digest_of(SIGNING_SECRET),
+        created_at=datetime(2026, 9, 9, tzinfo=UTC),
+    )
+
+    assert SIGNING_SECRET not in repr(callback)
+    assert not [name for name in type(callback).__dataclass_fields__ if name == "secret"], (
+        "`Callback` has a `secret` field, so a listing could return one"
+    )
+
+
+def test_no_field_of_a_delivery_could_hold_a_secret() -> None:
+    """The row that records what was sent carries a status and a class name."""
+    from docdoc.runs.delivery import Delivery
+
+    fields = set(Delivery.__dataclass_fields__)
+
+    assert not (fields & {"secret", "signature", "signing_secret", "body", "payload"})
+
+
+def test_the_signature_header_does_not_contain_the_secret() -> None:
+    """**The one that would be easy to get wrong.**
+
+    An HMAC is *derived* from the secret and does not contain it — but a scheme
+    that had accidentally emitted `t=…,v1=…,secret=…`, or signed with a
+    reversible construction, would look identical at a glance.
+    """
+    from docdoc.runs.delivery import signature
+
+    header = signature(SIGNING_SECRET, b'{"run_id":"0f8b"}', timestamp=1_788_000_000)
+
+    assert SIGNING_SECRET not in header
+    assert "whsec" not in header
+
+
+def test_a_delivery_payload_carries_no_secret() -> None:
+    """What actually leaves the deployment, over a network, to somebody else."""
+    import json
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from docdoc.runs.delivery import payload_for
+    from docdoc.runs.model import Run, RunStatus
+
+    at = datetime(2026, 9, 9, tzinfo=UTC)
+    run = Run(
+        run_id=uuid4(),
+        tenant_id="acme",
+        blob_id="sha256:" + "a" * 64,
+        schema_identity="invoice@1",
+        status=RunStatus.SUCCEEDED,
+        processing_id="sha256:" + "b" * 64,
+        created_at=at,
+        updated_at=at,
+        expires_at=at,
+    )
+
+    body = json.dumps(payload_for(run, delivery_id=uuid4()))
+
+    assert SIGNING_SECRET not in body
+    assert "whsec" not in body
+
+
+def test_no_route_returns_a_signing_secret_after_registration() -> None:
+    """FR-066's other half, asserted as an **absence of a route**.
+
+    There is no callback *listing* route, so there is nowhere a stored secret
+    could be returned from — and the registration response carries the identity
+    and the URL and nothing else. Checked against the route table rather than by
+    trying a URL, because an absence needs an exhaustive check.
+    """
+    pytest.importorskip("fastapi", reason="the HTTP interface lives behind the docdoc[api] extra")
+    from fastapi.testclient import TestClient
+
+    from docdoc.api.app import _Deployment, build_app
+
+    client = TestClient(build_app(_Deployment()))
+    paths = client.app.openapi()["paths"]  # type: ignore[attr-defined]
+
+    callback_routes = {
+        (method.upper(), path)
+        for path, methods in paths.items()
+        for method in methods
+        if "callback" in path
+    }
+
+    assert callback_routes == {
+        ("POST", "/v1/callbacks"),
+        ("DELETE", "/v1/callbacks/{callback_id}"),
+    }, (
+        f"an unexpected callback route exists: {sorted(callback_routes)}. A "
+        f"listing route would be somewhere a stored secret could be returned "
+        f"from, which is what FR-066 forbids"
+    )
+
+
+def test_the_secret_book_holds_secrets_and_the_database_holds_digests() -> None:
+    """The join between the two is `sha256`, which is what keeps a row unable to
+    sign and a route unable to read one."""
+    from docdoc.runs.delivery import SecretBook
+    from docdoc.runs.principal import digest_of
+
+    book = SecretBook({digest_of(SIGNING_SECRET): SIGNING_SECRET})
+
+    assert book.secret_for(digest_of(SIGNING_SECRET)) == SIGNING_SECRET
+    assert book.secret_for("not-a-digest-we-hold") is None
+    assert book.knows(SIGNING_SECRET)

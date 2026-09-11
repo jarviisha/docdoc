@@ -180,16 +180,33 @@ The file holds hashes and never keys, so a leak of it is not a set of working
 credentials. There is no flag and there never will be: `argv` is readable by
 every process on the host.
 
-### Rotating a key means restarting
+### Rotating a *file* key means restarting; a *table* key does not
 
-The key file is read once, at startup, and never re-read. Rotation is therefore a
-deploy, not an edit:
+The key file is read once, at startup, and never re-read. Rotating a key that
+lives there is therefore a deploy, not an edit:
 
 ```bash
 # 1. add the new key alongside the old one, then restart every process
 # 2. move callers onto the new key
 # 3. remove the old key, then restart every process again
 ```
+
+Milestone 10 added credentials that do not work this way, and they are what to
+use for anything you may need to revoke in a hurry:
+
+```bash
+docdoc credential issue --tenant acme --label ci   # prints the key once
+docdoc credential list   --tenant acme             # identifiers, never keys
+docdoc credential revoke 7f2c…                     # effective everywhere in ~30s
+```
+
+No restart, no file edit, no signal. The bound is
+`DOCDOC_RUN_CREDENTIAL_TTL_SECONDS` (default 30) and it is a number rather than
+"immediately", because "immediately" is not something you can test. Issuing takes
+effect at once — a resolution hit is cached and a miss is not.
+
+The file is consulted **before** the table, so both work at the same time and a
+deployment can move across one key at a time.
 
 **Deleting a key from the file on its own does nothing.** There is no error and
 no warning — the running process is still answering from the mapping it read at

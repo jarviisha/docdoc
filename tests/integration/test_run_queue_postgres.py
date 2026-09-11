@@ -77,28 +77,87 @@ def test_the_migration_is_idempotent(queue: PostgresRunQueue) -> None:
         assert migrations.pending(connection) == []
 
 
-def test_two_workers_racing_never_receive_the_same_run(queue: PostgresRunQueue) -> None:
-    """The question a fake cannot pose (FR-016).
+#: How many independent races one run of the test below stages.
+#:
+#: **One was not enough, and that is why this constant exists.** Milestone 10
+#: broke this guarantee — the eligibility predicate moved into a CTE outside the
+#: locked scan, so `FOR UPDATE`'s recheck re-tested only the join on `run_id` and
+#: a run another worker had already claimed passed it. The bug reached the end of
+#: the milestone, through two convergence passes and a live deployment check.
+#:
+#: When it was finally caught, a single round detected it about **70%** of the
+#: time: often enough to look like a flaky test somebody reruns, rarely enough
+#: that a full-suite run had passed with the bug present. Five rounds put that
+#: past 99%, for about a second of wall clock — which is the trade a race test
+#: should be making.
+_RACE_ROUNDS = 5
 
-    Ten runs, eight threads claiming as fast as they can. If `SKIP LOCKED` were
-    absent the threads would serialise on the oldest row; if the claim were two
-    statements instead of one, two of them would win the same run.
+
+def test_two_workers_racing_never_receive_the_same_run(queue: PostgresRunQueue) -> None:
+    """The question a fake cannot pose (FR-016, FR-092).
+
+    Ten runs, eight threads claiming as fast as they can, five times over. If
+    `SKIP LOCKED` were absent the threads would serialise on the oldest row; if
+    the claim were two statements instead of one, two of them would win the same
+    run.
+
+    **And if the eligibility predicate is not on the locked scan, two of them win
+    the same run anyway** — which is what happened, and is not the same failure.
+    `SKIP LOCKED` steps over a row another worker holds *uncommitted*; what
+    rejects one whose claim has already *committed* is `FOR UPDATE` re-evaluating
+    the scan's own quals after taking the lock. Move those quals into a CTE and
+    the recheck has nothing left to test but the row's identity.
+
+    `attempts` is asserted as well as the identities, because it is the evidence
+    that says which failure occurred: two workers holding one run leaves that row
+    at 2, and no amount of reading the returned ids explains how it got there.
     """
     now = datetime.now(UTC)
-    for offset in range(10):
-        _submit(queue, at=now + timedelta(milliseconds=offset))
 
-    def claim(worker: int):
-        return queue.claim(
-            worker_id=f"w{worker}", now=now + timedelta(minutes=1), lease=LEASE, max_attempts=3
+    for round_number in range(_RACE_ROUNDS):
+        # A fresh instant per round so the runs sort deterministically within it
+        # and no round can inherit the previous one's rows.
+        started = now + timedelta(seconds=round_number)
+        for offset in range(10):
+            _submit(queue, at=started + timedelta(milliseconds=offset))
+
+        def claim(worker: int, at: datetime = started):
+            return queue.claim(
+                worker_id=f"w{worker}", now=at + timedelta(minutes=1), lease=LEASE, max_attempts=3
+            )
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            claimed = [run for run in pool.map(claim, range(8)) if run is not None]
+
+        ids = [run.run_id for run in claimed]
+        assert len(ids) == 8, (
+            f"round {round_number}: eight workers, ten runs, {len(ids)} claims — "
+            f"every worker should get one"
+        )
+        assert len(set(ids)) == 8, f"round {round_number}: two workers were handed the same run"
+
+        # The direct evidence. A run claimed twice carries two increments, and
+        # this is the assertion that names the mechanism rather than the symptom.
+        doubled = queue._execute(
+            "SELECT count(*) AS n FROM runs WHERE attempts > 1", (), fetch="one"
+        )
+        assert doubled["n"] == 0, (
+            f"round {round_number}: {doubled['n']} run(s) were claimed more than "
+            f"once. `FOR UPDATE` re-evaluates only the quals of the scan that "
+            f"carries it — if eligibility has moved into a CTE above that scan, "
+            f"the recheck passes on run_id alone and a committed claim is claimed "
+            f"again (FR-092)"
         )
 
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        claimed = [run for run in pool.map(claim, range(8)) if run is not None]
-
-    ids = [run.run_id for run in claimed]
-    assert len(ids) == 8, "eight workers, ten runs: every worker should get one"
-    assert len(set(ids)) == 8, "two workers were handed the same run"
+        # Terminal, so the next round starts from a clean queue and its claims
+        # cannot be satisfied by this round's leftovers.
+        for run in claimed:
+            queue.finish(
+                run.run_id,
+                RunOutcome(status=RunStatus.CANCELLED),
+                now=started + timedelta(minutes=2),
+                worker_id=run.worker_id,
+            )
 
 
 def test_a_locked_row_is_skipped_rather_than_waited_on(queue: PostgresRunQueue) -> None:

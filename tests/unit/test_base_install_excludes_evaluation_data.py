@@ -87,9 +87,22 @@ def test_no_new_optional_extra_was_added_for_evaluation() -> None:
     # but cannot add *files* to a wheel everyone already installs, so opting in
     # is the only way the base install can stay free of static assets. Scoring is
     # not gated by it either, which is what this test is actually about.
-    assert extras == {"pdf", "azure", "google", "gcv", "api", "ui", "postgres", "s3", "dev"}, (
-        f"the extras are now {sorted(extras)}; evaluation must need none of its own"
-    )
+    # `otel` was added by Milestone 10 and belongs to the same category as
+    # `postgres` and `s3`: infrastructure the sanctioned stack names, opted into by
+    # a deployment that wants it. Scoring is not gated by it, which is what this
+    # test is actually about.
+    assert extras == {
+        "pdf",
+        "azure",
+        "google",
+        "gcv",
+        "api",
+        "ui",
+        "postgres",
+        "s3",
+        "otel",
+        "dev",
+    }, f"the extras are now {sorted(extras)}; evaluation must need none of its own"
 
 
 def test_importing_the_scorer_pulls_in_no_provider_sdk() -> None:

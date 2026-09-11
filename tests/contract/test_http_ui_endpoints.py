@@ -59,6 +59,46 @@ ROUTES = {
     # because what it removes is the *attempt* — the result, if one was already
     # produced, is content-addressed, immutable, and untouched by this.
     ("DELETE", "/v1/runs/{run_id}"),
+    # Milestone 10. Two, and both require the `admin` scope; a caller without it
+    # gets a 404 rather than a 403, so an ordinary tenant cannot learn from this
+    # surface that it exists.
+    #
+    # **The absence this list asserts is still the important half.** There is no
+    # route that assigns a correction to a reviewer, no queue of work, no review
+    # state, and no write path on a result -- which is what keeps FR-083's claim
+    # that this milestone is not the deferred "full review UI" checkable rather
+    # than asserted. Phase 10 adds exactly two correction routes, and if it ever
+    # adds a third this test is where that decision has to be made in the open.
+    ("DELETE", "/v1/admin/tenants/{tenant_id}"),
+    ("DELETE", "/v1/admin/documents/{blob_id}"),
+    # Credential lifecycle (ADR-0016). Three, and the shape of the set is the
+    # argument: issue, list, revoke. There is no route that *returns* a
+    # credential, because the plaintext exists once — at issuance — and a second
+    # way to obtain it would make "stored as a digest" a description of the
+    # storage rather than of the guarantee.
+    ("POST", "/v1/admin/credentials"),
+    ("GET", "/v1/admin/credentials"),
+    ("DELETE", "/v1/admin/credentials/{credential_id}"),
+    # Delivery (ADR-0018). Three, and the shape argues the same way the
+    # credential set does: register, revoke, and read what became of one. There
+    # is no route that returns a signing secret, because the deployment holds it
+    # as configuration and the table holds only a digest (FR-066) -- so a second
+    # way to obtain it is not withheld, it is absent.
+    #
+    # `GET /v1/runs/{run_id}/delivery` is a *read* on the run's notification, not
+    # a second way to learn a run's state: a lost delivery loses no information,
+    # because polling remains the record (FR-065).
+    ("POST", "/v1/callbacks"),
+    ("DELETE", "/v1/callbacks/{callback_id}"),
+    ("GET", "/v1/runs/{run_id}/delivery"),
+    # Corrections (Principle IX). **Two, and the absence of a third is the
+    # contract** (FR-083). Record one, read this tenant's. There is no route that
+    # assigns a correction to a reviewer, no queue of work, no work list, no
+    # review state, and no `PATCH` on a result -- see
+    # `test_no_review_platform.py`, which asserts the absence by name rather than
+    # leaving it to this set to imply.
+    ("POST", "/v1/runs/{run_id}/corrections"),
+    ("GET", "/v1/runs/{run_id}/corrections"),
 }
 
 
@@ -255,7 +295,7 @@ def test_a_deployment_with_no_schemas_returns_an_empty_list_and_not_an_error() -
 # -- FR-031, FR-060 what must never accumulate -------------------------------
 
 
-def test_the_route_set_is_exactly_these_ten(storeless: TestClient) -> None:
+def test_the_route_set_is_exactly_these_twenty(storeless: TestClient) -> None:
     """FR-031, FR-060 — an exhaustive list is the only way to assert an absence.
 
     A route added without a decision shows up here, which is the point: this

@@ -1,0 +1,16 @@
+{
+  "report_id": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "document_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+
+  "field_path": "total",
+
+  "predicted_value": "1234.56",
+  "corrected_value": "1243.56",
+
+  "location": { "page": 1 },
+
+  "reason": "the two middle digits are transposed; the printed total is 1,243.56",
+
+  "annotator": "ana@example.com",
+  "timestamp": "2026-09-09T10:00:00Z"
+}

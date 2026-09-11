@@ -229,7 +229,16 @@ class TestTheMigrateCommandAgainstADatabase:
         rendering = run(_args(), settings)  # type: ignore[arg-type]
 
         assert rendering.code == 0
-        assert rendering.data["applied"] == ["0001_runs", "0002_default_tenant"]
+        # Against `discover()` rather than a literal list. This asserted
+        # Milestone 9's two version names, so Milestone 10's five migrations made
+        # it red for describing the wrong thing: what is being checked is that
+        # applying reports *what it applied, in order*, not which files happened
+        # to exist when the test was written. A literal list here means every
+        # milestone that adds a migration edits this line, and the milestone that
+        # forgets gets a failure that says nothing about its own change.
+        from docdoc.runs import migrations
+
+        assert rendering.data["applied"] == [m.version for m in migrations.discover()]
         assert rendering.data["default_tenant"] == "default"
         assert any("store root belongs to tenant" in line for line in rendering.lines)
 

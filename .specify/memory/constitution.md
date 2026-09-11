@@ -330,6 +330,61 @@ Migration note: no artifact is invalidated. The `pyproject.toml` layers contract
 remains the authoritative form and already carries the change.
 
 Templates: no changes required.
+
+---
+AMENDMENT 1.7.0 → 1.8.0 (2026-09-04)
+Bump rationale: MINOR — guidance is materially widened in one place, a layer is
+added to Principle X's chain, and an enumerated list gains four members. No
+principle is removed or redefined; nothing previously compliant becomes
+non-compliant.
+
+Principles affected: X (Layered Dependency Direction and Bounded Concepts), and
+Principle XI via the MVP Scope Constraints "Deferred technology" paragraph.
+
+  - **"Multi-tenant billing" gains a second distinguishing sentence.** v1.6.0
+    already separated billing from tenant isolation; this separates **counting in
+    order to refuse** from **metering in order to bill**. Milestone 10 counts
+    submissions, concurrent runs, runs per period, and tokens per tenant, and
+    refuses when a configured limit is reached. It prices nothing, invoices
+    nothing, and emits no billing record, and those three remain deferred.
+
+    Recorded as an amendment rather than settled by reading, for the reason
+    v1.6.0 gives about itself: Governance says the constitution wins where a spec
+    conflicts with it, so a spec that reinterprets a sentence in order to comply
+    with it inverts the precedence. A per-tenant token counter is metering under
+    any honest reading of the previous text, and `specs/010`'s FR-102 made this
+    amendment a dependency of implementation rather than arguing the point.
+
+  - **`telemetry` joins the chain in Principle X**, between `runs` and `pipeline`,
+    sharing a position with `evaluation`. It holds the OTLP bridge: `api` and
+    `runs.worker` install it, and nothing at or below `pipeline` may reach an
+    exporter. Sharing a position with `evaluation` says neither imports the other,
+    which is the case.
+
+    `specs/010`'s plan argued it should have no position at all — it imports
+    nothing of docdoc's, so a position would assert a dependency that does not
+    exist. That argument is coherent and the conclusion was wrong, and
+    `tests/unit/test_layer_boundaries.py` said so on the first run it was given:
+    a package on disk that no layer names is **unconstrained**, free to import
+    anything in any direction with CI still green. Principle X's own rule — "this
+    text MUST be amended in the same change that adds a layer to it" — is what
+    brings the amendment here rather than leaving the discovery in a research
+    document.
+
+  - **The error model's enumerated list gains four names**: `RetentionError`,
+    `CredentialError`, `LimitExceededError`, and `DeliveryError`. Adding names to
+    an enumerated list in a governing document is guidance expansion, and doing it
+    in the same change avoids two amendments in one milestone.
+
+Sections amended: Principle X (the chain, and one paragraph on the new position);
+MVP Scope Constraints (Deferred technology, Error model). No decision moved; the
+open list stays empty.
+
+Migration note: no artifact is invalidated. No existing error is renamed, no
+existing layer moves, and a deployment that configures no limits counts nothing.
+
+Templates: no changes required — the plan-template gate table references
+Principles X and XI by number and remains accurate.
 -->
 
 # docdoc Constitution
@@ -569,8 +624,8 @@ not regress.
 The dependency direction MUST be, strictly downward. The layers that **exist**, in order:
 
 ```text
-API, CLI → Recording, Runs → Evaluation → Pipeline → Validation → Grounding
-         → Extraction → Ingest → Artifacts → Kernel
+API, CLI → Recording, Runs → Evaluation, Telemetry → Pipeline → Validation
+         → Grounding → Extraction → Ingest → Artifacts → Kernel
 ```
 
 Nothing is planned and unbuilt: every layer named here exists. `Transform` was named as a layer in
@@ -591,6 +646,14 @@ position cannot express; an `independence` contract states it instead.
 produce a prediction set; `Runs` drives it to serve an accepted request. Neither uses the other, so
 an ordered position between them would grant a permission neither needs. A second `independence`
 contract states it.
+
+**`Telemetry` shares `Evaluation`'s position, and it is here at all because a package that no layer
+names is unconstrained.** It holds the OTLP bridge: `API` and the worker install it, so it sits below
+`Runs`; nothing at or below `Pipeline` may reach an exporter, so it sits above `Pipeline`. It imports
+nothing of docdoc's, and that was very nearly the argument for giving it no position — which
+`tests/unit/test_layer_boundaries.py` rejected, correctly, on the ground that an undeclared package
+may import anything in any direction while CI stays green. A position that constrains who may import
+it is worth more than the accuracy of saying it depends on nothing.
 
 Rules:
 
@@ -697,6 +760,17 @@ artifacts to a tenant so that one customer cannot read another's is permitted an
 required; metering, invoicing, and per-tenant pricing remain deferred. The distinction is stated
 because the two are one phrase apart and a reviewer would otherwise have to guess which was meant.
 
+It also forbids **metering in order to bill**, not **counting in order to refuse**. From Milestone 10
+a deployment may count a tenant's submissions, its concurrent runs, its runs per period, and its
+tokens per period, and may refuse further work when a configured limit is reached. What stays
+deferred is what those numbers may be *used for*: no price, no invoice, no billing record, and no
+per-tenant rate card. A counter that exists to say "not now" is a limit; the same counter exported to
+an accounts-receivable system is metering, and adding the second needs its own amendment.
+
+The line is drawn here rather than left to a reviewer because a per-tenant token counter is metering
+under the plainest reading of the sentence above, and `specs/010` would otherwise have had to argue
+that it is not — which is the reinterpretation Governance's precedence rule exists to prevent.
+
 **Normalization.** `Document.text` is byte-faithful source text. No Unicode normalization, line
 joining, hyphen removal, whitespace normalization, or table linearization is applied to the
 canonical IR. Normalization for **matching only** is permitted via the versioned, offset-mapped
@@ -709,9 +783,14 @@ and prompts containing sensitive documents MUST NOT be logged. Log hashes and id
 
 **Error model.** Errors are stable, typed, and provider-neutral: `DocumentError`, `ParserError`,
 `UnsupportedDocumentError`, `ParserCapabilityError`, `ExtractionError`, `ProviderError`,
-`SchemaError`, `GroundingError`, `ValidationError`, `PipelineError`, `ArtifactError`. Retries
+`SchemaError`, `GroundingError`, `ValidationError`, `PipelineError`, `ArtifactError`,
+`RetentionError`, `CredentialError`, `LimitExceededError`, `DeliveryError`. Retries
 are permitted for LLM/network calls only; validation, grounding, and schema errors MUST NOT be
 retried.
+
+The last four arrive with Milestone 10 and each subclasses `RunError`, so every handler that already
+catches it keeps working. None may carry a credential, document content, a provider message, or a
+webhook receiver's response body — the same no-content rule every observer in this project follows.
 
 **Observability.** Structured logging with request id, processing id, step id, latency,
 provider, model, and token usage. OpenTelemetry where practical.
@@ -794,4 +873,4 @@ insufficient. Unjustified violations are rejected regardless of the code's quali
 **Precedence for unresolved items.** Where an "Open Constitutional Decision" is unresolved,
 implementers MUST NOT resolve it silently in code. Raise it, decide it, record it.
 
-**Version**: 1.7.0 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-08-28
+**Version**: 1.8.0 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-09-04

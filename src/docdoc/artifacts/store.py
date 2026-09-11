@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import tempfile
 from enum import Enum
 from pathlib import Path
@@ -113,6 +114,34 @@ class ArtifactStore(Protocol):
         """Remove everything, or one stage. Returns how many were removed."""
         ...
 
+    def delete(self, artifact_id: str) -> bool:
+        """Remove one artifact. ``True`` if it was there (ADR-0015 §7).
+
+        Returns presence rather than ``None`` so a retention sweep can count what
+        it actually removed without a second existence check that would race
+        against a concurrent write (FR-012).
+
+        There is no ``tenant_id`` parameter because a store instance **is** a
+        tenant: ``tenant_id`` is a constructor argument, and every path this
+        object derives is already inside its own namespace (ADR-0014 §3).
+        """
+        ...
+
+    def delete_prefix(self, *, allow_store_root: bool = False) -> int:
+        """Remove this tenant's entire artifact subtree. Returns the count.
+
+        Raises ``ArtifactError`` when this store's namespace is the store root
+        itself — which is the case for the default tenant, whose prefix is
+        unprefixed (ADR-0014 §3). That subtree holds everything written before
+        authentication was ever enabled and everything ``docdoc extract`` ever
+        wrote from the command line, none of which belongs to a customer anybody
+        is erasing.
+
+        ``allow_store_root=True`` is passed at exactly one call site in this
+        codebase, on the command line, and at no HTTP route (ADR-0015 §5).
+        """
+        ...
+
 
 class NullArtifactStore:
     """A store that stores nothing, and is the default.
@@ -149,6 +178,15 @@ class NullArtifactStore:
         return None
 
     def clear(self, *, stage: str | None = None) -> int:
+        return 0
+
+    def delete(self, artifact_id: str) -> bool:
+        # A store that holds nothing deleted nothing. Raising would make this the
+        # one implementation a sweep has to branch for, which is how a caller
+        # ends up with a `hasattr` check instead of a protocol.
+        return False
+
+    def delete_prefix(self, *, allow_store_root: bool = False) -> int:
         return 0
 
 
@@ -411,6 +449,51 @@ class FileArtifactStore:
                 continue
             path.unlink(missing_ok=True)
             removed += 1
+        return removed
+
+    # -- deletion (Milestone 10, ADR-0015) ------------------------------------
+
+    def delete(self, artifact_id: str) -> bool:
+        """Remove one artifact, reporting whether it was there (FR-012)."""
+        path = self._path_for(artifact_id)
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            return False
+        except OSError as error:
+            # Same rule as everywhere else in this class: an unreachable store
+            # is a degradation, not a lie. Raising is correct here rather than
+            # returning False, because False means "it was not there" and a
+            # sweep that believed it would remove the run row and lose the only
+            # record of what still needs deleting (ADR-0015 §3).
+            raise ArtifactError(
+                f"could not delete {artifact_id!r}",
+                reason="delete_failed",
+                artifact_id=artifact_id,
+            ) from error
+        return True
+
+    def delete_prefix(self, *, allow_store_root: bool = False) -> int:
+        """Remove this tenant's artifact subtree (ADR-0015 §5).
+
+        **The guard tests the danger and not a name.** ``self._base ==
+        self.root`` is true exactly when this store's tenant is the unprefixed
+        one, which is the property that makes the operation destructive; testing
+        for the string ``"default"`` instead would be a second source of truth
+        about the same fact, and it would be wrong for a deployment that
+        configured a different default tenant name.
+        """
+        if self._base == self.root and not allow_store_root:
+            raise ArtifactError(
+                "refusing to delete the store root: this tenant's namespace is "
+                "the root itself, so this would remove every artifact written "
+                "before authentication was enabled and every one the command "
+                "line ever wrote (ADR-0014 §3, ADR-0015 §5)",
+                reason="store_root_refused",
+                root=str(self.root),
+            )
+        removed = sum(1 for _ in self._all_paths())
+        shutil.rmtree(self._artifacts, ignore_errors=True)
         return removed
 
 

@@ -31,9 +31,14 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from docdoc.artifacts.errors import ArtifactError
-from docdoc.runs import identity
+from docdoc.runs import identity, maintenance, retention
 from docdoc.runs.errors import RunStateUnavailableError
-from docdoc.runs.identity import DEFAULT_LEASE, DEFAULT_MAX_ATTEMPTS
+from docdoc.runs.identity import (
+    DEFAULT_DELIVERY_BATCH,
+    DEFAULT_LEASE,
+    DEFAULT_MAX_ATTEMPTS,
+    DEFAULT_SWEEP_BATCH,
+)
 from docdoc.runs.model import RunOutcome, RunStatus
 
 if TYPE_CHECKING:
@@ -73,6 +78,10 @@ def execute_one(
     adapter: Any,
     now: datetime,
     limits: Any = None,
+    # `limiter`, not `limits`: the latter is already this function's parameter for
+    # the ingest caps -- document size, page count. Two different questions that
+    # would read as one under a shared name.
+    limiter: Any = None,
     stopping: Callable[[], bool] | None = None,
 ) -> PipelineResult | None:
     """Execute one claimed run and record what happened.
@@ -194,7 +203,34 @@ def execute_one(
     # worker that stalled past its lease could overwrite the verdict of the worker
     # that superseded it — see `RunQueue.finish`.
     queue.finish(run.run_id, outcome, now=now, worker_id=run.worker_id)
+    _record_tokens(limiter, run, result, now=now)
     return result
+
+
+def _record_tokens(limiter: Any, run: Run, result: Any, *, now: datetime) -> None:
+    """Count what the run consumed, beside the terminal state (FR-042, T092).
+
+    **After the run, which is the whole design of the token budget.** Tokens are
+    known only once a provider has answered, so this can refuse the *next*
+    submission and can never abort the one that produced them. Enforcing mid-run
+    would discard work already paid for, which is the failure Milestone 9 was
+    built to remove (FR-047).
+
+    Swallows everything. A counter is a limit's bookkeeping; failing to write one
+    must not turn a completed run into a failed one, and the next tick's counter
+    being short by one run is a smaller error than losing the run.
+    """
+    if limiter is None:
+        return
+    usage = getattr(getattr(result, "extraction", None), "provenance", None)
+    tokens = getattr(getattr(usage, "usage", None), "input_tokens", None) or 0
+    tokens += getattr(getattr(usage, "usage", None), "output_tokens", None) or 0
+    if tokens <= 0:
+        return
+    try:
+        limiter.record_tokens(tenant_id=run.tenant_id, tokens=int(tokens), now=now)
+    except Exception as error:  # bookkeeping may not fail a completed run
+        _logger.warning('{"event": "limit.tokens_unrecorded", "error": "%s"}', type(error).__name__)
 
 
 def _demand_the_result_is_retrievable(store: ArtifactStore, outcome: RunOutcome) -> RunOutcome:
@@ -274,8 +310,22 @@ class Worker:
         lease: timedelta = DEFAULT_LEASE,
         max_attempts: int = DEFAULT_MAX_ATTEMPTS,
         limits: Any = None,
+        #: Counts what a completed run consumed, so the token budget refuses the
+        #: *next* submission (FR-042). `None` means no limits are configured,
+        #: which is the default.
+        limiter: Any = None,
         health_port: int | None = None,
         stores_for: Callable[[str], tuple[Any, Any]] | None = None,
+        retention_period: timedelta | None = None,
+        sweep_batch: int = DEFAULT_SWEEP_BATCH,
+        maintenance_interval_seconds: int = maintenance.DEFAULT_INTERVAL_SECONDS,
+        #: Attempts the deliveries that are due, between claims. `None` means
+        #: this deployment delivers nothing, which is the default and is what
+        #: FR-064 requires: no callback registered, no outbound request, and no
+        #: socket opened to discover there was nothing to send.
+        deliverer: Any = None,
+        delivery_batch: int = DEFAULT_DELIVERY_BATCH,
+        maintenance_budget_ms: int = maintenance.DEFAULT_BUDGET_MS,
     ) -> None:
         self._queue = queue
         self._blobs = blobs
@@ -291,9 +341,18 @@ class Worker:
         self._lease = lease
         self._max_attempts = max_attempts
         self._limits = limits
+        self._limiter = limiter
         self._health_port = health_port
         self._stopping = threading.Event()
         self._health: _HealthServer | None = None
+        #: `None` means retention is not configured, and the tick does nothing
+        #: (FR-014). Every capability in Milestone 10 is off until asked for.
+        self._retention = retention_period
+        self._sweep_batch = sweep_batch
+        self._deliverer = deliverer
+        self._delivery_batch = delivery_batch
+        self._maintenance_budget_ms = maintenance_budget_ms
+        self._ticker = maintenance.Ticker(interval_seconds=maintenance_interval_seconds)
 
     def stop(self) -> None:
         """Ask the loop to finish its current run and exit."""
@@ -336,6 +395,11 @@ class Worker:
                 continue
 
             if claimed is None:
+                # Between claims, and only here: an idle worker is the one with
+                # a budget to spare, and a busy one runs this at most once per
+                # interval (FR-114). Never while a run is in flight, so a tick
+                # cannot delay a heartbeat into losing a lease.
+                self._maintain()
                 self._stopping.wait(_IDLE_SLEEP_SECONDS)
                 continue
 
@@ -401,6 +465,57 @@ class Worker:
         )
         self._health.start()
 
+    def _maintain(self) -> None:
+        """One bounded tick of unrequested work, if it is time (T046b).
+
+        This is what makes User Story 1's "on a schedule" true. Without it
+        retention exists only as a command somebody has to remember to run, and
+        Milestone 9's own argument against a reaper -- "a process to deploy,
+        monitor, and have fail silently" -- applies to a forgotten crontab entry
+        just as well.
+
+        Swallows everything. A maintenance failure must not stop a worker
+        claiming runs: the runs are what a deployment is paid for, and the sweep
+        is idempotent, so the next tick resumes wherever this one stopped.
+        """
+        nothing_to_do = (
+            self._retention is None and self._deliverer is None and self._limiter is None
+        )
+        if nothing_to_do or not self._ticker.due(identity.now()):
+            return
+
+        now = identity.now()
+        try:
+            report = maintenance.tick(
+                maintenance.MaintenanceDeps(
+                    queue=self._queue,
+                    stores_for=lambda tenant_id: retention.Stores(*self._stores_for(tenant_id)),
+                    deliverer=self._deliverer,
+                    # For expiring spent counter windows only. The tick enforces
+                    # no limit: limits are checked at submission and nowhere
+                    # else, and there is no interposition point here that could.
+                    limiter=self._limiter,
+                ),
+                now=now,
+                retention_period=self._retention,
+                batch=self._sweep_batch,
+                delivery_batch=self._delivery_batch,
+                budget_ms=self._maintenance_budget_ms,
+            )
+        except Exception as error:  # a tick may not stop the claim loop
+            _logger.warning('{"event": "maintenance.failed", "error": "%s"}', type(error).__name__)
+        else:
+            if report.swept.runs:
+                _logger.info('{"event": "maintenance.swept", "runs": %d}', report.swept.runs)
+            if report.attempted:
+                _logger.info(
+                    '{"event": "maintenance.delivered", "attempted": %d, "delivered": %d}',
+                    report.attempted,
+                    report.delivered,
+                )
+        finally:
+            self._ticker.ran(now)
+
     def _stores_for(self, tenant_id: str) -> tuple[Any, Any]:
         """The stores for one tenant's namespace (FR-084, FR-086).
 
@@ -445,6 +560,7 @@ class Worker:
                 adapter=self._adapter,
                 now=identity.now(),
                 limits=self._limits,
+                limiter=self._limiter,
                 # FR-042's "finish or relinquish". `execute_one` stops the
                 # pipeline at the next stage boundary once this reads True, and
                 # releases the run so it re-queues immediately (FR-043).

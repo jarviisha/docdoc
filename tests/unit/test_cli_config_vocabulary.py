@@ -408,6 +408,11 @@ def test_no_flag_introduces_a_second_name_for_a_setting() -> None:
         # `DOCDOC_RUN_DATABASE_URL`, where "which run?" is a real question.
         "DOCDOC_RUN_LEASE_SECONDS": "--lease-seconds",
         "DOCDOC_RUN_MAX_ATTEMPTS": "--max-attempts",
+        # Milestone 10, on the same reasoning: both live only on `docdoc sweep`,
+        # which sweeps runs and nothing else, so `--run-retention-days` there
+        # would repeat a word the command already carries.
+        "DOCDOC_RUN_RETENTION_DAYS": "--retention-days",
+        "DOCDOC_RUN_SWEEP_BATCH": "--batch",
     }
     for setting, flag in FLAG_FOR_SETTING.items():
         if setting in aliases:
@@ -477,6 +482,26 @@ FLAGS_WITHOUT_A_SETTING: dict[str, str] = {
     "--stage": "which subset of the store to clear; an argument",
     "--predictions": "where one evaluation's predictions are; an argument",
     "--check": "a per-invocation mode: report rather than apply",
+    "--tenant": "whose data to erase, or whose credentials to list; an argument",
+    "--label": "what a credential is for; an argument recorded beside it",
+    "--admin": (
+        "grants the administrative scope to the credential being issued. A "
+        "per-invocation decision by an operator with database access, and "
+        "deliberately not a setting: an environment variable enabling it would "
+        "make every issued credential administrative in a deployment somebody "
+        "configured once and forgot (FR-032)"
+    ),
+    "--document": "which document to erase; an argument",
+    "--purge-store-root": (
+        "a per-invocation confirmation that the operator means the store root, "
+        "not a deployment setting. A variable enabling this would let an "
+        "environment somebody forgot about make the destructive reading the "
+        "default one (ADR-0015 section 5)"
+    ),
+    "--all": (
+        "how far one sweep invocation goes, which is a property of this "
+        "invocation and not of the deployment. The *batch size* is the setting"
+    ),
     "--health-port": (
         "which port a process listens on is a property of how it was started, "
         "like uvicorn's --port, and not a setting docdoc reads from anywhere"

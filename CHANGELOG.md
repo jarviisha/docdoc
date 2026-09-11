@@ -9,6 +9,201 @@ API may change in any release. `document_id` derivation is versioned separately 
 
 ## [Unreleased]
 
+Milestone 10: retention, credentials, limits, delivery, tracing, and the human loop. **Milestone 9
+ended with a list of seven things it deferred; this is that list, built.** Every one of them could be
+added without moving a process boundary, and none of them did: four process types, four containers,
+one queue, one store, `pipeline.run()` untouched.
+
+**Every capability is off until configured.** A Milestone 9 deployment that changes nothing observes
+no behavioural difference at all — nothing swept, counted, refused, exported, routed, or delivered.
+Golden-set metrics are bit-identical with everything enabled and with everything disabled, and the
+milestone touched **zero** files under `kernel/`, `ingest/`, `extraction/`, `grounding/`, and
+`validation/` — a test reads the diff against `main` and asserts it.
+
+### Added
+
+- **Retention and erasure.** Expired runs and the content only they held are removed automatically,
+  idempotently, in a bounded batch, by the worker between claims. Erasure removes one customer's
+  data or one document's, on request, from `docdoc erase` and from two administrative routes.
+
+  **The deletion set is a set difference and never a complement** (**ADR-0015**). An artifact becomes
+  a candidate only by having been named by a run that is being removed. The rejected form is one word
+  away in English — "delete every artifact no surviving run references" — and it deletes every
+  artifact `docdoc extract` ever wrote from the command line, because a CLI extraction creates no run
+  row and is unreferenced by construction. That is designed out rather than tested for.
+
+  A removed run leaves a **tombstone**: four fields, in its own table. `GET /v1/runs/{run_id}` then
+  answers `410` to the owning tenant, with when and under which policy, and `404` — byte-identical to
+  an identifier that never existed — to everybody else.
+
+  **The default tenant's namespace is the store root**, so erasing it is emptying the store. The
+  route refuses it always; the CLI falls back to the set difference; emptying the root outright needs
+  `--purge-store-root`, which exists at no URL. ADR-0014 predicted this bug by name.
+
+- **Credential lifecycle** (**ADR-0016**). Keys are issued, listed, and revoked at runtime, and a
+  revocation reaches every process within `DOCDOC_RUN_CREDENTIAL_TTL_SECONDS` — default 30 seconds,
+  stated as a number because "immediately" is not a property anybody can test.
+
+  This closes a security defect Milestone 9 shipped with and documented: the key file is read once at
+  startup, so a deleted key kept working until every process restarted. The file still behaves that
+  way and is still consulted first, so a deployment mid-migration keeps its file keys working while
+  table-issued keys start to.
+
+  The plaintext exists once, at issuance. Revocation is an `UPDATE` and never a `DELETE`, so "this
+  key was revoked on the 4th" stays answerable. The first administrative credential comes from
+  `docdoc credential issue --admin`, because a route that could mint one would need no credential.
+
+- **Four per-tenant limits**, refused at submission and nowhere else: submission rate, concurrent
+  runs, runs per period, and a token budget. A `429` names which limit, carries `Retry-After`, and
+  creates no run. Concurrency is counted from the `runs` table rather than stored, because a counter
+  beside a table that already knows is a fact that can drift.
+
+  **No limit aborts a run that is already executing**, and there is no interposition point that
+  could. The token budget therefore refuses the *next* submission and never the one that produced the
+  tokens.
+
+- **Per-tenant fair claiming, and priority.** One tenant's backlog delays another's run by a bound
+  proportional to the number of tenants with work rather than to anyone's backlog depth. A client may
+  mark a submission `urgent` within a ceiling the operator sets; over the ceiling is **accepted at the
+  ceiling** and told so, because an operator lowering one must not break a client that changed
+  nothing. Past `DOCDOC_RUN_STARVATION_SECONDS` an ordinary run outranks everything.
+
+- **Webhook delivery** (**ADR-0018**), at-least-once, signed with HMAC-SHA256 over
+  `f"{timestamp}.{body}"` — the timestamp inside the signed material, so a captured delivery is not
+  valid for ever. **One delivery per run, by a `UNIQUE` constraint** rather than by worker discipline,
+  and the delivery identity is stable across every retry because it is what a receiver deduplicates
+  on.
+
+  The destination policy resolves the host, refuses if **any** resolved address is loopback,
+  link-local, private, multicast, reserved, or unspecified, connects to the validated address while
+  presenting the original hostname, and does not follow redirects. It re-validates before every
+  attempt, because validating once at registration is defeated by DNS rebinding.
+
+  **No dependency was added for any of this** — `http.client`, `socket`, `hmac`, `hashlib`.
+
+- **OpenTelemetry export**, behind a new `docdoc[otel]` extra imported inside the bridge factory. It
+  exports the `pipeline.stage` and `run.transition` events docdoc already emits, and **changes
+  neither**: the log lines stay byte-identical, because an exporter that enriched a payload
+  "harmlessly" is how a deployment's log parsing breaks at the moment its tracing starts working.
+
+  It does not install itself. docdoc has one observer slot, documented as a decision, so the bridge is
+  installed only when it is empty and the log says which of four things happened. `runs/observe.py`
+  gained the slot it did not have.
+
+- **Confidence routing** (**ADR-0017**). A completed run carries a versioned routing outcome —
+  `automatic` or `review`, and exactly those two — computed from grounding status and score,
+  validation severity and verdict, and schema requiredness.
+
+  **It does not read `model_confidence`**, which Principle II forbids and ADR-0004 keeps inert. A test
+  varies that field alone across a fixture set and requires the decision not to move; that test *is*
+  the requirement. `reject` is a disposition the caller owns and `retry` would re-enter the pipeline,
+  which is why there is no third outcome.
+
+- **Corrections.** A reviewer's statement that a value was wrong can be recorded against a run and
+  read back, using Milestone 6's `Correction` model imported and not redefined. `annotator` comes from
+  the body and is never inferred from the credential.
+
+  **A correction changes nothing it annotates** — the result, its artifacts, and its identities hash
+  identically before and after — and **moves no metric** until an explicit promotion produces a new
+  golden set. A run carrying a live correction is not swept.
+
+  **There is no assignment route, no reviewer queue, no work list, no review state, and no `PATCH` on
+  a result.** Principle IX permits the model and forbids the platform; the absence is asserted by
+  name.
+
+### Changed
+
+- **`ArtifactStore` and `BlobStore` gained `delete` and `delete_prefix`** — a public break under
+  ADR-0011, entered separately below when it landed. Every deletion requirement is unimplementable
+  without it.
+
+- **`docdoc.runs` imports `docdoc.evaluation`** for the first time, to reach the `Correction` model.
+  Downward and legal, and it was *forced*: that layer's own contract bars `socket`, `urllib`, `http`,
+  and `docdoc.artifacts`, so a database-backed correction store cannot live beside its model.
+
+- **`docdoc.telemetry` is a new layer**, sharing `evaluation`'s position, and constitution **v1.8.0**
+  carries the Principle X amendment in the same change. The argument that it needed no position was
+  coherent and wrong: a package no layer names is *unconstrained*.
+
+- **The constitution is amended to v1.8.0**, distinguishing counting in order to refuse from metering
+  in order to bill — the second remains deferred — and adding `RetentionError`, `CredentialError`,
+  `LimitExceededError`, and `DeliveryError` to the error model.
+
+- **`examples/receive_webhook.py` prints what it received.** The documented way to run it is `… &`,
+  and redirected stdout is block-buffered — so a receiver whose whole purpose is showing you the
+  delivery showed nothing until it exited, and nothing at all if it was signalled. `flush=True`.
+
+- **docdoc's structured events reach a deployment's stdout at all.** Every one of them — the audit
+  trail, limit refusals, deletion counts, `run.transition`, the bridge's own startup line — went to
+  a `docdoc.*` logger at INFO that had no handler and inherited `WARNING`, so a deployed container
+  logged nothing but its web server's access log. `telemetry.configure_logging()` now emits one JSON
+  object per record from both front ends, and defers entirely to a deployment that has configured
+  logging itself. Found by following quickstart scenario 6, which tells the operator to read a line
+  that was never printed.
+
+- **`packaging/docker/compose.yml` can reach the host and carry an operator's files.**
+  `host.docker.internal` does not resolve under plain Docker on Linux, which two scenarios depend on;
+  both services now set `extra_hosts`. And there was nowhere to put a key file, a signing secret, or
+  a routing policy — `docker cp` loses them the moment an environment variable changes and the
+  container is recreated — so `secrets/` is mounted read-only at `/secrets`.
+
+- **The OTLP bridge exports spans at all.** It built a `TracerProvider`, attached an exporter to it,
+  and then read its tracer from `trace.get_tracer(...)` — the **global** provider, which was never
+  set. Every span went to a no-op tracer, so docdoc exported nothing from the day telemetry landed.
+  Four tests passed throughout, because emitting into a no-op tracer raises nothing. The tracer now
+  comes off the provider that was built; `trace.set_tracer_provider` is deliberately not used,
+  because it is process-global and would displace whatever the deployment had configured. Found by
+  pointing a collector at it and observing that nothing arrived.
+
+- **Two workers can no longer be handed the same run.** Milestone 10's per-tenant fair claim moved
+  the eligibility predicate into a CTE above the scan carrying `FOR UPDATE ... SKIP LOCKED`. That
+  clause makes Postgres re-evaluate a row after locking it, but only against **that scan's** quals —
+  which had become the join on `run_id` alone. A run another worker had claimed and committed passed
+  the recheck, so one document could be parsed and billed to a model provider twice, concurrently,
+  by two workers each holding what it believed was the lease. The predicate is back on the locked
+  scan; ordering still reads the snapshot, which is all it needs. Found by running the `postgres`
+  suite for the first time — it failed 18 times in 20 and passes 30 in 30.
+
+- **The routing block reaches `GET /v1/runs/{run_id}` at all.** `_routing_for` assembled a
+  `PipelineResult` from two stored artifacts and passed a `ValidationProvenance` where a
+  `RunProvenance` was required, so the route raised on every succeeded run once a policy was
+  configured — the whole feature unreachable on the one route that serves it. `decide` now takes
+  `routing.Routable`, naming the two attributes it reads, and the route passes a `StoredResult`
+  instead of fabricating the six it does not have.
+
+- **`priority` crosses the wire as a name, not a number.** A submission asks for `"urgent"`; the
+  response answered `10`. The ceiling is deliberately readable through no route, so a client
+  receiving a number had to guess a mapping it could not check — and a third priority class would
+  have broken every client that hard-coded two. The `IntEnum` value stays in the column the claim
+  query orders by; only the HTTP surface changed. Found by running the quickstart against the
+  composition.
+
+- **`packaging/docker/compose.yml` forwards `DOCDOC_DEFAULT_TENANT`.** It is read by every process
+  and describes the store's layout, so it must agree everywhere — but the composition passed it to
+  none of them, so a deployment upgrading a store with pre-tenant content could be told by `docdoc
+  migrate` that it disagreed with itself and had no way to answer.
+
+- **`packaging/docker/compose.yml` named eight variables nothing reads.** `DOCDOC_RETENTION_PERIOD`,
+  `DOCDOC_SWEEP_BATCH`, `DOCDOC_CREDENTIAL_TTL`, `DOCDOC_STARVATION_BOUND`,
+  `DOCDOC_DELIVERY_ATTEMPT_LIMIT`, `DOCDOC_DELIVERY_TIMEOUT`, `DOCDOC_CORRECTION_RETENTION_PERIOD`,
+  and `DOCDOC_MAINTENANCE_INTERVAL` are corrected to the names the code actually reads. An operator
+  exporting one of them got silence.
+
+### What this deliberately does not do
+
+- **No metering, no invoicing, no pricing.** Tokens are counted in order to refuse a submission, and
+  nothing prices, invoices, or emits a billing record.
+- **No review UI, and no review workflow.** See above.
+- **No fifth process type and no fifth container.** Retention, delivery, and counter expiry happen in
+  the worker's loop between claims. An external scheduler is the reaper process Milestone 9 refused,
+  wearing the operator's crontab.
+- **No OTLP collector in the composition.** docdoc exports; where it exports to is yours.
+- **Delivery is at-least-once, not exactly-once.** Deduplicate on `delivery_id`.
+- **`RunStatus` gains no member.** No `expired`, no `erased`, no `needs_review`. A client switching
+  exhaustively on it keeps being right.
+
+---
+
 Milestone 9: asynchronous runs, shared storage, and tenant scoping. **Submitting a document no longer
 means holding a connection open while four stages run.** A run is recorded, a worker claims it, and
 the caller polls — which turns a single process into a four-process topology, and most of this
@@ -100,6 +295,23 @@ unchanged.
   see on disk.
 
 ### Changed
+
+- **`ArtifactStore` and `BlobStore` gain `delete` and `delete_prefix`. This is a public break** —
+  a third-party implementation of either protocol must add both methods to keep satisfying it.
+
+  Milestone 10 begins here. Retention, per-document deletion, and per-tenant erasure are all
+  unimplementable while a store can only `get` and `put`, and until now a deployment could accumulate
+  content forever with no in-product way to comply with a deletion request.
+
+  Under ADR-0011 a `0.x` minor may break any public API provided the changelog names what moved, and
+  this is that naming. The two surfaces that get a deprecation path instead — the kernel's identity
+  derivations and the on-disk artifact format — are **untouched**: no artifact's bytes are rewritten,
+  no `artifact_id` is reused for different content, and ADR-0010 §5's refusal to overwrite stands.
+
+  `delete` returns whether the object was there, so a sweep counts what it removed rather than what it
+  attempted. `delete_prefix` **refuses when the tenant's namespace is the store root itself** — the
+  default tenant's case (ADR-0014 §3) — unless an explicit `allow_store_root=True` is passed, which
+  happens at one call site on the command line and at no HTTP route. See ADR-0015.
 
 - **Cancelling a running run is a request, not a stop.** `DELETE` answers `200` with
   `status: "running"`, and that is the honest report rather than a bug in the response. The worker

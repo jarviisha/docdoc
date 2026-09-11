@@ -32,11 +32,16 @@ from docdoc.runs.errors import (
     RunNotFoundError,
     RunStateUnavailableError,
 )
-from docdoc.runs.model import Run, RunOutcome, RunStatus
+from docdoc.runs.identity import (
+    DEFAULT_FAIRNESS_WINDOW,
+    DEFAULT_STARVATION,
+    new_delivery_id,
+)
+from docdoc.runs.model import Run, RunOutcome, RunStatus, Tombstone
 from docdoc.runs.observe import log_transition, reason_for
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Collection
     from datetime import datetime, timedelta
     from uuid import UUID
 
@@ -49,7 +54,11 @@ __all__ = ["PostgresRunQueue"]
 _COLUMNS = (
     "run_id, tenant_id, blob_id, schema_identity, status, attempts, worker_id, "
     "lease_until, processing_id, failed_stage, error_class, stage_outcomes, "
-    "cancel_requested, request_id, idempotency_key, created_at, updated_at, expires_at"
+    "cancel_requested, request_id, idempotency_key, created_at, updated_at, expires_at, "
+    # Milestone 10. Named here rather than left to a `SELECT *` for the reason
+    # this list exists: a migration adding a column must not silently change what
+    # `_row_to_run` receives -- and adding these is exactly that migration.
+    "priority, tokens_used, callback_id"
 )
 
 #: The same list, qualified, for the statements that ``RETURNING`` out of a join.
@@ -119,6 +128,145 @@ class PostgresRunQueue:
             # would make this module wrong on the driver's next release.
             raise RunStateUnavailableError(str(type(exc).__name__)) from exc
 
+    # -- retention (Milestone 10, ADR-0015) --------------------------------
+
+    def expiring(
+        self,
+        *,
+        now: datetime,
+        limit: int,
+        exclude: Collection[UUID] = (),
+    ) -> tuple[Run, ...]:
+        """Terminal runs past their deadline, oldest first, bounded."""
+        rows = self._execute(
+            f"""
+            SELECT {_COLUMNS} FROM runs
+             WHERE status IN ('succeeded', 'failed', 'cancelled')
+               AND expires_at <= %(now)s
+               AND (%(exclude)s::uuid[] IS NULL OR NOT (run_id = ANY(%(exclude)s::uuid[])))
+             ORDER BY expires_at
+             LIMIT %(limit)s
+            """,
+            {"now": now, "limit": limit, "exclude": list(exclude) or None},
+            fetch="all",
+        )
+        return tuple(_row_to_run(row) for row in rows or ())
+
+    def retained_ids_for(
+        self, tenant_id: str, *, excluding: Collection[UUID]
+    ) -> tuple[frozenset[str], frozenset[str]]:
+        """Both halves of the survivor set, in one read.
+
+        `jsonb_array_elements` unrolls `stage_outcomes` so the artifact ids come
+        back as rows rather than as documents this layer would have to parse. The
+        blob ids come from the column beside it, in the same scan.
+        """
+        rows = self._execute(
+            """
+            SELECT runs.blob_id AS blob_id,
+                   outcome ->> 'artifact_id' AS artifact_id
+              FROM runs
+              LEFT JOIN LATERAL jsonb_array_elements(runs.stage_outcomes) AS outcome
+                     ON true
+             WHERE runs.tenant_id = %(tenant_id)s
+               AND NOT (runs.run_id = ANY(%(excluding)s::uuid[]))
+            """,
+            {"tenant_id": tenant_id, "excluding": list(excluding)},
+            fetch="all",
+        )
+        artifacts = {row["artifact_id"] for row in rows or () if row["artifact_id"]}
+        blobs = {row["blob_id"] for row in rows or () if row["blob_id"]}
+        return frozenset(artifacts), frozenset(blobs)
+
+    def entomb(self, runs: Collection[Run], *, now: datetime, policy: str) -> int:
+        """Tombstone then delete, in one transaction, last of all.
+
+        `ON CONFLICT DO NOTHING` because a sweep interrupted between the insert
+        and the delete re-runs both, and a duplicate tombstone would turn a
+        resumable step into a failure (FR-002).
+        """
+        run_ids = [run.run_id for run in runs]
+        if not run_ids:
+            return 0
+        rows = self._execute(
+            """
+            WITH marked AS (
+                INSERT INTO run_tombstones (run_id, tenant_id, deleted_at, policy)
+                SELECT run_id, tenant_id, %(now)s, %(policy)s
+                  FROM runs WHERE run_id = ANY(%(ids)s::uuid[])
+                ON CONFLICT (run_id) DO NOTHING
+                RETURNING run_id
+            )
+            DELETE FROM runs WHERE run_id = ANY(%(ids)s::uuid[]) RETURNING run_id
+            """,
+            {"now": now, "policy": policy, "ids": run_ids},
+            fetch="all",
+        )
+        return len(rows or ())
+
+    def purge_tenant_rows(self, tenant_id: str) -> dict[str, int]:
+        """One statement per table, counted (FR-086)."""
+        counts: dict[str, int] = {}
+        for table in ("corrections", "callbacks", "deliveries", "limit_counters"):
+            rows = self._execute(
+                # The table name is interpolated and the tenant is a parameter.
+                # `table` comes from the literal tuple above and from nowhere
+                # else, which is the only form of this that is safe.
+                f"DELETE FROM {table} WHERE tenant_id = %s RETURNING tenant_id",
+                (tenant_id,),
+                fetch="all",
+            )
+            counts[table] = len(rows or ())
+        return counts
+
+    def purge_rows_for(self, run_ids: Collection[UUID]) -> dict[str, int]:
+        """The two tables keyed by `run_id` (FR-086)."""
+        identities = list(run_ids)
+        if not identities:
+            return {}
+        counts: dict[str, int] = {}
+        for table in ("corrections", "deliveries"):
+            rows = self._execute(
+                # `table` comes from the literal tuple above and nowhere else,
+                # which is the only form of an interpolated name that is safe.
+                f"DELETE FROM {table} WHERE run_id = ANY(%s::uuid[]) RETURNING run_id",
+                (identities,),
+                fetch="all",
+            )
+            counts[table] = len(rows or ())
+        return counts
+
+    def runs_for(
+        self,
+        tenant_id: str,
+        *,
+        blob_id: str | None = None,
+        limit: int,
+    ) -> tuple[Run, ...]:
+        """Every state, because an erasure is about a customer and not a deadline."""
+        rows = self._execute(
+            f"""
+            SELECT {_COLUMNS} FROM runs
+             WHERE tenant_id = %(tenant_id)s
+               AND (%(blob_id)s::text IS NULL OR blob_id = %(blob_id)s)
+             ORDER BY created_at
+             LIMIT %(limit)s
+            """,
+            {"tenant_id": tenant_id, "blob_id": blob_id, "limit": limit},
+            fetch="all",
+        )
+        return tuple(_row_to_run(row) for row in rows or ())
+
+    def tombstone(self, run_id: UUID, tenant_id: str) -> Tombstone | None:
+        """Scoped in the query, exactly as `get` is (FR-011)."""
+        row = self._execute(
+            "SELECT run_id, tenant_id, deleted_at, policy FROM run_tombstones "
+            "WHERE run_id = %s AND tenant_id = %s",
+            (run_id, tenant_id),
+            fetch="one",
+        )
+        return Tombstone.model_validate(dict(row)) if row else None
+
     # -- reading -----------------------------------------------------------
 
     def ping(self) -> None:
@@ -177,9 +325,10 @@ class PostgresRunQueue:
             f"""
             INSERT INTO runs (
                 run_id, tenant_id, blob_id, schema_identity, status,
-                request_id, idempotency_key, created_at, updated_at, expires_at
+                request_id, idempotency_key, created_at, updated_at, expires_at,
+                priority, callback_id
             )
-            VALUES (%s, %s, %s, %s, 'queued', %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, 'queued', %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (tenant_id, idempotency_key)
                 WHERE idempotency_key IS NOT NULL DO NOTHING
             RETURNING {_COLUMNS}
@@ -194,6 +343,12 @@ class PostgresRunQueue:
                 now,
                 now,
                 expires_at,
+                # `getattr` with the column's own default, because `RunSpec` is a
+                # structural type: a caller written against Milestone 9 supplies
+                # neither, and it must keep submitting runs that behave exactly
+                # as they did (FR-101).
+                int(getattr(spec, "priority", 0) or 0),
+                getattr(spec, "callback_id", None),
             ),
             fetch="one",
         )
@@ -233,8 +388,9 @@ class PostgresRunQueue:
         now: datetime,
         lease: timedelta,
         max_attempts: int,
+        starvation: timedelta | None = None,
     ) -> Run | None:
-        """Take the oldest eligible run, or ``None``.
+        """Take the next eligible run, or ``None``.
 
         Two statements, in this order and for different reasons.
 
@@ -261,13 +417,42 @@ class PostgresRunQueue:
         **Then claim, in a single statement.** The ``SELECT`` inside the
         ``UPDATE`` is what removes the window between choosing a candidate and
         owning it; ``SKIP LOCKED`` makes concurrent workers step over each
-        other's chosen row instead of serialising on the oldest one; and the
-        ``OR`` clause makes lease expiry self-healing — there is no reaper
-        process to deploy, monitor, and have fail silently (research R8).
+        other's chosen row instead of serialising on their common first choice;
+        and the ``OR`` clause makes lease expiry self-healing — there is no
+        reaper process to deploy, monitor, and have fail silently (research R8).
 
-        ``now`` is a parameter rather than ``now()`` in SQL, so the whole policy
-        is testable at an arbitrary instant.
+        **Milestone 10 replaced the ordering and left the guarantee.** Milestone 9
+        claimed strictly oldest-first, and said in FR-024's own text that this
+        described an ordering rather than a discretion because "nothing else is
+        ever unequal". Three things are now unequal, and the ``ORDER BY`` applies
+        them in this order:
+
+        1. ``starved`` — past ``starvation`` a run outranks everything (FR-089),
+           which is what makes a misconfigured priority ceiling a latency problem
+           and never a liveness one;
+        2. ``recent`` — a **deficit**: the tenant served least in the last window
+           goes first, so one tenant's backlog delays another by at most one
+           claim per tenant with work rather than by the size of the backlog
+           (FR-090). Ranking each tenant's *queued* runs by position was the
+           first design and is not round-robin — the rank recomputes over what is
+           still waiting, so the backlog always has another rank-0 run and it is
+           always the older one (research R10, corrected);
+        3. ``priority`` — within a tenant (FR-088).
+
+        With one tenant, no priorities, and nothing starved, every added term is
+        constant and the order collapses to ``created_at``. That is Milestone 9's
+        behaviour as the *default* rather than as a special case (FR-091).
+
+        ``now`` and ``starvation`` are parameters rather than ``now()`` and a
+        constant in SQL, so the whole policy is testable at an arbitrary instant.
         """
+        # `None` rather than `DEFAULT_STARVATION` as the signature's default, so
+        # the protocol renders the same text in code and in
+        # `contracts/runs-layer.md` -- which `test_data_model_matches_the_code`
+        # compares literally. A constant in a signature is a constant a document
+        # has to spell as `datetime.timedelta(seconds=3600)` to match.
+        bound = DEFAULT_STARVATION if starvation is None else starvation
+
         abandoned = self._execute(
             """
             WITH doomed AS (
@@ -312,19 +497,90 @@ class PostgresRunQueue:
         # *from*, and a claim and a redelivery — the two things a lease exists to
         # tell apart — would be indistinguishable in the log.
         #
-        # `FOR UPDATE SKIP LOCKED` is unchanged and still inside the candidate
-        # selection, which is what removes the window between choosing a row and
-        # owning it; moving it here changes where the text sits, not what it does.
+        # **The eligibility predicate sits on the locked scan, and it has to.**
+        #
+        # It did not, and the queue handed one run to two workers. Milestone 10
+        # lifted the predicate into an `eligible` CTE and joined `candidate` to
+        # it, leaving that scan with one qual: the join on `run_id`. Under READ
+        # COMMITTED, `FOR UPDATE` re-evaluates a row after acquiring its lock —
+        # but only against **the quals of the scan carrying the clause**. So when
+        # another worker claimed a run and committed, this statement locked the
+        # row, rechecked it, found the id still matched, and claimed it again.
+        # `status` and `lease_until` were never re-tested, because they lived one
+        # CTE away.
+        #
+        # `test_two_workers_racing_never_receive_the_same_run` failed 18 times in
+        # 20, and a probe left a row at `attempts = 2` — two `UPDATE`s on one run,
+        # two workers each holding what they believed was the lease. Sequential
+        # claims were always correct, which is why every offline test missed it.
+        #
+        # plan.md asked this exact question and answered it wrongly: *"`FOR UPDATE
+        # SKIP LOCKED` still applies to the single row the outer statement
+        # selects, so two workers still cannot claim one run."* The clause does
+        # still apply. What had moved is the predicate it rechecks against.
+        #
+        # So the `eligible` CTE is gone and its two jobs are separated by which
+        # one has to be fresh:
+        #
+        #   * **eligibility** is on the `runs` scan below, inside the lock, where
+        #     the recheck can see it. This is the correctness half.
+        #   * **ordering** still reads `served`, which is a snapshot and is
+        #     allowed to be: preferring the wrong tenant for one claim is a
+        #     fairness wobble, and claiming a run somebody else owns is a
+        #     document parsed and billed twice.
+        #
+        # `SKIP LOCKED` steps over a row another worker holds *uncommitted*; the
+        # recheck rejects one whose claim has *committed*. Both are needed, and
+        # only the first was working.
         row = self._execute(
             f"""
-            WITH candidate AS (
-                SELECT run_id, status AS from_state
+            WITH served AS (
+                -- How much each tenant has been served lately. **This is the
+                -- fairness term, and the first draft got it wrong in a way a
+                -- test caught**: ranking each tenant's *queued* runs by position
+                -- looks like round-robin and is not. The rank recomputes over
+                -- what is still waiting, so a tenant with a backlog always has
+                -- another rank-0 run, and it is always older than the newcomer's
+                -- -- 201 claims in a row in the test that found it.
+                --
+                -- What produces alternation is a *deficit*: prefer the tenant
+                -- that has had least recently. Derived from the table rather
+                -- than from a counter beside it, so nothing can drift and a
+                -- crash reconciles nothing.
+                SELECT tenant_id, count(*) AS recent
                   FROM runs
-                 WHERE (status = 'queued'
-                        OR (status = 'running' AND lease_until < %(now)s))
-                   AND attempts < %(max_attempts)s
-                 ORDER BY created_at
-                   FOR UPDATE SKIP LOCKED
+                 WHERE updated_at > %(now)s - %(fairness_window)s::interval
+                   AND status <> 'queued'
+                 GROUP BY tenant_id
+            ),
+            candidate AS (
+                SELECT runs.run_id, runs.status AS from_state
+                  FROM runs
+                  -- `LEFT JOIN`, and `FOR UPDATE OF runs` locks only the
+                  -- preserved side. A tenant with nothing served lately has no
+                  -- `served` row and must still be claimable -- it is in fact
+                  -- the tenant fairness most wants to prefer.
+                  LEFT JOIN served ON served.tenant_id = runs.tenant_id
+                 -- **On this scan, not in a CTE above it.** This is the whole of
+                 -- the fix: these three conditions are what `FOR UPDATE`
+                 -- re-evaluates after it takes the lock, so a run another worker
+                 -- claimed and committed no longer passes.
+                 WHERE (runs.status = 'queued'
+                        OR (runs.status = 'running' AND runs.lease_until < %(now)s))
+                   AND runs.attempts < %(max_attempts)s
+                 -- With one tenant, `recent` is the same for every candidate and
+                 -- drops out; with no priorities and nothing starved, the whole
+                 -- order collapses to `created_at`, which is Milestone 9's
+                 -- FR-024 exactly (FR-091). The default is the old behaviour.
+                 ORDER BY
+                          -- Past the bound, a run outranks everything (FR-089).
+                          -- A misconfigured priority ceiling is then a latency
+                          -- problem and never a liveness one.
+                          (runs.created_at < %(now)s - %(starvation)s::interval) DESC,
+                          COALESCE(served.recent, 0),
+                          runs.priority DESC,
+                          runs.created_at
+                   FOR UPDATE OF runs SKIP LOCKED
                  LIMIT 1
             )
             UPDATE runs
@@ -342,6 +598,8 @@ class PostgresRunQueue:
                 "now": now,
                 "lease": lease,
                 "max_attempts": max_attempts,
+                "starvation": bound,
+                "fairness_window": DEFAULT_FAIRNESS_WINDOW,
             },
             fetch="one",
         )
@@ -508,31 +766,58 @@ class PostgresRunQueue:
 
         ``only_from`` narrows the accepted prior state. `cancel` uses it to make
         its queued-run path atomic; see there.
+
+        **The delivery is enqueued here, in this statement** (T112, FR-053). A
+        run carrying a `callback_id` reaches a terminal state and gains a pending
+        delivery in one transaction, so there is no window in which a run is
+        finished and its notification is lost — which is what a second statement
+        after the commit would have. It is a data-modifying CTE rather than a
+        trigger for the reason this module has no ORM: the statement that does it
+        should be the statement you can read.
+
+        ``ON CONFLICT (run_id) DO NOTHING`` is the constraint doing the work
+        (FR-058). A redelivered attempt whose `finish` is suppressed inserts
+        nothing anyway, because the UPDATE returned no row; the clause covers the
+        remaining case, which is two workers concluding one run at once.
         """
         row = self._execute(
             f"""
             WITH prior AS (
                 SELECT run_id, status, worker_id FROM runs WHERE run_id = %(run_id)s
-            )
-            UPDATE runs
-               SET status = %(status)s,
-                   processing_id = %(processing_id)s,
-                   failed_stage = %(failed_stage)s,
-                   error_class = %(error_class)s,
-                   stage_outcomes = %(stage_outcomes)s::jsonb,
-                   worker_id = NULL,
-                   lease_until = NULL,
-                   updated_at = %(now)s
-              FROM prior
-             WHERE runs.run_id = prior.run_id
-               AND {
+            ),
+            updated AS (
+                UPDATE runs
+                   SET status = %(status)s,
+                       processing_id = %(processing_id)s,
+                       failed_stage = %(failed_stage)s,
+                       error_class = %(error_class)s,
+                       stage_outcomes = %(stage_outcomes)s::jsonb,
+                       worker_id = NULL,
+                       lease_until = NULL,
+                       updated_at = %(now)s
+                  FROM prior
+                 WHERE runs.run_id = prior.run_id
+                   AND {
                 "runs.status = %(only_from)s"
                 if only_from
                 else "runs.status IN ('queued', 'running')"
             }
-               {"AND runs.worker_id = %(worker_id)s" if worker_id is not None else ""}
-            RETURNING runs.run_id, runs.tenant_id, runs.attempts, runs.status AS to_state,
-                      prior.status AS from_state, prior.worker_id AS prior_worker
+                   {"AND runs.worker_id = %(worker_id)s" if worker_id is not None else ""}
+                RETURNING runs.run_id, runs.tenant_id, runs.attempts,
+                          runs.status AS to_state, runs.callback_id,
+                          prior.status AS from_state, prior.worker_id AS prior_worker
+            ),
+            notified AS (
+                INSERT INTO deliveries (delivery_id, tenant_id, run_id, callback_id,
+                                        state, attempts, next_attempt_at,
+                                        created_at, updated_at)
+                SELECT %(delivery_id)s, tenant_id, run_id, callback_id,
+                       'pending', 0, %(now)s, %(now)s, %(now)s
+                  FROM updated
+                 WHERE callback_id IS NOT NULL
+                ON CONFLICT (run_id) DO NOTHING
+            )
+            SELECT * FROM updated
             """,
             {
                 "run_id": run_id,
@@ -546,6 +831,10 @@ class PostgresRunQueue:
                 "now": now,
                 "worker_id": worker_id,
                 "only_from": None if only_from is None else str(only_from),
+                # Allocated whether or not it is used, because a parameter that
+                # exists conditionally would mean two statements. Unused when the
+                # run carries no callback, which is the ordinary case.
+                "delivery_id": new_delivery_id(),
             },
             fetch="one",
         )

@@ -724,12 +724,28 @@ def test_an_unreachable_database_after_the_claim_does_not_kill_the_worker() -> N
 
     queue.claim = claim_then_stop  # type: ignore[method-assign]
 
-    logging.getLogger("docdoc.runs").setLevel(logging.WARNING)
+    # Quiet, because this test deliberately drives the failure path and the
+    # worker says so at INFO. **Restored in a `finally`**, which it was not:
+    # `setLevel` on a named logger is process-global and outlives the test, so
+    # every later test that expected an INFO record from `docdoc.runs` got
+    # nothing — the record is filtered before it is created, and `caplog`'s
+    # `at_level` sets the *root* level and cannot undo an explicit one here.
+    #
+    # It went unnoticed for a milestone because nothing downstream read a
+    # `docdoc.runs` INFO record. Milestone 10's telemetry tests do, and they
+    # failed on CI while passing under a local command whose marker selection
+    # happened to put them before this file.
+    runs_logger = logging.getLogger("docdoc.runs")
+    previous = runs_logger.level
+    runs_logger.setLevel(logging.WARNING)
 
-    # The assertion is that this returns at all. Before the handler existed the
-    # `RunStateUnavailableError` from `finish` propagated out of `run_forever`,
-    # out of the command, and took the process with it.
-    worker.run_forever()
+    try:
+        # The assertion is that this returns at all. Before the handler existed
+        # the `RunStateUnavailableError` from `finish` propagated out of
+        # `run_forever`, out of the command, and took the process with it.
+        worker.run_forever()
+    finally:
+        runs_logger.setLevel(previous)
 
 
 class TestAMissingBucketIsNotAMissingDocument:

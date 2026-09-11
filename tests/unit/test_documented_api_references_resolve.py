@@ -256,6 +256,35 @@ CONFIG_MODULES = {
         "RUN_LEASE_SECONDS_ENV",
         "RUN_MAX_ATTEMPTS_ENV",
         "API_KEYS_FILE_ENV",
+        # Milestone 10's retention pair, re-exported here for the same reason
+        # Milestone 9's lease pair is.
+        "RUN_CREDENTIAL_TTL_ENV",
+        "RUN_RETENTION_DAYS_ENV",
+        "RUN_SWEEP_BATCH_ENV",
+        "RUN_STARVATION_SECONDS_ENV",
+        # The four limits and the per-tenant override file.
+        "LIMIT_SUBMISSIONS_ENV",
+        "LIMIT_CONCURRENT_ENV",
+        "LIMIT_RUNS_PER_PERIOD_ENV",
+        "LIMIT_TOKENS_ENV",
+        "LIMITS_FILE_ENV",
+        # Delivery, telemetry, priority, and routing — the second half of
+        # Milestone 10. Re-exported here for the reason the retention pair is:
+        # this module is the one a reader can import without installing a web
+        # framework, and this check runs on a base install.
+        "DELIVERY_ATTEMPTS_ENV",
+        "DELIVERY_TIMEOUT_ENV",
+        "DELIVERY_BACKOFF_ENV",
+        "DELIVERY_BATCH_ENV",
+        "DELIVERY_ALLOW_PRIVATE_ENV",
+        "DELIVERY_SECRETS_FILE_ENV",
+        "OTLP_ENDPOINT_ENV",
+        "OTLP_HEADERS_ENV",
+        "PRIORITY_CEILING_ENV",
+        "ROUTING_POLICY_ENV",
+        "CORRECTION_RETENTION_DAYS_ENV",
+        "MAINTENANCE_INTERVAL_ENV",
+        "MAINTENANCE_BUDGET_ENV",
     ),
     "docdoc.ingest.source": ("MAX_DOCUMENT_BYTES_ENV", "MAX_PAGES_ENV"),
     "docdoc.artifacts.paths": ("DEFAULT_TENANT_ENV",),
@@ -270,7 +299,9 @@ CONFIG_MODULES = {
 #: would then require a `--test-database-url` flag on `docdoc`, which is a
 #: command-line surface for configuring pytest. The real definitions, with their
 #: skip helpers, are in `tests/infra.py`.
-SUITE_ONLY_ENV = frozenset({"DOCDOC_TEST_DATABASE_URL", "DOCDOC_TEST_S3_ENDPOINT"})
+SUITE_ONLY_ENV = frozenset(
+    {"DOCDOC_TEST_DATABASE_URL", "DOCDOC_TEST_S3_ENDPOINT", "DOCDOC_TEST_OTLP_ENDPOINT"}
+)
 
 #: Wider than DOCUMENTS: configuration is described in places that carry no python
 #: block at all, and those are exactly the ones an import check cannot reach.
@@ -289,6 +320,23 @@ CONFIG_DOCUMENTS = (
     # document, so a setting named wrongly there is a setting somebody exports
     # and watches do nothing.
     "docs/concepts/runs.md",
+    # Milestone 10. Names eight settings and is the operator-facing description
+    # of what a refusal means, so a variable spelled wrongly here is a variable
+    # somebody exports and watches do nothing.
+    "docs/concepts/limits.md",
+    # The rest of Milestone 10's operator-facing set, on the same terms: each
+    # names settings, so a variable spelled wrongly in one is a variable somebody
+    # exports and watches do nothing.
+    "docs/concepts/retention.md",
+    "docs/concepts/credentials.md",
+    "docs/concepts/delivery.md",
+    "docs/concepts/routing.md",
+    # And the two runnable operator walk-throughs FR-110 requires. A rotation
+    # guide naming a variable that no longer exists is worse than none: the
+    # operator exports it, nothing changes, and the key they were rotating away
+    # from keeps working.
+    "examples/erase_tenant.md",
+    "examples/rotate_credential.md",
     "examples/serve_api.md",
     # Three that predate Milestone 9 and were never checked either. Added rather
     # than recorded as debt: closing the gap needed two settings registered in

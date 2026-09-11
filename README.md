@@ -212,6 +212,34 @@ stages feeding it have run. Submitting one document twice gives you two run ids 
 id, and that is the answer rather than a collision. A succeeded run names its `processing_id`, and
 the unchanged job routes serve the result — see [runs](docs/concepts/runs.md).
 
+Milestone 10 adds eight, and every one of them is inert until configured:
+
+```text
+POST   /v1/callbacks                      → register a destination; 422 if the policy refuses it
+DELETE /v1/callbacks/{callback_id}        → 204, idempotent
+GET    /v1/runs/{run_id}/delivery         → what became of the notification
+POST   /v1/runs/{run_id}/corrections      → record a reviewer's statement; changes nothing
+GET    /v1/runs/{run_id}/corrections      → this tenant's, and nobody else's
+POST   /v1/admin/credentials              → issue; the only time a key is readable
+GET    /v1/admin/credentials              → what has been issued; no key, no digest
+DELETE /v1/admin/credentials/{id}         → revoke, on every process, with no restart
+DELETE /v1/admin/tenants/{tenant_id}      → erase a customer's data
+DELETE /v1/admin/documents/{blob_id}      → erase one document and the runs over it
+```
+
+The five under `/v1/admin` require the `admin` scope, and a caller without it gets `404` rather than
+`403`: an ordinary tenant learning that an administrative surface exists at a URL is a disclosure
+with no upside.
+
+**There is no route that assigns a correction to a reviewer, no queue of work, no review state, and
+no `PATCH` on a result.** Principle IX permits the correction model and forbids the review platform,
+and a contract test asserts each of those absences by name.
+
+`GET /v1/runs/{run_id}` gains two outcomes: `410` when the run was this tenant's and has been
+erased, carrying when and under which policy, and `404` — byte-identical to an identifier that never
+existed — for everybody else. `POST /v1/documents/{blob_id}/runs` gains `429` when a configured
+limit is reached, naming which and carrying `Retry-After`.
+
 Two more are outside `/v1` and outside authentication, served by the API and every worker alike:
 
 ```text
@@ -232,13 +260,20 @@ SHA-256 hashes rather than keys, so a leak of it is not a set of working credent
 {"keys": [{"sha256": "…", "tenant_id": "acme"}]}
 ```
 
-**Revoking a key requires restarting the process.** The file is read once, at startup. Delete a
-compromised key from it and nothing happens — no error, no warning, no change in behaviour — and the
-key keeps working until every process holding the old mapping has restarted. Static credentials are
-what this milestone provides; if you need revocation to take effect in seconds, put a gateway that
-does in front of the service. Reloading on change was left out deliberately: it means either a
-filesystem watch or a stat on every request, and a deployment changing keys is restarting a process
-anyway, as it already does for every other configuration value.
+**Revoking a key from the file still requires restarting the process.** The file is read once, at
+startup. Delete a compromised key from it and nothing happens — no error, no warning, no change in
+behaviour — and the key keeps working until every process holding the old mapping has restarted.
+Reloading on change was left out deliberately: it means either a filesystem watch or a stat on every
+request.
+
+**Milestone 10 added the other way, and it is the one to use for anything you may need to revoke.**
+`docdoc credential issue --tenant acme` stores a credential in the run database and prints it once;
+`docdoc credential revoke <id>` stops it working on **every** process within
+`DOCDOC_RUN_CREDENTIAL_TTL_SECONDS`, with no restart. The two sources coexist — the file is consulted
+first — so a deployment can move across one key at a time and nothing stops working because a table
+appeared. Issuance and revocation are also available over HTTP to a credential carrying the `admin`
+scope, and the first such credential is created by `docdoc credential issue --admin`, on a command
+line, because a route that could mint one would need no credential to call.
 
 > **A deployment that has not enabled it is exactly as exposed as it was before.** The default is the
 > *compatible* one, not the safe one: it exists so that upgrading breaks nothing, and it means
@@ -246,6 +281,15 @@ anyway, as it already does for every other configuration value.
 > implicit tenant owns everything, and anyone who can reach the service can spend your model provider
 > budget. Put it behind your own gateway, or turn this on. See
 > [ADR-0014](docs/adr/0014-tenant-scoping-and-store-namespacing.md).
+>
+> **Milestone 10 changed one sentence of this and not the rest.** Credentials can now be issued and
+> revoked at runtime, and a revocation reaches every process within
+> `DOCDOC_RUN_CREDENTIAL_TTL_SECONDS` — the defect above is closed for table-issued keys. Everything
+> else in this warning is unchanged: authentication is still off by default, a deployment that has
+> enabled none of it is exactly as exposed as Milestone 9 left it, and **the viewer still does not
+> work under authentication**. It fails at the door rather than after a partial render, because the
+> browser cannot hold a bearer token it was never given, and a viewer that works under
+> authentication needs a session mechanism this project has not designed.
 
 ### Installing
 
@@ -274,9 +318,14 @@ export DOCDOC_STORE_URL=s3://bucket/prefix       # …or an object store, which 
 export DOCDOC_RUN_DATABASE_URL=postgresql://…    # run state, for asynchronous runs — no default
 ```
 
-`DOCDOC_RUN_DATABASE_URL` is needed only by the asynchronous run routes and the worker, and it has
-no default for the same reason `DOCDOC_STORE_ROOT` has none. A deployment that uses neither needs no
-database at all, and the library and the command line need one in no configuration. Apply the schema
+`DOCDOC_RUN_DATABASE_URL` has no default for the same reason `DOCDOC_STORE_ROOT` has none, and the
+library and the command line need one in no configuration.
+
+**Milestone 9's "the database is a dependency of asynchrony only" ends here.** That was true when the
+only thing in it was run state; runtime credential revocation, per-tenant limits, webhook delivery,
+and corrections each need it too. A deployment that has enabled none of them still needs no database
+at all — the synchronous routes are untouched — but "asynchronous runs" is no longer the whole list
+of what one buys. Apply the schema
 explicitly with `docdoc migrate`; nothing applies it on startup, because several workers booting at
 once would be several processes altering one table.
 
@@ -294,6 +343,98 @@ Three configure asynchronous runs, and only the worker reads the last two:
 export DOCDOC_API_KEYS_FILE=/etc/docdoc/keys.json # turns authentication on; absent means off
 export DOCDOC_RUN_LEASE_SECONDS=90                # how long a worker's claim holds
 export DOCDOC_RUN_MAX_ATTEMPTS=3                  # claims before a run is abandoned
+```
+
+Two configure retention, and **both are unset by default, which means nothing is ever removed**:
+
+```sh
+export DOCDOC_RUN_RETENTION_DAYS=30               # how long a run is kept; unset means kept forever
+export DOCDOC_RUN_SWEEP_BATCH=500                 # runs removed per pass
+```
+
+One configures how quickly a revoked credential stops working:
+
+```sh
+export DOCDOC_RUN_CREDENTIAL_TTL_SECONDS=30        # how long a resolution is cached
+```
+
+**This is a number and not "immediately", because "immediately" is not something you can test.** Each
+process that authenticates caches what a credential resolved to for this long, so revoking one takes
+effect everywhere within one lifetime — with no restart, no file edit, and no signal. Issuing a
+credential takes effect at once: a hit is cached and a miss is not.
+
+Until Milestone 10 there was no revocation at all. A key removed from `DOCDOC_API_KEYS_FILE` keeps
+working until the process restarts, and that file still behaves that way — it is read once, at
+startup, and is consulted before the database-backed store.
+
+A run's `expires_at` has been recorded since Milestone 9 and nothing read it. Setting the first of
+these is what starts reading it — and a sweep removes the run **and the artifacts and blobs no
+surviving run of that tenant still names**. Content written outside a run is never touched: an
+extraction from the command line creates no run, so nothing a sweep considers can reach it.
+
+The worker sweeps between claims, so a deployment running one needs to arrange nothing. A deployment
+running **no** worker sweeps nothing, and `docdoc sweep` is how it removes anything at all.
+
+Four configure per-tenant limits, and all four are absent by default, which means nothing is counted
+and nothing is refused:
+
+```sh
+export DOCDOC_LIMIT_SUBMISSIONS_PER_MINUTE=60     # fixed window
+export DOCDOC_LIMIT_CONCURRENT_RUNS=25            # counted from the runs table, never stored
+export DOCDOC_LIMIT_RUNS_PER_PERIOD=10000         # fixed window, 30 days
+export DOCDOC_LIMIT_TOKENS_PER_PERIOD=5000000     # the budget refuses the *next* submission
+export DOCDOC_LIMITS_FILE=/etc/docdoc/limits.json # per-tenant overrides, and priority ceilings
+export DOCDOC_PRIORITY_CEILING=ordinary           # the highest priority a client may be granted
+```
+
+A refusal is `429`, it names which limit and when to come back, and it creates no run — see
+[limits](docs/concepts/limits.md).
+
+Six configure webhook delivery, and the first is what turns it on at all:
+
+```sh
+export DOCDOC_DELIVERY_SECRETS_FILE=/etc/docdoc/webhook-secrets.json
+export DOCDOC_DELIVERY_MAX_ATTEMPTS=6             # then the delivery comes to rest at `failed`
+export DOCDOC_DELIVERY_TIMEOUT_SECONDS=10
+export DOCDOC_DELIVERY_BACKOFF_SECONDS=30         # doubled per attempt, capped at a day
+export DOCDOC_MAINTENANCE_DELIVERY_BATCH=32       # deliveries attempted per tick
+export DOCDOC_DELIVERY_ALLOW_PRIVATE=false        # permits http and private addresses; a guard
+```
+
+**A deployment that registers no callbacks performs no outbound request at all** — it opens no
+socket to discover there was nothing to send. Destinations are resolved and validated at
+registration *and again before every attempt*, because validating once is defeated by DNS rebinding;
+redirects are not followed. See [delivery](docs/concepts/delivery.md).
+
+Two export what docdoc already logs, and unset means nothing is exported and **no telemetry
+dependency is required**:
+
+```sh
+pip install 'docdoc[otel]'
+export DOCDOC_OTLP_ENDPOINT=http://collector:4318/v1/traces
+export DOCDOC_OTLP_HEADERS='authorization=Bearer …'
+```
+
+The bridge is installed only when docdoc's observer slot is empty, so an exporter cannot take it from
+whatever you had there. No collector is added to the composition; if you run one, it is yours.
+
+Two configure routing and corrections, and both are unset by default — with no policy there is no
+`routing` block on a run at all:
+
+```sh
+export DOCDOC_ROUTING_POLICY=/etc/docdoc/routing.json
+export DOCDOC_CORRECTION_RETENTION_DAYS=365       # unset means "as long as the run"
+```
+
+A routing decision reads grounding status and score, validation severity and verdict, and schema
+requiredness. It does **not** read `model_confidence`, and a test varies that field alone and
+requires the decision not to move. See [routing](docs/concepts/routing.md).
+
+Two bound the worker's unrequested work:
+
+```sh
+export DOCDOC_MAINTENANCE_INTERVAL_SECONDS=60     # how often a tick runs
+export DOCDOC_MAINTENANCE_BUDGET_MS=5000          # how long one may take
 ```
 
 One more matters only when you enable authentication over a store that already has content in it:
@@ -452,6 +593,7 @@ higher-layer work merges while that property is failing or absent.
 | 7 | Pipeline, artifact store, CLI, and HTTP API | **Done** |
 | 8 | Read-only grounding viewer, and the two endpoints that reach it | **Done** |
 | 9 | Asynchronous runs, shared object storage, health routes, tenant scoping | **Done** |
+| 10 | Retention and erasure, credential lifecycle, limits, webhook delivery, tracing, routing and corrections | **Done** |
 
 Milestone 8 adds no guarantee — no stage, no provider, no change to any value docdoc produces. What it
 changes is who can see the guarantees the first seven built.
@@ -460,6 +602,17 @@ Milestone 9 adds none either, and that is the claim it is measured on: a result 
 worker and the same result obtained synchronously agree on every value, verdict, location, and
 identity, and the golden-set metrics do not move by a digit. What it buys is that a 400-page scan no
 longer holds an HTTP connection for the several minutes it takes.
+
+Milestone 10 adds none either, and it is measured the same way: golden-set metrics are bit-identical
+with every one of its capabilities enabled and with all of them disabled. It touched no file under
+`kernel/`, `ingest/`, `extraction/`, `grounding/`, or `validation/`, and a test reads the diff and
+asserts that. What it buys is that a deployment can now delete what it holds, revoke a key without a
+restart, refuse a customer that is consuming everything, tell a client when a run finishes, export
+what it already logs, and take a correction back — none of which moves a value.
+
+It also moves no process boundary. Four process types and four containers, exactly as Milestone 9
+left them: retention, delivery, and counter expiry happen in the worker's loop between claims rather
+than in a scheduler somebody has to deploy, monitor, and have fail silently.
 
 ## The browser viewer
 

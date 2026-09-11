@@ -1,0 +1,13 @@
+{
+  "version": "default@1",
+
+  "required_fields": ["total", "invoice_number", "invoice_date"],
+
+  "review_verdicts": ["invalid", "incomplete"],
+
+  "review_on_error_finding": true,
+
+  "review_when_required_ungrounded": true,
+
+  "review_when_required_fuzzy_below": 0.9
+}

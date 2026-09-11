@@ -19,7 +19,7 @@ argument from `docdoc.runs.identity`.
 from __future__ import annotations
 
 from datetime import datetime
-from enum import StrEnum
+from enum import IntEnum, StrEnum
 from typing import TYPE_CHECKING, Any, Self
 from uuid import UUID
 
@@ -31,10 +31,12 @@ if TYPE_CHECKING:
 __all__ = [
     "DEFAULT_TENANT",
     "TERMINAL_STATES",
+    "Priority",
     "Run",
     "RunOutcome",
     "RunStatus",
     "StageOutcomeRecord",
+    "Tombstone",
 ]
 
 #: The tenant a deployment has when authentication is off (FR-088).
@@ -65,6 +67,90 @@ class RunStatus(StrEnum):
 
 #: No transition leaves these (data-model.md rule 7).
 TERMINAL_STATES = frozenset({RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED})
+
+
+# ---------------------------------------------------------------------------
+# `RunStatus` ABOVE IS CLOSED AT FIVE AND MILESTONE 10 ADDS NOTHING TO IT.
+#
+# This is the file where a sixth member would be added by somebody who had not
+# read FR-004a, and the reasoning is short enough to keep here rather than in a
+# specification they would also not have read.
+#
+# Milestone 10 builds the retention sweep whose absence is the reason `expired`
+# was left out. So the state is now reachable — and putting it back would swap
+# one lie for another, because a `Run` carrying that status carries none of a
+# run's other fields. A removed run is gone AS A RUN: what remains is a
+# `Tombstone` below, four fields, in its own table. `tests/unit/
+# test_run_status_set_is_closed.py` asserts the five by name (SC-023).
+# ---------------------------------------------------------------------------
+
+
+class Priority(IntEnum):
+    """How eagerly a run is claimed. Two members, and the values are the order.
+
+    An `IntEnum` because the claim query sorts by this column directly, and a
+    gap between the two values so a third class — if one is ever justified —
+    is a number rather than a migration of a type (data-model.md).
+
+    **The client sets it, bounded by a per-tenant ceiling the operator
+    configures** (FR-087a). Letting a client choose freely was rejected on the
+    obvious ground: every client chooses the top of the scale, and in a shared
+    deployment that is self-service escalation past another customer's queue.
+    A request above the ceiling is accepted AT the ceiling and told so, never
+    refused — an operator lowering a ceiling must not break a client that
+    changed nothing.
+    """
+
+    ORDINARY = 0
+    URGENT = 10
+
+    @property
+    def label(self) -> str:
+        """What a caller sees: ``ordinary`` or ``urgent``, never ``0`` or ``10``.
+
+        **The numbers are a storage and ordering detail** and they escaped into
+        the HTTP surface once. A submission asks for ``"urgent"`` by name, so a
+        response answering ``10`` makes the client learn a mapping to read back
+        what it just sent — and it cannot check that mapping against anything,
+        because the ceiling is deliberately readable through no route (FR-087b).
+        A number would also make a third class a breaking change for every
+        client that had hard-coded the two.
+        """
+        return self.name.lower()
+
+    @classmethod
+    def from_label(cls, label: str) -> Priority:
+        """The member a caller named, or `KeyError`. The inverse of `label`."""
+        return cls[label.strip().upper()]
+
+
+class Tombstone(BaseModel):
+    """What remains of a removed run. Four fields, and the shortness is the point.
+
+    No status, no blob id, no schema identity, no stage outcomes (FR-004). A
+    tombstone that carried what the run held would be a way of retaining what was
+    deleted.
+
+    `extra="forbid"` so a fifth field is a failure rather than a drift.
+
+    Read by the owning tenant, which is told its run was here and is gone, with
+    when and under which rule. Every other tenant is told what it would be told
+    about an identifier that never existed — the two responses differ in kind,
+    not in a field of one shape (FR-011).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    run_id: UUID
+    tenant_id: str
+    deleted_at: datetime
+
+    #: Which rule removed it: `retention` for the sweep, `erasure:tenant` or
+    #: `erasure:document` for an operator's request. This field is why
+    #: `RunStatus` gains no member — the distinction between ageing out and being
+    #: erased has to be recorded somewhere, and a status carrying it too would be
+    #: a second source of truth about one fact.
+    policy: str
 
 
 class StageOutcomeRecord(BaseModel):
@@ -192,6 +278,16 @@ class Run(BaseModel):
     request_id: str | None = None
     idempotency_key: str | None = None
 
+    #: Milestone 10. Each defaults to what an existing row already means, so the
+    #: migration that adds the columns changes no run's behaviour (FR-101).
+    priority: Priority = Priority.ORDINARY
+    #: The run's total, recorded by the worker in the same statement as the
+    #: terminal state. `None` rather than `0` for a run that failed before
+    #: reaching a provider: "used none" and "never got there" are different facts.
+    tokens_used: int | None = None
+    #: The destination registered at submission, or none.
+    callback_id: UUID | None = None
+
     created_at: datetime
     updated_at: datetime
     expires_at: datetime
@@ -218,5 +314,28 @@ class Run(BaseModel):
         tenant's — SC-008 requires cross-tenant responses to be byte-identical to
         non-existence, and the cheapest way to keep that true is to never emit
         the field that distinguishes them.
+
+        Milestone 10 adds three columns and emits **one** of them.
+
+        `priority` is emitted always, including when none was requested, because
+        a submission above its tenant's ceiling is accepted *at* the ceiling and
+        the caller has no other way to learn what it was granted (FR-087a).
+
+        `tokens_used` is not. It is an enforcement counter, and a token total in
+        a response body is the first half of an invoice — which constitution
+        v1.8.0 keeps deferred in the same sentence that permits the counting.
+
+        `callback_id` is not. The caller supplied it; what they cannot see
+        without asking is what became of the delivery, and that is a route of its
+        own. Echoing an input widens this contract for nothing.
         """
-        return self.model_dump(mode="json", exclude={"tenant_id", "idempotency_key"})
+        body = self.model_dump(
+            mode="json",
+            exclude={"tenant_id", "idempotency_key", "tokens_used", "callback_id"},
+        )
+        # **The name, not the number.** `mode="json"` serialises an `IntEnum` as
+        # its value, so this answered `10` to a caller that had asked for
+        # `"urgent"` — contracts/operations-http-api.md says the name in three
+        # places and the request side has always used one. See `Priority.label`.
+        body["priority"] = self.priority.label
+        return body

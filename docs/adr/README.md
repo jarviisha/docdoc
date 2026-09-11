@@ -20,6 +20,10 @@ it would be decided explicitly rather than settled by whichever code landed firs
 | [0012](0012-storeless-extraction-over-http.md) | Extraction over HTTP without a store | Accepted | `STORELESS_EXTRACTION` |
 | [0013](0013-asynchronous-run-model.md) | The asynchronous run model, and the second identity it requires | Accepted | — (amends 0010 §6) |
 | [0014](0014-tenant-scoping-and-store-namespacing.md) | Tenant scoping, store namespacing, and the existence oracle | Accepted | — (Milestone 9 design) |
+| [0015](0015-deletion-over-a-content-addressed-store.md) | Deletion is a set difference, never a complement | Accepted | — (Milestone 10 design) |
+| [0016](0016-credential-lifecycle.md) | Credential lifecycle, and the administrative scope | Accepted; supersedes `specs/009` FR-061 | — (Milestone 10 design) |
+| [0017](0017-confidence-routing-policy.md) | Routing reads trusted signals only, and has two outcomes | Accepted | — (Milestone 10 design) |
+| [0018](0018-webhook-delivery-semantics.md) | Webhook delivery: at-least-once, signed, and pinned to a validated address | Accepted | — (Milestone 10 design) |
 
 ## Conventions
 

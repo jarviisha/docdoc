@@ -64,6 +64,19 @@ DOCDOC_TEST_S3_ENDPOINT=http://localhost:9000 \
   uv run pytest -m s3
 ```
 
+Milestone 10 adds a third on the same terms. The exporter tests need the `otel` extra **and** a
+collector; without either they skip themselves rather than failing:
+
+```bash
+uv sync --extra otel
+DOCDOC_TEST_OTLP_ENDPOINT=http://localhost:4318 \
+  uv run pytest -m otel
+```
+
+There is deliberately no collector in the development composition — the constitution's scope
+constraint says it contains only api, worker, postgres, and object storage, and an operator's
+collector is the operator's (FR-023, SC-025).
+
 Run `uv run pytest` with neither variable set and the suite passes, reporting what it skipped. That
 is asserted rather than assumed — see SC-013 in `specs/009-asynchronous-runs/spec.md`.
 

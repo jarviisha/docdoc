@@ -276,8 +276,16 @@ class _S3Base:
         # `tenant_root` returns "" for the default tenant, so an existing
         # deployment's objects stay exactly where they are (FR-084a). Do not
         # "tidy" this into an unconditional prefix; see that function's docstring.
-        parts = [part for part in (prefix.strip("/"), tenant_root(tenant_id)) if part]
+        segment = tenant_root(tenant_id)
+        parts = [part for part in (prefix.strip("/"), segment) if part]
         self._prefix = "/".join(parts)
+        # Kept because `delete_prefix` needs to know whether a tenant segment
+        # contributed anything (ADR-0015 §5). An empty segment means this store's
+        # prefix covers every other tenant's `t/<id>/…` keys and everything ever
+        # written without a tenant — which is the property that makes a prefix
+        # delete destructive, and it cannot be recovered from `_prefix` alone
+        # because a configured bucket prefix looks identical.
+        self._tenant_segment = segment
         # Once per condition, exactly as the filesystem stores do. An object
         # store is the one more likely to be briefly unreachable, so "once rather
         # than per stage" matters more here, not less (ADR-0010 §4, US3/AC3).
@@ -297,6 +305,57 @@ class _S3Base:
         """What the error model reports as the store's location."""
         return f"s3://{self._bucket}/{self._prefix}" if self._prefix else f"s3://{self._bucket}"
 
+    # -- deletion (Milestone 10, ADR-0015) ------------------------------------
+
+    def _refuse_store_root(self, *, allow_store_root: bool, what: str) -> None:
+        """The guard, shared by both stores because the danger is shared."""
+        if self._tenant_segment or allow_store_root:
+            return
+        raise ArtifactError(
+            f"refusing to delete the store root: this tenant's namespace carries "
+            f"no tenant segment, so this would remove every {what} written before "
+            f"authentication was enabled, and every one written without a tenant "
+            f"(ADR-0014 §3, ADR-0015 §5)",
+            reason="store_root_refused",
+            root=self.root,
+        )
+
+    def _delete_under(self, prefix: str) -> int:
+        """Every object under a prefix, counted as it goes."""
+        removed = 0
+        paginator = self._client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self._bucket, Prefix=prefix):
+            for entry in page.get("Contents", ()):
+                self._client.delete_object(Bucket=self._bucket, Key=entry["Key"])
+                removed += 1
+        return removed
+
+    def _delete_key(self, key: str, identity: str) -> bool:
+        """One object, reporting whether it was there.
+
+        Two round trips, because S3's ``delete_object`` succeeds on a key that
+        never existed and reports nothing either way. A sweep counts what it
+        removed (FR-012), and a count that includes things that were already gone
+        is a count nobody can act on.
+
+        The head-then-delete window is real and benign: a concurrent delete makes
+        this report ``True`` for something already gone, which overcounts by one
+        and removes nothing twice.
+        """
+        try:
+            self._client.head_object(Bucket=self._bucket, Key=key)
+        except Exception as error:
+            if _is_missing(error) or _blob_is_absent(error):
+                return False
+            raise ArtifactError(
+                f"could not determine whether {identity!r} is present",
+                reason="delete_failed",
+                artifact_id=identity,
+                root=self.root,
+            ) from error
+        self._client.delete_object(Bucket=self._bucket, Key=key)
+        return True
+
 
 class S3BlobStore(_S3Base):
     """Source bytes in an object store, keyed by their own content."""
@@ -304,6 +363,15 @@ class S3BlobStore(_S3Base):
     def _key_for(self, blob_id: str) -> str:
         digest = _digest_of(blob_id)
         return self._key("blobs", digest[:2], digest)
+
+    def delete(self, blob_id: str) -> bool:
+        """Remove one blob, reporting whether it was there (FR-012)."""
+        return self._delete_key(self._key_for(blob_id), blob_id)
+
+    def delete_prefix(self, *, allow_store_root: bool = False) -> int:
+        """Remove this tenant's blob objects (ADR-0015 §5)."""
+        self._refuse_store_root(allow_store_root=allow_store_root, what="source document")
+        return self._delete_under(self._key("blobs"))
 
     def put(self, data: bytes) -> str:
         """Store bytes and return their identity. Idempotent.
@@ -620,6 +688,15 @@ class S3ArtifactStore(_S3Base):
             root=self.root,
             stage=stage,
         )
+
+    def delete(self, artifact_id: str) -> bool:
+        """Remove one artifact, reporting whether it was there (FR-012)."""
+        return self._delete_key(self._key_for(artifact_id), artifact_id)
+
+    def delete_prefix(self, *, allow_store_root: bool = False) -> int:
+        """Remove this tenant's artifact objects (ADR-0015 §5)."""
+        self._refuse_store_root(allow_store_root=allow_store_root, what="artifact")
+        return self._delete_under(self._key("artifacts"))
 
     def clear(self, *, stage: str | None = None) -> int:
         """Remove everything, or one stage. Returns how many were removed.

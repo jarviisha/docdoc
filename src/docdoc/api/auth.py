@@ -28,70 +28,55 @@ every store call site. A human who works for two customers holds two keys.
 segment never reaches a store. The stores deliberately do not re-validate: one
 validation point that always runs beats two that can disagree (ADR-0014 §1, R12).
 
-**Nothing here is mutable through a route** (FR-061). The mapping is read at
-startup and there is no endpoint that creates, revokes, or lists a key. That is
-why it is a file and not a table: a table invites exactly the endpoint the
-requirement forbids.
+**Nothing here is mutable through a route** (`specs/009` FR-061). The mapping is
+read at startup and there is no endpoint that creates, revokes, or lists a key.
+That is why it is a file and not a table: a table invites exactly the endpoint
+the requirement forbids.
+
+**And Milestone 10 built that endpoint** (ADR-0016). FR-061's own text ended "in
+this milestone", and this is the one it was pointing at. The reasoning above is
+kept rather than deleted because it is still true *of this module*: the ring is a
+file, it is read once, and nothing here can be mutated. What changed is that it
+is no longer the only source of principals — ``docdoc.runs.keys`` holds a table
+with issuance, revocation, and a bounded cache, and this ring is consulted
+**first** so a deployment configured as Milestone 9 configured it authenticates
+exactly as before (FR-038).
+
+The limitation this docstring used to leave implicit is worth stating plainly,
+because it was a security defect and not a design note: a key deleted from this
+file keeps working until the process restarts. That is why the table exists.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
-import re
 import secrets
-from dataclasses import dataclass
 from pathlib import Path
 
 from docdoc.api.settings import API_KEYS_FILE_ENV
 from docdoc.runs.model import DEFAULT_TENANT
 
+# Moved to `docdoc.runs.principal` by Milestone 10 and re-exported here, so that
+# nothing which imported them from this module has to change. The move was forced
+# rather than chosen: `docdoc.runs.keys` needs both, and `runs` sits below `api`
+# in the layers contract — see that module's docstring.
+from docdoc.runs.principal import (
+    ADMIN_SCOPE,
+    TENANT_PATTERN,
+    AuthenticationError,
+    Principal,
+    digest_of,
+)
+
 __all__ = [
+    "ADMIN_SCOPE",
     "TENANT_PATTERN",
     "AuthenticationError",
     "KeyRing",
     "Principal",
     "digest_of",
 ]
-
-#: ADR-0014 §1. Narrow enough that a tenant identifier is always a safe path
-#: segment: no separator, no parent reference, no case that a filesystem or an
-#: object store would fold differently.
-TENANT_PATTERN = re.compile(r"^[a-z0-9_-]{1,64}$")
-
-
-class AuthenticationError(Exception):
-    """No principal could be resolved from what was presented.
-
-    **One error for absent, malformed, and unrecognised.** A different message
-    for each would tell an attacker which keys are well-formed enough to be worth
-    guessing, and this class is what makes that impossible to get wrong later:
-    there is nowhere to put the distinction.
-
-    Carries no credential and no fragment of one (FR-068). The message is a
-    constant.
-    """
-
-    def __init__(self) -> None:
-        super().__init__("a valid credential is required")
-
-
-@dataclass(frozen=True)
-class Principal:
-    """Who is asking, reduced to the only thing docdoc does anything with.
-
-    Exactly one ``tenant_id`` (FR-060), and no name, no key, no key identifier.
-    A principal that carried the credential it was resolved from would put one in
-    reach of every log line and error body that ever holds a request context.
-    """
-
-    tenant_id: str
-
-
-def digest_of(key: str) -> str:
-    """The stored form of a credential. What goes in the file, never the key."""
-    return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
 class KeyRing:
@@ -186,6 +171,36 @@ class KeyRing:
     @property
     def enabled(self) -> bool:
         return self._enabled
+
+    def resolve(self, digest: str) -> Principal | None:
+        """`KeyStore.resolve`, so this ring can head a `ChainedKeyStore`.
+
+        **The shape reconciliation ADR-0016 §7 anticipated.** That section says
+        the file ring "implements the same `resolve`"; when Milestone 10 came to
+        build it, this class had `principal_for`, which takes a *plaintext*
+        credential and *raises*. The protocol takes a digest and returns `None`.
+        Both differences are deliberate on both sides:
+
+        * a digest, because a store further down the chain holds digests and
+          nothing should re-hash per source;
+        * `None`, because a chain has to be able to ask the next source, and an
+          exception is not a question.
+
+        `principal_for` keeps its signature and its behaviour, because it is what
+        the HTTP layer calls and what turns four causes into one indistinguishable
+        refusal. This is the narrower verb underneath it.
+
+        Returns `None` when authentication is disabled: a disabled ring resolves
+        *everyone* to the default tenant, which `principal_for` expresses and a
+        digest lookup cannot.
+        """
+        if not self._enabled:
+            return None
+        found: str | None = None
+        for stored, tenant_id in self._by_digest.items():
+            if secrets.compare_digest(stored, digest):
+                found = tenant_id
+        return None if found is None else Principal(found)
 
     def principal_for(self, credential: str | None) -> Principal:
         """The principal this credential names, or raise (FR-059, FR-067).

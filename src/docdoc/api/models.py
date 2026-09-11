@@ -251,6 +251,16 @@ class RunAcceptedResponse(BaseModel):
     status: str
     created_at: str
 
+    #: **Echoed always, including when none was requested** (FR-087a). A request
+    #: above the tenant's ceiling is accepted *at* the ceiling rather than
+    #: refused, so without this the caller has no way to learn what it was
+    #: granted — the ceiling is deliberately readable through no route (FR-087b).
+    #:
+    #: Defaulted rather than required so a caller constructing one of these in a
+    #: test keeps working, and so the field's absence in a Milestone 9 response
+    #: is the value it already meant.
+    priority: str = "ordinary"
+
 
 class RunStateResponse(BaseModel):
     """What ``GET /v1/runs/{run_id}`` returns.
@@ -278,6 +288,17 @@ class RunStateResponse(BaseModel):
     created_at: str
     updated_at: str
     expires_at: str
+
+    #: Always present, including when the submission requested none (FR-087a).
+    #: A request above its tenant's ceiling is accepted *at* the ceiling, and this
+    #: is the only way the caller learns what it was granted — a ceiling is not
+    #: readable through any route, deliberately (FR-087b).
+    #:
+    #: `tokens_used` and `callback_id` are deliberately absent: the first is an
+    #: enforcement counter and a token total in a response body is the first half
+    #: of an invoice, which v1.8.0 keeps deferred; the second is an input the
+    #: caller already has, and what became of the delivery is its own route.
+    priority: str = "ordinary"
 
     processing_id: str | None = None
     failed_stage: str | None = None
