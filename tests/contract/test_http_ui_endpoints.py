@@ -374,17 +374,20 @@ def test_a_missing_interface_says_what_is_missing_and_what_fixes_it(
     failed on one where somebody had — measuring the developer's shell rather than
     the behaviour. A test whose result depends on whether you happened to run
     ``npm run build`` is not testing this endpoint.
+
+    The surface is the console since ADR-0020; before it, the same assertions ran
+    against the viewer's ``/ui``, which no longer exists.
     """
     from docdoc.api import ui as ui_module
 
-    monkeypatch.setattr(ui_module, "chosen_assets", lambda _surface=None: (None, None))
+    monkeypatch.setattr(ui_module, "chosen_assets", lambda: (None, None))
     client = TestClient(build_app(_Deployment(registry=_registry(), adapter=_adapter())))
 
-    response = client.get("/ui")
+    response = client.get("/console")
 
     assert response.status_code == 501
     body = response.json()["error"]
-    assert body["class"] == "ViewerNotInstalled"
+    assert body["class"] == "ConsoleNotInstalled"
     assert body["message"]
 
 
@@ -394,23 +397,42 @@ def test_a_built_interface_is_served_from_this_origin(
     """FR-034 — same origin, so no cross-origin configuration exists anywhere.
 
     The other half of the case above, and forced the same way. Mounted under
-    ``/ui`` rather than at the root so that adding an interface cannot shadow an
-    API path — which this asserts by checking both still answer.
+    ``/console`` rather than at the root so that adding an interface cannot
+    shadow an API path — which this asserts by checking both still answer.
     """
     from docdoc.api import ui as ui_module
 
     (tmp_path / "index.html").write_text("<!doctype html><div id=root></div>", encoding="utf-8")
-    monkeypatch.setattr(ui_module, "chosen_assets", lambda _surface=None: ("test", tmp_path))
+    monkeypatch.setattr(ui_module, "chosen_assets", lambda: ("test", tmp_path))
     client = TestClient(build_app(_Deployment(registry=_registry(), adapter=_adapter())))
 
-    assert client.get("/ui/").status_code == 200
+    assert client.get("/console/").status_code == 200
     assert client.get("/v1/schemas").status_code == 200
+
+
+def test_the_viewer_is_gone(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """ADR-0020 — `/ui` is not a 501 and not a gate. There is nothing there.
+
+    Asserted on an **unauthenticated** deployment on purpose. With authentication
+    on, `_require_credential_everywhere_else` answers 401 before routing, so every
+    path that does not exist looks exactly like every path that does — and this
+    test would pass just as well with the viewer still mounted.
+    """
+    from docdoc.api import ui as ui_module
+
+    (tmp_path / "index.html").write_text("<!doctype html><div id=root></div>", encoding="utf-8")
+    monkeypatch.setattr(ui_module, "chosen_assets", lambda: ("test", tmp_path))
+    client = TestClient(build_app(_Deployment(registry=_registry(), adapter=_adapter())))
+
+    assert client.get("/console/").status_code == 200, "the console is what should be mounted"
+    assert client.get("/ui/").status_code == 404
+    assert client.get("/ui").status_code == 404
 
 
 @pytest.mark.parametrize(
     ("state", "expected"),
     [
-        ("configured", "DOCDOC_UI_ROOT"),
+        ("configured", "DOCDOC_CONSOLE_ROOT"),
         ("installed-but-empty", "built wrongly"),
         ("checkout", "npm run build"),
         ("absent", "docdoc[ui]"),
@@ -433,16 +455,16 @@ def test_each_kind_of_absence_gets_its_own_sentence(
     """
     from docdoc.api import ui as ui_module
 
-    monkeypatch.delenv("DOCDOC_UI_ROOT", raising=False)
-    monkeypatch.setattr(ui_module, "_installed_root", lambda _surface=None: None)
-    monkeypatch.setattr(ui_module, "_checkout_root", lambda _surface=None: None)
+    monkeypatch.delenv("DOCDOC_CONSOLE_ROOT", raising=False)
+    monkeypatch.setattr(ui_module, "_installed_root", lambda: None)
+    monkeypatch.setattr(ui_module, "_checkout_root", lambda: None)
 
     if state == "configured":
-        monkeypatch.setenv("DOCDOC_UI_ROOT", str(tmp_path))
+        monkeypatch.setenv("DOCDOC_CONSOLE_ROOT", str(tmp_path))
     if state == "installed-but-empty":
-        monkeypatch.setattr(ui_module, "_installed_root", lambda _surface=None: tmp_path)
+        monkeypatch.setattr(ui_module, "_installed_root", lambda: tmp_path)
     if state == "checkout":
-        monkeypatch.setattr(ui_module, "_checkout_root", lambda _surface=None: tmp_path)
+        monkeypatch.setattr(ui_module, "_checkout_root", lambda: tmp_path)
     if state == "absent":
         monkeypatch.chdir(tmp_path)
 
@@ -486,11 +508,11 @@ def test_a_checkout_build_beats_an_installed_distribution(
     from docdoc.api import ui as ui_module
 
     checkout = _built_at(tmp_path / "checkout" / "ui" / "dist", "checkout")
-    installed = _built_at(tmp_path / "site-packages" / "docdoc_ui" / "assets", "installed")
+    installed = _built_at(tmp_path / "site-packages" / "docdoc_ui" / "console", "installed")
 
-    monkeypatch.delenv("DOCDOC_UI_ROOT", raising=False)
-    monkeypatch.setattr(ui_module, "_checkout_root", lambda _surface=None: checkout)
-    monkeypatch.setattr(ui_module, "_installed_root", lambda _surface=None: installed)
+    monkeypatch.delenv("DOCDOC_CONSOLE_ROOT", raising=False)
+    monkeypatch.setattr(ui_module, "_checkout_root", lambda: checkout)
+    monkeypatch.setattr(ui_module, "_installed_root", lambda: installed)
 
     source, chosen = ui_module.chosen_assets()
 
@@ -503,18 +525,14 @@ def test_an_explicit_setting_beats_both(monkeypatch: pytest.MonkeyPatch, tmp_pat
     from docdoc.api import ui as ui_module
 
     configured = _built_at(tmp_path / "configured", "configured")
-    monkeypatch.setenv("DOCDOC_UI_ROOT", str(configured))
-    monkeypatch.setattr(
-        ui_module, "_checkout_root", lambda _surface=None: _built_at(tmp_path / "c", "checkout")
-    )
-    monkeypatch.setattr(
-        ui_module, "_installed_root", lambda _surface=None: _built_at(tmp_path / "i", "inst")
-    )
+    monkeypatch.setenv("DOCDOC_CONSOLE_ROOT", str(configured))
+    monkeypatch.setattr(ui_module, "_checkout_root", lambda: _built_at(tmp_path / "c", "checkout"))
+    monkeypatch.setattr(ui_module, "_installed_root", lambda: _built_at(tmp_path / "i", "inst"))
 
     source, chosen = ui_module.chosen_assets()
 
     assert chosen == configured
-    assert source == "DOCDOC_UI_ROOT"
+    assert source == "DOCDOC_CONSOLE_ROOT"
 
 
 def test_the_installed_distribution_still_serves_a_real_deployment(
@@ -528,11 +546,11 @@ def test_the_installed_distribution_still_serves_a_real_deployment(
     """
     from docdoc.api import ui as ui_module
 
-    installed = _built_at(tmp_path / "site-packages" / "docdoc_ui" / "assets", "installed")
+    installed = _built_at(tmp_path / "site-packages" / "docdoc_ui" / "console", "installed")
 
-    monkeypatch.delenv("DOCDOC_UI_ROOT", raising=False)
-    monkeypatch.setattr(ui_module, "_checkout_root", lambda _surface=None: None)
-    monkeypatch.setattr(ui_module, "_installed_root", lambda _surface=None: installed)
+    monkeypatch.delenv("DOCDOC_CONSOLE_ROOT", raising=False)
+    monkeypatch.setattr(ui_module, "_checkout_root", lambda: None)
+    monkeypatch.setattr(ui_module, "_installed_root", lambda: installed)
 
     source, chosen = ui_module.chosen_assets()
 
@@ -554,10 +572,10 @@ def test_an_unbuilt_checkout_does_not_shadow_a_working_installation(
 
     empty = tmp_path / "checkout" / "ui" / "dist"
     empty.mkdir(parents=True)
-    installed = _built_at(tmp_path / "site-packages" / "docdoc_ui" / "assets", "installed")
+    installed = _built_at(tmp_path / "site-packages" / "docdoc_ui" / "console", "installed")
 
-    monkeypatch.delenv("DOCDOC_UI_ROOT", raising=False)
-    monkeypatch.setattr(ui_module, "_checkout_root", lambda _surface=None: empty)
-    monkeypatch.setattr(ui_module, "_installed_root", lambda _surface=None: installed)
+    monkeypatch.delenv("DOCDOC_CONSOLE_ROOT", raising=False)
+    monkeypatch.setattr(ui_module, "_checkout_root", lambda: empty)
+    monkeypatch.setattr(ui_module, "_installed_root", lambda: installed)
 
     assert ui_module.chosen_assets()[1] == installed

@@ -1,9 +1,9 @@
 """T017 — the shell loads without a credential, and nothing else does.
 
 **This is the test that catches the mistake this milestone was most likely to
-make.** `_mount_ui` gates the viewer behind the API credential and records the
+make.** `_mount_ui` gated the viewer behind the API credential and recorded the
 consequence in a comment: with authentication on, the viewer *"does not load"*.
-For the viewer that is the honest failure. For a console whose entire premise is
+For the viewer that was the honest failure. For a console whose entire premise is
 that an operator pastes a key **into a page that has already loaded** it is
 fatal — a browser's top-level navigation carries no `Authorization` header and
 cannot be made to.
@@ -12,6 +12,10 @@ So a console written by copying the viewer's mount would pass every other test i
 this suite and be unusable on every deployment it exists for. That failure is
 invisible to anyone developing against an unauthenticated deployment, which is
 what everybody does locally. Hence a test.
+
+The viewer it was copied from is gone (ADR-0020) and this test is not: the
+mistake it catches is a property of the mount, and the next person adding a
+gated mount beside this one will not have the viewer to be warned by.
 
 The other half is the one that keeps the exemption honest: the shell is open and
 the **data** is not. specs/011 research R1, ADR-0019.
@@ -70,11 +74,6 @@ def test_the_data_is_still_behind_the_credential(client: TestClient) -> None:
     """The exemption is the shell and nothing else."""
     for path in ("/v1/runs", "/v1/schemas", "/v1/admin/credentials"):
         assert client.get(path).status_code == 401, f"{path} answered without a credential"
-
-
-def test_the_viewer_is_unchanged(client: TestClient) -> None:
-    """FR-022b. Milestone 8's posture is what it was, including its gate."""
-    assert client.get("/ui/").status_code == 401
 
 
 def test_a_path_that_merely_starts_with_console_is_not_exempt(client: TestClient) -> None:

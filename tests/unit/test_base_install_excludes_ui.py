@@ -1,4 +1,4 @@
-"""The base install acquires nothing from Milestone 8 (FR-035, FR-036, SC-005).
+"""The base install acquires nothing from the browser client (FR-035, FR-036, SC-005).
 
 The same argument as ``test_base_install_excludes_evaluation_data.py``, applied to
 a new way of breaking it. That file was written because FR-059 "currently holds by
@@ -36,7 +36,10 @@ def _config() -> dict:  # type: ignore[type-arg]
 def test_the_ui_source_exists_to_be_excluded() -> None:
     """The guard on the guard: excluding a directory that does not exist proves nothing."""
     assert pathlib.Path("ui/package.json").is_file()
-    assert pathlib.Path("ui/src/model").is_dir()
+    # `ui/src/model` until ADR-0020: that was the viewer's, and the console's is
+    # a directory deeper. A path that stopped existing is exactly what this guard
+    # is for — it caught the rename rather than quietly passing over nothing.
+    assert pathlib.Path("ui/src/console/model").is_dir()
 
 
 def test_the_wheel_still_ships_only_the_python_package() -> None:
@@ -126,6 +129,7 @@ def test_no_build_output_is_committed() -> None:
             "ui/dist",
             "ui/node_modules",
             "packaging/docdoc-ui/src/docdoc_ui/assets",
+            "packaging/docdoc-ui/src/docdoc_ui/console",
         ],
         capture_output=True,
         text=True,

@@ -9,10 +9,10 @@ Every decision the console makes is here, and nothing here renders.
   the network only through `src/transport.ts` (FR-041).
 - `scripts/check-console-boundary.mjs` — none of ADR-0019 §2's five nouns
   appears here (FR-002), and no result content does either (FR-037, SC-016).
-- `scripts/check-readonly.mjs` — its **persistence** scan covers all of
-  `src/`, so nothing here may reach `localStorage`, `sessionStorage`,
-  IndexedDB, or the Cache API (FR-007, SC-004). Its *editing* scan does not
-  cover this tree, and must not be widened to: see `../components/README.md`.
+- `scripts/check-no-persistence.mjs` — covers all of `src/`, so nothing here
+  may reach `localStorage`, `sessionStorage`, IndexedDB, the Cache API, or a
+  cookie (FR-007, SC-004). This was the persistence half of `check-readonly.mjs`
+  until ADR-0020; the editing half guarded the viewer and went with it.
 
 **Why the split is load-bearing.** The rendering layer carries no automated test
 by decision (`specs/008`), so this directory is the entire tested surface. A

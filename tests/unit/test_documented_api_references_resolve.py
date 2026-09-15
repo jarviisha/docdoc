@@ -251,7 +251,7 @@ CONFIG_MODULES = {
     # in one of them: the constant would vanish and this list would say so.
     "docdoc.api.settings": (
         "REQUEST_BYTES_ENV",
-        "UI_ROOT_ENV",
+        "CONSOLE_ROOT_ENV",
         "RUN_DATABASE_URL_ENV",
         "RUN_LEASE_SECONDS_ENV",
         "RUN_MAX_ATTEMPTS_ENV",
@@ -350,7 +350,12 @@ CONFIG_DOCUMENTS = (
     # it was being given. A guard refusing its author's shortcut is the guard
     # working.
     "docs/concepts/ingest.md",
-    "docs/concepts/viewer.md",
+    "docs/concepts/console.md",
+    # ADR-0020 names `DOCDOC_CONSOLE_ROOT`'s neighbourhood while recording the
+    # viewer's removal. Listed rather than exempted: the sweep below has no
+    # exemption list on purpose, and an ADR that names a setting goes stale in
+    # exactly the way every other document does.
+    "docs/adr/0020-retire-the-grounding-viewer.md",
     "examples/view_grounding.md",
     # And one the sweep found that no hand-written list would have: an ADR names
     # a setting too. Decision records are read by whoever is deciding whether to

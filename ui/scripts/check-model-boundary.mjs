@@ -1,14 +1,13 @@
 #!/usr/bin/env node
 /**
- * T005 — the view model imports nothing that can render (FR-043, R9).
+ * The view model imports nothing that can render (specs/008 FR-043, R9).
  *
  * Principle XII requires dependency boundaries to be enforced by an automated
  * test rather than by convention, and this repository already holds the Python
  * layer graph to that standard with import-linter. The browser client gets the
- * same treatment for a sharper reason: under the first clarification of
- * 2026-08-25 the rendering layer carries no automated test at all, so the model
- * is the entire tested surface. A decision that drifts into a component is a
- * requirement that silently loses its coverage.
+ * same treatment for a sharper reason: the rendering layer carries no automated
+ * test at all, so the model is the entire tested surface. A decision that drifts
+ * into a component is a requirement that silently loses its coverage.
  *
  * Deliberately dependency-free: it reads files and matches import specifiers.
  * A parser would be more precise and would cost a dependency that R4 spent an
@@ -20,21 +19,21 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-// Two models and two component trees since Milestone 11: the viewer's, and the
-// console's. The rules do not change, because the property does not — and the
+// One model and one component tree since the viewer was removed (ADR-0020).
+// The rules did not change with it, because the property did not — and the
 // console has more to lose than the viewer did, since it sends a credential and
 // a second `fetch` site is a second place that can fail to.
-const MODEL_DIRS = [join(ROOT, "src", "model"), join(ROOT, "src", "console", "model")];
-const COMPONENT_DIRS = [join(ROOT, "src", "components"), join(ROOT, "src", "console", "components")];
+const MODEL_DIRS = [join(ROOT, "src", "console", "model")];
+const COMPONENT_DIRS = [join(ROOT, "src", "console", "components")];
 
 /**
- * Components reach the network through `src/transport.ts` or not at all (T083).
+ * Components reach the network through `src/transport.ts` or not at all.
  *
- * SC-013 claims that across every user action, zero requests are constructed
- * that write to a store. That is a guarantee only while construction lives in
- * one tested place — and it did not: a component was assembling the URL and
- * calling `fetch` itself, so the claim rested on nobody adding a second call
- * site. This is what makes the single call site a rule.
+ * specs/011 FR-041 requires every request to be built at the one tested
+ * construction point, and that is a guarantee only while nothing else calls
+ * `fetch`. It did not hold once: a component was assembling the URL and calling
+ * `fetch` itself, so the claim rested on nobody adding a second call site. This
+ * is what makes the single call site a rule.
  */
 const NETWORK_CALLS = [
   { match: /\bfetch\s*\(/, what: "fetch()" },
@@ -49,7 +48,6 @@ const FORBIDDEN = [
   { match: /^react(\/|$)/, why: "React is a rendering concern" },
   { match: /^react-dom(\/|$)/, why: "React DOM is a rendering concern" },
   { match: /^@astryxdesign\//, why: "component libraries are a rendering concern" },
-  { match: /^pdfjs-dist(\/|$)/, why: "the renderer is a rendering concern" },
   { match: /^@components\//, why: "the model must not depend on components" },
   { match: /(^|\/)\.\.\/components\//, why: "the model must not depend on components" },
 ];
@@ -114,8 +112,8 @@ if (violations.length > 0 || networkViolations.length > 0) {
       console.error(`  ${violation.file}\n    imports ${violation.specifier} — ${violation.why}`);
     }
     console.error(
-      "\nThe view model is the only tested surface of this milestone. Move the decision\n" +
-        "back into src/model/ or src/console/model/, or it ships with no coverage at all.",
+      "\nThe view model is the only tested surface of this application. Move the\n" +
+        "decision back into src/console/model/, or it ships with no coverage at all.",
     );
   }
 
@@ -125,9 +123,9 @@ if (violations.length > 0 || networkViolations.length > 0) {
       console.error(`  ${violation.file}:${violation.line} — ${violation.what}`);
     }
     console.error(
-      "\nRequests are constructed in src/model/client.ts and executed in\n" +
-        "src/transport.ts. A second call site puts SC-013's guarantee — that no\n" +
-        "request this viewer makes writes anything — out of reach of any test.",
+      "\nRequests are constructed in src/console/model/client.ts and executed in\n" +
+        "src/transport.ts. A second call site puts FR-041's guarantee — that the\n" +
+        "console reaches exactly the endpoints ALLOWED names — out of reach of any test.",
     );
   }
 

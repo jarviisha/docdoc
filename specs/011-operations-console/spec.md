@@ -431,9 +431,15 @@ confirm the console shows the attempts and the final at-rest state.
   summary from any of them. `GET /v1/runs/{run_id}` already fixes this — one result representation,
   reachable one way — and a console that rendered any part of a result would be the second, with its
   own rounding, its own field ordering, and its own opportunity to disagree with the first.
-- **FR-022b**: The Milestone 8 viewer MUST NOT be modified by this milestone. Its request allow-list
-  keeps exactly the two paths it holds, and it gains no ability to open a stored run. A console link
-  into it MUST NOT be offered, because there is nothing on the other side of one.
+- **FR-022b** *(retired 2026-09-15, [ADR-0020](../../docs/adr/0020-retire-the-grounding-viewer.md))*:
+  The Milestone 8 viewer MUST NOT be modified by this milestone. Its request allow-list keeps exactly
+  the two paths it holds, and it gains no ability to open a stored run. A console link into it MUST
+  NOT be offered, because there is nothing on the other side of one.
+
+  *Discharged when this milestone shipped: it was a constraint on Milestone 11's restraint, not a
+  rule about the repository in perpetuity. The viewer has since been removed entirely. The clause
+  survives as a record rather than as a requirement, and its last sentence is now true for a second
+  reason — there is no viewer to link into.*
 - **FR-023**: For a removed run, the console MUST show the removal time and the policy under which it
   was removed, and nothing else about what it held.
 
@@ -491,9 +497,16 @@ confirm the console shows the attempts and the final at-rest state.
 
 #### The fences that must keep holding
 
-- **FR-040**: Milestone 8's read-only guarantee MUST remain machine-checked over the viewer's own
-  sources. The guard MUST be re-pointed rather than relaxed, exempted, or deleted, and the viewer
-  MUST gain no write path (ADR-0019 §5, `specs/010` FR-084).
+- **FR-040** *(retired 2026-09-15, [ADR-0020](../../docs/adr/0020-retire-the-grounding-viewer.md))*:
+  Milestone 8's read-only guarantee MUST remain machine-checked over the viewer's own sources. The
+  guard MUST be re-pointed rather than relaxed, exempted, or deleted, and the viewer MUST gain no
+  write path (ADR-0019 §5, `specs/010` FR-084).
+
+  *Held for this milestone's whole life, which is what it asked for. The guard it names enforced two
+  claims in one file; when the viewer was removed the read-only half lost its subject and the
+  no-persistence half did not. ADR-0020 §3 split them rather than deleting the file, so
+  `check-no-persistence.mjs` still covers all of `ui/src/` and FR-007 below is still machine-checked.
+  That was the part worth keeping.*
 - **FR-041**: The console MUST construct every request through the single tested request-construction
   point the application already has, and no component may call the network directly. The existing
   model-boundary check MUST cover the console's sources.
@@ -575,8 +588,11 @@ confirm the console shows the attempts and the final at-rest state.
   ADR-0016 §3 documents, in **100%** of attempts, with **zero** process restarts.
 - **SC-011**: An erasure is impossible to trigger without re-entering the exact target: **0%** of
   attempts with a differing confirmation proceed.
-- **SC-012**: The Milestone 8 viewer's read-only check still passes and still covers **100%** of the
-  viewer's sources, with **0** exemptions added by this milestone.
+- **SC-012** *(retired 2026-09-15, [ADR-0020](../../docs/adr/0020-retire-the-grounding-viewer.md))*:
+  The Milestone 8 viewer's read-only check still passes and still covers **100%** of the viewer's
+  sources, with **0** exemptions added by this milestone. *Measured and met at the time. Its subject
+  no longer exists; the surviving no-persistence check covers **100%** of `ui/src/`, which is the
+  console.*
 - **SC-013**: A Milestone 10 deployment upgrades with **zero** configuration changes and observes
   **zero** behavioural differences when it does not serve the console.
 - **SC-014**: The base install acquires **zero** new runtime dependencies, the deployment still has

@@ -1,17 +1,22 @@
 /**
  * The guard on the guards.
  *
- * `check-model-boundary.mjs` and `check-readonly.mjs` both pass on an empty tree,
- * which is the state this repository is in until Phase 3 lands. A check that has
- * only ever been observed passing on no input is not evidence of anything — the
- * same argument `tests/unit/test_base_install_excludes_evaluation_data.py` makes
- * for its own subject: "excluding a directory that does not exist proves nothing".
+ * Every check here passes on an empty tree, and a check that has only ever been
+ * observed passing on no input is not evidence of anything — the same argument
+ * `tests/unit/test_base_install_excludes_evaluation_data.py` makes for its own
+ * subject: "excluding a directory that does not exist proves nothing".
  *
- * So each guard is run twice here: once against a planted violation, where it
- * must fail, and once against the real tree, where it must pass. Written in
- * plain JavaScript rather than TypeScript because it tests scripts rather than
- * the view model, and because it should keep working if the type-stripping
- * story changes.
+ * So each guard is run twice: once against a planted violation, where it must
+ * fail, and once against the real tree, where it must pass. Written in plain
+ * JavaScript rather than TypeScript because it tests scripts rather than the
+ * view model, and because it should keep working if the type-stripping story
+ * changes.
+ *
+ * The read-only guard is absent from this file because it is absent from the
+ * repository: it fenced the viewer, and the viewer was removed (ADR-0020). Its
+ * no-persistence half survived as `check-no-persistence.mjs` and is exercised
+ * below, because that half never was about the viewer — it is what keeps the
+ * console's credential from being written down (specs/011 FR-007, SC-004).
  */
 
 import { strict as assert } from "node:assert";
@@ -22,8 +27,8 @@ import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const PROBE_MODEL = join(ROOT, "src", "model", "__guard_probe.ts");
-const PROBE_COMPONENT = join(ROOT, "src", "components", "__guard_probe.tsx");
+const PROBE_MODEL = join(ROOT, "src", "console", "model", "__guard_probe.ts");
+const PROBE_COMPONENT = join(ROOT, "src", "console", "components", "__guard_probe.tsx");
 
 const run = (script) =>
   spawnSync(process.execPath, [join(ROOT, "scripts", script)], { encoding: "utf8" });
@@ -44,15 +49,15 @@ describe("the view-model boundary guard", () => {
   });
 
   it("fails when the model imports a component", () => {
-    plant(PROBE_MODEL, 'import { x } from "@components/Overlay";\nexport const y = x;\n');
+    plant(PROBE_MODEL, 'import { x } from "../components/Shell.tsx";\nexport const y = x;\n');
     const result = run("check-model-boundary.mjs");
     assert.equal(result.status, 1);
     assert.match(result.stderr, /must not depend on components/);
     rmSync(PROBE_MODEL, { force: true });
   });
 
-  it("fails when the model imports the renderer", () => {
-    plant(PROBE_MODEL, 'import * as pdfjs from "pdfjs-dist";\nexport const y = pdfjs;\n');
+  it("fails when the model imports something that renders", () => {
+    plant(PROBE_MODEL, 'import { useState } from "react";\nexport const y = useState;\n');
     const result = run("check-model-boundary.mjs");
     assert.equal(result.status, 1);
     assert.match(result.stderr, /rendering concern/);
@@ -60,40 +65,11 @@ describe("the view-model boundary guard", () => {
   });
 });
 
-describe("the read-only guard", () => {
-  it("passes on the real tree", () => {
-    assert.equal(run("check-readonly.mjs").status, 0);
-  });
-
-  it("fails on a text input in a component", () => {
-    plant(PROBE_COMPONENT, "export const C = () => <input value=\"x\" />;\n");
-    const result = run("check-readonly.mjs");
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /<input>/);
-    rmSync(PROBE_COMPONENT, { force: true });
-  });
-
-  it("allows the file picker when the exemption is stated on the line", () => {
-    // FR-013 needs one way for a document to enter the viewer, and the platform
-    // offers exactly one. The exemption is narrow and must be visible where it
-    // is used, which is what this asserts.
-    plant(
-      PROBE_COMPONENT,
-      "export const C = () => (\n" +
-        "  // read-only-exempt: file picker — reads a local file, writes nothing\n" +
-        '  <input type="file" />\n' +
-        ");\n",
-    );
-    assert.equal(run("check-readonly.mjs").status, 0);
-    rmSync(PROBE_COMPONENT, { force: true });
-  });
-});
-
 describe("the network boundary", () => {
   it("fails when a component calls fetch directly", () => {
-    // T083. SC-013 claims no request this viewer makes writes anything, which is
-    // a guarantee only while every request is constructed in one tested place.
-    // A component did call `fetch` itself until convergence found it.
+    // FR-041. The console reaches exactly the endpoints `ALLOWED` names, which
+    // is a guarantee only while every request is constructed in one tested
+    // place. A component did call `fetch` itself until convergence found it.
     plant(PROBE_COMPONENT, 'export const C = () => { void fetch("/v1/anything"); return null; };\n');
     const result = run("check-model-boundary.mjs");
     assert.equal(result.status, 1);
@@ -109,23 +85,35 @@ describe("the network boundary", () => {
 });
 
 describe("the no-persistence guard", () => {
+  it("passes on the real tree", () => {
+    assert.equal(run("check-no-persistence.mjs").status, 0);
+  });
+
   it("fails on browser storage in a component", () => {
-    // FR-032, T084. The document goes to the extraction endpoint and nowhere
-    // else; losing the view on reload is the accepted cost of that.
-    plant(PROBE_COMPONENT, 'export const C = () => { localStorage.setItem("d", "x"); };\n');
-    const result = run("check-readonly.mjs");
+    // FR-007. The credential lives in the page's memory; a reload asking for it
+    // again is the accepted cost, not a gap to close with storage.
+    plant(PROBE_COMPONENT, 'export const C = () => { localStorage.setItem("k", "x"); };\n');
+    const result = run("check-no-persistence.mjs");
     assert.equal(result.status, 1);
     assert.match(result.stderr, /localStorage/);
     rmSync(PROBE_COMPONENT, { force: true });
   });
 
   it("fails on browser storage in the model too", () => {
-    // Scoped to all of `src/`, not to components: a model file caching a result
-    // would put the document at rest just as effectively.
-    plant(PROBE_MODEL, 'export const x = () => { indexedDB.open("docs"); };\n');
-    const result = run("check-readonly.mjs");
+    // Scoped to all of `src/`, not to components: a model file caching a run
+    // would put it at rest just as effectively.
+    plant(PROBE_MODEL, 'export const x = () => { indexedDB.open("runs"); };\n');
+    const result = run("check-no-persistence.mjs");
     assert.equal(result.status, 1);
     assert.match(result.stderr, /IndexedDB/);
+    rmSync(PROBE_MODEL, { force: true });
+  });
+
+  it("fails on a cookie, which ADR-0019 §4 rejected by name", () => {
+    plant(PROBE_MODEL, 'export const x = () => { document.cookie = "k=v"; };\n');
+    const result = run("check-no-persistence.mjs");
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /a cookie/);
     rmSync(PROBE_MODEL, { force: true });
   });
 });

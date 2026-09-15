@@ -245,10 +245,12 @@ def test_two_tenants_derive_the_same_identity_and_that_is_correct(
 
 # -- every mounted path, not every route (T100) -------------------------------
 #
-# The tests above name the paths they check, which is how `/ui` stayed open:
-# it is a `mount` rather than a route, so it inherited nothing from the router's
-# dependency and appeared in nobody's list. FR-059 exempts liveness and readiness
-# and nothing else, so the assertion has to be exhaustive rather than enumerated.
+# The tests above name the paths they check, which is how the viewer's `/ui`
+# stayed open: it was a `mount` rather than a route, so it inherited nothing from
+# the router's dependency and appeared in nobody's list. FR-059 exempts liveness
+# and readiness and nothing else, so the assertion has to be exhaustive rather
+# than enumerated. The viewer is gone (ADR-0020); `/console` is mounted the same
+# way and the walk is what keeps the next one visible.
 
 
 def _every_path(app: object) -> list[str]:
@@ -267,13 +269,13 @@ def _every_path(app: object) -> list[str]:
     return found
 
 
-def test_the_route_walk_finds_the_ui_mount(client: TestClient) -> None:
+def test_the_route_walk_finds_the_console_mount(client: TestClient) -> None:
     """Guards the guard. A walk that missed mounts would have missed the defect."""
     paths = _every_path(client.app)
 
-    assert "/ui" in paths, (
+    assert "/console" in paths, (
         "the mount is invisible to this walk, so the check below cannot see the "
-        "one path that was actually unauthenticated"
+        "one path that is deliberately unauthenticated"
     )
     assert {"/healthz", "/readyz"} <= set(paths)
 
@@ -325,50 +327,15 @@ def test_the_consoles_exemption_is_the_shell_and_not_the_data(
         )
 
 
-def test_the_viewer_is_reachable_with_a_credential(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Gating must not mean breaking: a caller holding a key still gets the page.
-
-    **The assets are stubbed, and they have to be.** This asserted `200` against
-    whatever `chosen_assets()` found, which is `ui/dist` — a build output, and
-    gitignored. So it passed on any machine that had ever built the viewer and
-    returned `501` on a fresh checkout, which is to say it passed here and failed
-    in CI. `test_http_ui_endpoints.py` had already solved this by monkeypatching
-    the lookup; this file reached for the real thing and got the developer's
-    working tree.
-
-    The claim being tested is about *authentication*, not about the build: a
-    caller holding a key must reach the mount rather than be refused at the door.
-    Stubbing the assets is what isolates that claim from whether anybody has run
-    `npm build`.
-    """
-    from docdoc.api import ui as ui_module
-
-    (tmp_path / "index.html").write_text("<!doctype html><div id=root></div>", encoding="utf-8")
-    monkeypatch.setattr(ui_module, "chosen_assets", lambda _surface=None: ("test", tmp_path))
-
-    served = TestClient(
-        build_app(
-            _Deployment(
-                store_root=tmp_path,
-                registry=SchemaRegistry.from_paths([Path("schemas")]),
-                keys=KeyRing.from_file(Path(KEYS_FILE)),
-            )
-        )
-    )
-
-    assert served.get("/ui/", headers=bearer("acme")).status_code == 200
-    # And the gate is still on it: the same path without a key is refused.
-    assert served.get("/ui/").status_code == 401
-
-
 def test_with_authentication_off_nothing_requires_a_credential(tmp_path: Path) -> None:
-    """FR-088. The default deployment is Milestone 8, including `/ui`.
+    """FR-088. The default deployment refuses nothing.
 
-    The pair of assertions matters more than either alone: gating `/ui` when
-    authentication is *on* would be a regression if it also gated it when
-    authentication is off, and that is a deployment nobody configured.
+    `test_the_viewer_is_reachable_with_a_credential` sat above this and was the
+    other half of it: the viewer was the one *gated* mount, so the pair asserted
+    that gating it with authentication on did not also gate it with authentication
+    off. The viewer is gone (ADR-0020) and with it the only mount that was ever
+    behind the credential, so the pairing has nothing left to pair against — but
+    the claim below is unchanged and is FR-088's own.
     """
     from docdoc.api.auth import KeyRing
 

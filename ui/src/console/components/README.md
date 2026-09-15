@@ -1,7 +1,10 @@
 # `src/console/components` — where the console renders, and edits
 
-This directory contains forms. That is not an oversight in the read-only guard;
-it is the reason this directory exists separately from `src/components/`.
+This directory contains forms. It sat beside `src/components/`, the viewer's
+read-only tree, and the separation was what let one guard say "the viewer edits
+nothing" while this one edited (ADR-0019 §5). The viewer is gone (ADR-0020) and
+the path stays: the model/component split below is the one that was always doing
+the work.
 
 **Which guards scan this directory:**
 
@@ -12,12 +15,10 @@ it is the reason this directory exists separately from `src/components/`.
   rule set, as for the model.
 - `scripts/check-model-boundary.mjs` — components reach the network through
   `src/transport.ts` or not at all.
-- `scripts/check-readonly.mjs` — **its editing scan does not cover this
-  directory, and must not be extended to it.** That scan is scoped to
-  `src/components/`, the viewer's own tree, which is what keeps Milestone 8's
-  claim machine-checked while this console does the editing Milestone 11
-  permits (FR-040, ADR-0019 §5). Widening it breaks the console; narrowing the
-  viewer's claim to match breaks Milestone 8's.
+- `scripts/check-no-persistence.mjs` — nothing under `src/` may write to
+  browser storage or a cookie (FR-007, SC-004). It does **not** forbid forms:
+  the editing scan that would have was `check-readonly.mjs`'s, scoped to the
+  viewer's tree and deleted with it (ADR-0020 §3).
 
 **No decision belongs here.** If a component is deciding something — when a
 credential expires, whether an erasure is armed, which page comes next — the

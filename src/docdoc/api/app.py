@@ -112,11 +112,12 @@ _UNAUTHENTICATED = frozenset({LIVENESS_PATH, READINESS_PATH})
 #: The console's shell, and the one prefix exempt from the credential.
 #:
 #: **A browser's top-level navigation carries no `Authorization` header.** The
-#: viewer's mount is gated, and `_mount_ui` records what that costs: with
-#: authentication on, it does not load. That was the honest failure for a surface
-#: whose credential is a deployment-wide one; it is a fatal one for a console
-#: whose entire premise is that an operator pastes a key **into a page that has
-#: already loaded** (specs/011 FR-006, research R1).
+#: viewer's mount was gated and recorded what that costs: with authentication on,
+#: it did not load. That was the honest failure for a surface whose credential is
+#: a deployment-wide one; it is a fatal one for a console whose entire premise is
+#: that an operator pastes a key **into a page that has already loaded**
+#: (specs/011 FR-006, research R1). The viewer is gone (ADR-0020); the reason it
+#: could not be copied here is why this prefix exists and so it is kept.
 #:
 #: What is exempt is HTML, CSS, and JavaScript. No run, no tenant identifier, no
 #: credential, and no document is reachable from those bytes, and the console
@@ -585,7 +586,6 @@ def build_app(deployment: _Deployment | None = None) -> FastAPI:
     # registered on the application rather than on it (FR-058).
     health.install(app, resolved.readiness())
     _install_error_handler(app)
-    _mount_ui(app)
     _mount_console(app)
     return app
 
@@ -595,7 +595,7 @@ def _require_credential_everywhere_else(app: FastAPI) -> None:
 
     The router dependency covers `/v1` and resolves a `Principal` for the
     handlers that need one. It cannot cover what is not on that router, and three
-    kinds of thing are not: the `/ui` **mount**, which inherits no dependency
+    kinds of thing are not: a static **mount**, which inherits no dependency
     because a mount is not a route; FastAPI's `/docs`, `/redoc` and
     `/openapi.json`, which its constructor registers directly; and any path a
     later change adds outside the router.
@@ -605,7 +605,7 @@ def _require_credential_everywhere_else(app: FastAPI) -> None:
     rule that needs no list. FR-059 names exactly two exemptions, so this
     enforces exactly two and refuses everything else.
 
-    **Milestone 11 adds the third, and it is deliberate rather than an oversight
+    **Milestone 11 added the third, and it is deliberate rather than an oversight
     rediscovered.** `/console` serves a shell that must load before a credential
     exists, because that is where the operator types one. See `_CONSOLE_PREFIX`
     for what is exempt and what it is worth to an unauthenticated reader.
@@ -616,7 +616,7 @@ def _require_credential_everywhere_else(app: FastAPI) -> None:
 
     With authentication disabled `principal_for` returns the default tenant for
     everyone and this is a function call per request that changes nothing —
-    Milestone 8's behaviour, including an open `/ui` (FR-088).
+    Milestone 8's behaviour, in which every route was open (FR-088).
     """
 
     @app.middleware("http")
@@ -676,94 +676,14 @@ def _refuse_unnamespaceable(deployment: _Deployment) -> None:
         )
 
 
-def _mount_ui(app: FastAPI) -> None:
-    """Serve the browser client from this origin, or explain its absence.
-
-    **Same origin, so no cross-origin configuration exists anywhere** (Milestone 8
-    FR-034). That is the whole reason the assets are mounted here rather than
-    served by something else: a second origin would need a CORS policy, and a
-    CORS policy is a thing to get wrong.
-
-    Mounted under ``/ui`` and never at the root, so that adding an interface
-    cannot shadow an API path — now or when a later route is added by someone who
-    has forgotten this exists.
-    """
-    from docdoc.api.ui import absence_reason, chosen_assets
-
-    source, assets = chosen_assets()
-
-    if assets is None:
-        # Not an error: a deployment without the `ui` extra is a supported and
-        # ordinary deployment. But a blank page is exactly what FR-037 forbids,
-        # so the one route that exists says what is missing and what fixes it.
-        @app.get("/ui", include_in_schema=False)
-        @app.get("/ui/{path:path}", include_in_schema=False)
-        async def _no_ui(path: str = "") -> JSONResponse:
-            return JSONResponse(
-                status_code=501,
-                content={
-                    "error": {
-                        "class": "ViewerNotInstalled",
-                        "message": absence_reason(),
-                    }
-                },
-            )
-
-        return
-
-    from fastapi.staticfiles import StaticFiles
-
-    # **Say which of the three roots won.** Three places can hold three different
-    # builds, and until this line nothing named the winner: a stale installed
-    # distribution shadowed a fresh `ui/dist`, every rebuild appeared to do
-    # nothing, and the months-old page that resulted was read as evidence about
-    # current code.
-    #
-    # **Visible only where the application configures logging**, which uvicorn's
-    # defaults do not — it sets up `uvicorn.*` and leaves root without a handler,
-    # so this INFO falls to `logging.lastResort` and is dropped. That is how every
-    # structured event docdoc emits behaves, and adding a handler here would be
-    # the library deciding for the application. `docdoc.api.ui.chosen_assets` is
-    # the answer that needs no logging at all, and it is what the documentation
-    # tells a developer to run.
-    #
-    # Not a second request-logging path, and so not the thing T019 forbids: it
-    # runs once at construction, and it carries a filesystem path and no document
-    # content, no values and no credentials (FR-033).
-    logging.getLogger("docdoc.api").info(
-        json.dumps({"event": "ui.assets", "source": source, "path": str(assets)})
-    )
-
-    # **Behind the same credential as everything else** (FR-059), which exempts
-    # liveness and readiness and nothing further. A mount is not a route, so it
-    # does not inherit the router's dependency and had to be given one.
-    #
-    # The assets carry no tenant data, so this is not closing a leak — it is
-    # keeping one sentence true. Without it a deployment that has enabled
-    # authentication still serves the viewer's shell to anyone who can reach the
-    # port, and the reader is told the opposite.
-    #
-    # What it costs is worth stating plainly: the viewer cannot send a bearer
-    # token, so with authentication on it does not work either way. Before this
-    # it loaded and then failed on every `/v1` call it made; now it does not
-    # load. The second is the honest failure — the interface is unavailable, and
-    # it says so at the door rather than after the page has rendered.
-    app.mount("/ui", StaticFiles(directory=assets, html=True), name="ui")
-
-    # And the sentence Milestone 11 had to qualify: *everything else*. The
-    # console's shell is exempt, for a reason that is about browsers rather than
-    # about trust — `_CONSOLE_PREFIX` states it.
-
-
 def _mount_console(app: FastAPI) -> None:
     """Serve the operations console, or explain its absence (specs/011 FR-001).
 
-    **Not behind the credential, and this is the milestone's one deliberate
-    divergence.** `_mount_ui` above records what gating a shell costs: with
-    authentication enabled the viewer *"does not load"*. For the viewer that was
-    the honest failure. For the console it would be fatal, because the console's
-    premise is that an operator pastes a key into a page that has **already
-    loaded** (FR-006) — a browser's top-level navigation carries no
+    **Not behind the credential, and that is deliberate.** The viewer's mount was
+    gated, and with authentication enabled it *"did not load"*. For the viewer
+    that was the honest failure. For the console it would be fatal, because the
+    console's premise is that an operator pastes a key into a page that has
+    **already loaded** (FR-006) — a browser's top-level navigation carries no
     `Authorization` header and cannot be made to. Gating this shell does not make
     the console strict; it makes it impossible on exactly the deployments it
     exists for.
@@ -775,13 +695,17 @@ def _mount_console(app: FastAPI) -> None:
     a cookie session, a credential in the URL — are rejected in ADR-0019 §4 and
     in the spec's FR-008, and both would have cost more than this exemption does.
 
-    Under ``/console``, which is distinct from the viewer's ``/ui`` and contains
-    none of the fifteen words `tests/contract/test_no_review_platform.py` forbids
-    in a path (FR-003).
-    """
-    from docdoc.api.ui import CONSOLE, absence_reason, chosen_assets
+    Under ``/console``, which contains none of the fifteen words
+    `tests/contract/test_no_review_platform.py` forbids in a path (FR-003). It
+    was chosen to be distinct from the viewer's ``/ui``; the viewer is gone
+    (ADR-0020) and the path stays, because it is in FR-001, in operators'
+    bookmarks, and worth nothing to reclaim.
 
-    source, assets = chosen_assets(CONSOLE)
+    **This is now the only mount.** `_mount_ui` sat above it until ADR-0020.
+    """
+    from docdoc.api.ui import absence_reason, chosen_assets
+
+    source, assets = chosen_assets()
 
     if assets is None:
         # A deployment without the console is ordinary. A blank page is not:
@@ -796,7 +720,7 @@ def _mount_console(app: FastAPI) -> None:
                 content={
                     "error": {
                         "class": "ConsoleNotInstalled",
-                        "message": absence_reason(CONSOLE),
+                        "message": absence_reason(),
                     }
                 },
             )
@@ -809,10 +733,10 @@ def _mount_console(app: FastAPI) -> None:
         json.dumps({"event": "console.assets", "source": source, "path": str(assets)})
     )
 
-    # `html=True` with the entry point named, because this build's entry is
-    # `console.html` rather than `index.html` — Vite writes the file it was given
-    # and `StaticFiles` looks for `index.html` by default, so without the copy
-    # made at build time the directory would serve a 404 at its own root.
+    # `html=True` serves the directory's `index.html` at its own root, which is
+    # what the build emits. It emitted `console.html` until ADR-0020, when the
+    # viewer stopped occupying the name — and the plugin that copied one to the
+    # other went with it.
     app.mount(
         _CONSOLE_PREFIX,
         StaticFiles(directory=assets, html=True),

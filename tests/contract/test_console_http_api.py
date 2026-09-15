@@ -62,6 +62,10 @@ def _run(
     tenant: str = "acme",
     status: RunStatus = RunStatus.SUCCEEDED,
     age: int = 0,
+    # Set at construction because `Run` is frozen, which is also why they are
+    # parameters here rather than assignments at the call site.
+    failed_stage: str | None = None,
+    error_class: str | None = None,
 ) -> Run:
     run = Run(
         run_id=uuid4(),
@@ -73,6 +77,8 @@ def _run(
         created_at=NOW - timedelta(minutes=age),
         updated_at=NOW - timedelta(minutes=age),
         expires_at=NOW + timedelta(days=30),
+        failed_stage=failed_stage,
+        error_class=error_class,
     )
     queue._runs[run.run_id] = run
     return run
@@ -80,6 +86,10 @@ def _run(
 
 def _list(client: TestClient, key: str = KEY, **params: object) -> object:
     return client.get("/v1/runs", params=params, headers={"Authorization": f"Bearer {key}"})
+
+
+def _detail(client: TestClient, run: Run, key: str = KEY) -> object:
+    return client.get(f"/v1/runs/{run.run_id}", headers={"Authorization": f"Bearer {key}"})
 
 
 # -- shape --------------------------------------------------------------------
@@ -113,6 +123,51 @@ def test_no_row_carries_content(client: TestClient, queue: InMemoryRunQueue) -> 
 
     for absent in ("stage_outcomes", "error_class", "failed_stage", "tenant_id", "tokens_used"):
         assert absent not in row
+
+
+def test_the_detail_of_a_failed_run_says_why(client: TestClient, queue: InMemoryRunQueue) -> None:
+    """US2 scenario 7 — the row hides the reason and the detail must not.
+
+    The pair to `test_no_row_carries_content` above, and it exists because the
+    two were not read together. That test asserts `error_class` and
+    `failed_stage` are **absent from a list row**, correctly: a listing is shown
+    to anyone holding the tenant's key and carries no diagnosis. Nothing asserted
+    that the *detail* carries them — so the console shipped reading one field of
+    this body, `routing`, and a failed run opened to a red badge and four
+    timestamps with no reason anywhere on the screen.
+
+    `ui/src/console/model/runs.ts:toFailure` reads exactly these two names. This
+    is the other end of that: rename either field here and the console goes
+    quiet, not red.
+    """
+    run = _run(
+        queue, status=RunStatus.FAILED, failed_stage="extract", error_class="ModelProviderError"
+    )
+
+    body = _detail(client, run).json()
+
+    assert body["failed_stage"] == "extract"
+    assert body["error_class"] == "ModelProviderError"
+    # A class name and never a message: a provider's text may quote the document
+    # it choked on, which is why `RunStateResponse` has no message field at all.
+    assert "message" not in body
+
+
+def test_a_run_that_failed_before_a_stage_says_so_with_a_null(
+    client: TestClient, queue: InMemoryRunQueue
+) -> None:
+    """`failed_stage` is `None` when no stage ran — a distinction, not a gap.
+
+    An unresolvable schema fails a run before anything executes. The console
+    shows "failed before any stage ran" for this and names the stage otherwise;
+    both need the field to be present and null rather than omitted.
+    """
+    run = _run(queue, status=RunStatus.FAILED, error_class="SchemaError")
+
+    body = _detail(client, run).json()
+
+    assert body["failed_stage"] is None
+    assert body["error_class"] == "SchemaError"
 
 
 def test_a_running_run_has_no_finished_at(client: TestClient, queue: InMemoryRunQueue) -> None:
