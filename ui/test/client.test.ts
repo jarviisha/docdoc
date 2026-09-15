@@ -22,6 +22,24 @@ describe("every intent a user can express", () => {
     }
   });
 
+  it("constructs no DELETE, though the shared type now admits one", () => {
+    // **T078, Milestone 11.** `RequestPlan.method` was widened to `GET | POST |
+    // DELETE` so the operations console could revoke a credential and erase a
+    // tenant through the transport this viewer shares. Nothing about the viewer
+    // changed — but the hole did: a type that permits a `DELETE` is a type in
+    // which somebody can write one here without the compiler objecting.
+    //
+    // `specs/011` FR-022b says the viewer is not modified by that milestone.
+    // This is the assertion that keeps the sentence true where it matters, and
+    // the reason the widening was accepted rather than reverted: one shared
+    // transport is what FR-041 asks for, and the cost of it is one test.
+    for (const intent of allIntents(DOCUMENT, "invoice@1")) {
+      const plan = requestFor(intent);
+      const permitted = plan.method === "GET" || plan.path === "/v1/extract";
+      assert.ok(permitted, `${intent.type} constructs ${plan.method} ${plan.path}`);
+    }
+  });
+
   it("touches only the two paths this viewer knows", () => {
     const paths = allIntents(DOCUMENT, "invoice@1").map((intent) => requestFor(intent).path);
 

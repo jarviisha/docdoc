@@ -297,6 +297,27 @@ class RunQueue(Protocol):
         """
         ...
 
+    def page_runs(
+        self,
+        tenant_id: str,
+        *,
+        status: str | None = None,
+        before: tuple[datetime, UUID] | None = None,
+        limit: int,
+    ) -> tuple[Run, ...]:
+        """One page of a tenant's runs, newest first (Milestone 11 FR-013).
+
+        Keyset and never `OFFSET`: an offset page shifts under concurrent
+        submission, which would make FR-018's "every run exactly once" false in
+        production and true in every test.
+
+        `before` is the `(created_at, run_id)` of the last row on the previous
+        page. Separate from `runs_for`, which exists for erasure and wants every
+        state in ascending order with no cursor — one function with two callers
+        that want opposite things is how both come to be served badly.
+        """
+        ...
+
     def tombstone(self, run_id: UUID, tenant_id: str) -> Tombstone | None:
         """What remains of a removed run, for the tenant that owned it.
 

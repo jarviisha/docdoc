@@ -18,6 +18,8 @@ import { toUrl, type RequestPlan } from "./model/client.ts";
 
 export interface Response {
   ok: boolean;
+  /** The status, because `401` and `404` mean different things to a console. */
+  status: number;
   body: unknown;
 }
 
@@ -31,14 +33,36 @@ export interface Response {
  */
 export class TransportError extends Error {}
 
-export async function send(plan: RequestPlan, body?: BodyInit): Promise<Response> {
+/**
+ * What a caller supplies beyond the plan.
+ *
+ * `credential` arrives from the operations console, which holds an API key in
+ * memory for the life of a page (Milestone 11 FR-006, FR-007). It is a
+ * parameter and never a module-level variable: this file decides nothing, and a
+ * credential it could reach on its own would be a credential it could attach to
+ * a request nobody asked it to.
+ *
+ * It becomes a header, never a query parameter — FR-008, and the reason is that
+ * a URL lands in browser history, proxy logs, and referrer headers.
+ */
+export interface Options {
+  body?: BodyInit;
+  credential?: string;
+}
+
+export async function send(plan: RequestPlan, options: Options = {}): Promise<Response> {
+  const { body, credential } = options;
   const response = await fetch(toUrl(plan), {
     method: plan.method,
+    ...(credential === undefined ? {} : { headers: { Authorization: `Bearer ${credential}` } }),
     ...(plan.hasBody && body !== undefined ? { body } : {}),
   });
 
+  // `401` is not an error to this layer — it is an answer, and a well-formed
+  // one. The console's session model is what decides that a credential was
+  // refused; reporting it here would put that decision where no test reaches it.
   try {
-    return { ok: response.ok, body: await response.json() };
+    return { ok: response.ok, status: response.status, body: await response.json() };
   } catch {
     // A proxy timing out mid-flight answers with HTML, not JSON. Letting the
     // `SyntaxError` escape presented a JSON parse failure to the user as the

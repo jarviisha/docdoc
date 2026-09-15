@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "API_KEYS_FILE_ENV",
+    "CONSOLE_ROOT_ENV",
     "CORRECTION_RETENTION_DAYS_ENV",
     "DEFAULT_MAX_REQUEST_BYTES",
     "DELIVERY_ALLOW_PRIVATE_ENV",
@@ -68,6 +69,12 @@ SCHEMA_PATHS_ENV = "DOCDOC_SCHEMA_PATHS"
 #: fallback for a deployment that would rather build the interface itself than
 #: install the ``docdoc-ui`` distribution; unset is the normal case.
 UI_ROOT_ENV = "DOCDOC_UI_ROOT"
+
+#: Where Milestone 11's operations console was built, if a deployment names it.
+#: Separate from ``UI_ROOT_ENV`` because they are two builds -- Vite's ``base``
+#: is per-build, and the console is served from a different path for a reason
+#: that is not cosmetic (specs/011 research R1).
+CONSOLE_ROOT_ENV = "DOCDOC_CONSOLE_ROOT"
 
 #: The request body cap, in bytes, applied while reading. Distinct from the
 #: document size limit of ``ingest.Limits``: this one bounds what the *process*

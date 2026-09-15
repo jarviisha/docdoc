@@ -112,6 +112,26 @@ services:
       # pre-tenant content could be told, correctly, that it disagreed with
       # itself, and had no way to say otherwise from here.
       DOCDOC_DEFAULT_TENANT: ${DOCDOC_DEFAULT_TENANT:-}
+      # --- Milestone 11: the browser clients ----------------------------------
+      #
+      # **This image carries no built assets and never will**: they live in the
+      # separate `docdoc-ui` distribution, which the default extras deliberately
+      # omit. So both surfaces answer `501` here unless the host's builds are
+      # mounted, which is what the two read-only volumes below do.
+      #
+      # Absent builds are the ordinary state of a fresh checkout — `ui/dist` and
+      # `ui/dist-console` are gitignored — and compose creates the mount points
+      # empty. An empty directory is not a build: `docdoc.api.ui` requires the
+      # entry point, so the routes answer `501` naming what is missing rather
+      # than serving a blank page.
+      #
+      #   (cd ui && npm ci && npm run build && npm run build:console)
+      # Overridable, like every other setting here, so that "this deployment does
+      # not serve the console" is a state a reader can produce without deleting
+      # the mounted directory — which leaves the bind mount pointing at a dead
+      # inode and the API serving what it already resolved (specs/011 T083).
+      DOCDOC_UI_ROOT: ${DOCDOC_UI_ROOT:-/clients/viewer}
+      DOCDOC_CONSOLE_ROOT: ${DOCDOC_CONSOLE_ROOT:-/clients/console}
       # --- Milestone 10, and every one of them is unset on purpose -------------
       #
       # Each capability is off by default (FR-101): a Milestone 9 deployment that
@@ -151,6 +171,11 @@ services:
     volumes: &docdoc_mounts
       - ../../schemas:/schemas:ro
       - ../../tests/fixtures/echo:/fixtures:ro
+      # The two browser builds, read-only. See DOCDOC_UI_ROOT above for why they
+      # are mounted rather than built into the image, and what an absent build
+      # does (it answers 501; it does not serve a blank page).
+      - ../../ui/dist:/clients/viewer:ro
+      - ../../ui/dist-console:/clients/console:ro
       # **Where an operator's own files go**: a key file, webhook signing
       # secrets, a routing policy. Read-only, gitignored, and empty until
       # somebody puts something in it — see `secrets/README.md`.

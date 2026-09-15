@@ -12,19 +12,26 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 package="$root/packaging/docdoc-ui"
 assets="$package/src/docdoc_ui/assets"
+console="$package/src/docdoc_ui/console"
 
 echo "==> building the browser client"
-(cd "$root/ui" && npm ci && npm run build)
+(cd "$root/ui" && npm ci && npm run build && npm run build:console)
 
 if [[ ! -f "$root/ui/dist/index.html" ]]; then
   echo "ui/dist/index.html is missing — the build produced nothing to package" >&2
   exit 1
 fi
 
+if [[ ! -f "$root/ui/dist-console/console.html" ]]; then
+  echo "ui/dist-console/console.html is missing — the console build produced nothing" >&2
+  exit 1
+fi
+
 echo "==> copying assets into the distribution"
-rm -rf "$assets"
-mkdir -p "$assets"
+rm -rf "$assets" "$console"
+mkdir -p "$assets" "$console"
 cp -R "$root/ui/dist/." "$assets/"
+cp -R "$root/ui/dist-console/." "$console/"
 
 # `uv build` rather than `python -m build`, which is what this said until T082
 # and which is not a dependency this repository declares — the documented

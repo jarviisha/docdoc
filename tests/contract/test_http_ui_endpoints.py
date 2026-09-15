@@ -38,9 +38,13 @@ from docdoc.extraction.adapters.echo import EchoAdapter
 FIXTURE = Path("tests/fixtures/pdf/digital_invoice.pdf")
 SCHEMA = "invoice@1"
 
-#: Every route this interface has, after Milestone 8. The set is asserted rather
+#: Every route this interface has, after Milestone 11. The set is asserted rather
 #: than described because "no per-user state" is a claim about what does *not*
 #: exist, and only an exhaustive list can carry it (FR-031).
+#:
+#: The count is in the test's name deliberately: a route added without a decision
+#: fails a test whose name has to be edited to make it pass, which is a harder
+#: thing to do absent-mindedly than appending a line.
 ROUTES = {
     ("POST", "/v1/documents"),
     ("GET", "/v1/documents/{blob_id}"),
@@ -55,6 +59,17 @@ ROUTES = {
     # and still carry three statuses, none of them `pending`.
     ("POST", "/v1/documents/{blob_id}/runs"),
     ("GET", "/v1/runs/{run_id}"),
+    # Milestone 11, and the **only** route it adds. The operations console needs
+    # to enumerate — `GET /v1/runs/{run_id}` answers only for an identifier a
+    # caller already holds — and everything else that console does reaches a
+    # route already on this list. Scoped to the caller's tenant as a predicate in
+    # the query, so another tenant's runs are absent for the same reason an
+    # unknown one is.
+    #
+    # That it is exactly one, and that it is a read, is asserted separately in
+    # `test_console_adds_one_read.py`: this list says *which* routes exist, and
+    # that one says *how many were added* and by which milestone.
+    ("GET", "/v1/runs"),
     # Cancellation is a DELETE on the run rather than a POST to an action,
     # because what it removes is the *attempt* — the result, if one was already
     # produced, is content-addressed, immutable, and untouched by this.
@@ -295,7 +310,7 @@ def test_a_deployment_with_no_schemas_returns_an_empty_list_and_not_an_error() -
 # -- FR-031, FR-060 what must never accumulate -------------------------------
 
 
-def test_the_route_set_is_exactly_these_twenty(storeless: TestClient) -> None:
+def test_the_route_set_is_exactly_these_twenty_one(storeless: TestClient) -> None:
     """FR-031, FR-060 — an exhaustive list is the only way to assert an absence.
 
     A route added without a decision shows up here, which is the point: this
@@ -362,7 +377,7 @@ def test_a_missing_interface_says_what_is_missing_and_what_fixes_it(
     """
     from docdoc.api import ui as ui_module
 
-    monkeypatch.setattr(ui_module, "chosen_assets", lambda: (None, None))
+    monkeypatch.setattr(ui_module, "chosen_assets", lambda _surface=None: (None, None))
     client = TestClient(build_app(_Deployment(registry=_registry(), adapter=_adapter())))
 
     response = client.get("/ui")
@@ -385,7 +400,7 @@ def test_a_built_interface_is_served_from_this_origin(
     from docdoc.api import ui as ui_module
 
     (tmp_path / "index.html").write_text("<!doctype html><div id=root></div>", encoding="utf-8")
-    monkeypatch.setattr(ui_module, "chosen_assets", lambda: ("test", tmp_path))
+    monkeypatch.setattr(ui_module, "chosen_assets", lambda _surface=None: ("test", tmp_path))
     client = TestClient(build_app(_Deployment(registry=_registry(), adapter=_adapter())))
 
     assert client.get("/ui/").status_code == 200
@@ -419,15 +434,15 @@ def test_each_kind_of_absence_gets_its_own_sentence(
     from docdoc.api import ui as ui_module
 
     monkeypatch.delenv("DOCDOC_UI_ROOT", raising=False)
-    monkeypatch.setattr(ui_module, "_installed_root", lambda: None)
-    monkeypatch.setattr(ui_module, "_checkout_root", lambda: None)
+    monkeypatch.setattr(ui_module, "_installed_root", lambda _surface=None: None)
+    monkeypatch.setattr(ui_module, "_checkout_root", lambda _surface=None: None)
 
     if state == "configured":
         monkeypatch.setenv("DOCDOC_UI_ROOT", str(tmp_path))
     if state == "installed-but-empty":
-        monkeypatch.setattr(ui_module, "_installed_root", lambda: tmp_path)
+        monkeypatch.setattr(ui_module, "_installed_root", lambda _surface=None: tmp_path)
     if state == "checkout":
-        monkeypatch.setattr(ui_module, "_checkout_root", lambda: tmp_path)
+        monkeypatch.setattr(ui_module, "_checkout_root", lambda _surface=None: tmp_path)
     if state == "absent":
         monkeypatch.chdir(tmp_path)
 
@@ -474,8 +489,8 @@ def test_a_checkout_build_beats_an_installed_distribution(
     installed = _built_at(tmp_path / "site-packages" / "docdoc_ui" / "assets", "installed")
 
     monkeypatch.delenv("DOCDOC_UI_ROOT", raising=False)
-    monkeypatch.setattr(ui_module, "_checkout_root", lambda: checkout)
-    monkeypatch.setattr(ui_module, "_installed_root", lambda: installed)
+    monkeypatch.setattr(ui_module, "_checkout_root", lambda _surface=None: checkout)
+    monkeypatch.setattr(ui_module, "_installed_root", lambda _surface=None: installed)
 
     source, chosen = ui_module.chosen_assets()
 
@@ -489,8 +504,12 @@ def test_an_explicit_setting_beats_both(monkeypatch: pytest.MonkeyPatch, tmp_pat
 
     configured = _built_at(tmp_path / "configured", "configured")
     monkeypatch.setenv("DOCDOC_UI_ROOT", str(configured))
-    monkeypatch.setattr(ui_module, "_checkout_root", lambda: _built_at(tmp_path / "c", "checkout"))
-    monkeypatch.setattr(ui_module, "_installed_root", lambda: _built_at(tmp_path / "i", "inst"))
+    monkeypatch.setattr(
+        ui_module, "_checkout_root", lambda _surface=None: _built_at(tmp_path / "c", "checkout")
+    )
+    monkeypatch.setattr(
+        ui_module, "_installed_root", lambda _surface=None: _built_at(tmp_path / "i", "inst")
+    )
 
     source, chosen = ui_module.chosen_assets()
 
@@ -512,8 +531,8 @@ def test_the_installed_distribution_still_serves_a_real_deployment(
     installed = _built_at(tmp_path / "site-packages" / "docdoc_ui" / "assets", "installed")
 
     monkeypatch.delenv("DOCDOC_UI_ROOT", raising=False)
-    monkeypatch.setattr(ui_module, "_checkout_root", lambda: None)
-    monkeypatch.setattr(ui_module, "_installed_root", lambda: installed)
+    monkeypatch.setattr(ui_module, "_checkout_root", lambda _surface=None: None)
+    monkeypatch.setattr(ui_module, "_installed_root", lambda _surface=None: installed)
 
     source, chosen = ui_module.chosen_assets()
 
@@ -538,7 +557,7 @@ def test_an_unbuilt_checkout_does_not_shadow_a_working_installation(
     installed = _built_at(tmp_path / "site-packages" / "docdoc_ui" / "assets", "installed")
 
     monkeypatch.delenv("DOCDOC_UI_ROOT", raising=False)
-    monkeypatch.setattr(ui_module, "_checkout_root", lambda: empty)
-    monkeypatch.setattr(ui_module, "_installed_root", lambda: installed)
+    monkeypatch.setattr(ui_module, "_checkout_root", lambda _surface=None: empty)
+    monkeypatch.setattr(ui_module, "_installed_root", lambda _surface=None: installed)
 
     assert ui_module.chosen_assets()[1] == installed

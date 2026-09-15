@@ -55,8 +55,10 @@ from docdoc.api.models import (
     JobStatus,
     JobStatusResponse,
     RunAcceptedResponse,
+    RunListResponse,
     RunResponse,
     RunStateResponse,
+    RunSummary,
     SchemaChoice,
     SchemaListing,
     StageOutcomeView,
@@ -106,6 +108,40 @@ CONNECT_TIMEOUT_SECONDS = 5
 #: are registered under, and two copies of a path is how one of them ends up
 #: exempting something that no longer exists.
 _UNAUTHENTICATED = frozenset({LIVENESS_PATH, READINESS_PATH})
+
+#: The console's shell, and the one prefix exempt from the credential.
+#:
+#: **A browser's top-level navigation carries no `Authorization` header.** The
+#: viewer's mount is gated, and `_mount_ui` records what that costs: with
+#: authentication on, it does not load. That was the honest failure for a surface
+#: whose credential is a deployment-wide one; it is a fatal one for a console
+#: whose entire premise is that an operator pastes a key **into a page that has
+#: already loaded** (specs/011 FR-006, research R1).
+#:
+#: What is exempt is HTML, CSS, and JavaScript. No run, no tenant identifier, no
+#: credential, and no document is reachable from those bytes, and the console
+#: issues zero requests before a key is entered. Every `/v1` call it then makes
+#: is authenticated exactly as any other client's is.
+#:
+#: A prefix and not a path, because a built client is a directory of hashed
+#: assets. It is checked with `startswith` against this exact string plus the
+#: bare path, so a route named `/consoleroom` later would not be exempted by
+#: accident.
+_CONSOLE_PREFIX = "/console"
+
+
+def _is_console_asset(path: str) -> bool:
+    """Whether a path is the console's shell rather than the API."""
+    return path == _CONSOLE_PREFIX or path.startswith(f"{_CONSOLE_PREFIX}/")
+
+
+#: The run listing's page size (Milestone 11 FR-015).
+#:
+#: A default and a maximum, both documented, and a request above the maximum is
+#: a `422` rather than a silent clamp: a clamped page is one a client pages
+#: through wrongly forever, having been told nothing.
+DEFAULT_RUN_PAGE = 50
+MAX_RUN_PAGE = 200
 
 #: The run layer's errors, mapped. Kept beside `api_errors.STATUS_BY_ERROR`
 #: rather than inside it, because that table is the constitution's error model
@@ -550,6 +586,7 @@ def build_app(deployment: _Deployment | None = None) -> FastAPI:
     health.install(app, resolved.readiness())
     _install_error_handler(app)
     _mount_ui(app)
+    _mount_console(app)
     return app
 
 
@@ -568,6 +605,11 @@ def _require_credential_everywhere_else(app: FastAPI) -> None:
     rule that needs no list. FR-059 names exactly two exemptions, so this
     enforces exactly two and refuses everything else.
 
+    **Milestone 11 adds the third, and it is deliberate rather than an oversight
+    rediscovered.** `/console` serves a shell that must load before a credential
+    exists, because that is where the operator types one. See `_CONSOLE_PREFIX`
+    for what is exempt and what it is worth to an unauthenticated reader.
+
     **Before routing**, which means an unknown path answers 401 rather than 404
     on an authenticated deployment. That is the better answer: a 404 would say
     which paths exist to someone who cannot use any of them.
@@ -579,7 +621,7 @@ def _require_credential_everywhere_else(app: FastAPI) -> None:
 
     @app.middleware("http")
     async def _credential(request: Request, call_next: Any) -> Response:
-        if request.url.path in _UNAUTHENTICATED:
+        if request.url.path in _UNAUTHENTICATED or _is_console_asset(request.url.path):
             return await call_next(request)  # type: ignore[no-any-return]
         try:
             _deployment_of(request).keys.principal_for(
@@ -707,6 +749,75 @@ def _mount_ui(app: FastAPI) -> None:
     # load. The second is the honest failure — the interface is unavailable, and
     # it says so at the door rather than after the page has rendered.
     app.mount("/ui", StaticFiles(directory=assets, html=True), name="ui")
+
+    # And the sentence Milestone 11 had to qualify: *everything else*. The
+    # console's shell is exempt, for a reason that is about browsers rather than
+    # about trust — `_CONSOLE_PREFIX` states it.
+
+
+def _mount_console(app: FastAPI) -> None:
+    """Serve the operations console, or explain its absence (specs/011 FR-001).
+
+    **Not behind the credential, and this is the milestone's one deliberate
+    divergence.** `_mount_ui` above records what gating a shell costs: with
+    authentication enabled the viewer *"does not load"*. For the viewer that was
+    the honest failure. For the console it would be fatal, because the console's
+    premise is that an operator pastes a key into a page that has **already
+    loaded** (FR-006) — a browser's top-level navigation carries no
+    `Authorization` header and cannot be made to. Gating this shell does not make
+    the console strict; it makes it impossible on exactly the deployments it
+    exists for.
+
+    What is served is HTML, CSS, and JavaScript. No run, no tenant identifier, no
+    credential, and no document is reachable from those bytes, and the console
+    issues zero requests before a key is entered. Every `/v1` call it makes after
+    that is authenticated exactly as any other client's is. The alternatives —
+    a cookie session, a credential in the URL — are rejected in ADR-0019 §4 and
+    in the spec's FR-008, and both would have cost more than this exemption does.
+
+    Under ``/console``, which is distinct from the viewer's ``/ui`` and contains
+    none of the fifteen words `tests/contract/test_no_review_platform.py` forbids
+    in a path (FR-003).
+    """
+    from docdoc.api.ui import CONSOLE, absence_reason, chosen_assets
+
+    source, assets = chosen_assets(CONSOLE)
+
+    if assets is None:
+        # A deployment without the console is ordinary. A blank page is not:
+        # `specs/008` FR-037 forbids it, and the console inherits both the rule
+        # and the two different sentences for a missing build and a missing
+        # distribution.
+        @app.get(_CONSOLE_PREFIX, include_in_schema=False)
+        @app.get(f"{_CONSOLE_PREFIX}/{{path:path}}", include_in_schema=False)
+        async def _no_console(path: str = "") -> JSONResponse:
+            return JSONResponse(
+                status_code=501,
+                content={
+                    "error": {
+                        "class": "ConsoleNotInstalled",
+                        "message": absence_reason(CONSOLE),
+                    }
+                },
+            )
+
+        return
+
+    from fastapi.staticfiles import StaticFiles
+
+    logging.getLogger("docdoc.api").info(
+        json.dumps({"event": "console.assets", "source": source, "path": str(assets)})
+    )
+
+    # `html=True` with the entry point named, because this build's entry is
+    # `console.html` rather than `index.html` — Vite writes the file it was given
+    # and `StaticFiles` looks for `index.html` by default, so without the copy
+    # made at build time the directory would serve a 404 at its own root.
+    app.mount(
+        _CONSOLE_PREFIX,
+        StaticFiles(directory=assets, html=True),
+        name="console",
+    )
 
 
 def create_app() -> FastAPI:
@@ -1412,6 +1523,134 @@ def _router() -> APIRouter:
                 priority=run.priority.label,
             ).model_dump(mode="json"),
         )
+
+    @router.get("/runs", response_model=RunListResponse)
+    async def list_runs(
+        request: Request,
+        principal: Caller,
+        status: str | None = None,
+        limit: int = DEFAULT_RUN_PAGE,
+        cursor: str | None = None,
+    ) -> Any:
+        """This principal's runs, newest first (Milestone 11 FR-013).
+
+        **The one new read this milestone adds**, and it is a read. Everything
+        the operations console writes reaches a route Milestone 10 already
+        ships; this exists because `GET /v1/runs/{run_id}` answers only for an
+        identifier the caller already holds, and a surface that cannot enumerate
+        cannot open.
+
+        **No administrative scope.** A principal lists their own tenant's runs.
+        Listing across tenants does not exist here, deliberately: it would be a
+        second new read, and "exactly one new server-side concept" is the claim
+        this milestone is measured on.
+
+        **Removed runs are absent** (FR-020). A tombstone stays reachable by
+        identity, by its owner, through the route `specs/010` FR-011 defines —
+        this listing is not a second way to learn that something was deleted.
+        """
+        from docdoc.api.paging import Cursor, CursorError, decode, encode
+        from docdoc.runs.model import RunStatus
+
+        deployment = _deployment_of(request)
+        if not deployment.has_runs:
+            # The same answer `GET /v1/runs/{run_id}` gives a deployment with no
+            # database, in the same shape: this is a configuration a deployment
+            # may have, not a fault, and an empty list would read as "nothing has
+            # ever been submitted" (Edge Cases).
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": {
+                        "class": "RunStateUnavailableError",
+                        "message": "this deployment records no runs",
+                    }
+                },
+            )
+
+        if status is not None and status not in {member.value for member in RunStatus}:
+            # A `422` and not an empty page. The set is the five members
+            # `specs/009` closed it at, and a filter nobody can satisfy is a
+            # client bug the deployment should name rather than absorb.
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": {
+                        "class": "InvalidRunStatus",
+                        "message": "status must be one of "
+                        + ", ".join(sorted(member.value for member in RunStatus)),
+                    }
+                },
+            )
+
+        if limit < 1 or limit > MAX_RUN_PAGE:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": {
+                        "class": "InvalidPageSize",
+                        "message": f"limit must be between 1 and {MAX_RUN_PAGE}",
+                    }
+                },
+            )
+
+        before: tuple[Any, Any] | None = None
+        if cursor is not None:
+            try:
+                position = decode(cursor, tenant_id=principal.tenant_id)
+            except CursorError:
+                # One answer for malformed and for another tenant's, because two
+                # would tell a caller which foreign cursors are well formed
+                # (FR-016).
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "error": {
+                            "class": "InvalidCursor",
+                            "message": "this cursor cannot be read",
+                        }
+                    },
+                )
+            before = (position.created_at, position.run_id)
+
+        runs = deployment.runs().page_runs(
+            principal.tenant_id,
+            status=status,
+            before=before,
+            limit=limit,
+        )
+
+        summaries = [
+            RunSummary(
+                run_id=str(run.run_id),
+                status=str(run.status),
+                created_at=run.created_at.isoformat(),
+                # `updated_at` is when a terminal run reached its terminal state.
+                # `None` while it has not: an absent field says "still going",
+                # and a timestamp that moved with every heartbeat would not.
+                finished_at=run.updated_at.isoformat() if run.is_terminal else None,
+                blob_id=run.blob_id,
+                schema_identity=run.schema_identity,
+                processing_id=run.processing_id,
+            )
+            for run in runs
+        ]
+
+        # A full page means there may be more; a short one is the end. One extra
+        # round trip on the boundary case, against a `COUNT(*)` on every page.
+        next_cursor = (
+            encode(
+                Cursor(
+                    tenant_id=principal.tenant_id,
+                    created_at=runs[-1].created_at,
+                    run_id=runs[-1].run_id,
+                )
+            )
+            if len(runs) == limit
+            else None
+        )
+
+        return RunListResponse(runs=tuple(summaries), next_cursor=next_cursor)
 
     @router.get("/runs/{run_id}", response_model=RunStateResponse)
     async def run_state(request: Request, run_id: str, principal: Caller) -> Any:

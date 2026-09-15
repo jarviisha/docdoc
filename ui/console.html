@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Names the surface, not the product: an operator with a tab open on three
+         deployments needs to tell them apart, and "docdoc" alone does not. -->
+    <title>docdoc — operations console</title>
+  </head>
+  <body>
+    <!--
+      **The fallback lives inside `#root`, and that placement is the whole
+      mechanism** (T082). `createRoot(...).render()` replaces this element's
+      children, so the sentence below is on screen from the first byte and gone
+      the moment the console is actually running. Nothing has to clear it, and
+      there is no moment where both are visible.
+
+      It covers the failure a `<noscript>` cannot: JavaScript is enabled, the
+      bundle 404s or is served by a proxy that mangled it, and the page renders a
+      shell with no data — which the spec's Edge Cases forbid in as many words,
+      because a blank page reads as "nothing to show" rather than "this did not
+      start". `specs/008` FR-037 spent a requirement on the same failure for the
+      server side; this is the browser's half of it.
+    -->
+    <div id="root">
+      <p>
+        The operations console could not start — its assets did not load. This is a failure to
+        load the page, not an empty deployment: nothing here has been asked about your runs yet.
+      </p>
+      <p>
+        If you are running from a checkout, build it with <code>npm run build:console</code> in
+        <code>ui/</code>. Otherwise the <code>docdoc-ui</code> distribution is missing or its
+        assets are not being served — the API's <code>/console</code> route says which.
+      </p>
+    </div>
+
+    <noscript>
+      <p>
+        This console needs JavaScript. It is a browser application talking to the docdoc API; with
+        scripting disabled there is nothing for it to render.
+      </p>
+      <p>
+        Everything it does is also a command:
+        <code>docdoc credential issue|revoke|list</code>, <code>docdoc erase</code>, and
+        <code>docdoc sweep</code>.
+      </p>
+    </noscript>
+
+    <script type="module" src="/src/console/main.tsx"></script>
+  </body>
+</html>

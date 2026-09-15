@@ -278,7 +278,7 @@ def test_the_route_walk_finds_the_ui_mount(client: TestClient) -> None:
     assert {"/healthz", "/readyz"} <= set(paths)
 
 
-def test_only_liveness_and_readiness_answer_without_a_credential(
+def test_only_liveness_readiness_and_the_console_shell_answer_without_a_credential(
     client: TestClient,
 ) -> None:
     """FR-059, stated as the closed exemption list the requirement actually is.
@@ -286,17 +286,43 @@ def test_only_liveness_and_readiness_answer_without_a_credential(
     Exhaustive rather than enumerated: a route or a mount added later is covered
     without anybody remembering to add it here, which is the failure this exists
     to prevent rather than the one it found.
+
+    **The list gained a third member in Milestone 11, deliberately**, and this
+    test's name had to be edited to let it — which is the point of writing the
+    count into the name. `/console` serves the operations console's shell, and it
+    cannot be gated for a reason that is about browsers rather than about trust:
+    a top-level navigation carries no `Authorization` header, and the console's
+    premise is that an operator pastes a key **into a page that has already
+    loaded** (specs/011 FR-006, research R1). Gating it does not make the console
+    strict; it makes it unusable on every deployment it exists for.
+
+    What is exempt is HTML, CSS, and JavaScript. The half that matters is
+    asserted right below: the **data** is still behind the credential, and
+    `tests/contract/test_console_mount.py` holds both halves together.
     """
     unauthenticated: list[str] = []
     for path in _every_path(client.app):
         if client.get(path).status_code != 401:
             unauthenticated.append(path)
 
-    assert set(unauthenticated) == {"/healthz", "/readyz"}, (
+    assert set(unauthenticated) == {"/healthz", "/readyz", "/console"}, (
         f"these answer without a credential: {sorted(unauthenticated)}. FR-059 "
-        f"exempts liveness and readiness and nothing else — a probe cannot carry "
-        f"a key, and everything that can, must"
+        f"exempts liveness, readiness, and the console's static shell — nothing "
+        f"else. A probe cannot carry a key and neither can a navigation; "
+        f"everything that can, must"
     )
+
+
+def test_the_consoles_exemption_is_the_shell_and_not_the_data(
+    client: TestClient,
+) -> None:
+    """The other half of the exemption above, and the one that bounds it."""
+    for path in ("/v1/runs", "/v1/schemas", "/v1/admin/credentials"):
+        assert client.get(path).status_code == 401, (
+            f"{path} answered without a credential. The console's exemption is "
+            "its static assets; every /v1 call it makes is authenticated like "
+            "any other client's"
+        )
 
 
 def test_the_viewer_is_reachable_with_a_credential(
@@ -320,7 +346,7 @@ def test_the_viewer_is_reachable_with_a_credential(
     from docdoc.api import ui as ui_module
 
     (tmp_path / "index.html").write_text("<!doctype html><div id=root></div>", encoding="utf-8")
-    monkeypatch.setattr(ui_module, "chosen_assets", lambda: ("test", tmp_path))
+    monkeypatch.setattr(ui_module, "chosen_assets", lambda _surface=None: ("test", tmp_path))
 
     served = TestClient(
         build_app(

@@ -19,7 +19,11 @@ export type Intent =
   | { type: "extract"; schema: string; document: Uint8Array };
 
 export interface RequestPlan {
-  method: "GET" | "POST";
+  // `DELETE` since Milestone 11: the operations console revokes credentials and
+  // erases tenants through routes Milestone 10 already ships. The *viewer* still
+  // constructs none — `writesToStore` below is what says so, and it is checked
+  // over every intent the viewer has rather than over this type.
+  method: "GET" | "POST" | "DELETE";
   path: string;
   query: Record<string, string>;
   hasBody: boolean;

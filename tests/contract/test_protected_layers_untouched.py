@@ -48,6 +48,14 @@ GUARDS = (
 )
 
 
+def _head() -> str | None:
+    """This checkout's commit, or ``None`` when `git` cannot say."""
+    found = subprocess.run(
+        ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=False
+    )
+    return found.stdout.strip() if found.returncode == 0 else None
+
+
 def _merge_base() -> str:
     """Where this branch left `main`, or a skip naming why there is none."""
     for ref in ("origin/main", "main"):
@@ -58,7 +66,29 @@ def _merge_base() -> str:
             check=False,
         )
         if found.returncode == 0 and found.stdout.strip():
-            return found.stdout.strip()
+            base = found.stdout.strip()
+
+            # **On `main` itself there is no branch to assess**, and this file
+            # asks a question only a branch can answer: *what did this milestone
+            # change*. After a merge, `HEAD` **is** the merge base, the diff is
+            # empty by arithmetic rather than by anything anybody did, and
+            # `test_the_diff_is_not_empty` fires — correctly, because an empty
+            # diff would satisfy every "does not contain" assertion above it.
+            #
+            # That is what turned CI red on `main` from the moment Milestone 9
+            # merged, and again for 10: the pull request ran green, the merge
+            # commit ran red, and the run that went red was the one nobody was
+            # looking at. Skipping here is not relaxing the guard — a branch
+            # with real work still gets every assertion, and a branch whose diff
+            # is unexpectedly empty still fails. It is declining to ask a
+            # question that has no subject.
+            if base == _head():
+                pytest.skip(
+                    "HEAD is the merge base with `main`, so this is `main` itself "
+                    "and there is no branch to assess. This file reads a diff "
+                    "against `main`; on `main` there is none by arithmetic"
+                )
+            return base
 
     pytest.skip(
         "no merge base with `main` is reachable, so there is no diff to read. "

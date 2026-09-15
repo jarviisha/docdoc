@@ -10,9 +10,10 @@
   },
   "scripts": {
     "build": "vite build",
+    "build:console": "vite build --config vite.console.config.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --test",
-    "lint:boundaries": "node scripts/check-model-boundary.mjs && node scripts/check-readonly.mjs",
+    "lint:boundaries": "node scripts/check-model-boundary.mjs && node scripts/check-readonly.mjs && node scripts/check-console-boundary.mjs && node scripts/check-console-a11y.mjs",
     "licenses": "node scripts/check-licenses.mjs"
   },
   "dependencies": {

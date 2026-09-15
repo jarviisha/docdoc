@@ -170,10 +170,18 @@ def test_the_storeless_route_has_no_asynchronous_variant(client: TestClient) -> 
     paths = client.app.openapi()["paths"]  # type: ignore[attr-defined]
 
     assert "/v1/extract/runs" not in paths
-    assert "/v1/runs" not in paths, "there is no collection route that submits a run"
+    # **A collection route exists since Milestone 11 and does not submit.**
+    # `GET /v1/runs` lists a tenant's runs for the operations console; the claim
+    # this test carries is about *creating* one, so it is asserted on the method
+    # rather than on the path. A `POST` here would be the asynchronous variant of
+    # a storeless extraction, which has nowhere to leave a result.
+    assert set(paths.get("/v1/runs", {})) == {"get"}, (
+        "there is no collection route that submits a run"
+    )
     run_routes = {path for path in paths if "runs" in path}
     assert run_routes == {
         "/v1/documents/{blob_id}/runs",
+        "/v1/runs",
         "/v1/runs/{run_id}",
         # Milestone 10. Sub-resources of a run that already exists, which is why
         # they do not weaken the claim above: neither creates a run, and both are

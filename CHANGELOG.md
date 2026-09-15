@@ -9,6 +9,96 @@ API may change in any release. `document_id` derivation is versioned separately 
 
 ## [Unreleased]
 
+Milestone 11: the operations console. **The browser face of work Milestone 10 already did**, and
+almost nothing else. Every write it performs — issue a credential, revoke one, erase a tenant or a
+document — reaches a route that already existed and was already tested. The whole server-side
+addition is `GET /v1/runs`, because `GET /v1/runs/{run_id}` answers only for an identifier a caller
+already holds, and a surface that cannot enumerate cannot open.
+
+**It is not a review platform.** Constitution **v1.9.0** permits an operations console and keeps the
+deferred "full review UI" deferred, and the difference is who the surface is *about*: the person who
+runs the deployment, not the person who checks documents. **ADR-0019** fixes that boundary as five
+nouns — reviewer assignment, review queue, workload, review state, disposition — and
+`ui/scripts/check-console-boundary.mjs` fails the build on any of them, because a principle is argued
+at review time and an identifier is grepped. `tests/contract/test_no_review_platform.py`, written by
+Milestone 10 without knowing this milestone would be measured against it, is unchanged.
+
+### Added
+
+- **The operations console**, served at `/console` from the `docdoc-ui` distribution's second build
+  tree. Run listing and detail, routing outcome, delivery record, credential issuance and revocation,
+  tenant and document erasure.
+
+  A run's **delivery attempts are listed**, not summarised: the sentence answers *was anyone told*
+  and the operator's actual question is *what did they say*. An attempt that never got an answer
+  reads `no answer` rather than a blank cell — a receiver that did not reply and one that replied
+  `500` are different failures, and only the second is worth retrying.
+
+  A **removed run says when and under which policy**, and nothing else about what it held. A
+  tombstone carries four fields precisely so that being told about one discloses nothing about its
+  contents.
+
+  It **says it could not start** when its own bundle never runs — JavaScript disabled, a stale
+  cache, a proxy that mangled the asset. The sentence lives inside the mount point and React
+  replaces it only on a successful render, so a blank page is never what an operator is shown. That
+  is the browser half of the failure `specs/008` FR-037 spent a requirement on for the server.
+
+- **`GET /v1/runs`** — the one new route, and it is a read. Keyset paging over
+  `(created_at, run_id)` descending with an opaque cursor, a `status` filter over the five-member
+  closed set, a page size defaulting to 50 and capped at 200. **Zero migrations**: the
+  `runs_by_tenant (tenant_id, created_at)` index Milestone 9 created for retention already covers the
+  access path. The tenant is a predicate in the query, so another tenant's runs are absent from the
+  same branch an unknown run is.
+
+  An oversized limit is a `422` rather than a silent clamp — a clamped page is one a client pages
+  through wrongly forever, having been told nothing. A cursor that is malformed and a cursor issued
+  for another tenant get one answer, because two would say which foreign cursors are well formed.
+
+- **Two build guards**: `check-console-boundary.mjs` (the five nouns, and a second rule set for
+  result content that gives SC-016 something to name) and `check-console-a11y.mjs` (every control
+  named and keyboard-reachable, **and a live region wherever a status message is shown**). Both take
+  a directory argument so `guards-can-fail.test.mjs` can watch them fail — a guard nobody has seen
+  fail is a guard nobody knows works.
+
+  The third rule exists because the console **announces its state changes** — a list loading, an
+  erasure completing, a credential refused — and until a convergence pass looked, it announced none
+  of them while the viewer announced one. A requirement about what a screen reader hears was being
+  checked by nobody. The rule's ceiling is stated where it lives: it proves a region exists in the
+  file, not that it wraps the right message, because matching the two needs a rendered accessibility
+  tree and that needs a browser driver this milestone declined.
+
+### Changed
+
+- **`/console` is served without a credential, and it is the third and last exemption.** A browser's
+  top-level navigation cannot carry a bearer token, so a gated shell would never load on an
+  authenticated deployment — which is every deployment the console exists for. What is exempt is
+  HTML, CSS, and JavaScript; the data behind it is not, and the console issues zero requests before a
+  key is entered. `tests/contract/test_tenant_isolation.py` names the third exemption explicitly and
+  its test had to be renamed to admit it, which is the point of putting the count in the name.
+
+- **`docdoc.api.ui` now locates two surfaces** rather than one, through the same three-candidate
+  search. An installed root that is not on disk is no longer treated as present — that made an
+  unbuilt console in a checkout answer "reinstall the distribution", which was accurate about the
+  installed copy and useless to the developer standing in the repository.
+
+### Not added, and deliberately
+
+- **No correction surface.** The route exists and the console does not call it. One reviewer
+  annotating one value is Principle IX's product feature; the same screen with an inbox beside it is
+  the platform Principle IX forbids, and ADR-0019 §6 leaves it to a milestone that says which side of
+  the line it lands on.
+- **No login route, no session record, no cookie.** The operator pastes the key the deployment
+  already issued, it lives in the page, and a reload asks again. An idle console discards it after 15
+  minutes.
+- **No cross-tenant view, no limits gauge, no worker backlog, no re-delivery, no per-operator
+  preferences.** Each is recorded in the spec's Out of Scope with what it would cost — the backlog
+  view down to the name it would have to use, because `queue` is one of the fifteen words no route
+  may contain.
+- **No part of a result is rendered anywhere.** A succeeded run gets a link. One result
+  representation, reachable one way.
+
+## [Unreleased — Milestone 10]
+
 Milestone 10: retention, credentials, limits, delivery, tracing, and the human loop. **Milestone 9
 ended with a list of seven things it deferred; this is that list, built.** Every one of them could be
 added without moving a process boundary, and none of them did: four process types, four containers,

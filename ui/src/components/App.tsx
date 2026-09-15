@@ -142,7 +142,7 @@ export function App() {
     const pageCount = pageCountFor(doc ?? toDocumentView(bytes), pdf?.numPages ?? null);
     const plan = requestFor({ type: "extract", schema, document: bytes });
 
-    void send(plan, bytes.slice())
+    void send(plan, { body: bytes.slice() })
       .then(({ ok, body }) => {
         // The surviving stages are read out of the same body (FR-025), so a
         // mid-run failure shows what it produced instead of only saying that it
