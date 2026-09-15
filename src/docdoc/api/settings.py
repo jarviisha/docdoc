@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "API_KEYS_FILE_ENV",
+    "CONSOLE_ROOT_ENV",
     "CORRECTION_RETENTION_DAYS_ENV",
     "DEFAULT_MAX_REQUEST_BYTES",
     "DELIVERY_ALLOW_PRIVATE_ENV",
@@ -53,7 +54,6 @@ __all__ = [
     "SCHEMA_PATHS_ENV",
     "STORE_ROOT_ENV",
     "STORE_URL_ENV",
-    "CONSOLE_ROOT_ENV",
     "UI_ROOT_ENV",
     "run_lease",
     "run_max_attempts",

@@ -9,7 +9,7 @@ would tell a caller which foreign cursors are well-formed.
 from __future__ import annotations
 
 import base64
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -18,7 +18,7 @@ from docdoc.api.paging import Cursor, CursorError, decode, encode
 
 TENANT = "acme"
 OTHER = "globex"
-AT = datetime(2026, 9, 11, 9, 12, 4, tzinfo=timezone.utc)
+AT = datetime(2026, 9, 11, 9, 12, 4, tzinfo=UTC)
 
 
 def test_a_cursor_round_trips() -> None:
@@ -30,7 +30,8 @@ def test_a_cursor_round_trips() -> None:
 def test_the_encoding_is_opaque_and_url_safe() -> None:
     raw = encode(Cursor(TENANT, AT, uuid4()))
     assert "=" not in raw
-    assert "+" not in raw and "/" not in raw
+    assert "+" not in raw
+    assert "/" not in raw
     # Opaque means the tenant is not readable at a glance. It is *in* there —
     # that is how the check works — but a client is not invited to parse it.
     assert TENANT not in raw

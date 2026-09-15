@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-
 from typing import NamedTuple
 
 from docdoc.api.settings import CONSOLE_ROOT_ENV, UI_ROOT_ENV

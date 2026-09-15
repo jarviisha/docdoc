@@ -113,9 +113,7 @@ def test_one_tenants_listing_holds_none_of_the_others(
     assert listed.isdisjoint({str(run.run_id) for run in theirs})
 
 
-def test_a_filter_cannot_reach_across_tenants(
-    client: TestClient, queue: InMemoryRunQueue
-) -> None:
+def test_a_filter_cannot_reach_across_tenants(client: TestClient, queue: InMemoryRunQueue) -> None:
     _submit(queue, "globex", age=0)
 
     body = client.get(
@@ -131,9 +129,7 @@ def test_another_tenants_run_is_unreachable_by_identity_too(
     """The listing and the detail route have to agree about what does not exist."""
     theirs = _submit(queue, "globex", age=0)
 
-    response = client.get(
-        f"/v1/runs/{theirs.run_id}", headers={"Authorization": f"Bearer {ACME}"}
-    )
+    response = client.get(f"/v1/runs/{theirs.run_id}", headers={"Authorization": f"Bearer {ACME}"})
 
     assert response.status_code == 404
 
@@ -141,9 +137,7 @@ def test_another_tenants_run_is_unreachable_by_identity_too(
 # -- paging -------------------------------------------------------------------
 
 
-def test_paging_returns_every_run_exactly_once(
-    client: TestClient, queue: InMemoryRunQueue
-) -> None:
+def test_paging_returns_every_run_exactly_once(client: TestClient, queue: InMemoryRunQueue) -> None:
     """SC-009. Five runs, pages of two, no duplicate and no omission."""
     submitted = [_submit(queue, "acme", age=age) for age in range(5)]
 
@@ -204,9 +198,7 @@ def test_a_removed_run_leaves_the_listing_and_stays_reachable_by_identity(
 
     assert _walk(client, ACME) == [str(kept.run_id)]
 
-    stone = client.get(
-        f"/v1/runs/{removed.run_id}", headers={"Authorization": f"Bearer {ACME}"}
-    )
+    stone = client.get(f"/v1/runs/{removed.run_id}", headers={"Authorization": f"Bearer {ACME}"})
     assert stone.status_code == 410
     assert stone.json()["policy"] == "retention"
 

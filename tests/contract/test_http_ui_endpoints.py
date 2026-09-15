@@ -504,8 +504,12 @@ def test_an_explicit_setting_beats_both(monkeypatch: pytest.MonkeyPatch, tmp_pat
 
     configured = _built_at(tmp_path / "configured", "configured")
     monkeypatch.setenv("DOCDOC_UI_ROOT", str(configured))
-    monkeypatch.setattr(ui_module, "_checkout_root", lambda _surface=None: _built_at(tmp_path / "c", "checkout"))
-    monkeypatch.setattr(ui_module, "_installed_root", lambda _surface=None: _built_at(tmp_path / "i", "inst"))
+    monkeypatch.setattr(
+        ui_module, "_checkout_root", lambda _surface=None: _built_at(tmp_path / "c", "checkout")
+    )
+    monkeypatch.setattr(
+        ui_module, "_installed_root", lambda _surface=None: _built_at(tmp_path / "i", "inst")
+    )
 
     source, chosen = ui_module.chosen_assets()
 
