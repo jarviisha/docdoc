@@ -21,8 +21,9 @@
     // No `baseUrl`: TypeScript 7 removed it, and non-relative targets with it.
     "paths": {
       "@model/*": ["./src/model/*"],
-      "@components/*": ["./src/components/*"]
+      "@components/*": ["./src/components/*"],
+      "@console/*": ["./src/console/*"]
     }
   },
-  "include": ["src", "test", "vite.config.ts"]
+  "include": ["src", "test", "vite.config.ts", "vite.console.config.ts"]
 }

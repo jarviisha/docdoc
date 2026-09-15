@@ -594,6 +594,7 @@ higher-layer work merges while that property is failing or absent.
 | 8 | Read-only grounding viewer, and the two endpoints that reach it | **Done** |
 | 9 | Asynchronous runs, shared object storage, health routes, tenant scoping | **Done** |
 | 10 | Retention and erasure, credential lifecycle, limits, webhook delivery, tracing, routing and corrections | **Done** |
+| 11 | The operations console: run listing, credentials, erasure, delivery — and the one read that makes it possible | **Done** |
 
 Milestone 8 adds no guarantee — no stage, no provider, no change to any value docdoc produces. What it
 changes is who can see the guarantees the first seven built.
@@ -609,6 +610,13 @@ with every one of its capabilities enabled and with all of them disabled. It tou
 asserts that. What it buys is that a deployment can now delete what it holds, revoke a key without a
 restart, refuse a customer that is consuming everything, tell a client when a run finishes, export
 what it already logs, and take a correction back — none of which moves a value.
+
+Milestone 11 adds no guarantee either, and its claim is the narrowest yet: **one new route, and it is
+a read.** Everything the operations console writes — issuing a credential, revoking one, erasing a
+tenant or a document — reaches a route Milestone 10 already ships and already tested. The addition is
+`GET /v1/runs`, because `GET /v1/runs/{run_id}` answers only for an identifier a caller already holds,
+and a surface that cannot enumerate cannot open. Zero migrations, zero new dependencies, zero new
+processes, and a test counts the routes rather than trusting this paragraph.
 
 It also moves no process boundary. Four process types and four containers, exactly as Milestone 9
 left them: retention, delivery, and counter expiry happen in the worker's loop between claims rather
@@ -648,6 +656,48 @@ you run it anywhere real:
 A related change to the API: **`POST /v1/extract` runs a document with no store configured** and writes
 nothing. A deployment that previously refused every extraction for want of storage now serves them
 (ADR-0012).
+
+## The operations console
+
+```bash
+pip install 'docdoc[api,ui]'
+uvicorn --factory docdoc.api.app:create_app --port 8000    # then open /console/
+```
+
+For the person who **runs the deployment**: list and inspect runs, read a run's routing outcome and
+delivery record, issue and revoke credentials, and erase a tenant or a document. It is the browser
+face of commands the CLI already has — `docdoc credential`, `docdoc erase` — for the times you are not
+at a terminal.
+
+**It is not a review platform, and that boundary is constitutional rather than editorial.**
+Constitution v1.9.0 permits a console and keeps the deferred "full review UI" deferred; the difference
+is who the surface is *about*. There is no reviewer assignment, no review queue, no workload, no review
+state, and no disposition — five nouns a build check greps for, because a principle is argued at review
+time and an identifier is not ([ADR-0019](docs/adr/0019-operations-console-boundary.md)). It holds no
+per-operator state of any kind: no saved filters, no preferences, nothing.
+
+Five things worth knowing before you run it anywhere real:
+
+- **You paste your API key into the page, and a reload asks for it again.** There is no login route,
+  no session, and no cookie — deliberately. A session mechanism would be four new security surfaces
+  written by this project to guard a credential your deployment already issues and already rotates.
+  The cost is stated rather than softened: reload, and you type the key again.
+- **An idle console discards the key after 15 minutes** and asks for another. It erases tenants; the
+  tab you left open on an unlocked laptop is the reason this is not configurable away.
+- **`/console` serves its shell without a credential, and this is the one place docdoc does that.**
+  A browser's top-level navigation cannot carry a bearer token, so a gated shell would never load on
+  an authenticated deployment — which is every deployment the console is for. What is open is HTML,
+  CSS, and JavaScript: no run, no tenant identifier, no credential, and no document is reachable from
+  those bytes, the console makes zero requests before you enter a key, and every `/v1` call it then
+  makes is authenticated like any other client's.
+- **For single sign-on, put an authenticating proxy in front of it.** That is your infrastructure;
+  docdoc ships no part of one.
+- **No accessibility conformance level is claimed**, as for the viewer. What is guaranteed instead:
+  every control carries a name and is operable by keyboard, and no state is conveyed by colour alone.
+
+It shows **no part of a result**. A succeeded run links to the result representation the API already
+serves; the console renders no value, no claimed text, and no grounding, and derives no figure from
+any of them. One result representation, reachable one way.
 
 ## Documentation
 

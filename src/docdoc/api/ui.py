@@ -24,22 +24,60 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from docdoc.api.settings import UI_ROOT_ENV
+from typing import NamedTuple
 
-__all__ = ["absence_reason", "chosen_assets", "locate_assets"]
+from docdoc.api.settings import CONSOLE_ROOT_ENV, UI_ROOT_ENV
 
-#: What a built interface always contains. Used to tell a real build from an
-#: empty directory left behind by a failed one — an empty `dist/` mounted
-#: silently is FR-037's "blank page", arrived at by a different route.
-_ENTRY_POINT = "index.html"
+__all__ = [
+    "CONSOLE",
+    "VIEWER",
+    "Surface",
+    "absence_reason",
+    "chosen_assets",
+    "locate_assets",
+]
 
 
-def _configured_root() -> Path | None:
-    raw = os.environ.get(UI_ROOT_ENV, "").strip()
+class Surface(NamedTuple):
+    """One built browser client, and the four facts needed to find it.
+
+    Two exist: Milestone 8's viewer and Milestone 11's console. They are two
+    builds rather than one because Vite's ``base`` is per-build and the console
+    is served from a different path — which is itself not cosmetic, since the
+    viewer's mount sits behind the API credential and a browser navigation
+    carries no bearer token (``specs/011`` research R1).
+
+    A named tuple rather than two copies of this module's search: three roots in
+    two orders is exactly the kind of thing that comes to disagree on the release
+    where one of them moves, which this module's ``_installed_root`` already
+    records having learned once.
+    """
+
+    #: The environment variable a deployment may set to name the build.
+    env: str
+    #: The directory under ``ui/`` a checkout builds into.
+    checkout: str
+    #: The attribute on ``docdoc_ui`` holding the installed path.
+    attribute: str
+    #: What a real build of this surface always contains.
+    entry: str
+    #: How to name this surface to a human who has to fix something.
+    label: str
+
+
+#: The entry point is what tells a real build from an empty directory left
+#: behind by a failed one — an empty `dist/` mounted silently is FR-037's "blank
+#: page", arrived at by a different route.
+VIEWER = Surface(UI_ROOT_ENV, "dist", "ASSETS", "index.html", "the viewer")
+CONSOLE = Surface(CONSOLE_ROOT_ENV, "dist-console", "CONSOLE_ASSETS", "console.html", "the console")
+
+
+def _configured_root(surface: Surface) -> Path | None:
+    raw = os.environ.get(surface.env, "").strip()
     return Path(raw) if raw else None
 
 
-def _installed_root() -> Path | None:
+def _installed_root(surface: Surface) -> Path | None:
     """The ``docdoc-ui`` distribution, if it is installed.
 
     Reads that package's own ``ASSETS`` constant rather than recomputing the
@@ -53,33 +91,47 @@ def _installed_root() -> Path | None:
     except ImportError:
         return None
 
-    assets = getattr(docdoc_ui, "ASSETS", None)
+    assets = getattr(docdoc_ui, surface.attribute, None)
     if assets is not None:
-        return Path(assets)
+        # The directory has to exist. Returning a path that does not is what made
+        # an unbuilt **console** in a checkout answer "the distribution was built
+        # wrongly, reinstall it" — accurate about the installed copy, and useless
+        # to the developer standing in the repository. A missing directory means
+        # this candidate is simply not present; a present directory with no entry
+        # point is the "built wrongly" case, and `_built` still catches it.
+        found = Path(assets)
+        return found if found.is_dir() else None
 
     # An older `docdoc-ui` that predates the constant. Falling back rather than
     # failing keeps a version mismatch a missing-assets message (FR-037) instead
     # of an AttributeError from inside a request.
     location = getattr(docdoc_ui, "__file__", None)
-    return None if location is None else Path(location).parent / "assets"
+    if location is None:
+        return None
+    # The viewer's directory is `assets`; the console's is `console`. An older
+    # distribution predating either constant has neither, and falling back to a
+    # directory that is not there simply misses, which is the behaviour a missing
+    # build already has.
+    folder = "assets" if surface is VIEWER else "console"
+    return Path(location).parent / folder
 
 
-def _checkout_root() -> Path | None:
+def _checkout_root(surface: Surface) -> Path | None:
     """``ui/dist`` in a source checkout.
 
     Four parents up from this file is the repository root when running from a
     checkout, and something meaningless when running from a wheel — which is why
     the caller checks for the entry point rather than trusting the path.
     """
-    candidate = Path(__file__).resolve().parents[3] / "ui" / "dist"
+    candidate = Path(__file__).resolve().parents[3] / "ui" / surface.checkout
     return candidate if candidate.is_dir() else None
 
 
-def _built(root: Path | None) -> Path | None:
-    return root if root is not None and (root / _ENTRY_POINT).is_file() else None
+def _built(root: Path | None, surface: Surface) -> Path | None:
+    return root if root is not None and (root / surface.entry).is_file() else None
 
 
-def _candidates() -> tuple[tuple[str, Path | None], ...]:
+def _candidates(surface: Surface) -> tuple[tuple[str, Path | None], ...]:
     """Where built assets may live, in the order they are preferred.
 
     An explicit setting wins, because a deployment that named a path meant it —
@@ -102,55 +154,56 @@ def _candidates() -> tuple[tuple[str, Path | None], ...]:
     install there is, and it is the one the developer means.
     """
     return (
-        (UI_ROOT_ENV, _configured_root()),
-        ("the checkout's ui/dist", _checkout_root()),
-        ("the installed docdoc-ui distribution", _installed_root()),
+        (surface.env, _configured_root(surface)),
+        (f"the checkout's ui/{surface.checkout}", _checkout_root(surface)),
+        ("the installed docdoc-ui distribution", _installed_root(surface)),
     )
 
 
-def chosen_assets() -> tuple[str | None, Path | None]:
+def chosen_assets(surface: Surface = VIEWER) -> tuple[str | None, Path | None]:
     """Which candidate is being served, and where it is.
 
     Returned as a pair so the caller can *say* which one it picked. The failure
     above was silent — three roots can hold three different builds and nothing
     named the winner — so the answer is reportable rather than merely computed.
     """
-    for name, candidate in _candidates():
-        found = _built(candidate)
+    for name, candidate in _candidates(surface):
+        found = _built(candidate, surface)
         if found is not None:
             return name, found
     return None, None
 
 
-def locate_assets() -> Path | None:
+def locate_assets(surface: Surface = VIEWER) -> Path | None:
     """The directory to serve, or ``None`` if there is nothing built."""
-    return chosen_assets()[1]
+    return chosen_assets(surface)[1]
 
 
-def absence_reason() -> str:
+def absence_reason(surface: Surface = VIEWER) -> str:
     """Why there is nothing to serve, and the one step that fixes it (FR-037)."""
-    configured = _configured_root()
+    build = "npm run build" if surface is VIEWER else "npm run build:console"
+    configured = _configured_root(surface)
     if configured is not None:
         return (
-            f"{UI_ROOT_ENV} is set to {configured} and there is no {_ENTRY_POINT} there. "
-            f"Build the interface into that directory, or unset {UI_ROOT_ENV} to let "
+            f"{surface.env} is set to {configured} and there is no {surface.entry} there. "
+            f"Build {surface.label} into that directory, or unset {surface.env} to let "
             "docdoc find the installed assets."
         )
 
     # Same order as `_candidates`, so the advice names the root that would have
     # been used rather than one further down the list.
-    if _checkout_root() is not None:
+    if _checkout_root(surface) is not None:
         return (
-            "this is a source checkout and the interface has not been built. "
-            "Run `npm ci && npm run build` in ui/."
+            f"this is a source checkout and {surface.label} has not been built. "
+            f"Run `npm ci && {build}` in ui/."
         )
 
-    if _installed_root() is not None:
+    if _installed_root(surface) is not None:
         return (
-            "the docdoc-ui distribution is installed but carries no built assets, which "
-            "means it was built wrongly rather than that anything is missing here. "
+            f"the docdoc-ui distribution is installed but carries no build of {surface.label}, "
+            "which means it was built wrongly rather than that anything is missing here. "
             "Reinstall it, or set "
-            f"{UI_ROOT_ENV} to a directory you built yourself."
+            f"{surface.env} to a directory you built yourself."
         )
 
     # A guess, and last on purpose. The two checks above read real roots; this one
@@ -160,11 +213,11 @@ def absence_reason() -> str:
     # broken one, purely because they happened to be standing in a checkout.
     if (Path.cwd() / "ui" / "package.json").is_file():
         return (
-            "this is a source checkout and the interface has not been built. "
-            "Run `npm ci && npm run build` in ui/."
+            f"this is a source checkout and {surface.label} has not been built. "
+            f"Run `npm ci && {build}` in ui/."
         )
 
     return (
-        "the browser interface is not installed. Run `pip install 'docdoc[ui]'`, which "
+        f"{surface.label} is not installed. Run `pip install 'docdoc[ui]'`, which "
         "brings the docdoc-ui distribution. The API is fully functional without it."
     )

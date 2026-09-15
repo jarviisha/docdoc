@@ -20,8 +20,12 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const MODEL_DIR = join(ROOT, "src", "model");
-const COMPONENTS_DIR = join(ROOT, "src", "components");
+// Two models and two component trees since Milestone 11: the viewer's, and the
+// console's. The rules do not change, because the property does not — and the
+// console has more to lose than the viewer did, since it sends a credential and
+// a second `fetch` site is a second place that can fail to.
+const MODEL_DIRS = [join(ROOT, "src", "model"), join(ROOT, "src", "console", "model")];
+const COMPONENT_DIRS = [join(ROOT, "src", "components"), join(ROOT, "src", "console", "components")];
 
 /**
  * Components reach the network through `src/transport.ts` or not at all (T083).
@@ -70,8 +74,14 @@ async function walk(dir) {
   return files;
 }
 
+async function walkAll(dirs) {
+  const files = [];
+  for (const dir of dirs) files.push(...(await walk(dir)));
+  return files;
+}
+
 const violations = [];
-for (const file of await walk(MODEL_DIR)) {
+for (const file of await walkAll(MODEL_DIRS)) {
   const source = await readFile(file, "utf8");
   for (const match of source.matchAll(IMPORT_RE)) {
     const specifier = match[1] ?? match[2] ?? match[3] ?? match[4];
@@ -84,7 +94,7 @@ for (const file of await walk(MODEL_DIR)) {
 }
 
 const networkViolations = [];
-for (const file of await walk(COMPONENTS_DIR)) {
+for (const file of await walkAll(COMPONENT_DIRS)) {
   const source = await readFile(file, "utf8");
   source.split("\n").forEach((line, index) => {
     // A mention inside a comment is documentation, not a call site.
@@ -105,7 +115,7 @@ if (violations.length > 0 || networkViolations.length > 0) {
     }
     console.error(
       "\nThe view model is the only tested surface of this milestone. Move the decision\n" +
-        "back into src/model/, or it ships with no coverage at all.",
+        "back into src/model/ or src/console/model/, or it ships with no coverage at all.",
     );
   }
 

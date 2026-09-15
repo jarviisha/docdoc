@@ -142,7 +142,12 @@ dist/
 ui/node_modules/
 ui/dist/
 
+# The console's build, for the same reason and from the same toolchain. A
+# second tree because Vite's `base` is per-build (specs/011 research R1).
+ui/dist-console/
+
 # Copied in by packaging/docdoc-ui/build.sh immediately before the wheel is
 # built. Never committed, for the same reason ui/dist is not (FR-038).
 packaging/docdoc-ui/src/docdoc_ui/assets/
+packaging/docdoc-ui/src/docdoc_ui/console/
 packaging/docdoc-ui/dist/

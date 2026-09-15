@@ -158,6 +158,31 @@ class InMemoryRunQueue:
         found.sort(key=lambda run: run.created_at)
         return tuple(found[:limit])
 
+    def page_runs(
+        self,
+        tenant_id: str,
+        *,
+        status: str | None = None,
+        before: tuple[datetime, UUID] | None = None,
+        limit: int,
+    ) -> tuple[Run, ...]:
+        """Milestone 11 FR-013, in memory and in the same order.
+
+        The tenant is applied here as a predicate for the same reason the
+        Postgres query applies it in SQL: a test whose fake filters afterwards
+        would pass against an implementation that leaks.
+        """
+        self._check_reachable()
+        found = [
+            run
+            for run in self._runs.values()
+            if run.tenant_id == tenant_id and (status is None or str(run.status) == status)
+        ]
+        found.sort(key=lambda run: (run.created_at, run.run_id), reverse=True)
+        if before is not None:
+            found = [run for run in found if (run.created_at, run.run_id) < before]
+        return tuple(found[:limit])
+
     def tombstone(self, run_id: UUID, tenant_id: str) -> Tombstone | None:
         self._check_reachable()
         found = self._tombstones.get(run_id)

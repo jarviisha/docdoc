@@ -19,7 +19,27 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
+/**
+ * The **viewer's** components, and not `src/**` /components.
+ *
+ * Since Milestone 11 this tree also holds `src/console/components/`, which is
+ * full of forms on purpose: constitution v1.9.0 permits an operations console,
+ * and a console that revokes a credential edits by definition. Widening this
+ * path to cover it would fail the build on correct code; narrowing Milestone 8's
+ * claim to match would give up the guarantee this script exists for. So the
+ * scope stays exactly what it was, and the claim narrows from "this
+ * repository's UI edits nothing" to "**the viewer** edits nothing" — which is
+ * the claim Milestone 8 actually made (specs/011 FR-040, ADR-0019 §5).
+ */
 const COMPONENTS_DIR = join(ROOT, "src", "components");
+
+/**
+ * All of `src/`, and that deliberately includes the console.
+ *
+ * The console holds an API key in memory for the life of a page. FR-007 says it
+ * may never come to rest, and this scan is what enforces that — unchanged, from
+ * the first line of console code written.
+ */
 const SRC_DIR = join(ROOT, "src");
 
 /** Controls that edit. Only components can render one (FR-029). */

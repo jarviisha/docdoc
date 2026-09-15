@@ -257,6 +257,62 @@ class PostgresRunQueue:
         )
         return tuple(_row_to_run(row) for row in rows or ())
 
+    def page_runs(
+        self,
+        tenant_id: str,
+        *,
+        status: str | None = None,
+        before: tuple[datetime, UUID] | None = None,
+        limit: int,
+    ) -> tuple[Run, ...]:
+        """One page of a tenant's runs, newest first (Milestone 11 FR-013).
+
+        **The tenant is a predicate, not a filter applied afterwards** (FR-014,
+        ADR-0014 §3). Another tenant's runs are absent from the same branch an
+        unknown run is absent from, so the two cannot drift into two behaviours.
+
+        **Keyset, and never `OFFSET`.** `(created_at, run_id) < (…)` in the
+        ordering this returns, so a run submitted between two pages cannot cause
+        a repeat and cannot hide a row. An offset page shifts under insertion,
+        which makes FR-018's "every run exactly once" false exactly when it
+        matters and true in every test.
+
+        **No migration.** `runs_by_tenant (tenant_id, created_at)` was created by
+        Milestone 9 for retention and already covers this access path.
+
+        # ponytail: the `run_id` tiebreak is not in that index, so rows sharing a
+        # `created_at` are sorted in memory. Add `(tenant_id, created_at,
+        # run_id)` if a tenant ever files enough runs in one microsecond for that
+        # to be measurable.
+        """
+        conditions = ["tenant_id = %(tenant_id)s"]
+        parameters: dict[str, Any] = {"tenant_id": tenant_id, "limit": limit}
+
+        if status is not None:
+            conditions.append("status = %(status)s")
+            parameters["status"] = status
+
+        if before is not None:
+            # A row tuple comparison, so the database applies the same ordering
+            # the `ORDER BY` does. Written as two columns rather than one because
+            # `created_at` alone would skip every run sharing a timestamp with
+            # the last row of the previous page.
+            conditions.append("(created_at, run_id) < (%(before_at)s, %(before_id)s)")
+            parameters["before_at"] = before[0]
+            parameters["before_id"] = before[1]
+
+        rows = self._execute(
+            f"""
+            SELECT {_COLUMNS} FROM runs
+             WHERE {" AND ".join(conditions)}
+             ORDER BY created_at DESC, run_id DESC
+             LIMIT %(limit)s
+            """,
+            parameters,
+            fetch="all",
+        )
+        return tuple(_row_to_run(row) for row in rows or ())
+
     def tombstone(self, run_id: UUID, tenant_id: str) -> Tombstone | None:
         """Scoped in the query, exactly as `get` is (FR-011)."""
         row = self._execute(

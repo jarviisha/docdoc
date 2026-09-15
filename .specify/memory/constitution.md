@@ -385,6 +385,53 @@ existing layer moves, and a deployment that configures no limits counts nothing.
 
 Templates: no changes required — the plan-template gate table references
 Principles X and XI by number and remains accurate.
+
+---
+AMENDMENT 1.8.0 → 1.9.0 (2026-09-11)
+Bump rationale: MINOR — existing guidance is materially expanded in one
+paragraph. No principle is added, removed, or redefined, and nothing previously
+compliant becomes non-compliant.
+
+Principles affected: XI (MVP Discipline), via the MVP Scope Constraints
+"Deferred technology" paragraph. Principle IX is engaged and left unedited — its
+sentence forbidding a workflow or review platform is what the new line is drawn
+around.
+
+  - **"A full review UI" gains a distinguishing paragraph** (ADR-0019), in the
+    same shape as the two "multi-tenant billing" already carries. It forbids a
+    **review platform** — a surface about the person who checks documents — and
+    not an **operations console** — a surface about the person who runs the
+    deployment. From Milestone 11 a console may list and inspect runs, show
+    routing outcomes and delivery records, issue and revoke credentials, and
+    trigger erasure. Reviewer assignment, review queues, workload, review states
+    beyond the closed run status set, and any disposition beyond ADR-0017's two
+    routing outcomes stay deferred, and ADR-0019 §2 enumerates them as five
+    identifiers a build script fails on.
+
+    Recorded as an amendment for the reason v1.6.0 and v1.8.0 each give about
+    themselves: an administrative interface is a UI under any honest reading of
+    the sentence it is being measured against, and Governance says the
+    constitution wins where a spec conflicts with it — so a spec that
+    reinterprets the sentence in order to comply with it inverts the precedence.
+    `specs/010` made this amendment a dependency of Milestone 11 rather than
+    arguing the point, by deferring "an operator or administrative interface" to
+    Milestone 11 by name.
+
+    The paragraph also states what it does not do: it does not relax Milestone
+    8's read-only viewer. That claim stays machine-checked, narrowed to the
+    viewer's own sources rather than inherited by a tree that now holds forms
+    (ADR-0019 §5).
+
+Sections amended: MVP Scope Constraints (Deferred technology). No decision moved;
+the open list stays empty.
+
+Migration note: no artifact is invalidated and no code changes meaning. A
+deployment that never serves a console is unaffected, and the console ships no
+new server-side concept — one tenant-scoped read is the whole of its API
+surface beyond what Milestone 10 already exposes.
+
+Templates: no changes required — the plan-template gate table references
+Principle XI by number and remains accurate.
 -->
 
 # docdoc Constitution
@@ -771,6 +818,22 @@ The line is drawn here rather than left to a reviewer because a per-tenant token
 under the plainest reading of the sentence above, and `specs/010` would otherwise have had to argue
 that it is not — which is the reinterpretation Governance's precedence rule exists to prevent.
 
+"A full review UI" above forbids a **review platform**, not an **operations console** (ADR-0019).
+From Milestone 11 the project may ship a browser surface that serves the person who *runs the
+deployment*: it may list and inspect runs, show routing outcomes and delivery records, issue and
+revoke credentials, and trigger tenant and document erasure — all of it through routes Milestone 10
+already ships, plus one tenant-scoped read that lets the surface enumerate at all. What stays
+deferred is every surface that serves the person who *checks documents*: reviewer assignment, review
+queues, workload, review states beyond the closed run status set, and any disposition beyond
+ADR-0017's two routing outcomes. Principle IX's own sentence — supporting corrections "MUST NOT turn
+the MVP into a workflow or review platform" — is what this line is drawn around, and the five nouns
+are enumerated in ADR-0019 §2 so the boundary can be checked by a script rather than argued in a PR.
+
+The distinction is who the surface is *about*. A console that grows a per-reviewer inbox has become
+the deferred thing whatever it is called, and this paragraph is not a licence to build one in
+instalments. It is also not a relaxation of Milestone 8's read-only viewer: that guarantee stays
+machine-checked over the viewer's own sources (ADR-0019 §5).
+
 **Normalization.** `Document.text` is byte-faithful source text. No Unicode normalization, line
 joining, hyphen removal, whitespace normalization, or table linearization is applied to the
 canonical IR. Normalization for **matching only** is permitted via the versioned, offset-mapped
@@ -873,4 +936,4 @@ insufficient. Unjustified violations are rejected regardless of the code's quali
 **Precedence for unresolved items.** Where an "Open Constitutional Decision" is unresolved,
 implementers MUST NOT resolve it silently in code. Raise it, decide it, record it.
 
-**Version**: 1.8.0 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-09-04
+**Version**: 1.9.0 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-09-11

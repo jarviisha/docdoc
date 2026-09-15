@@ -127,6 +127,12 @@ jobs:
       - name: It builds
         run: npm run build
 
+      # Milestone 11. Without this step the console's build breaks green and
+      # `packaging/docdoc-ui/build.sh` packages a tree CI has never produced —
+      # the same class of gap the perf job below was added to correct.
+      - name: The console builds
+        run: npm run build:console
+
       # FR-038. The build writes to ui/dist, which is gitignored; if build output
       # ever becomes tracked, it surfaces here rather than in a release.
       - name: The build left nothing to commit

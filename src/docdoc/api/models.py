@@ -24,7 +24,9 @@ __all__ = [
     "ErrorDetail",
     "JobStatus",
     "JobStatusResponse",
+    "RunListResponse",
     "RunResponse",
+    "RunSummary",
     "SchemaChoice",
     "SchemaListing",
     "StageOutcomeView",
@@ -260,6 +262,52 @@ class RunAcceptedResponse(BaseModel):
     #: test keeps working, and so the field's absence in a Milestone 9 response
     #: is the value it already meant.
     priority: str = "ordinary"
+
+
+class RunSummary(BaseModel):
+    """One row of ``GET /v1/runs`` (Milestone 11 FR-019).
+
+    A projection of a run, narrowed to what a list may show without disclosing
+    content. What is **absent** is the part worth naming: `stage_outcomes`, any
+    extracted value, any claimed text, and any error message that could carry
+    document text. That absence is what lets the listing be shown to anyone
+    holding the tenant's key, and it is why this is a separate model rather than
+    `RunStateResponse` with fewer fields — a shared model gains a field for one
+    caller and leaks it to the other.
+
+    ``processing_id`` is present only on a succeeded run, by the
+    ``processing_id_belongs_to_success`` constraint, and only as an identifier.
+    It is the link to the result the console is permitted to offer (FR-022a);
+    the console renders no part of what is on the other side of it.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    run_id: str
+    status: str
+    created_at: str
+    #: Absent while the run is not terminal, which is a real distinction rather
+    #: than a missing value.
+    finished_at: str | None = None
+    blob_id: str
+    #: The identity ``name@version``. Never the schema's contents.
+    schema_identity: str
+    processing_id: str | None = None
+
+
+class RunListResponse(BaseModel):
+    """What ``GET /v1/runs`` returns.
+
+    ``next_cursor`` is ``null`` on the last page — an explicit end rather than an
+    empty page discovered on the following request. There is no total: a total is
+    a second query on every page and a number that is wrong by the time it is
+    read.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    runs: tuple[RunSummary, ...]
+    next_cursor: str | None = None
 
 
 class RunStateResponse(BaseModel):
