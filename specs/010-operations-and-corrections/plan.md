@@ -102,7 +102,7 @@ v1.8.0 carries it (corrected 2026-09-04, during implementation)
 | 9 | **No silent fallback (VIII)** | **PASS** — four typed, provider-neutral errors, each a subclass of the existing `RunError`. An unreachable store during a sweep deletes nothing *and removes no run row*, so the record of what to delete survives; an unreachable collector fails no run and reports once per outage |
 | 10 | **Measurability (IX)** | **PASS, and this milestone is the one Principle IX was written for** — corrections become reachable through the product's own surface and remain reusable as dataset signal (FR-081), while assignment, queues, and review states stay absent (FR-083). SC-018 requires a correction to move zero metrics absent an explicit promotion |
 | 11 | **Layer direction (X)** | **PASS, after a correction found by running the suite** — one layer *is* added, `docdoc.telemetry`, sharing `evaluation`'s position. This row previously said none was, on the argument that telemetry imports nothing of docdoc's; `tests/unit/test_layer_boundaries.py` requires every package on disk to be named in the contract, because an undeclared one is unconstrained. Constitution v1.8.0 carries the Principle X amendment in the same change, as that principle requires. Plus one new downward edge, `runs → evaluation`, forced by a contract rather than chosen (R13) |
-| 12 | **MVP discipline (XI)** | **CONDITIONAL — PASS only once constitution v1.8.0 is adopted.** See below |
+| 12 | **MVP discipline (XI)** | **PASS** — was CONDITIONAL on constitution v1.8.0, which was adopted 2026-09-04 before the first code task ran (T008). The condition and its argument are kept below rather than deleted: what made the gate conditional is why the amendment exists |
 | 13 | **Kernel test rigor (XII)** | **N/A** — no kernel, span, or geometry change |
 | 14 | **Open decisions** | **PASS, with four outstanding deliverables that gate implementation and not planning** — see below |
 
@@ -150,6 +150,12 @@ milestone.
 
 **Until v1.8.0 merges, gate 12 is FAIL and implementation does not begin.** Planning does; that is
 what this document is.
+
+**Resolved 2026-09-04**: v1.8.0 merged as T008, and gate 12 reads PASS in the table above. The second
+bullet is amended by constitution **v1.9.0** (2026-09-11, ADR-0019), which distinguishes an
+operations console from a review platform and permits the former from Milestone 11. It changes
+nothing this milestone did: Milestone 10 still adds no interface, and "out of scope by name" above is
+what made the later amendment possible to write cleanly rather than as an exception to this work.
 
 ### Outstanding deliverables, which gate implementation and not planning
 
