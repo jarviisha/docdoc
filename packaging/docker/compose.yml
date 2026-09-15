@@ -247,7 +247,21 @@ services:
   # account. Production points DOCDOC_STORE_URL at S3, R2, GCS, or a self-hosted
   # MinIO; S3ArtifactStore does not know the difference.
   minio:
-    image: minio/minio:latest
+    # **quay.io and a pinned release, and both halves were forced.**
+    #
+    # `minio/minio` on Docker Hub stopped serving anonymous pulls — it answers
+    # "repository does not exist or may require `docker login`" to an
+    # unauthenticated client, from a CI runner and from a developer's machine
+    # alike. It failed in CI first and looked like rate limiting; it is not.
+    # quay.io is where MinIO's own documentation points, and it serves the same
+    # images anonymously.
+    #
+    # The tag is a release rather than `latest` because this composition claims
+    # to be reproducible, and `latest` in a file making that claim is a
+    # contradiction — a checkout from a year ago would bring up different
+    # software than the one it was tested against. The failure is what prompted
+    # the pin; the pin was owed regardless.
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: docdoc
@@ -264,7 +278,9 @@ services:
   # way to declare "this bucket must exist", and a first run that fails on a
   # missing bucket reads as a docdoc bug rather than a setup step.
   createbucket:
-    image: minio/mc:latest
+    # Same registry and the same reason. `mc` is also what `minio`'s healthcheck
+    # runs, so a broken pull here takes the object store's readiness with it.
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
     depends_on:
       minio: {condition: service_healthy}
     entrypoint: >
