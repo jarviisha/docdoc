@@ -3,12 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Operations console for docdoc. Lists runs, issues and revokes credentials, and erases a tenant or a document \u2014 and holds the key only in memory.",
+  "description": "Operations console for docdoc. Lists runs, issues and revokes credentials, and erases a tenant or a document — and holds the key only in memory.",
   "license": "Apache-2.0",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
+    "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "test": "node --test",
@@ -18,6 +19,7 @@
   "dependencies": {
     "@astryxdesign/core": "0.5.0",
     "@astryxdesign/theme-neutral": "0.5.0",
+    "@fontsource-variable/inter": "^5.3.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

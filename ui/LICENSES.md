@@ -11,6 +11,7 @@ Verified 2026-08-25 against the registry, not copied from documentation.
 | `@astryxdesign/core` | 0.5.0 | MIT | yes |
 | `@astryxdesign/theme-neutral` | 0.5.0 | MIT | yes |
 | `@astryxdesign/cli` (dev) | 0.5.0 | MIT | yes |
+| `@fontsource-variable/inter` | ^5.3.0 | OFL-1.1 | yes |
 | `react` | ^19.2.8 | MIT | yes |
 | `react-dom` | ^19.2.8 | MIT | yes |
 | `@types/node` (dev) | ^26.3.0 | MIT | yes |
@@ -18,6 +19,20 @@ Verified 2026-08-25 against the registry, not copied from documentation.
 | `@types/react-dom` (dev) | ^19.2.5 | MIT | yes |
 | `typescript` (dev) | ^7.0.2 | Apache-2.0 | yes |
 | `vite` (dev) | ^8.2.2 | MIT | yes |
+
+## On the bundled typeface
+
+`@fontsource-variable/inter` is the one dependency whose licence imposes an obligation that shipping
+the package does not discharge by itself. OFL-1.1 §2 requires the copyright notice and the licence to
+travel **with the font files**, and what a deployment receives is `ui/dist` — woff2 files and a
+stylesheet, with `node_modules` nowhere in sight. So the text is copied to `public/OFL-Inter.txt`,
+which Vite emits at the root of the build, and the obligation is met by the artefact rather than by
+this file.
+
+Nothing about that is a restriction on docdoc: OFL is permissive about bundling and Apache-2.0
+distribution, and the only thing it forbids — selling the font on its own — is not something this
+repository could do by accident. It is recorded because an obligation that lives only in a
+`node_modules` directory is one that disappears on the first `npm ci --omit=dev`.
 
 ## On Astryx's `postinstall`
 

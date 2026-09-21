@@ -1,0 +1,65 @@
+/*
+ * The console ships the font it renders in, and reads none from the machine.
+ *
+ * **What it was doing before.** Nothing here set a family, so every glyph came
+ * from `astryx.css`'s default token — `-apple-system, BlinkMacSystemFont,
+ * "Segoe UI", Roboto, Helvetica, Arial, sans-serif` — which names four faces
+ * that exist on no Linux host and two that exist on some. The theme's own token
+ * puts `Figtree` in front of that list and the package ships no `@font-face` for
+ * it, so the name resolved to whatever fontconfig felt was closest.
+ *
+ * That is not a cosmetic difference between machines, it is a difference between
+ * *browsers on one machine*: fontconfig never answers "no such family", it
+ * substitutes. Chrome hands an unknown name straight to it and takes the
+ * substitute; Firefox checks that the family exists before using it and walks on
+ * down the list. On a host with both Apple and Microsoft fonts installed the two
+ * land on different faces, which is what was reported and what this removes.
+ *
+ * **Inter and not Figtree**, which the theme names first and would otherwise be
+ * the obvious pick: Figtree ships `latin` and `latin-ext` only, and `latin-ext`
+ * stops short of `U+1EA0–1EF1` — the block holding `ạ ả ấ ầ ể ệ ị ọ ố ồ ớ ợ ụ`.
+ * A console whose operators write Vietnamese would fall back to a system face
+ * for exactly those characters, which is the bug this file exists to close,
+ * reappearing somewhere harder to see. Inter ships a `vietnamese` subset.
+ *
+ * Self-hosted from `node_modules` rather than linked to Google's CDN: the API
+ * serves `/console` and a deployment that can reach this service cannot be
+ * assumed to reach anything else (FR-034's same-origin premise). A font that
+ * fails to load from a third party puts the machine's fonts back on screen.
+ */
+
+/* One variable file per subset, `swap`, and `unicode-range` per face — so a
+   page of English never downloads the Cyrillic, Greek or Vietnamese cuts. */
+@import "@fontsource-variable/inter";
+
+/*
+ * Unlayered and imported last, which is what makes this win.
+ *
+ * `astryx.css` declares the token on `:root` and `theme.css` declares it inside
+ * `@layer reset`. A layered declaration loses to an unlayered one regardless of
+ * specificity, and against the unlayered `:root` this matches specificity and
+ * wins on order. Neither is overridden with `!important`: the cascade already
+ * says what should happen here.
+ */
+:root {
+  --font-family-body: "Inter Variable", sans-serif;
+  --font-family-heading: "Inter Variable", sans-serif;
+
+  /*
+   * **Setting the token is not enough, and this line is the actual fix.**
+   *
+   * Astryx applies `font-family: var(--font-family-body)` on its own StyleX
+   * classes and nowhere else; `reset.css` sets a family on `<code>` and on no
+   * other element. So nothing in the imported stylesheets establishes a font at
+   * document level, and every glyph outside an Astryx component — bare text, the
+   * `index.html` fallback, anything a future component forgets to wrap —
+   * inherits the *browser's* default face instead. Chrome and Firefox do not
+   * agree on what that is, which is the whole of the reported symptom, and
+   * overriding the token alone left it untouched because those elements never
+   * read the token.
+   *
+   * On `:root` so the whole tree inherits. Components that set the family
+   * themselves still win, and they now resolve to the same face.
+   */
+  font-family: var(--font-family-body);
+}

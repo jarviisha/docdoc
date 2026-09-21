@@ -16,6 +16,11 @@ import "@astryxdesign/core/reset.css";
 import "@astryxdesign/core/astryx.css";
 import "@astryxdesign/theme-neutral/theme.css";
 
+// Last, and the order is the mechanism — see the file. It ships the typeface
+// and overrides the theme's family token, so the console renders the same face
+// in every browser instead of whichever one the host happened to have.
+import "./fonts.css";
+
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
