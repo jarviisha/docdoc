@@ -227,7 +227,19 @@ export function Shell() {
               key={name}
               label={AREAS[name]}
               isSelected={area === name}
-              onClick={() => setArea(name)}
+              // The notice goes with the area that raised it. It is one region
+              // that outlives every switch — which is what makes it work as a
+              // live region, and what left "The run list could not be read"
+              // sitting above the erasure form, describing a request made
+              // somewhere the operator is no longer standing.
+              //
+              // Nothing survivable is lost: a refused credential and an idle
+              // session both drop the key, and the gate has no side navigation
+              // to click away from.
+              onClick={() => {
+                setArea(name);
+                setNotice(null);
+              }}
             />
           ))}
         </SideNav>
