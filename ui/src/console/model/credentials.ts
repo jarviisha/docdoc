@@ -68,20 +68,50 @@ export const SELF_REVOCATION_WARNING =
 
 export interface CredentialState {
   records: CredentialRecord[];
+  /**
+   * Which tenant `records` describes, or `null` if nothing has been listed.
+   *
+   * The listing used to run from an effect keyed on the field, so the rows were
+   * never more than a keystroke behind what was typed and this could stay
+   * implicit. Asking explicitly opened the gap between them, and an empty array
+   * that means *"not looked up"* rendered identically to one that means *"this
+   * tenant holds nothing"* — the same conflation `runs.ts`'s three listing
+   * states exist to prevent, arrived at from the other direction.
+   */
+  listed: string | null;
   disclosure: Disclosure | null;
   /** Whether the once-per-session warning has been shown. */
   warned: boolean;
 }
 
 export function initialCredentials(): CredentialState {
-  return { records: [], disclosure: null, warned: false };
+  return { records: [], listed: null, disclosure: null, warned: false };
 }
 
 export function withRecords(
   state: CredentialState,
   records: CredentialRecord[],
+  tenant: string,
 ): CredentialState {
-  return { ...state, records };
+  return { ...state, records, listed: tenant };
+}
+
+/** Whether the rows in hand describe the tenant currently named. */
+export function describes(state: CredentialState, typed: string): boolean {
+  return state.listed !== null && state.listed === typed.trim();
+}
+
+/**
+ * What stands where the rows would be, or `null` when the rows are there.
+ *
+ * "This tenant holds no credentials" is a statement about a deployment and may
+ * only be made about a tenant that was actually asked about. Everything else —
+ * an empty field, a half-typed name, rows left over from the previous tenant —
+ * is the console having nothing to say yet, and it says that instead.
+ */
+export function listingNotice(state: CredentialState, typed: string): string | null {
+  if (!describes(state, typed)) return "Name a tenant and list its credentials.";
+  return state.records.length === 0 ? "This tenant holds no credentials." : null;
 }
 
 export function withDisclosure(

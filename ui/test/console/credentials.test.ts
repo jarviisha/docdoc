@@ -10,9 +10,11 @@ import {
   DISCLOSURE_WARNING,
   SELF_REVOCATION_WARNING,
   acknowledged,
+  describes,
   disclosureFrom,
   initialCredentials,
   isActive,
+  listingNotice,
   needsWarning,
   scopesOf,
   toRecords,
@@ -101,7 +103,41 @@ test("scopes read as the route sends them, and an empty set is a dash", () => {
 });
 
 test("the records replace rather than accumulate", () => {
-  const one = withRecords(initialCredentials(), [{ credential_id: "a" } as never]);
-  const two = withRecords(one, [{ credential_id: "b" } as never]);
+  const one = withRecords(initialCredentials(), [{ credential_id: "a" } as never], "acme");
+  const two = withRecords(one, [{ credential_id: "b" } as never], "acme");
   assert.equal(two.records.length, 1);
+});
+
+test("nothing is claimed about a tenant nobody asked about", () => {
+  const asked = "Name a tenant and list its credentials.";
+
+  // Nothing listed yet, with an empty field and with a full one. The second is
+  // the case the effect used to hide: the operator has typed a tenant name and
+  // the console has not asked the deployment anything about it.
+  assert.equal(listingNotice(initialCredentials(), ""), asked);
+  assert.equal(listingNotice(initialCredentials(), "acme"), asked);
+
+  // Asked, and the answer was genuinely nothing. The only state in which the
+  // console may say so.
+  const empty = withRecords(initialCredentials(), [], "acme");
+  assert.equal(listingNotice(empty, "acme"), "This tenant holds no credentials.");
+
+  // Rows in hand, describing the tenant named: they are shown, so there is
+  // nothing to say in their place.
+  const held = withRecords(initialCredentials(), [{ credential_id: "a" } as never], "acme");
+  assert.equal(listingNotice(held, "acme"), null);
+
+  // …and the moment the field stops naming that tenant, they stop describing
+  // it. A half-typed name is not a shorter tenant.
+  assert.equal(listingNotice(held, "acm"), asked);
+  assert.equal(listingNotice(empty, "acm"), asked);
+});
+
+test("the tenant is compared trimmed, because that is how it was asked", () => {
+  // `refresh` sends `listing.trim()`, so a field holding " acme " asked about
+  // `acme` and the rows do describe what is named. Comparing the raw field
+  // would blank the table on a trailing space.
+  const listed = withRecords(initialCredentials(), [{ credential_id: "a" } as never], "acme");
+  assert.equal(describes(listed, "  acme  "), true);
+  assert.equal(listingNotice(listed, "  acme  "), null);
 });

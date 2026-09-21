@@ -7,7 +7,7 @@
  * know which credential is its own and is not going to find out (FR-026a).
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   Badge,
   Banner,
@@ -31,6 +31,7 @@ import {
   disclosureFrom,
   initialCredentials,
   isActive,
+  listingNotice,
   needsWarning,
   scopesOf,
   toRecords,
@@ -64,16 +65,28 @@ export function CredentialArea({ request, onFailure }: Props) {
   // already knows the tenant they are issuing it for.
   const [listing, setListing] = useState("");
 
+  /**
+   * Asked for, never typed into existence.
+   *
+   * This ran from an effect keyed on the field's value, so `acme` was four
+   * requests — one per keystroke, each of them a full credential listing, and
+   * the first three for tenants nobody asked about. An operator cannot see that
+   * happening and the deployment answers all four.
+   *
+   * It is still called after issuing and after revoking, because those change
+   * what the listing would say and the operator did ask for them.
+   */
   const refresh = useCallback(async () => {
-    if (listing.trim() === "") return;
-    const answer = await request({ type: "list-credentials", tenant: listing.trim() });
-    if (answer.ok) setState((previous) => withRecords(previous, toRecords(answer.body)));
+    const tenant = listing.trim();
+    if (tenant === "") return;
+    const answer = await request({ type: "list-credentials", tenant });
+    if (answer.ok) setState((previous) => withRecords(previous, toRecords(answer.body), tenant));
     else onFailure(answer.failure);
   }, [request, onFailure, listing]);
 
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  // The rows are shown only while they describe the tenant that is named; the
+  // rest of the time this is what stands in their place.
+  const notice = listingNotice(state, listing);
 
   return (
     <Stack direction="vertical" gap={3}>
@@ -140,23 +153,33 @@ export function CredentialArea({ request, onFailure }: Props) {
           Credentials
         </Text>
 
-        <Field label="List credentials for tenant" inputID="list-tenant">
-          <input
-            id="list-tenant"
-            type="text"
-            value={listing}
-            onChange={(event) => setListing(event.target.value)}
+        <HStack gap={2} align="end">
+          <Field label="List credentials for tenant" inputID="list-tenant">
+            <input
+              id="list-tenant"
+              type="text"
+              value={listing}
+              onChange={(event) => setListing(event.target.value)}
+              // Enter as well as the button: a lone text field beside a button
+              // is a form, and a form that ignores Enter is the one complaint
+              // every operator has about one.
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void refresh();
+              }}
+            />
+          </Field>
+          <Button
+            label="List"
+            variant="secondary"
+            isDisabled={listing.trim() === ""}
+            onClick={() => void refresh()}
           />
-        </Field>
+        </HStack>
 
         {needsWarning(state) ? <Banner status="info" title={SELF_REVOCATION_WARNING} /> : null}
 
-        {state.records.length === 0 ? (
-          <Text size="sm">
-            {listing.trim() === ""
-              ? "Name a tenant to list its credentials."
-              : "This tenant holds no credentials."}
-          </Text>
+        {notice !== null ? (
+          <Text size="sm">{notice}</Text>
         ) : (
           <Card>
             <Table
