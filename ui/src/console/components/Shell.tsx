@@ -15,7 +15,16 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Badge, Banner, Button, HStack, Stack, Text } from "@astryxdesign/core";
+import {
+  AppShell,
+  Badge,
+  Banner,
+  SideNav,
+  SideNavItem,
+  Stack,
+  TopNav,
+  TopNavHeading,
+} from "@astryxdesign/core";
 
 import { send, TransportError } from "../../transport.ts";
 import { PROBE_TENANT, requestFor } from "../model/client.ts";
@@ -39,7 +48,20 @@ import { EraseArea } from "./EraseArea.tsx";
 /** How often the clock is read. The bound is fifteen minutes; this is not it. */
 const TICK_MS = 15_000;
 
-type Area = "runs" | "credentials" | "erasure";
+/**
+ * The areas, and the name each one is called on screen.
+ *
+ * The labels were the raw keys until this became an app shell, which put them in
+ * a navigation landmark where a screen reader reads them as the page's structure
+ * — `runs` is an identifier, `Runs` is a destination.
+ */
+const AREAS = {
+  runs: "Runs",
+  credentials: "Credentials",
+  erasure: "Erasure",
+} as const;
+
+type Area = keyof typeof AREAS;
 
 export function Shell() {
   const [session, setSession] = useState<Session>(() => emptySession(Date.now()));
@@ -122,68 +144,95 @@ export function Shell() {
     [],
   );
 
+  /**
+   * The frame, and it is the same frame before and after a key is entered.
+   *
+   * The heading and the notice do not move when the gate clears, so the
+   * credential screen is a state of the console rather than a different page.
+   */
+  const topNav = (
+    <TopNav
+      label="Console"
+      heading={<TopNavHeading heading="docdoc" subheading="operations console" />}
+      endContent={
+        // FR-011: the mode is stated, because a key field that checks nothing
+        // and an authenticated deployment look identical from the outside.
+        // Nothing is claimed before the probe answers — `unknown` shows nothing
+        // rather than guessing "authenticated" at the gate.
+        session.mode === "unknown" ? null : (
+          <Badge
+            label={session.mode === "open" ? "authentication disabled" : "authenticated"}
+            variant={session.mode === "open" ? "warning" : "neutral"}
+          />
+        )
+      }
+    />
+  );
+
+  /**
+   * FR-045b: a credential being refused, and an idle session ending, are both
+   * announced. Without this the operator learns the key was dropped by noticing
+   * that the page changed.
+   *
+   * In the shell's banner slot rather than inside an area, so it is one region
+   * that outlives every area switch — a live region that unmounts when the
+   * operator moves elsewhere announces nothing.
+   */
+  const banner = (
+    <div role="status" aria-live="polite">
+      {notice === null ? null : <Banner status="warning" title={notice} />}
+    </div>
+  );
+
   if (!ready(session)) {
     return (
-      // `padding` because the viewer's App has it and this did not, which is why
-      // the first screenshot of this console had every control glued to the
-      // left edge of the window.
-      <Stack direction="vertical" gap={4} padding={4} maxWidth={520}>
-        <CredentialPrompt
-          notice={notice}
-          onCredential={(pasted) => {
-            const next = withCredential(session, pasted, Date.now());
-            setNotice(null);
-            setSession(next);
-            void discover(next);
-          }}
-          onContinueWithout={() => {
-            const next = asOpen(session, Date.now());
-            setNotice(null);
-            setSession(next);
-            void discover(next);
-          }}
-        />
-      </Stack>
+      // No side navigation and no mobile drawer at the gate: the areas do not
+      // exist yet, and a drawer that opens onto nothing is a control that lies.
+      <AppShell topNav={topNav} banner={banner} contentPadding={4} mobileNav={false}>
+        <Stack direction="vertical" gap={4} maxWidth={520}>
+          <CredentialPrompt
+            onCredential={(pasted) => {
+              const next = withCredential(session, pasted, Date.now());
+              setNotice(null);
+              setSession(next);
+              void discover(next);
+            }}
+            onContinueWithout={() => {
+              const next = asOpen(session, Date.now());
+              setNotice(null);
+              setSession(next);
+              void discover(next);
+            }}
+          />
+        </Stack>
+      </AppShell>
     );
   }
 
   const areas: Area[] = session.administrative ? ["runs", "credentials", "erasure"] : ["runs"];
 
   return (
-    <Stack direction="vertical" gap={4} padding={4}>
-      <HStack gap={2} align="center">
-        <Text size="lg" weight="bold">
-          docdoc operations console
-        </Text>
-        {/* FR-011: the mode is stated, because a key field that checks nothing
-            and an authenticated deployment look identical from the outside. */}
-        <Badge
-          label={session.mode === "open" ? "authentication disabled" : "authenticated"}
-          variant={session.mode === "open" ? "warning" : "neutral"}
-        />
-      </HStack>
-
-      {/* FR-045b: a credential being refused, and an idle session ending, are
-          both announced. Without this the operator learns the key was dropped by
-          noticing that the page changed. */}
-      <div role="status" aria-live="polite">
-        {notice === null ? null : <Banner status="warning" title={notice} />}
-      </div>
-
-      {/* Plain buttons rather than a tab component: three of them, each a real
-          control with a real accessible name, and nothing here needs the
-          roving-focus behaviour a tab list brings with it. */}
-      <HStack gap={2}>
-        {areas.map((name) => (
-          <Button
-            key={name}
-            label={name}
-            variant={area === name ? "primary" : "secondary"}
-            onClick={() => setArea(name)}
-          />
-        ))}
-      </HStack>
-
+    <AppShell
+      topNav={topNav}
+      banner={banner}
+      contentPadding={4}
+      sideNav={
+        // `SideNavItem` and not a tab list: switching area replaces the whole
+        // content region, which is what a navigation item means and what a tab
+        // does not. AppShell mirrors these into a drawer below its breakpoint,
+        // so the narrow-window case costs nothing here.
+        <SideNav>
+          {areas.map((name) => (
+            <SideNavItem
+              key={name}
+              label={AREAS[name]}
+              isSelected={area === name}
+              onClick={() => setArea(name)}
+            />
+          ))}
+        </SideNav>
+      }
+    >
       {area === "runs" ? <RunArea request={request} onFailure={handle} /> : null}
       {area === "credentials" && session.administrative ? (
         <CredentialArea request={request} onFailure={handle} />
@@ -191,6 +240,6 @@ export function Shell() {
       {area === "erasure" && session.administrative ? (
         <EraseArea request={request} onFailure={handle} />
       ) : null}
-    </Stack>
+    </AppShell>
   );
 }

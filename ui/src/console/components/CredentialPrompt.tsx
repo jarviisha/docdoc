@@ -12,28 +12,24 @@
  */
 
 import { useState } from "react";
-import { Banner, Button, Field, Stack, Text } from "@astryxdesign/core";
+import { Button, Field, Stack, Text } from "@astryxdesign/core";
 
 interface Props {
-  /** Set when a previous credential was refused, so the reason is on screen. */
-  notice: string | null;
   onCredential: (pasted: string) => void;
   onContinueWithout: () => void;
 }
 
-export function CredentialPrompt({ notice, onCredential, onContinueWithout }: Props) {
+/**
+ * The heading and the refusal notice are the shell's, not this component's. They
+ * were both here until the console grew an app shell, which gave each one a slot
+ * that outlives the gate — and a refusal announced by a component that unmounts
+ * the moment it succeeds is announced to nobody.
+ */
+export function CredentialPrompt({ onCredential, onContinueWithout }: Props) {
   const [pasted, setPasted] = useState("");
 
   return (
     <Stack direction="vertical" gap={3}>
-      <Text size="lg" weight="bold">
-        docdoc operations console
-      </Text>
-
-      <div role="status" aria-live="polite">
-        {notice === null ? null : <Banner status="warning" title={notice} />}
-      </div>
-
       <Text size="sm">
         Paste the API key this deployment issued you. It is held for this page only — a reload, and
         fifteen minutes of inactivity, both require it again.
