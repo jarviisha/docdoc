@@ -57,15 +57,22 @@ interface Props {
 
 export function CredentialArea({ request, onFailure }: Props) {
   const [state, setState] = useState(initialCredentials);
-  const [tenant, setTenant] = useState("");
   const [scope, setScope] = useState("");
   const [administrative, setAdministrative] = useState(false);
 
-  // Which tenant's credentials are listed. The route requires it and the console
-  // has no way to learn its own tenant — no route reports one, and adding one
-  // would be the second new read SC-003 forbids. An operator issuing a key
-  // already knows the tenant they are issuing it for.
-  const [listing, setListing] = useState("");
+  /**
+   * The tenant both halves of this area are about, named once.
+   *
+   * There were two fields — one to issue for, one to list — and nothing said
+   * they were the same thing, because usually they are. Issuing a key for
+   * `acme` and then not seeing it appear, because the listing field below still
+   * held `beta` or nothing, was the ordinary way to use this page.
+   *
+   * The route requires it and the console has no way to learn its own tenant:
+   * no route reports one, and adding one would be the second new read SC-003
+   * forbids. An operator issuing a key already knows who it is for.
+   */
+  const [tenant, setTenant] = useState("");
 
   /**
    * Asked for, never typed into existence.
@@ -79,16 +86,16 @@ export function CredentialArea({ request, onFailure }: Props) {
    * what the listing would say and the operator did ask for them.
    */
   const refresh = useCallback(async () => {
-    const tenant = listing.trim();
-    if (tenant === "") return;
-    const answer = await request({ type: "list-credentials", tenant });
-    if (answer.ok) setState((previous) => withRecords(previous, toRecords(answer.body), tenant));
+    const named = tenant.trim();
+    if (named === "") return;
+    const answer = await request({ type: "list-credentials", tenant: named });
+    if (answer.ok) setState((previous) => withRecords(previous, toRecords(answer.body), named));
     else onFailure(answer.failure);
-  }, [request, onFailure, listing]);
+  }, [request, onFailure, tenant]);
 
   // The rows are shown only while they describe the tenant that is named; the
   // rest of the time this is what stands in their place.
-  const notice = listingNotice(state, listing);
+  const notice = listingNotice(state, tenant);
 
   // Hoisted so the narrowing survives into the handler below, where reading
   // `state.pending` again would be `string | null` and need a second check for
@@ -136,13 +143,34 @@ export function CredentialArea({ request, onFailure }: Props) {
         </Stack>
       )}
 
+      {/* Named once, above both halves, because both halves are about it. */}
+      <HStack gap={2} align="end">
+        <Field label="Tenant" inputID="tenant">
+          <input
+            id="tenant"
+            type="text"
+            value={tenant}
+            onChange={(event) => setTenant(event.target.value)}
+            // Enter as well as the button: a lone text field beside a button
+            // is a form, and a form that ignores Enter is the one complaint
+            // every operator has about one.
+            onKeyDown={(event) => {
+              if (event.key === "Enter") void refresh();
+            }}
+          />
+        </Field>
+        <Button
+          label="List"
+          variant="secondary"
+          isDisabled={tenant.trim() === ""}
+          onClick={() => void refresh()}
+        />
+      </HStack>
+
       <Stack direction="vertical" gap={2}>
         <Text size="sm" weight="bold">
           Issue a credential
         </Text>
-        <Field label="Tenant" inputID="issue-tenant">
-          <input id="issue-tenant" type="text" value={tenant} onChange={(e) => setTenant(e.target.value)} />
-        </Field>
         <Field label="Label (what it is for)" inputID="issue-label">
           <input id="issue-label" type="text" value={scope} onChange={(e) => setScope(e.target.value)} />
         </Field>
@@ -182,29 +210,6 @@ export function CredentialArea({ request, onFailure }: Props) {
         <Text size="sm" weight="bold">
           Credentials
         </Text>
-
-        <HStack gap={2} align="end">
-          <Field label="List credentials for tenant" inputID="list-tenant">
-            <input
-              id="list-tenant"
-              type="text"
-              value={listing}
-              onChange={(event) => setListing(event.target.value)}
-              // Enter as well as the button: a lone text field beside a button
-              // is a form, and a form that ignores Enter is the one complaint
-              // every operator has about one.
-              onKeyDown={(event) => {
-                if (event.key === "Enter") void refresh();
-              }}
-            />
-          </Field>
-          <Button
-            label="List"
-            variant="secondary"
-            isDisabled={listing.trim() === ""}
-            onClick={() => void refresh()}
-          />
-        </HStack>
 
         {notice !== null ? (
           <Text size="sm">{notice}</Text>
