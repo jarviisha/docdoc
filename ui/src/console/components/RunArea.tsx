@@ -23,9 +23,11 @@ import {
   MetadataList,
   MetadataListItem,
   Selector,
+  Skeleton,
   Stack,
   Table,
   Text,
+  VisuallyHidden,
   pixel,
   proportional,
 } from "@astryxdesign/core";
@@ -63,6 +65,18 @@ interface Props {
   request: Request;
   onFailure: (failure: Failure) => void;
 }
+
+/**
+ * How many rows stand in for the page while it is being read.
+ *
+ * Five, and not the page's own size: the console never sends `limit`, so the
+ * number of rows coming back is the deployment's default and this side does not
+ * know it. What this buys is the card keeping its place — the table used to
+ * unmount entirely while loading, dropping everything below it up the page and
+ * back down again on arrival. Matching the height exactly would need the page
+ * size, and asking for it is a request nobody needs.
+ */
+const PLACEHOLDER_ROWS = [0, 1, 2, 3, 4];
 
 /** The state's colour, and the word that must always be beside it. */
 const TONE: Record<RunStatus, "success" | "error" | "warning" | "neutral"> = {
@@ -145,7 +159,12 @@ export function RunArea({ request, onFailure }: Props) {
           rather than only the eye. `polite` and not `assertive` — an operator
           reading a row should not be interrupted by a page they asked for. */}
       <div role="status" aria-live="polite">
-        {state.listing.state === "loading" ? <Text size="sm">Loading…</Text> : null}
+        {/* Heard and not seen. The skeleton below is what the eye gets, and a
+            line of text appearing above it would be a second announcement of
+            one event — and a second thing moving the page while it loads. */}
+        {state.listing.state === "loading" ? (
+          <VisuallyHidden>Loading…</VisuallyHidden>
+        ) : null}
 
         {state.listing.state === "failed" ? (
           // Not an empty list. An empty tenant and a refused request read
@@ -160,7 +179,18 @@ export function RunArea({ request, onFailure }: Props) {
         {isEmpty(state) ? <Banner status="info" title={emptyNotice(state)} /> : null}
       </div>
 
-      {rows.length > 0 ? (
+      {state.listing.state === "loading" ? (
+        // The card holds its place rather than vanishing. `aria-busy` says why
+        // it is standing there with nothing in it, so the shape is not read as
+        // five rows that failed to render.
+        <Card>
+          <Stack direction="vertical" gap={2} aria-busy>
+            {PLACEHOLDER_ROWS.map((index) => (
+              <Skeleton key={index} height={32} radius={1} index={index} />
+            ))}
+          </Stack>
+        </Card>
+      ) : rows.length > 0 ? (
         <Card>
           <Table
             data={rows as unknown as Record<string, unknown>[]}
