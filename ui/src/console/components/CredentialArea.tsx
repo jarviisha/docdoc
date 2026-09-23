@@ -9,6 +9,7 @@
 
 import { useCallback, useState } from "react";
 import {
+  AlertDialog,
   Badge,
   Banner,
   Button,
@@ -26,16 +27,17 @@ import {
 import type { Intent } from "../model/client.ts";
 import {
   DISCLOSURE_WARNING,
-  SELF_REVOCATION_WARNING,
   acknowledged,
+  askedToRevoke,
   disclosureFrom,
   initialCredentials,
   isActive,
   listingNotice,
-  needsWarning,
+  revocationCancelled,
+  revocationConfirmed,
+  revocationPrompt,
   scopesOf,
   toRecords,
-  warned,
   withDisclosure,
   withRecords,
 } from "../model/credentials.ts";
@@ -88,8 +90,36 @@ export function CredentialArea({ request, onFailure }: Props) {
   // rest of the time this is what stands in their place.
   const notice = listingNotice(state, listing);
 
+  // Hoisted so the narrowing survives into the handler below, where reading
+  // `state.pending` again would be `string | null` and need a second check for
+  // a case that cannot happen.
+  const pending = state.pending;
+
   return (
     <Stack direction="vertical" gap={3}>
+      {pending === null ? null : (
+        <AlertDialog
+          isOpen
+          onOpenChange={(open) => {
+            if (!open) setState(revocationCancelled);
+          }}
+          title={`Revoke credential ${shortId(pending)}?`}
+          description={revocationPrompt(state)}
+          actionLabel="Revoke"
+          // Not "Cancel" against "Revoke": both are things you might do to a
+          // credential, and the pair reads as a choice between two actions on
+          // it rather than between doing this and not.
+          cancelLabel="Keep it"
+          onAction={() => {
+            setState(revocationConfirmed);
+            void request({ type: "revoke-credential", credentialId: pending }).then((answer) => {
+              if (!answer.ok) onFailure(answer.failure);
+              void refresh();
+            });
+          }}
+        />
+      )}
+
       {state.disclosure === null ? null : (
         <Stack direction="vertical" gap={2} role="status" aria-live="assertive">
           {/* FR-045b: the key is shown once. A reader who does not see the
@@ -176,8 +206,6 @@ export function CredentialArea({ request, onFailure }: Props) {
           />
         </HStack>
 
-        {needsWarning(state) ? <Banner status="info" title={SELF_REVOCATION_WARNING} /> : null}
-
         {notice !== null ? (
           <Text size="sm">{notice}</Text>
         ) : (
@@ -242,19 +270,10 @@ export function CredentialArea({ request, onFailure }: Props) {
                         variant="destructive"
                         size="sm"
                         isDisabled={!isActive(record)}
-                        onClick={() => {
-                          // The warning is shown once per session, before the
-                          // first revocation, and the action still proceeds: a
-                          // leaked key is very often the one in your hand.
-                          setState(warned);
-                          void request({
-                            type: "revoke-credential",
-                            credentialId: record.credential_id,
-                          }).then((answer) => {
-                            if (!answer.ok) onFailure(answer.failure);
-                            void refresh();
-                          });
-                        }}
+                        // Asks, and sends nothing. The confirmation is where
+                        // the once-per-session warning is spent, and where a
+                        // revocation stops being one mis-aimed pointer away.
+                        onClick={() => setState((previous) => askedToRevoke(previous, record.credential_id))}
                       />
                     );
                   },

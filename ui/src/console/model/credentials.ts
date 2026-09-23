@@ -82,10 +82,20 @@ export interface CredentialState {
   disclosure: Disclosure | null;
   /** Whether the once-per-session warning has been shown. */
   warned: boolean;
+  /**
+   * The credential a revocation has been asked about but not yet performed.
+   *
+   * Revocation is irreversible and used to happen on the click — one control,
+   * one mis-aimed pointer, one key gone. The erasure area has typed
+   * confirmation for the same reason; this is the lighter form of it, because
+   * a revoked credential costs its holder a reconnection and an erased tenant
+   * costs a customer their documents.
+   */
+  pending: string | null;
 }
 
 export function initialCredentials(): CredentialState {
-  return { records: [], listed: null, disclosure: null, warned: false };
+  return { records: [], listed: null, disclosure: null, warned: false, pending: null };
 }
 
 export function withRecords(
@@ -133,6 +143,43 @@ export function warned(state: CredentialState): CredentialState {
 /** Whether this revocation needs the warning shown first. */
 export function needsWarning(state: CredentialState): boolean {
   return !state.warned;
+}
+
+/** A revocation has been asked about. Nothing has been sent. */
+export function askedToRevoke(state: CredentialState, credentialId: string): CredentialState {
+  return { ...state, pending: credentialId };
+}
+
+/** Asked and thought better of. The warning stays unspent — see below. */
+export function revocationCancelled(state: CredentialState): CredentialState {
+  return { ...state, pending: null };
+}
+
+/**
+ * Confirmed, and this is where the once-per-session warning is spent.
+ *
+ * **Not when the confirmation opens.** FR-026a warns before the first
+ * *revocation*, and an operator who opened the dialog and backed out has not
+ * performed one — marking it shown there would mean the next attempt, the one
+ * they go through with, is the first unwarned one.
+ */
+export function revocationConfirmed(state: CredentialState): CredentialState {
+  return { ...state, pending: null, warned: true };
+}
+
+/**
+ * What the confirmation says will happen.
+ *
+ * The self-revocation warning is part of it rather than a banner over the
+ * table, which is where it used to be: it was rendered at the moment the
+ * request was already in flight, so "before the first revocation" was true by
+ * a few milliseconds and false in every sense an operator would recognise.
+ * Here it is on the screen that is asking.
+ */
+export function revocationPrompt(state: CredentialState): string {
+  const consequence =
+    "This cannot be undone. Anything using this credential stops being able to reach the deployment.";
+  return needsWarning(state) ? `${consequence} ${SELF_REVOCATION_WARNING}` : consequence;
 }
 
 /** How a row's scopes read on screen. `—` rather than an empty cell. */

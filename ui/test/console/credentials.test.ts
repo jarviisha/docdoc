@@ -10,12 +10,16 @@ import {
   DISCLOSURE_WARNING,
   SELF_REVOCATION_WARNING,
   acknowledged,
+  askedToRevoke,
   describes,
   disclosureFrom,
   initialCredentials,
   isActive,
   listingNotice,
   needsWarning,
+  revocationCancelled,
+  revocationConfirmed,
+  revocationPrompt,
   scopesOf,
   toRecords,
   warned,
@@ -140,4 +144,61 @@ test("the tenant is compared trimmed, because that is how it was asked", () => {
   const listed = withRecords(initialCredentials(), [{ credential_id: "a" } as never], "acme");
   assert.equal(describes(listed, "  acme  "), true);
   assert.equal(listingNotice(listed, "  acme  "), null);
+});
+
+// -- revocation asks first ----------------------------------------------------
+//
+// It used to happen on the click. One control, one mis-aimed pointer, one key
+// gone — and the warning FR-026a requires "before the first revocation" was
+// rendered at the moment the request was already in flight.
+
+test("asking about a revocation sends nothing and spends nothing", () => {
+  const asked = askedToRevoke(initialCredentials(), "c1");
+
+  assert.equal(asked.pending, "c1");
+  // The warning is not spent by opening the confirmation — see the next test
+  // for why that distinction is the point rather than a detail.
+  assert.equal(needsWarning(asked), true);
+});
+
+test("backing out of a confirmation leaves the warning unspent", () => {
+  // An operator who opened the dialog and thought better of it has performed no
+  // revocation. Marking the warning shown here would mean the attempt they do
+  // go through with is the first unwarned one — which is the requirement
+  // inverted, not satisfied.
+  const backedOut = revocationCancelled(askedToRevoke(initialCredentials(), "c1"));
+
+  assert.equal(backedOut.pending, null);
+  assert.equal(needsWarning(backedOut), true);
+  assert.match(revocationPrompt(backedOut), /key you are using/);
+});
+
+test("confirming spends the warning, and only the first one carries it", () => {
+  const first = askedToRevoke(initialCredentials(), "c1");
+  assert.match(revocationPrompt(first), /key you are using/);
+
+  const done = revocationConfirmed(first);
+  assert.equal(done.pending, null);
+  assert.equal(needsWarning(done), false);
+
+  // An operator revoking five leaked keys does not need telling five times, and
+  // a warning shown that often is one that is clicked through.
+  const second = askedToRevoke(done, "c2");
+  assert.doesNotMatch(revocationPrompt(second), /key you are using/);
+});
+
+test("every confirmation says the thing is irreversible, warned or not", () => {
+  const first = askedToRevoke(initialCredentials(), "c1");
+  const later = askedToRevoke(revocationConfirmed(first), "c2");
+
+  for (const state of [first, later]) {
+    assert.match(revocationPrompt(state), /cannot be undone/);
+  }
+});
+
+test("one revocation is pending at a time", () => {
+  // The model has no plural entry point, for the reason the erasure area has
+  // none: a confirmation that names one target cannot be reused to act on two.
+  const asked = askedToRevoke(askedToRevoke(initialCredentials(), "c1"), "c2");
+  assert.equal(asked.pending, "c2");
 });
