@@ -26,6 +26,7 @@ it would be decided explicitly rather than settled by whichever code landed firs
 | [0018](0018-webhook-delivery-semantics.md) | Webhook delivery: at-least-once, signed, and pinned to a validated address | Accepted | — (Milestone 10 design) |
 | [0019](0019-operations-console-boundary.md) | An operations console is permitted; a review platform stays deferred | Accepted; requires constitution v1.9.0 | — (Milestone 11 design) |
 | [0020](0020-retire-the-grounding-viewer.md) | The grounding viewer is retired; `ui/` builds the console only | Accepted; retires `specs/011` FR-022b, FR-040, SC-012 | — |
+| [0021](0021-the-console-renders-the-result-it-serves.md) | The console renders a run's result, and derives nothing from it | Proposed; on acceptance supersedes `specs/011` FR-022a, FR-037, SC-016 (first half) | — |
 
 ## Conventions
 
