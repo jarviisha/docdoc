@@ -17,6 +17,7 @@ import {
   initialListing,
   isEmpty,
   loaded,
+  reload,
   toFailure,
   toPage,
 } from "../../src/console/model/runs.ts";
@@ -122,4 +123,43 @@ test("a malformed or empty body reports no failure rather than an empty label", 
   assert.equal(toFailure("nope"), null);
   assert.equal(toFailure({ error_class: "" }), null);
   assert.equal(toFailure({ error_class: 7 }), null);
+});
+
+test("re-reading a page asks again for the page you are on", () => {
+  // Page two, filtered, loaded.
+  const paged = loaded(forward(loaded(filtered(initialListing(), "running"), PAGE)), PAGE);
+  assert.equal(currentCursor(paged), "c1");
+
+  const again = reload(paged);
+
+  // The position is kept — this is the whole difference from `filtered`, which
+  // clears the stack because a filter produces a different ordering. Re-reading
+  // does not change the ordering, so the cursor still addresses it.
+  assert.equal(currentCursor(again), "c1");
+  assert.equal(again.status, "running");
+  assert.equal(again.listing.state, "loading");
+});
+
+test("re-reading moves something, or the button does nothing", () => {
+  // The fetch is keyed on the filter and the cursor, and re-reading changes
+  // neither. If nothing else moves, the request is keyed on nothing new and
+  // the control is decorative — which is what the first version of it was.
+  const loadedState = loaded(initialListing(), PAGE);
+  const again = reload(loadedState);
+
+  assert.notEqual(again.generation, loadedState.generation);
+
+  // And it keeps moving, so a second re-read is not mistaken for the first.
+  assert.notEqual(reload(again).generation, again.generation);
+});
+
+test("re-reading is the only transition that moves it", () => {
+  // Every other transition already changes the filter or the cursor, so
+  // bumping this too would key a second fetch on the same page.
+  const base = loaded(initialListing(), PAGE);
+  assert.equal(forward(base).generation, base.generation);
+  assert.equal(back(forward(base)).generation, base.generation);
+  assert.equal(filtered(base, "failed").generation, base.generation);
+  assert.equal(failed(base, { kind: "offline" } as never).generation, base.generation);
+  assert.equal(loaded(base, PAGE).generation, base.generation);
 });

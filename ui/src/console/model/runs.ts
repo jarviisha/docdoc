@@ -41,10 +41,21 @@ export interface ListingState {
   /** Cursors already used, so "back" is a pop. The first page has none. */
   stack: string[];
   listing: Listing;
+  /**
+   * How many times a read of *this same* position has been asked for.
+   *
+   * Every other transition here changes either the filter or the cursor, and
+   * the component's fetch is keyed on those — which is exactly why `reload`
+   * needs this. Asking for the page you are already on changes neither, so
+   * without a value that moves, the request would be keyed on nothing new and
+   * the button would be a control that does nothing. It is a nonce, not a
+   * count: only its inequality is ever read.
+   */
+  generation: number;
 }
 
 export function initialListing(): ListingState {
-  return { status: null, stack: [], listing: { state: "loading" } };
+  return { status: null, stack: [], listing: { state: "loading" }, generation: 0 };
 }
 
 /** Whether there is a previous page to return to. */
@@ -83,7 +94,24 @@ export function back(state: ListingState): ListingState {
  * tenant's; it would simply skip rows nobody could explain.
  */
 export function filtered(state: ListingState, status: RunStatus | null): ListingState {
-  return { status, stack: [], listing: { state: "loading" } };
+  return { status, stack: [], listing: { state: "loading" }, generation: state.generation };
+}
+
+/**
+ * Read this same page again.
+ *
+ * The run list was fetched when the filter changed and when the page did, and
+ * a deployment whose runs go `queued` → `running` → `succeeded` on their own
+ * has neither of those happen while the operator waits. Re-reading meant
+ * changing the filter and changing it back.
+ *
+ * **The position is kept, and that is what separates this from `filtered`.** A
+ * cursor is a position in one ordering; the filter is unchanged here, so the
+ * ordering is the same one and the cursor still addresses it. Clearing the
+ * stack would silently send the operator back to page one.
+ */
+export function reload(state: ListingState): ListingState {
+  return { ...state, listing: { state: "loading" }, generation: state.generation + 1 };
 }
 
 export function loaded(state: ListingState, page: RunPage): ListingState {

@@ -47,6 +47,7 @@ import {
   initialListing,
   isEmpty,
   loaded,
+  reload,
   toFailure,
   toPage,
   type RunFailure,
@@ -78,6 +79,10 @@ export function RunArea({ request, onFailure }: Props) {
 
   const cursor = currentCursor(state);
   const status = state.status;
+  // The third key, and the reason `reload` exists in the model: asking for the
+  // page you are already on changes neither of the two above, so without this
+  // the effect would not run and the control would be decorative.
+  const generation = state.generation;
 
   useEffect(() => {
     let current = true;
@@ -97,7 +102,7 @@ export function RunArea({ request, onFailure }: Props) {
     return () => {
       current = false;
     };
-  }, [request, onFailure, status, cursor]);
+  }, [request, onFailure, status, cursor, generation]);
 
   if (selected !== null) {
     return <RunDetail run={selected} request={request} onBack={() => setSelected(null)} />;
@@ -122,6 +127,17 @@ export function RunArea({ request, onFailure }: Props) {
           variant="ghost"
           isDisabled={state.status === null}
           onClick={() => setState((previous) => filtered(previous, null))}
+        />
+        {/* A run goes `queued` → `running` → `succeeded` without anybody
+            touching this page, and until now the only way to see that happen
+            was to change the filter and change it back. Disabled while a read
+            is in flight, so an impatient second click is not a second read of
+            the same page. */}
+        <Button
+          label="Refresh"
+          variant="secondary"
+          isDisabled={state.listing.state === "loading"}
+          onClick={() => setState(reload)}
         />
       </HStack>
 
