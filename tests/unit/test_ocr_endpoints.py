@@ -99,6 +99,54 @@ class TestLoadEndpoints:
         assert caught.value.__cause__ is None
 
 
+class TestHeadersRejectControlCharacters:
+    """Finding 2 of the 012 review: a header value carrying CR/LF makes
+    `http.client.putheader` raise a bare `ValueError` that quotes the
+    credential in full (`ValueError("Invalid header value b'Bearer
+    s3cret\\n'")`). `OcrEndpoint` must refuse that at load time, before the
+    endpoint is ever used, and never echo the value while doing so.
+    """
+
+    def test_the_validator_itself_rejects_a_control_character(self) -> None:
+        # The constructor's raw `pydantic.ValidationError` is *not* the
+        # trusted boundary -- its own default `str()` embeds the whole
+        # offending field verbatim (`input=...`), same as `_url_is_http`'s
+        # value does for a bad url. That is exactly why `load_endpoints`
+        # below, not this constructor, is what a deployment's configuration
+        # actually goes through; this only pins that the validator fires.
+        with pytest.raises(ValueError, match="Authorization"):
+            OcrEndpoint(
+                id="paddle",
+                url="http://host/ocr",
+                version="1",
+                headers={"Authorization": "Bearer SEKRIT\n"},
+            )
+
+    def test_load_endpoints_refuses_it_too_naming_entry_and_header_not_value(
+        self, tmp_path: Path
+    ) -> None:
+        path = _write(
+            tmp_path,
+            [
+                {
+                    "id": "paddle",
+                    "url": "http://host/ocr",
+                    "version": "1",
+                    "headers": {"X-Key": "a\r\nb"},
+                }
+            ],
+        )
+
+        with pytest.raises(ValueError, match=r"endpoints\[0\]") as caught:
+            load_endpoints(path)
+
+        assert "X-Key" in str(caught.value)
+        assert "a\r\nb" not in str(caught.value)
+        rendered = "".join(traceback.format_exception(caught.value))
+        assert "a\r\nb" not in rendered
+        assert caught.value.__cause__ is None
+
+
 class TestOcrEndpointRepr:
     def test_repr_hides_url_and_headers(self) -> None:
         endpoint = OcrEndpoint(

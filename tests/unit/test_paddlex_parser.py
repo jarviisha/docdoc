@@ -613,6 +613,109 @@ class TestNoSecretInAnyFailure:
 
 
 @contextlib.contextmanager
+def _redirect_target():
+    """A second local server: the one a redirect might send the credential
+    to. Records whether it ever received a request at all, and what
+    `Authorization` it carried if so -- `test_redirect_never_carries_the_
+    credential` asserts both are nothing.
+    """
+    received: list[dict[str, str]] = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def _respond(self) -> None:
+            received.append(dict(self.headers.items()))
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        do_GET = _respond  # noqa: N815
+        do_POST = _respond  # noqa: N815
+
+        def log_message(self, log_format: str, *args: object) -> None:
+            pass
+
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield httpd.server_port, received
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+@contextlib.contextmanager
+def _redirecting_server(*, status: int, target_port: int):
+    """A server that answers every request with a redirect to
+    `_redirect_target`'s port -- the first hop a credential must never
+    survive past.
+    """
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def _respond(self) -> None:
+            self.send_response(status)
+            self.send_header("Location", f"http://127.0.0.1:{target_port}/ocr")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        do_GET = _respond  # noqa: N815
+        do_POST = _respond  # noqa: N815
+
+        def log_message(self, log_format: str, *args: object) -> None:
+            pass
+
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield httpd.server_port
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+class TestRedirectsAreRefused:
+    """Finding 1 of the 012 review: CPython's default `urlopen` follows a
+    301/302/303 and copies every header -- including `Authorization` -- onto
+    the redirected request. These two local servers pin that docdoc's own
+    opener never gets that far: the second server must receive nothing at
+    all, not merely a request stripped of the header.
+    """
+
+    @pytest.mark.parametrize("status", [301, 302, 303, 307])
+    def test_redirect_never_carries_the_credential(self, status: int) -> None:
+        with (
+            _redirect_target() as (target_port, received),
+            _redirecting_server(status=status, target_port=target_port) as redirect_port,
+        ):
+            endpoint = _endpoint(
+                url=f"http://127.0.0.1:{redirect_port}/ocr", headers=SECRET_HEADERS
+            )
+            with pytest.raises(ProviderError) as excinfo:
+                paddlex._post_over_the_wire(endpoint, {"file": "", "fileType": 0}, 2.0)
+
+        assert received == [], "the redirect target must receive no request at all"
+        assert excinfo.value.reason == "transport"
+        for secret in SECRETS:
+            assert secret not in str(excinfo.value)
+
+    def test_probe_false_on_redirect(self) -> None:
+        with (
+            _redirect_target() as (target_port, received),
+            _redirecting_server(status=302, target_port=target_port) as redirect_port,
+        ):
+            endpoint = _endpoint(
+                url=f"http://127.0.0.1:{redirect_port}/ocr", headers=SECRET_HEADERS
+            )
+            parser = PaddleXParser(endpoint)
+
+            assert parser.probe(timeout_s=2.0) is False
+
+        assert received == []
+
+
+@contextlib.contextmanager
 def _health_server(*, error_code: int = 0):
     """A server that answers GET with a health-shaped body on whatever path
     it's asked for, recording every path requested -- what `test_probe_*`

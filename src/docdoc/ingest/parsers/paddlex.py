@@ -177,6 +177,31 @@ class OcrEndpoint(BaseModel):
             raise ValueError("endpoint url must start with http:// or https://")
         return value
 
+    @field_validator("headers")
+    @classmethod
+    def _headers_contain_no_control_characters(cls, value: dict[str, str]) -> dict[str, str]:
+        """Refuse a header name or value carrying CR/LF (or any other control
+        character) before this endpoint can ever be used.
+
+        `http.client.putheader` raises a bare `ValueError` on exactly this --
+        `ValueError("Invalid header value b'Bearer s3cret\\n'")`, quoting the
+        credential in full -- from inside `urlopen`, left uncaught it would
+        reach uvicorn's own logger (012 review, Finding 2). Catching it at
+        the transport layer (see `_post_over_the_wire`) closes that one call
+        site; validating here closes every one, including a header this
+        adapter never sends over the wire at all, and it does so before a
+        caller ever sees this endpoint registered as available.
+
+        Only the header *name* may appear in the message -- never the value,
+        which is exactly the field this check exists to keep out of view,
+        and never the dict itself, which `load_endpoints` additionally
+        guards against (its own `from None`, not echoed here).
+        """
+        for name, header_value in value.items():
+            if not name.isprintable() or not header_value.isprintable():
+                raise ValueError(f"header {name!r} has a control character in its name or value")
+        return value
+
 
 def load_endpoints(path: str | Path) -> tuple[OcrEndpoint, ...]:
     """Read `{"endpoints": [...]}` from ``path``, refusing anything it cannot
@@ -221,9 +246,18 @@ def load_endpoints(path: str | Path) -> tuple[OcrEndpoint, ...]:
             # `__cause__`, which `traceback.format_exception` walks and
             # prints in full; `from None` is what actually keeps it out of
             # view, not just out of this function's own message.
+            # `error.errors()[i]["msg"]` is safe to surface here: every
+            # validator on this type that could see a secret value
+            # (`_url_is_http`, `_headers_contain_no_control_characters`) is
+            # written to name only what is wrong -- a header's *name*, never
+            # its value -- so joining their own messages is how this
+            # function's own message gets to name a header without
+            # resorting to `str(error)` or `error.errors()[i]["input"]`,
+            # pydantic's own capture of the raw field value, which for a
+            # rejected header is the whole `headers` dict, secrets and all.
+            detail = "; ".join(sorted({err["msg"] for err in error.errors()}))
             raise ValueError(
-                f"{path}: endpoints[{index}] is not a valid endpoint "
-                f"({len(error.errors())} field error(s))"
+                f"{path}: endpoints[{index}] is not a valid endpoint: {detail}"
             ) from None
 
         # The id itself is not a secret -- it is the one thing every error in
@@ -532,6 +566,45 @@ def _pdfium_installed() -> bool:
         return False
 
 
+class _NoRedirects(urllib.request.HTTPRedirectHandler):
+    """Refuses to follow a 3xx, ever.
+
+    CPython's default redirect handling copies every header on the original
+    request -- including ``Authorization`` -- onto the redirected one, even
+    across a scheme downgrade (``https`` to ``http``) or onto a host this
+    configuration never named (012 review, Finding 1). Raising here instead
+    of building a follow-up request is what stops that: ``redirect_request``
+    returning ``None`` would make ``urlopen`` quietly hand back the original
+    3xx response with nothing to say the credential was never resent, but
+    raising from inside it propagates straight out of the handler chain as
+    the same ``HTTPError`` a non-redirect status would, so the existing
+    ``except urllib.error.HTTPError`` branch below (and ``_from_http_error``)
+    is the only place that ever decides what a redirect means.
+    """
+
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> urllib.request.Request | None:
+        raise urllib.error.HTTPError(req.full_url, code, msg, headers, fp)
+
+
+#: Installed once, at import time, as the opener every bare
+#: ``urllib.request.urlopen`` call in this process uses from here on --
+#: ``_post_over_the_wire`` and ``probe`` are the two and only callers of it
+#: in docdoc (the import-linter contract confines ``urllib`` to this
+#: module), so there is nothing else in the process this could affect.
+#: ``build_opener`` with a subclass of a default handler *replaces* that
+#: default instance rather than running both (its own documented behaviour),
+#: so this is the one and only redirect policy ``urlopen`` has afterwards.
+urllib.request.install_opener(urllib.request.build_opener(_NoRedirects()))
+
+
 def _post_over_the_wire(
     endpoint: OcrEndpoint, body: dict[str, Any], timeout_s: float
 ) -> Mapping[str, Any]:
@@ -554,6 +627,14 @@ def _post_over_the_wire(
     `TimeoutError` out of `response.read()`, and a dropped connection raises
     `ConnectionResetError`/`http.client.HTTPException` -- neither wrapped.
     Both are caught here for the same reason `URLError` is.
+
+    ``ValueError`` joins the list for a narrower reason (012 review, Finding
+    2): ``http.client.putheader`` raises a bare one -- quoting the offending
+    header value in full -- for a header containing CR/LF, and
+    `OcrEndpoint`'s own validator is meant to refuse that long before a
+    request is ever built here. This is the second line of defence, not the
+    first: it exists in case a header becomes invalid some other way this
+    adapter has not foreseen, and it must not let the value through either.
     """
     request = urllib.request.Request(
         endpoint.url,
@@ -581,7 +662,7 @@ def _post_over_the_wire(
             reason="timeout",
             parser_id=endpoint.id,
         )
-    except (OSError, http.client.HTTPException):
+    except (OSError, http.client.HTTPException, ValueError):
         failure = ProviderError(
             f"endpoint {endpoint.id!r} could not be reached",
             reason="transport",
@@ -617,6 +698,19 @@ def _from_http_error(
     claim holds) must not itself chain onto the `HTTPError` being handled.
     """
     status = error.code
+    if 300 <= status < 400:
+        # `_NoRedirects.redirect_request` is what turns a followed redirect
+        # into this branch instead of a silently-resent credential (012
+        # review, Finding 1). Not `reason="auth"`: the service never
+        # rejected anything, it tried to hand the request to a different
+        # URL, which is a transport-level outcome -- the same bucket a
+        # refused connection or a DNS failure already lands in, not the one
+        # for a credential the service looked at and declined.
+        return ProviderError(
+            f"endpoint {endpoint.id!r} redirected, which is refused",
+            reason="transport",
+            parser_id=endpoint.id,
+        )
     if status in (401, 403):
         return ProviderError(
             f"endpoint {endpoint.id!r} rejected the credential",
