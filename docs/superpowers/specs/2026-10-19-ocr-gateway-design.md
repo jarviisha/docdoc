@@ -112,8 +112,10 @@ through configuration. To make the open-source engines easy to stand up, docdoc 
   client, as `examples/submit_async_run.py` does, unless an existing dependency is clearly better.
   PDF splitting needs `pypdfium2` (Apache-2.0/BSD-3, not PyMuPDF). It goes in a new opt-in extra
   (Claude's call: `docdoc[ocr]`), which is added to the Docker image's default `DOCDOC_EXTRAS`.
-  Without the extra, the adapter still serves images and PDFs within the endpoint's page limit,
-  and refuses a longer PDF with a typed error naming the missing extra.
+  Without the extra, the adapter still serves images; a PDF of any length is refused with a typed
+  error naming the missing extra, even one within the endpoint's page limit, because without a
+  PDF reader the adapter cannot learn the page count and so cannot prove the result it gets back
+  is complete (Task 3, deviation from the original plan recorded there).
 - Licensing stays clean. The Tesseract server uses `pypdfium2` (Apache/BSD) to render PDFs, not
   PyMuPDF (AGPL). Tesseract and PaddleOCR are Apache-2.0.
 - The Tesseract server is its own deployable. It must not import `docdoc`.

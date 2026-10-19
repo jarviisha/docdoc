@@ -70,22 +70,34 @@ that is.
 
 from __future__ import annotations
 
+import base64
+import importlib.util
+import io
 import json
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from docdoc.ingest.errors import ParserError, ProviderError
+from docdoc.ingest.capabilities import ParserCapabilities
+from docdoc.ingest.errors import (
+    ParserCapabilityError,
+    ParserError,
+    ProviderError,
+    UnsupportedDocumentError,
+)
 from docdoc.ingest.normalize import DocumentBuilder, normalize_bbox
 from docdoc.ingest.options import options_fingerprint
+from docdoc.ingest.retry import analyze_with_retries
 from docdoc.ingest.source import JPEG, PDF, PNG
 from docdoc.kernel import DocdocError, Document, IngestProvenance
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
-    from docdoc.ingest.capabilities import ParserCapabilities
+    from docdoc.ingest.options import Deadline, TransportSettings
     from docdoc.ingest.source import SourceFile
     from docdoc.kernel import TextLayerRecord
 
@@ -96,6 +108,7 @@ __all__ = [
     "OcrEndpoint",
     "OcrLine",
     "OcrPage",
+    "PaddleXParser",
     "build_document",
     "load_endpoints",
     "pages_of",
@@ -491,3 +504,307 @@ def _build_document(
             reading_order=READING_ORDER,
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# The wire: sending a request, splitting a long PDF, stitching the results.
+# ---------------------------------------------------------------------------
+
+#: PaddleX's own ``fileType`` codes (record.py), named rather than inlined.
+_FILE_TYPE_PDF: Final = 0
+_FILE_TYPE_IMAGE: Final = 1
+
+
+def _pdfium_installed() -> bool:
+    """Whether ``pypdfium2`` (the ``ocr`` extra) is importable.
+
+    Mirrors ``registry._sdk_installed``: a probe via `find_spec`, not a bare
+    `import` wrapped in `except ImportError`, which `_pdf_chunks` below can
+    monkeypatch in a test without fighting Python's import machinery.
+    """
+    try:
+        return importlib.util.find_spec("pypdfium2") is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def _post_over_the_wire(
+    endpoint: OcrEndpoint, body: dict[str, Any], timeout_s: float
+) -> Mapping[str, Any]:
+    """The real call. ``urllib`` only -- the one place this module uses it,
+    and the reason ``post`` is an injected parameter rather than a fixed
+    implementation: every other test replaces it and never opens a socket.
+
+    Every failure below is translated before it leaves this function, with
+    ``from None`` throughout: `urllib.error.HTTPError` and `URLError` embed
+    the request URL in their own ``str()``, and chaining them as `__cause__`
+    would smuggle it back in behind this adapter's own message (Review
+    Focus 3) -- `from None` is what actually drops it, not just omits it from
+    the message written here.
+    """
+    request = urllib.request.Request(
+        endpoint.url,
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json", **endpoint.headers},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_s) as response:
+            raw = response.read()
+    except urllib.error.HTTPError as error:
+        raise _from_http_error(error, endpoint) from None
+    except urllib.error.URLError:
+        raise ProviderError(
+            f"endpoint {endpoint.id!r} could not be reached",
+            reason="transport",
+            parser_id=endpoint.id,
+        ) from None
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        raise ProviderError(
+            f"endpoint {endpoint.id!r} returned a response that was not valid JSON",
+            reason="service",
+            parser_id=endpoint.id,
+        ) from None
+
+
+def _from_http_error(
+    error: urllib.error.HTTPError, endpoint: OcrEndpoint
+) -> ProviderError | UnsupportedDocumentError:
+    """Translate one HTTP status into docdoc's model. No URL, no header, no body."""
+    status = error.code
+    if status in (401, 403):
+        return ProviderError(
+            f"endpoint {endpoint.id!r} rejected the credential",
+            reason="auth",
+            parser_id=endpoint.id,
+        )
+    if status in (400, 415, 422):
+        return UnsupportedDocumentError(
+            f"endpoint {endpoint.id!r} rejected the file as unreadable or unsupported",
+            reason="corrupt",
+            parser_id=endpoint.id,
+        )
+
+    reason = "rate_limit" if status == 429 else ("timeout" if status == 504 else "service")
+    translated = ProviderError(
+        f"endpoint {endpoint.id!r} returned {status}",
+        reason=reason,
+        parser_id=endpoint.id,
+    )
+    retry_after = error.headers.get("Retry-After") if error.headers is not None else None
+    if retry_after:
+        translated.retry_after_s = float(retry_after)
+    return translated
+
+
+class PaddleXParser:
+    """Sends a document to one configured PaddleX-protocol endpoint and maps
+    what comes back.
+
+    One instance per `OcrEndpoint` -- unlike `AzureDocumentIntelligenceParser`
+    or `GoogleCloudVisionParser`, this adapter is parametrised by
+    configuration rather than fixed at class definition (ADR-0021 §3), so
+    `id`, `version`, `capabilities`, and `languages` are computed once per
+    instance, not declared once per class.
+    """
+
+    def __init__(
+        self,
+        endpoint: OcrEndpoint,
+        post: Callable[[OcrEndpoint, dict[str, Any], float], Mapping[str, Any]] | None = None,
+    ) -> None:
+        self._endpoint = endpoint
+        #: Injectable so the splitting, retry, and error-mapping behaviour is
+        #: testable with no socket. Production uses `_post_over_the_wire`.
+        self._post = post or _post_over_the_wire
+
+        self.id = endpoint.id
+        #: The adapter's own version plus this *deployment's* protocol
+        #: version -- not a module constant, because a second endpoint can
+        #: run a different build of the same protocol (`OcrEndpoint.version`).
+        self.version = f"{ADAPTER_VERSION}+{endpoint.version}"
+        self.capabilities = ParserCapabilities(
+            text=True,
+            geometry=True,
+            tables=False,
+            handwriting=False,
+            media_types=endpoint.media_types,
+            requires_network=True,
+        )
+        #: The protocol's own ordering. Every endpoint speaking it declares
+        #: the same one -- see `READING_ORDER`'s own docstring.
+        self.reading_order = READING_ORDER
+        self.languages = endpoint.languages
+
+    def parse(
+        self,
+        source: SourceFile,
+        options: Mapping[str, Any],
+        transport: TransportSettings,
+        text_layer: TextLayerRecord | None = None,
+    ) -> Document:
+        self._check_options(options, blob_id=source.blob_id)
+
+        if source.is_pdf:
+            pages = self._parse_pdf(source, transport)
+        else:
+            pages = analyze_with_retries(
+                lambda src, tr, dl: self._send(source.data, _FILE_TYPE_IMAGE, 1, src, tr, dl),
+                source=source,
+                transport=transport,
+                parser_id=self.id,
+            )
+
+        return build_document(
+            pages,
+            source=source,
+            options=options,
+            text_layer=text_layer,
+            parser_id=self.id,
+            parser_version=self.version,
+            capabilities=self.capabilities,
+        )
+
+    def _check_options(self, options: Mapping[str, Any], *, blob_id: str) -> None:
+        """Option checks first, and before any network call (ADR-0021 §3):
+        the only recognized key is ``language``, and only a value the
+        endpoint actually declared.
+        """
+        for key, value in options.items():
+            if key != "language":
+                raise ParserCapabilityError(
+                    f"endpoint {self.id!r} does not accept option {key!r}; only "
+                    "'language' is supported",
+                    required=(f"option={key}",),
+                    candidates=((self.id, True, None),),
+                    blob_id=blob_id,
+                )
+            if value not in self._endpoint.languages:
+                raise ParserCapabilityError(
+                    f"endpoint {self.id!r} does not support language {value!r}",
+                    required=(f"language={value}",),
+                    candidates=((self.id, True, None),),
+                    blob_id=blob_id,
+                )
+
+    def _parse_pdf(self, source: SourceFile, transport: TransportSettings) -> list[OcrPage]:
+        pages: list[OcrPage] = []
+        for data, expected_pages in self._pdf_chunks(source):
+            chunk_pages = analyze_with_retries(
+                lambda src, tr, dl, data=data, expected_pages=expected_pages: self._send(
+                    data, _FILE_TYPE_PDF, expected_pages, src, tr, dl
+                ),
+                source=source,
+                transport=transport,
+                parser_id=self.id,
+            )
+            pages.extend(chunk_pages)
+        return pages
+
+    def _pdf_chunks(self, source: SourceFile) -> list[tuple[bytes, int]]:
+        """Open the PDF once, learn its page count, and cut it into
+        ``endpoint.max_pages``-sized sub-PDFs if it is longer than that.
+
+        Every failure here is a typed docdoc error, raised before any network
+        call (Review Focus 5): the file either cannot be read at all, or this
+        process cannot read it without an extra it does not have installed.
+
+        **Deviation from the original design, recorded here and in the
+        design doc:** the plan assumed a PDF within the endpoint's limit
+        would still parse without `docdoc[ocr]`. It cannot: without a PDF
+        reader there is no way to learn the page count, and without the page
+        count this adapter cannot tell a complete result from PaddleX's own
+        silent truncation (record.py) -- the one defence ING-7 rests on. An
+        image needs none of this and is unaffected.
+        """
+        if not _pdfium_installed():
+            raise ParserCapabilityError(
+                f"endpoint {self.id!r} needs docdoc[ocr] (pypdfium2) to send a PDF",
+                required=("media_type=application/pdf",),
+                media_type=source.media_type,
+                candidates=((self.id, False, "extra_not_installed"),),
+                blob_id=source.blob_id,
+            )
+
+        import pypdfium2 as pdfium
+
+        try:
+            document = pdfium.PdfDocument(source.data)
+        except pdfium.PdfiumError as error:
+            reason = "encrypted" if error.err_code == pdfium.raw.FPDF_ERR_PASSWORD else "corrupt"
+            raise UnsupportedDocumentError(
+                f"endpoint {self.id!r} was sent a PDF that could not be opened",
+                reason=reason,
+                blob_id=source.blob_id,
+                media_type=source.media_type,
+                parser_id=self.id,
+            ) from None
+
+        try:
+            page_count = len(document)
+            max_pages = self._endpoint.max_pages
+            if max_pages is None or page_count <= max_pages:
+                # Sent exactly as received -- no re-encoding through
+                # pypdfium2 when no splitting is needed (record.py: exactly
+                # at the limit is fine; the limit is `>`, not `>=`).
+                return [(source.data, page_count)]
+
+            chunks: list[tuple[bytes, int]] = []
+            for start in range(0, page_count, max_pages):
+                count = min(max_pages, page_count - start)
+                chunk_doc = pdfium.PdfDocument.new()
+                try:
+                    chunk_doc.import_pages(document, pages=list(range(start, start + count)))
+                    buffer = io.BytesIO()
+                    chunk_doc.save(buffer)
+                finally:
+                    chunk_doc.close()
+                chunks.append((buffer.getvalue(), count))
+            return chunks
+        finally:
+            document.close()
+
+    def _send(
+        self,
+        data: bytes,
+        file_type: int,
+        expected_pages: int,
+        source: SourceFile,
+        transport: TransportSettings,
+        deadline: Deadline,
+    ) -> list[OcrPage]:
+        """One request, one chunk. Raises `ProviderError` on anything
+        `analyze_with_retries` should consider retrying -- including a short
+        result, which is PaddleX's own silent-truncation failure mode and
+        the one thing only this caller can detect (record.py, ING-7).
+        """
+        timeout_s = min(transport.attempt_timeout_s, deadline.remaining_s)
+        body = {"file": base64.b64encode(data).decode("ascii"), "fileType": file_type}
+        response = self._post(self._endpoint, body, timeout_s)
+
+        pages = pages_of(response, parser_id=self.id, blob_id=source.blob_id)
+        if len(pages) != expected_pages:
+            raise ProviderError(
+                f"endpoint {self.id!r} returned {len(pages)} pages for {expected_pages} sent",
+                reason="service",
+                parser_id=self.id,
+                blob_id=source.blob_id,
+            )
+        return pages
+
+    def probe(self, timeout_s: float = 2.0) -> bool:
+        """Whether the endpoint answers at all. Never raises: a health probe
+        that could itself fail is not one a caller can rely on.
+        """
+        try:
+            request = urllib.request.Request(
+                f"{self._endpoint.url}/health", headers=dict(self._endpoint.headers)
+            )
+            with urllib.request.urlopen(request, timeout=timeout_s) as response:
+                body = json.loads(response.read())
+        except Exception:
+            return False
+        return bool(body.get("errorCode") == 0)

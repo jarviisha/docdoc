@@ -31,7 +31,12 @@ services:
         #
         # For a real deployment, supply Azure Document Intelligence or Google
         # Cloud Vision credentials instead and leave this alone.
-        DOCDOC_EXTRAS: ${DOCDOC_EXTRAS:-api,postgres,s3,google,azure,gcv}
+        #
+        # `ocr` is in the default, unlike `pdf`: it is pypdfium2 (Apache-2.0/
+        # BSD-3), not PyMuPDF, so it carries none of ADR-0001's licence
+        # caveat, and the PaddleX-protocol adapter (ADR-0021) cannot send a
+        # PDF at all without it.
+        DOCDOC_EXTRAS: ${DOCDOC_EXTRAS:-api,postgres,s3,google,azure,gcv,ocr}
     depends_on:
       postgres: {condition: service_healthy}
       minio: {condition: service_healthy}
