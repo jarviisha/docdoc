@@ -11,6 +11,20 @@ So the diff against `main` is read, and the answer has to be zero.
 clone or a detached checkout with no merge base there is nothing to diff against;
 it skips with the reason rather than passing quietly, because a guard that
 silently no-ops in CI is worse than one that is absent.
+
+**Re-pointed at Milestone 012 (the OCR gateway, ADR-0021,
+`docs/superpowers/specs/2026-10-19-ocr-gateway-design.md`), 2026-10-19.** Every
+`PROTECTED` entry is a layer *this* milestone promised not to touch, not a
+permanent list -- the file's whole point is to be re-aimed at whichever
+milestone is current, the same way its own history already shows it moving
+(SC-020's original citation was Milestone 10's). `src/docdoc/ingest/` came off
+the list here because ADR-0021 and the design doc it implements make `ingest/`
+exactly what this milestone *is*: a caller naming a configured parser
+(`ParserRegistry.select_named`), the PaddleX-protocol adapter, and
+`DOCDOC_OCR_ENDPOINTS_FILE` all live there by design, not by accident. This is a
+re-scope, not a relaxation (FR-095): the kernel and the three layers downstream
+of it stay exactly as protected as before, and nothing here makes it any easier
+for a future milestone to touch them unnoticed.
 """
 
 from __future__ import annotations
@@ -19,12 +33,13 @@ import subprocess
 
 import pytest
 
-#: Every layer Milestone 10 declared it would not touch. `kernel` first, because
-#: it is the one Principle I protects by name and the one whose purity is
-#: enforced by an AST scan and a runtime audit hook.
+#: Every layer Milestone 012 declared it would not touch. `kernel` first,
+#: because it is the one Principle I protects by name and the one whose purity
+#: is enforced by an AST scan and a runtime audit hook. `ingest/` is
+#: deliberately absent -- this milestone's own work -- see the module
+#: docstring.
 PROTECTED = (
     "src/docdoc/kernel/",
-    "src/docdoc/ingest/",
     "src/docdoc/extraction/",
     "src/docdoc/grounding/",
     "src/docdoc/validation/",
@@ -185,7 +200,7 @@ def test_the_diff_is_not_empty() -> None:
     changed = _changed()
 
     assert changed, "the diff against `main` is empty, so nothing above was checked"
-    assert any(path.startswith("src/docdoc/runs/") for path in changed), (
-        "this milestone's work is in `docdoc.runs`, and the diff shows none of "
-        "it. The comparison is against the wrong ref"
+    assert any(path.startswith("src/docdoc/ingest/") for path in changed), (
+        "this milestone's work is in `docdoc.ingest` (the OCR gateway, ADR-0021), "
+        "and the diff shows none of it. The comparison is against the wrong ref"
     )

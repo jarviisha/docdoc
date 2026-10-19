@@ -132,8 +132,14 @@ class TestRefusals:
 
         # A PDF, not a PNG -- pdf-text could serve this, but naming an
         # endpoint that cannot never falls back to one that can (ADR-0021 §1).
-        with pytest.raises(ParserCapabilityError):
+        with pytest.raises(ParserCapabilityError) as excinfo:
             parse(INVOICE, registry=registry, parser="png-only")
+
+        # `missing_for` has nothing to report here -- "png-only" declares the
+        # same text/geometry booleans as any other PaddleXParser, so the
+        # refusal's detail has to fall back to naming the media type instead
+        # of a capability name (ParserCapabilities.satisfies / missing_for).
+        assert PDF in str(excinfo.value)
 
 
 class TestOverride:
@@ -146,10 +152,71 @@ class TestOverride:
 
         document = parse(INVOICE, registry=registry, parser="paddle")
 
+        verdict = document.provenance.text_layer
         assert document.provenance.parser_id == "paddle"
-        assert document.provenance.text_layer is not None
-        assert document.provenance.text_layer.overridden is True
-        assert document.provenance.text_layer.pages, "the rule's own evidence survives the override"
+        assert verdict is not None
+        assert verdict.overridden is True
+        # `digital_invoice.pdf` has a usable text layer, and naming a
+        # recognition parser does not erase that -- `overridden_verdict` is
+        # what the rule actually found (True, ADR-0021 §2), while
+        # `text_layer_usable` becomes the route actually taken: recognition,
+        # so False (TextLayerRule.as_override's `forced_native` argument).
+        assert verdict.overridden_verdict is True
+        assert verdict.text_layer_usable is False
+        assert verdict.pages, "the rule's own evidence survives the override"
+
+
+class TestNamedNativeParser:
+    def test_named_native_parser_on_text_pdf_takes_native_path(self) -> None:
+        """Naming the parser unforced selection would have picked anyway.
+
+        Still goes through `_route`'s override machinery: `_route` calls
+        `TextLayerRule.as_override` for *any* non-``None`` ``force``, named or
+        not, and `as_override` unconditionally sets `overridden=True` (it has
+        no way to tell "the caller's choice happens to agree with mine" from
+        "the caller overruled me"). So this document is marked overridden even
+        though `pdf-text` is exactly what capability-based selection would
+        have chosen -- the same thing an unnamed `force="native"` call already
+        does today, which this pins down as intentional rather than a new gap.
+        """
+        registry = _registry(PdfTextParser())
+
+        document = parse(INVOICE, registry=registry, parser="pdf-text")
+
+        verdict = document.provenance.text_layer
+        assert document.provenance.parser_id == "pdf-text"
+        assert verdict is not None
+        assert verdict.overridden is True
+        assert verdict.text_layer_usable is True
+        assert verdict.overridden_verdict is True, "the rule agreed with the name"
+
+
+class TestForceConflict:
+    def test_force_disagreeing_with_named_parser_path_is_refused(self) -> None:
+        """`force` and `parser` are both explicit caller inputs; when they
+        disagree about which path to take, neither is allowed to silently win
+        over the other (the same "no silent fallback" rule `_request_for`
+        already applies to a mismatched `require.media_type`).
+        """
+        paddle = PaddleXParser(_endpoint(), post=_refuse_post)
+        registry = _registry(PdfTextParser(), paddle)
+
+        # "paddle" is network-backed and implies the recognition path;
+        # force="native" asks for the other one.
+        with pytest.raises(ParserCapabilityError) as excinfo:
+            parse(INVOICE, registry=registry, parser="paddle", force="native")
+
+        assert "paddle" in str(excinfo.value)
+        assert "native" in str(excinfo.value)
+        assert "recognition" in str(excinfo.value)
+
+    def test_force_agreeing_with_named_parser_path_is_fine(self) -> None:
+        """The same combination, but consistent -- not refused."""
+        registry = _registry(PdfTextParser())
+
+        document = parse(INVOICE, registry=registry, parser="pdf-text", force="native")
+
+        assert document.provenance.parser_id == "pdf-text"
 
 
 class TestUnnamedSelectionUnchanged:

@@ -165,7 +165,8 @@ class ParserRegistry:
             )
         if not entry.available or entry.parser is None:
             raise ParserCapabilityError(
-                f"parser {parser_id!r} is not available ({entry.unavailable_reason})",
+                f"parser {parser_id!r} is not available "
+                f"({entry.unavailable_reason or 'unavailable'})",
                 required=require.required_names(),
                 media_type=require.media_type,
                 candidates=candidates,

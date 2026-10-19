@@ -105,6 +105,9 @@ def parse(
             chooses. The rule still runs where it can, and its verdict is kept.
             Where the rule cannot run at all -- no native reader installed -- an
             explicit ``force`` is the supported way to parse a PDF anyway.
+            Ignored only when it agrees with what ``parser`` implies; given
+            together with a ``parser`` whose own path disagrees, it is refused
+            rather than silently overruled by the name (see ``parser``).
         limits: Size, page-count, and media-type limits. Enforced before any
             parse or transmission.
         rule: The text-layer rule and its thresholds. Both are configurable;
@@ -117,7 +120,12 @@ def parse(
             ``require`` would otherwise have selected. Naming a recognition
             parser on a document with a usable text layer takes the
             recognition path anyway -- the rule still runs and its verdict is
-            kept, marked overridden (ADR-0021 §2).
+            kept, marked overridden (ADR-0021 §2). The path a named parser
+            takes is decided by what it declares (network-backed ->
+            recognition, otherwise native), not by ``force``: a ``force`` that
+            disagrees with that path is a contradiction between two explicit
+            caller inputs, not something one is allowed to silently win, so it
+            raises ``ParserCapabilityError`` rather than being dropped.
 
     Returns:
         A Document satisfying every kernel invariant, with provenance recording
@@ -125,8 +133,9 @@ def parse(
 
     Raises:
         UnsupportedDocumentError: the file cannot be accepted at all.
-        ParserCapabilityError: no available parser satisfies the request, or
-            the named ``parser`` cannot.
+        ParserCapabilityError: no available parser satisfies the request, the
+            named ``parser`` cannot, or ``force`` disagrees with the path
+            ``parser`` implies.
         ParserError: a parser produced something invalid.
         ProviderError: a service-backed parse failed.
     """
@@ -175,7 +184,11 @@ def plan_parse(
     decided by what it declares, not by a caller-supplied ``force``: a
     network-backed parser takes the recognition path, anything else takes the
     native one, and either way ``_route`` still runs the rule and records its
-    verdict as overridden (ADR-0021 §2).
+    verdict as overridden (ADR-0021 §2). A ``force`` that disagrees with that
+    implied path is refused rather than silently dropped -- the same "no
+    silent fallback" rule this module already applies to a mismatched
+    ``require.media_type`` (``_request_for``), applied to a second way a
+    caller's two explicit inputs can contradict each other.
     """
     limits = limits or Limits()
     transport = transport or TransportSettings()
@@ -203,11 +216,27 @@ def plan_parse(
             chosen = _select(registry, file, require=require, native=verdict.text_layer_usable)
         else:
             chosen = _select_named(registry, file, parser_id=parser, require=require)
-            verdict = _route(
-                file,
-                rule=rule,
-                force="recognition" if chosen.capabilities.requires_network else "native",
+            implied_force: Path = (
+                "recognition" if chosen.capabilities.requires_network else "native"
             )
+            if force is not None and force != implied_force:
+                # Two explicit caller inputs disagree: `parser` implies one
+                # path and `force` names the other. Honouring `force` would
+                # silently overrule the name; honouring the name would
+                # silently drop `force`. Neither is the "no silent fallback"
+                # rule this module already applies to a mismatched
+                # `require.media_type` (`_request_for`) -- so this is refused
+                # instead, same as that one.
+                raise ParserCapabilityError(
+                    f"parser {parser!r} takes the {implied_force} path, but "
+                    f"force={force!r} asks for the other one; drop force when "
+                    "naming a parser, or name a parser that takes the path "
+                    "force asks for",
+                    media_type=file.media_type,
+                    candidates=((chosen.id, True, None),),
+                    blob_id=file.blob_id,
+                )
+            verdict = _route(file, rule=rule, force=implied_force)
             if verdict.pages:
                 file.check_page_count(len(verdict.pages), limits)
         canonical, options_hash = options_fingerprint(options)
