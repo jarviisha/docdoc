@@ -129,4 +129,4 @@ def test_main_compose_has_no_model_service() -> None:
     assert services_block is not None
     service_names = re.findall(r"^  (\w[\w-]*):\n", services_block.group(1), re.M)
 
-    assert set(service_names) == {"api", "worker", "postgres", "minio", "createbucket"}
+    assert set(service_names) == {"api", "worker", "postgres", "seaweedfs", "createbucket"}

@@ -83,6 +83,15 @@ Milestone 10 without knowing this milestone would be measured against it, is unc
   "reinstall the distribution": accurate about the installed copy and useless to the developer
   standing in the repository.
 
+- **SeaweedFS replaces MinIO as the composition's object store.** Every MinIO image the composition
+  could pull — quay.io, Docker Hub, bitnami; pinned or `latest` — now answers 401 to an anonymous
+  client, so `docker compose up` could not start and CI's `s3`-marked tests had stopped running.
+  SeaweedFS is Apache-2.0, pinned to `4.48`, listens on the same port 9000 with the same development
+  key pair, and serves every call `S3ArtifactStore` makes. The service is `seaweedfs` rather than
+  `minio`, there is no web console on 9001, and `createbucket` is now a signed `PUT` that treats
+  "already exists" as success. CI's coverage job runs the object-store tests again, at the 93% floor
+  it briefly dropped while the store was out.
+
 ### Fixed
 
 - **A failed run now says why it failed.** `GET /v1/runs/{run_id}` has always carried `failed_stage`

@@ -39,7 +39,7 @@ services:
         DOCDOC_EXTRAS: ${DOCDOC_EXTRAS:-api,postgres,s3,google,azure,gcv,ocr}
     depends_on:
       postgres: {condition: service_healthy}
-      minio: {condition: service_healthy}
+      seaweedfs: {condition: service_healthy}
     ports: ["8000:8000"]
     # **So a container can reach a service on the host**, which two of this
     # milestone's capabilities need in development: a webhook receiver and an
@@ -56,7 +56,7 @@ services:
       - "host.docker.internal:host-gateway"
     environment: &docdoc_env
       DOCDOC_RUN_DATABASE_URL: postgresql://docdoc:docdoc@postgres:5432/docdoc
-      DOCDOC_STORE_URL: s3://docdoc?endpoint_url=http://minio:9000
+      DOCDOC_STORE_URL: s3://docdoc?endpoint_url=http://seaweedfs:9000
       AWS_ACCESS_KEY_ID: docdoc
       AWS_SECRET_ACCESS_KEY: docdocdocdoc
       AWS_DEFAULT_REGION: us-east-1
@@ -218,7 +218,7 @@ services:
     build: *docdoc_build
     depends_on:
       postgres: {condition: service_healthy}
-      minio: {condition: service_healthy}
+      seaweedfs: {condition: service_healthy}
     # `--health-port` is what makes the orchestrator's configuration one
     # configuration rather than two (FR-053, FR-054): the worker answers the same
     # `/healthz` and `/readyz`, with the same bodies, on the same port number the
@@ -259,50 +259,63 @@ services:
       timeout: 3s
       retries: 10
 
-  # MinIO stands in for S3 so the S3 code path is exercised locally with no cloud
-  # account. Production points DOCDOC_STORE_URL at S3, R2, GCS, or a self-hosted
-  # MinIO; S3ArtifactStore does not know the difference.
-  minio:
-    # **quay.io and a pinned release, and both halves were forced.**
-    #
-    # `minio/minio` on Docker Hub stopped serving anonymous pulls — it answers
-    # "repository does not exist or may require `docker login`" to an
-    # unauthenticated client, from a CI runner and from a developer's machine
-    # alike. It failed in CI first and looked like rate limiting; it is not.
-    # quay.io is where MinIO's own documentation points, and it serves the same
-    # images anonymously.
-    #
-    # The tag is a release rather than `latest` because this composition claims
-    # to be reproducible, and `latest` in a file making that claim is a
-    # contradiction — a checkout from a year ago would bring up different
-    # software than the one it was tested against. The failure is what prompted
-    # the pin; the pin was owed regardless.
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: docdoc
-      MINIO_ROOT_PASSWORD: docdocdocdoc
-    ports: ["9000:9000", "9001:9001"]
-    volumes: ["miniodata:/data"]
+  # SeaweedFS stands in for S3 so the S3 code path is exercised locally with no
+  # cloud account. Production points DOCDOC_STORE_URL at S3, R2, GCS, or any
+  # self-hosted S3-compatible store; S3ArtifactStore does not know the difference.
+  #
+  # **It replaced MinIO, and not by preference alone.** Every MinIO image this
+  # file could pull -- quay.io, Docker Hub, bitnami; pinned or `latest` --
+  # answers 401 to an anonymous client (checked 2026-10-19), so the composition
+  # could not start and CI's object-store tests stopped running. SeaweedFS is
+  # Apache-2.0, the same licence as docdoc, and serves every call the store
+  # makes: put, get, head, delete, and paginated list.
+  #
+  # The tag is a release rather than `latest` because this composition claims to
+  # be reproducible: a checkout from a year ago must bring up the software it
+  # was tested against.
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.48
+    # One process: master, volume, filer, and the S3 gateway. The gateway listens
+    # on 9000 so every endpoint URL MinIO used keeps working. `-ip.bind` because
+    # SeaweedFS otherwise binds only the address it detected at start, which a
+    # second network attached later would not reach.
+    command: >
+      server -dir=/data -ip.bind=0.0.0.0
+      -s3 -s3.port=9000 -s3.config=/etc/seaweedfs/s3.json
+    # The development key pair, the same one the services above use. Without an
+    # identities file the gateway accepts unsigned requests, which would let a
+    # credential mistake in docdoc pass here and fail against real S3.
+    volumes:
+      - seaweeddata:/data
+      - ./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+    ports: ["9000:9000"]
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9000/healthz"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 20
 
   # One-shot: creates the bucket the store writes to, then exits. Compose has no
   # way to declare "this bucket must exist", and a first run that fails on a
   # missing bucket reads as a docdoc bug rather than a setup step.
+  #
+  # A signed `PUT /docdoc` through the S3 API itself, with the image's own
+  # `curl` -- no second client image to pin. 409 is "you already own it", so a
+  # second `up` succeeds instead of failing on a bucket it created last time.
   createbucket:
-    # Same registry and the same reason. `mc` is also what `minio`'s healthcheck
-    # runs, so a broken pull here takes the object store's readiness with it.
-    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    image: chrislusf/seaweedfs:4.48
     depends_on:
-      minio: {condition: service_healthy}
-    entrypoint: >
-      sh -c "mc alias set local http://minio:9000 docdoc docdocdocdoc &&
-             mc mb --ignore-existing local/docdoc"
+      seaweedfs: {condition: service_healthy}
+    entrypoint:
+      - sh
+      - -c
+      - |
+        code=$$(curl -s -o /dev/null -w "%{http_code}" \
+          --aws-sigv4 aws:amz:us-east-1:s3 --user docdoc:docdocdocdoc \
+          -X PUT http://seaweedfs:9000/docdoc)
+        echo "create bucket: HTTP $$code"
+        [ "$$code" = 200 ] || [ "$$code" = 409 ]
 
 volumes:
   pgdata:
-  miniodata:
+  seaweeddata:
