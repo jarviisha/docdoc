@@ -1,0 +1,19 @@
+{
+  "endpoints": [
+    {
+      "id": "paddle",
+      "url": "http://paddlex-host:8080/ocr",
+      "version": "3.3.11",
+      "headers": {"Authorization": "REPLACE_ME"},
+      "languages": ["vie", "eng"],
+      "max_pages": 3
+    },
+    {
+      "id": "tesseract",
+      "url": "http://tesseract-host:8081/ocr",
+      "version": "1.0.0",
+      "headers": {"Authorization": "REPLACE_ME"},
+      "languages": ["vie", "eng"]
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+# PaddleX's own `OCR` pipeline, tuned for this deployment. Mounted read-only
+# into the `paddlex` container by compose.yml (`/config/OCR.yaml`) and named
+# on its `--pipeline` flag -- ported verbatim, comments included, from the
+# host this pipeline already runs on in production
+# (.superpowers/sdd/2026-10-19-ocr-gateway/paddlex-27-files.md), with its
+# Vietnamese comments translated to English but their reasons kept.
+
+pipeline_name: OCR
+
+text_type: general
+
+use_doc_preprocessor: True
+use_textline_orientation: True
+
+SubPipelines:
+  DocPreprocessor:
+    pipeline_name: doc_preprocessor
+    use_doc_orientation_classify: True
+    # Unwarping (UVDoc) costs RAM on a full PDF page, and a flat scan does
+    # not need it.
+    use_doc_unwarping: False
+    SubModules:
+      DocOrientationClassify:
+        module_name: doc_text_orientation
+        model_name: PP-LCNet_x1_0_doc_ori
+        model_dir: null
+      DocUnwarping:
+        module_name: image_unwarping
+        model_name: UVDoc
+        model_dir: null
+
+SubModules:
+  TextDetection:
+    module_name: text_detection
+    model_name: PP-OCRv5_server_det
+    model_dir: null
+    limit_side_len: 64
+    limit_type: min
+    max_side_limit: 2500
+    thresh: 0.3
+    box_thresh: 0.6
+    unclip_ratio: 1.5
+  TextLineOrientation:
+    module_name: textline_orientation
+    model_name: PP-LCNet_x1_0_textline_ori
+    model_dir: null
+    batch_size: 6
+  TextRecognition:
+    module_name: text_recognition
+    # latin_PP-OCRv5_mobile_rec is missing ố, ộ, ở, ạ... and drops the whole
+    # word rather than just the diacritic; this model keeps the letters and
+    # only misses some diacritics.
+    model_name: PP-OCRv5_server_rec
+    model_dir: null
+    batch_size: 6
+    score_thresh: 0.0
+
+Serving:
+  extra:
+    # A multi-page PDF exhausts RAM; an incoming document only needs its
+    # first page. PaddleX enforces this by silently truncating -- HTTP 200,
+    # first N pages, no error -- which is why docdoc's own endpoint config
+    # for this kit must set `max_pages` to the same number (see this kit's
+    # README.md).
+    max_num_input_imgs: 3
