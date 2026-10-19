@@ -432,6 +432,54 @@ surface beyond what Milestone 10 already exposes.
 
 Templates: no changes required — the plan-template gate table references
 Principle XI by number and remains accurate.
+
+---
+AMENDMENT 1.9.0 → 1.10.0 (2026-10-19)
+Bump rationale: MINOR — guidance is materially widened in two principles. Nothing
+previously compliant becomes non-compliant: no request names a parser today, so
+every call that omits a name keeps the selection behaviour it already had.
+
+Principles affected: IV (Provider-Agnostic Adapters), V (Text-First Document
+Processing).
+
+  - **Principle IV's provider-name rule is narrowed to docdoc itself, and a named
+    exception is added (ADR-0021).** The sentence read "Parsers are selected by
+    declared capabilities, never by hard-coded provider name," which a design
+    turning docdoc into an OCR gateway for other systems collides with head-on:
+    a caller choosing `paddle` over `tesseract` by name is choosing a provider by
+    name under any plain reading of that text. Rewriting the sentence to mean
+    only "never hard-coded in docdoc" is the honest fix rather than arguing the
+    old text already meant that — the reinterpretation Governance's precedence
+    rule exists to prevent, as ADR-0019 and the v1.6.0/v1.8.0 amendments each
+    recorded about themselves. A request may now name one of the parsers the
+    deployment has configured; code never does, and capability-based selection
+    remains what a caller gets by naming nothing. The request then fails rather
+    than falling back: an unknown, unavailable, or incapable name raises
+    `ParserCapabilityError` and never silently substitutes a different parser.
+
+  - **Principle V gains an override rule.** A caller who names a recognition
+    parser explicitly is asking for OCR's output shape on purpose, even on a
+    document whose text layer is usable, and docdoc MUST honour that rather than
+    second-guessing it. What must not happen is the text-layer verdict vanishing
+    when it is overridden: a document routed to recognition by a caller's choice
+    must stay distinguishable, in provenance, from one routed there because its
+    own text layer failed. The verdict is recorded as overridden
+    (`TextLayerRule.as_override`), the same mechanism the existing `force=`
+    path already uses.
+
+  - Recorded as an amendment, not a clarification, because both principles
+    permit something the previous wording forbade outright — a MINOR bump, not a
+    PATCH one.
+
+Sections amended: Principle IV (the provider-name rule); Principle V (one rule
+added). No decision moved; the open list stays empty.
+
+Migration note: no artifact is invalidated. No existing request names a parser,
+no existing routing verdict is overridden, and the registry's default selection
+is unchanged for every caller who names nothing.
+
+Templates: no changes required — the plan-template gate table references
+Principles IV and V by number and remains accurate.
 -->
 
 # docdoc Constitution
@@ -549,7 +597,9 @@ Rules:
   `kernel/`, `grounding/`, `validation/`, `evaluation/`, and `extraction/` outside
   `extraction/adapters/`, with `ingest/` restricted to `ingest/parsers/`. Provider exceptions MUST
   be translated to docdoc's error model and MUST NOT leak through the public API.
-- Parsers are selected by declared capabilities, never by hard-coded provider name.
+- Parsers are selected by declared capabilities, never by a provider name hard-coded in docdoc. A
+  request may name a configured parser (ADR-0021). The request then fails rather than falling
+  back.
 - Local/open-source components MUST remain a viable path; cloud providers are optional extras.
 - The base install MUST NOT force installation of any provider SDK or OCR engine. Provider
   integrations ship as optional extras.
@@ -567,6 +617,12 @@ documents that actually require OCR enter the OCR path.
 
 The architecture MUST support text PDFs, scanned PDFs, images, and mixed documents, and MUST
 make the text-layer usability decision explicit and inspectable rather than implicit.
+
+A request that explicitly names a configured recognition parser (ADR-0021) overrides this
+routing: it MUST be honoured even when the text layer is usable. The text-layer verdict MUST
+still be computed and recorded as overridden rather than skipped or discarded, so a document
+routed to recognition by a caller's choice remains distinguishable from one routed there because
+its own text layer failed.
 
 Rationale: forcing OCR on text-bearing PDFs destroys accurate native geometry, multiplies cost
 and latency, and lowers extraction quality.
@@ -936,4 +992,4 @@ insufficient. Unjustified violations are rejected regardless of the code's quali
 **Precedence for unresolved items.** Where an "Open Constitutional Decision" is unresolved,
 implementers MUST NOT resolve it silently in code. Raise it, decide it, record it.
 
-**Version**: 1.9.0 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-09-11
+**Version**: 1.10.0 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-10-19
