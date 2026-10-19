@@ -1279,17 +1279,30 @@ def _router() -> APIRouter:
         parameter refused raises `ParserCapabilityError` (422), never a silent
         substitution.
         """
+        from fastapi.concurrency import run_in_threadpool
+
         from docdoc.ingest import parse as ingest_parse
         from docdoc.ingest.source import SourceFile
 
         deployment = _deployment_of(request)
+        # The body still has to be read with `await` -- `_read_capped` drives
+        # `request.stream()`, an async generator a synchronous `def` handler
+        # has no event loop to iterate -- so this stays `async def`.
         data = await _read_capped(request, deployment.max_request_bytes)
 
         file = SourceFile.from_bytes(data, limits=deployment.limits)
         file.check_limits(deployment.limits or _default_limits())
 
         options = {} if language is None else {"language": language}
-        document = ingest_parse(
+        # `ingest_parse` is blocking (a named or selected parser may be
+        # service-backed, and the whole call is synchronous urllib underneath).
+        # Running it inline here would hold the event loop for the parse's full
+        # duration, stalling every other request this process is serving;
+        # `run_in_threadpool` is what a plain `def` handler gets for free and
+        # what this one has to ask for explicitly because the body read above
+        # needs `await`.
+        document = await run_in_threadpool(
+            ingest_parse,
             file,
             options=options,
             registry=deployment.parser_registry(),
@@ -1297,8 +1310,13 @@ def _router() -> APIRouter:
         )
         return document.model_dump(mode="json")
 
+    # A plain `def`, not `async def`: FastAPI runs a synchronous handler in its
+    # worker thread pool, so the blocking health probes below -- one urlopen
+    # per configured parser, each up to its own timeout -- cannot stall the
+    # event loop the way they would inside a coroutine every other request on
+    # this process is waiting on.
     @router.get("/parsers", response_model=ParserListing, response_model_exclude_none=True)
-    async def parsers(request: Request) -> Any:
+    def parsers(request: Request) -> Any:
         """The parsers this deployment has configured, in priority order.
 
         Never a URL, never a header (Review Focus 3's HTTP half) -- a
