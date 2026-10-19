@@ -48,7 +48,7 @@ def require_s3_endpoint() -> str:
     if not endpoint:
         pytest.skip(
             f"no {S3_ENDPOINT_ENV} configured; "
-            "`docker compose -f packaging/docker/compose.yml up -d minio`"
+            "`docker compose -f packaging/docker/compose.yml up -d seaweedfs createbucket`"
         )
     return endpoint
 

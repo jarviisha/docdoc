@@ -56,7 +56,7 @@ either carry a marker and **skip themselves** when their dependency is unconfigu
 live-provider tests already did:
 
 ```bash
-docker compose -f packaging/docker/compose.yml up -d postgres minio
+docker compose -f packaging/docker/compose.yml up -d postgres seaweedfs createbucket
 
 DOCDOC_TEST_DATABASE_URL=postgresql://docdoc:docdoc@localhost:5432/docdoc \
   uv run pytest -m postgres

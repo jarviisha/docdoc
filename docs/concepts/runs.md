@@ -177,7 +177,7 @@ deterministic.
 Two processes, one image, one database, one shared store:
 
 ```bash
-docker compose -f packaging/docker/compose.yml up -d      # api, worker, postgres, minio
+docker compose -f packaging/docker/compose.yml up -d      # api, worker, postgres, seaweedfs
 docdoc migrate                                            # explicit, idempotent, never on boot
 ```
 

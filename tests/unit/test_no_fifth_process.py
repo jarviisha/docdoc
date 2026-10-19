@@ -34,8 +34,8 @@ AT = datetime(2026, 9, 9, 12, 0, tzinfo=UTC)
 
 
 #: `createbucket` is not a fifth process type and is excluded by name rather than
-#: by the regex missing it. It is a one-shot `mc mb` that creates the object
-#: store's bucket and exits, so nothing is deployed, monitored, or able to fail
+#: by the regex missing it. It is a one-shot signed `PUT` that creates the
+#: object store's bucket and exits, so nothing is deployed, monitored, or able to fail
 #: silently — which is the whole of what FR-116's prohibition is about. It
 #: predates this milestone.
 _ONE_SHOT = {"createbucket"}
@@ -61,7 +61,7 @@ def test_the_composition_has_exactly_four_services() -> None:
     it to. That is the constitutional scope constraint holding: the composition
     demonstrates docdoc, and a collector is somebody else's infrastructure.
     """
-    assert _services() == {"api", "worker", "postgres", "minio"}, (
+    assert _services() == {"api", "worker", "postgres", "seaweedfs"}, (
         f"the composition has {sorted(_services())}. SC-025 asserts four, and "
         f"every capability this milestone added was built into a loop that "
         f"already runs rather than into a process to deploy and monitor"
