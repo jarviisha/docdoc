@@ -1,0 +1,83 @@
+# The official PaddleX serving CLI (`paddlex --serve`), speaking its own
+# native `/ocr` protocol -- the same protocol `packaging/ocr/tesseract/`
+# reimplements, so `docdoc`'s `PaddleXParser` (ADR-0021) calls either one
+# identically. Ported from the host this pipeline already runs on in
+# production (`.superpowers/sdd/2026-10-19-ocr-gateway/paddlex-27-files.md`),
+# with every host-specific path stripped.
+#
+# Run with:
+#   docker compose -f packaging/ocr/paddlex/compose.yml up -d
+#
+# Published on localhost only, same as packaging/ocr/tesseract/'s own
+# deployment and packaging/docker/compose.yml's own services: this has no
+# TLS and no authentication of its own, so it must never be reachable from
+# outside the host directly. Front it with a TLS- and auth-terminating
+# reverse proxy before pointing docdoc's `DOCDOC_OCR_ENDPOINTS_FILE` at
+# anything but localhost.
+
+services:
+  paddlex:
+    image: ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlex/paddlex:paddlex3.3.11-paddlepaddle3.2.0-cpu
+    # The source host ran this with the same policy: `mem_limit: 6g` below
+    # means an OOM kill is an expected outcome here, not a rare one, and
+    # with no restart policy the container would simply stay dead after one
+    # -- or after a host reboot -- until someone noticed.
+    restart: unless-stopped
+
+    environment:
+      # Forced to the public index regardless of whatever pip config the
+      # image or host carries, so the one-time `serving` install below
+      # behaves the same on every host this file is run on.
+      PIP_INDEX_URL: https://pypi.org/simple
+      PIP_EXTRA_INDEX_URL: ""
+      DISABLE_MODEL_SOURCE_CHECK: "True"
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+      PYTHONUNBUFFERED: "1"
+
+    # The base image ships PaddleX, not the `serving` extra -- installed
+    # once, on first boot, and remembered in a marker file so a later
+    # restart of the same container skips straight to `--serve`.
+    command:
+      - /bin/bash
+      - -lc
+      - |
+        set -e
+        if [ ! -f /opt/paddlex-serving-installed ]; then
+          python -m pip config unset global.index-url || true
+          python -m pip install --index-url https://pypi.org/simple "filetype>=1.2"
+          paddlex --install serving
+          touch /opt/paddlex-serving-installed
+        fi
+        exec paddlex --serve --pipeline /config/OCR.yaml --device cpu --host 0.0.0.0 --port 8080
+
+    ports:
+      - "127.0.0.1:8080:8080"
+
+    volumes:
+      # Downloaded once, kept across restarts -- a fresh container with an
+      # empty `./models` repeats a multi-gigabyte model download instead of
+      # serving a request.
+      - ./models:/root/.paddlex
+      - ./OCR.yaml:/config/OCR.yaml:ro
+
+    # 1 GiB of shared memory and 6 GiB of RAM: this pipeline's own working
+    # set for `max_num_input_imgs: 3` (OCR.yaml) at this image's model sizes,
+    # observed on the production host this kit is ported from. A deployment
+    # changing either number should re-measure both limits.
+    shm_size: 1gb
+    mem_limit: 6g
+
+    # Same check packaging/ocr/tesseract/compose.yml's own service makes --
+    # PaddleX serving answers `GET /health` with `{"errorCode":0,...}`
+    # (paddlex-27-files.md), and `python` is already on this image, so no
+    # extra tool is needed to ask it. `start_period` is generous because
+    # first boot (the `command` above) installs the `serving` plugin and
+    # downloads this pipeline's models before `--serve` ever starts
+    # listening -- a slow network makes that minutes, not seconds.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2).status == 200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10m

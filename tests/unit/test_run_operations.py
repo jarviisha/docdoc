@@ -22,6 +22,7 @@ same as every other test that needs infrastructure.
 from __future__ import annotations
 
 import argparse
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -305,6 +306,28 @@ class TestTheWorkerCommandRefusesBeforeItStarts:
 
         assert "no store configured" in str(refused.value)
         assert "cannot reach the documents it claims" in str(refused.value)
+
+    def test_a_malformed_endpoints_file_is_refused_before_the_worker_is_built(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """012 review, Finding 3: every run this worker claims re-reads
+        `DOCDOC_OCR_ENDPOINTS_FILE` through `default_registry()`, so a bad
+        file used to fail the first run that needed OCR, mid-pipeline, with
+        nothing logged at process start. The worker must refuse before it
+        ever claims anything, the same way the API refuses before it builds.
+        """
+        pytest.importorskip("psycopg", reason="the worker needs docdoc[postgres]")
+        from docdoc.cli.commands import worker
+        from docdoc.ingest.parsers.paddlex import ENDPOINTS_FILE_ENV
+
+        config = tmp_path / "endpoints.json"
+        config.write_text("not json")
+        monkeypatch.setenv(ENDPOINTS_FILE_ENV, str(config))
+
+        settings = type("S", (), {"run_database_url": "postgresql://x/y", "has_store": True})()
+
+        with pytest.raises(ValueError, match=re.escape(str(config))):
+            worker.run(_args(), settings)  # type: ignore[arg-type]
 
     def test_the_worker_id_names_a_host_and_a_process(self) -> None:
         """Diagnostic only — nothing routes on it, and worker liveness is the

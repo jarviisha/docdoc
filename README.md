@@ -9,7 +9,7 @@ LLM — everyone can do that. It is that every extracted value can answer:
 > **Where did this come from?**
 
 **Status:** Milestones 1–9 implemented — kernel, parsers, extraction, grounding, validation,
-evaluation, the pipeline and HTTP interface, the grounding viewer, and asynchronous runs. An extracted
+evaluation, the pipeline and HTTP interface, the operations console, and asynchronous runs. An extracted
 value can be **located**, **checked**, and **measured**: docdoc will tell you that an invoice's stated
 total does not equal the sum of its lines, point at the place on the page the total was read from, and
 tell you how often it gets that right against a golden set. Since Milestone 9 it will also accept that
@@ -193,10 +193,18 @@ POST /v1/documents/{blob_id}/extract      → the job identity, and the result
 POST /v1/extract                          → the result, storing nothing
 GET  /v1/jobs/{job_id}                    → succeeded | unavailable | unknown
 GET  /v1/jobs/{job_id}/result             → the stored result
+POST /v1/ocr                              → the raw Document, storing nothing
+GET  /v1/parsers                          → the parsers this deployment has configured
 ```
 
 A result fetched over HTTP and the same run performed in-process agree on every value, verdict,
 location, and identity — asserted by a contract test that runs both and compares.
+
+`POST /v1/ocr` is the ingest layer's own output with no schema and no extraction on top — the body
+is the document, `?parser=<id>` names a configured parser instead of leaving selection to capability
+matching, and `?language=<code>` becomes a parse option. `GET /v1/parsers` lists them, each with its
+capabilities, media types, and (for a parser with a health probe) whether it currently answers —
+never a URL or a header (ADR-0021 §3).
 
 Three more accept work without holding the connection open, and need a database:
 
@@ -285,11 +293,14 @@ line, because a route that could mint one would need no credential to call.
 > **Milestone 10 changed one sentence of this and not the rest.** Credentials can now be issued and
 > revoked at runtime, and a revocation reaches every process within
 > `DOCDOC_RUN_CREDENTIAL_TTL_SECONDS` — the defect above is closed for table-issued keys. Everything
-> else in this warning is unchanged: authentication is still off by default, a deployment that has
-> enabled none of it is exactly as exposed as Milestone 9 left it, and **the viewer still does not
-> work under authentication**. It fails at the door rather than after a partial render, because the
-> browser cannot hold a bearer token it was never given, and a viewer that works under
-> authentication needs a session mechanism this project has not designed.
+> else in this warning is unchanged: authentication is still off by default, and a deployment that
+> has enabled none of it is exactly as exposed as Milestone 9 left it.
+>
+> The grounding viewer used to carry a third sentence here — that it **did not work under
+> authentication at all**, because a browser cannot hold a bearer token it was never given. That was
+> true for its whole life and is why it is gone
+> ([ADR-0020](docs/adr/0020-retire-the-grounding-viewer.md)). The operations console solves the same
+> problem properly: its shell loads unauthenticated, and you paste a key into it.
 
 ### Installing
 
@@ -591,13 +602,15 @@ higher-layer work merges while that property is failing or absent.
 | 5 | Validation: schema, field, and cross-field rules | **Done** |
 | 6 | Evaluation: golden dataset, field accuracy, grounding rate | **Done** |
 | 7 | Pipeline, artifact store, CLI, and HTTP API | **Done** |
-| 8 | Read-only grounding viewer, and the two endpoints that reach it | **Done** |
+| 8 | Read-only grounding viewer, and the two endpoints that reach it | **Done**; viewer retired by [ADR-0020](docs/adr/0020-retire-the-grounding-viewer.md), its endpoints unchanged |
 | 9 | Asynchronous runs, shared object storage, health routes, tenant scoping | **Done** |
 | 10 | Retention and erasure, credential lifecycle, limits, webhook delivery, tracing, routing and corrections | **Done** |
-| 11 | The operations console: run listing, credentials, erasure, delivery — and the one read that makes it possible | **Done** |
+| 11 | The operations console: run listing, credentials, erasure, delivery — and the one read that makes it possible | **Done**; the only browser surface since [ADR-0020](docs/adr/0020-retire-the-grounding-viewer.md) |
 
-Milestone 8 adds no guarantee — no stage, no provider, no change to any value docdoc produces. What it
-changes is who can see the guarantees the first seven built.
+Milestone 8 added no guarantee — no stage, no provider, no change to any value docdoc produces. What
+it changed was who could see the guarantees the first seven built. Its browser surface is retired
+(ADR-0020) and the two endpoints it introduced, `POST /v1/extract` and `GET /v1/schemas`, are
+unchanged and in use.
 
 Milestone 9 adds none either, and that is the claim it is measured on: a result obtained through a
 worker and the same result obtained synchronously agree on every value, verdict, location, and
@@ -622,40 +635,23 @@ It also moves no process boundary. Four process types and four containers, exact
 left them: retention, delivery, and counter expiry happen in the worker's loop between claims rather
 than in a scheduler somebody has to deploy, monitor, and have fail silently.
 
-## The browser viewer
+## No browser surface for grounding
+
+There was one — a read-only viewer at `/ui` that drew each extracted value's rectangle on the page it
+came from. It is gone ([ADR-0020](docs/adr/0020-retire-the-grounding-viewer.md)), because it could
+not work on a deployment with authentication enabled: `/ui` required a credential like every other
+route, and a browser's top-level navigation cannot carry one. It worked on exactly one kind of
+deployment — the unauthenticated one — and cost two of everything in `ui/` to keep.
+
+Grounding is still fully reachable, and unchanged:
 
 ```bash
-pip install 'docdoc[api,ui]'
-uvicorn --factory docdoc.api.app:create_app --port 8000    # then open /ui/
+docdoc run invoice.pdf --schema invoice@1     # the CLI, with boxes in the result
 ```
 
-Read-only: it shows which page and which rectangle each extracted value came from, lists every value
-docdoc could **not** place rather than hiding it, and edits nothing. Five things worth knowing before
-you run it anywhere real:
-
-- **It is unauthenticated by default, and anyone who can reach it can spend your model provider
-  budget.** Milestone 9 added authentication and left it off, so this sentence is true of every
-  deployment that has not set `DOCDOC_API_KEYS_FILE`. Until then it belongs on a trusted network;
-  docdoc ships no `serve` command and cannot pick a safer bind address for you.
-- **With authentication on, the viewer does not work** — and it fails at the door rather than after
-  the page renders. `/ui` requires a credential like everything else except the two health routes,
-  and a browser has no way to send a bearer token, so the interface is unavailable to it. That is
-  the honest outcome rather than a regression: before, the shell loaded and then every `/v1` call it
-  made was refused. A viewer that works under authentication needs a session mechanism this
-  milestone deliberately does not add.
-- **A run continues after you close the page.** There is no cancel, because closing a browser stops the
-  waiting and not the work. A proxy in front of it must allow a request duration at least as long as
-  your slowest extraction, or it will terminate runs you have already paid for.
-- **Pages are shown selectively** — those carrying located values — because a deployment accepts
-  1000-page documents by default. Every other page is reachable, and the interface says so on screen.
-- **No accessibility conformance level is claimed.** What is guaranteed instead: every fact the overlay
-  conveys is in the value list, the list works without a pointer, and no distinction depends on colour.
-- **The rendered interface carries no automated test.** Its decisions are tested as pure functions; the
-  screen is not. [How the viewer works](docs/concepts/viewer.md) says exactly what that costs.
-
-A related change to the API: **`POST /v1/extract` runs a document with no store configured** and writes
-nothing. A deployment that previously refused every extraction for want of storage now serves them
-(ADR-0012).
+**`POST /v1/extract` runs a document with no store configured** and writes nothing, which is the
+route the viewer used and is untouched (ADR-0012). See
+[`examples/view_grounding.md`](examples/view_grounding.md) for reading the boxes it returns.
 
 ## The operations console
 
@@ -692,7 +688,7 @@ Five things worth knowing before you run it anywhere real:
   makes is authenticated like any other client's.
 - **For single sign-on, put an authenticating proxy in front of it.** That is your infrastructure;
   docdoc ships no part of one.
-- **No accessibility conformance level is claimed**, as for the viewer. What is guaranteed instead:
+- **No accessibility conformance level is claimed.** What is guaranteed instead:
   every control carries a name and is operable by keyboard, and no state is conveyed by colour alone.
 
 It shows **no part of a result**. A succeeded run links to the result representation the API already
@@ -712,7 +708,7 @@ any of them. One result representation, reachable one way.
 - [How grounding works](docs/concepts/grounding.md) — the three states, the match view, and why the two scores are not comparable
 - [How validation works](docs/concepts/validation.md) — the three verdicts, rules as data, and why docdoc has its own regex dialect
 - [How evaluation works](docs/concepts/evaluation.md) — the six outcomes, the denominators, the two tiers, and how to add a document to the golden set
-- [How the viewer works](docs/concepts/viewer.md) — the three geometry states, why no coordinate is transformed, and what carries no automated test
+- [How the operations console works](docs/concepts/console.md) — the session that is not one, the five forbidden nouns, and what carries no automated test
 - [The pipeline](docs/concepts/pipeline.md) — the four stages, the reuse decision, what a cached parse still pays for, and why a job needs no queue
 - [Artifacts](docs/concepts/artifacts.md) — the chain, the two hashes, which misses are errors, and the one symptom of a missed version bump
 - [Runs](docs/concepts/runs.md) — the two identities, the lifecycle, why redelivery is mostly "resume", and the exact limits of cancellation
@@ -723,7 +719,7 @@ any of them. One result representation, reachable one way.
 - [CLI contract](specs/007-pipeline-api-cli/contracts/cli.md) — commands, output forms, exit codes
 - [HTTP API contract](specs/007-pipeline-api-cli/contracts/http-api.md) — endpoints, statuses, error shapes
 - [HTTP API additions](specs/008-grounding-viewer/contracts/http-api-additions.md) — the storeless run and the schema listing
-- [View-model contract](specs/008-grounding-viewer/contracts/view-model.md) — the viewer's tested surface, and what it does not cover
+- [View-model contract](specs/008-grounding-viewer/contracts/view-model.md) — written for the retired viewer; the boundary it describes still governs `ui/src/console/model/`
 - [Run routes and authentication](specs/009-asynchronous-runs/contracts/runs-http-api.md) — the three run routes, the two health routes, and the exemption list
 - [The runs layer](specs/009-asynchronous-runs/contracts/runs-layer.md) — the queue protocol, the worker loop, store namespacing, and the transition events
 - [Contributing](CONTRIBUTING.md)

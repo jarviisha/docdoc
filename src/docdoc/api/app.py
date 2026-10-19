@@ -54,6 +54,8 @@ from docdoc.api.models import (
     BlobMetadata,
     JobStatus,
     JobStatusResponse,
+    ParserChoice,
+    ParserListing,
     RunAcceptedResponse,
     RunListResponse,
     RunResponse,
@@ -89,6 +91,7 @@ from docdoc.runs.model import DEFAULT_TENANT
 
 if TYPE_CHECKING:
     from docdoc.artifacts import ArtifactStore, BlobStore
+    from docdoc.ingest.registry import ParserRegistry
     from docdoc.pipeline import PipelineResult
 
 __all__ = ["build_app", "create_app"]
@@ -112,11 +115,12 @@ _UNAUTHENTICATED = frozenset({LIVENESS_PATH, READINESS_PATH})
 #: The console's shell, and the one prefix exempt from the credential.
 #:
 #: **A browser's top-level navigation carries no `Authorization` header.** The
-#: viewer's mount is gated, and `_mount_ui` records what that costs: with
-#: authentication on, it does not load. That was the honest failure for a surface
-#: whose credential is a deployment-wide one; it is a fatal one for a console
-#: whose entire premise is that an operator pastes a key **into a page that has
-#: already loaded** (specs/011 FR-006, research R1).
+#: viewer's mount was gated and recorded what that costs: with authentication on,
+#: it did not load. That was the honest failure for a surface whose credential is
+#: a deployment-wide one; it is a fatal one for a console whose entire premise is
+#: that an operator pastes a key **into a page that has already loaded**
+#: (specs/011 FR-006, research R1). The viewer is gone (ADR-0020); the reason it
+#: could not be copied here is why this prefix exists and so it is kept.
 #:
 #: What is exempt is HTML, CSS, and JavaScript. No run, no tenant identifier, no
 #: credential, and no document is reachable from those bytes, and the console
@@ -169,6 +173,7 @@ class _Deployment:
         store_root: Any = None,
         store_url: str | None = None,
         registry: Any = None,
+        parsers: ParserRegistry | None = None,
         adapter: Any = None,
         max_request_bytes: int | None = None,
         limits: Any = None,
@@ -201,6 +206,7 @@ class _Deployment:
         self._runs = runs
         self._readiness: Any = None
         self._registry = registry
+        self._parsers = parsers
         self._adapter = adapter
         self.limits = limits
         # The file ring first, the table second (ADR-0016 §7). A deployment
@@ -426,6 +432,19 @@ class _Deployment:
 
         return default_adapter()
 
+    def parser_registry(self) -> ParserRegistry:
+        """The parsers ``POST /v1/ocr`` and ``GET /v1/parsers`` choose from.
+
+        Mirrors ``registry()``: a deployment given one explicitly keeps it, and
+        one given none falls back to whichever adapters this installation can
+        use, including any ``DOCDOC_OCR_ENDPOINTS_FILE`` names (ADR-0021 §3).
+        """
+        if self._parsers is not None:
+            return self._parsers
+        from docdoc.ingest.registry import default_registry
+
+        return default_registry()
+
     def artifact_store(self) -> Any:
         from docdoc.artifacts import NullArtifactStore
 
@@ -505,7 +524,18 @@ def _default_deployment() -> _Deployment:
     produce one. The default tenant's stores are built from it immediately, and
     they land exactly where a Milestone 8 deployment already wrote — unprefixed
     (FR-084a).
+
+    **Validates `DOCDOC_OCR_ENDPOINTS_FILE` first, before anything else is
+    built.** `parser_registry()` reads that file again on every call it
+    makes (ADR-0021 §3), so a malformed one used to fail silently-to-an-
+    operator on whichever request first asked for OCR, as a bare 500 with
+    nothing logged at startup to explain it. Raising here instead means a
+    bad file keeps this process from ever starting (012 review, Finding 3).
     """
+    from docdoc.ingest.registry import validate_configured_endpoints
+
+    validate_configured_endpoints()
+
     runs = _configured_run_queue()
 
     # An object store, if one was named. Checked first because a deployment that
@@ -585,7 +615,6 @@ def build_app(deployment: _Deployment | None = None) -> FastAPI:
     # registered on the application rather than on it (FR-058).
     health.install(app, resolved.readiness())
     _install_error_handler(app)
-    _mount_ui(app)
     _mount_console(app)
     return app
 
@@ -595,7 +624,7 @@ def _require_credential_everywhere_else(app: FastAPI) -> None:
 
     The router dependency covers `/v1` and resolves a `Principal` for the
     handlers that need one. It cannot cover what is not on that router, and three
-    kinds of thing are not: the `/ui` **mount**, which inherits no dependency
+    kinds of thing are not: a static **mount**, which inherits no dependency
     because a mount is not a route; FastAPI's `/docs`, `/redoc` and
     `/openapi.json`, which its constructor registers directly; and any path a
     later change adds outside the router.
@@ -605,7 +634,7 @@ def _require_credential_everywhere_else(app: FastAPI) -> None:
     rule that needs no list. FR-059 names exactly two exemptions, so this
     enforces exactly two and refuses everything else.
 
-    **Milestone 11 adds the third, and it is deliberate rather than an oversight
+    **Milestone 11 added the third, and it is deliberate rather than an oversight
     rediscovered.** `/console` serves a shell that must load before a credential
     exists, because that is where the operator types one. See `_CONSOLE_PREFIX`
     for what is exempt and what it is worth to an unauthenticated reader.
@@ -616,7 +645,7 @@ def _require_credential_everywhere_else(app: FastAPI) -> None:
 
     With authentication disabled `principal_for` returns the default tenant for
     everyone and this is a function call per request that changes nothing —
-    Milestone 8's behaviour, including an open `/ui` (FR-088).
+    Milestone 8's behaviour, in which every route was open (FR-088).
     """
 
     @app.middleware("http")
@@ -676,94 +705,14 @@ def _refuse_unnamespaceable(deployment: _Deployment) -> None:
         )
 
 
-def _mount_ui(app: FastAPI) -> None:
-    """Serve the browser client from this origin, or explain its absence.
-
-    **Same origin, so no cross-origin configuration exists anywhere** (Milestone 8
-    FR-034). That is the whole reason the assets are mounted here rather than
-    served by something else: a second origin would need a CORS policy, and a
-    CORS policy is a thing to get wrong.
-
-    Mounted under ``/ui`` and never at the root, so that adding an interface
-    cannot shadow an API path — now or when a later route is added by someone who
-    has forgotten this exists.
-    """
-    from docdoc.api.ui import absence_reason, chosen_assets
-
-    source, assets = chosen_assets()
-
-    if assets is None:
-        # Not an error: a deployment without the `ui` extra is a supported and
-        # ordinary deployment. But a blank page is exactly what FR-037 forbids,
-        # so the one route that exists says what is missing and what fixes it.
-        @app.get("/ui", include_in_schema=False)
-        @app.get("/ui/{path:path}", include_in_schema=False)
-        async def _no_ui(path: str = "") -> JSONResponse:
-            return JSONResponse(
-                status_code=501,
-                content={
-                    "error": {
-                        "class": "ViewerNotInstalled",
-                        "message": absence_reason(),
-                    }
-                },
-            )
-
-        return
-
-    from fastapi.staticfiles import StaticFiles
-
-    # **Say which of the three roots won.** Three places can hold three different
-    # builds, and until this line nothing named the winner: a stale installed
-    # distribution shadowed a fresh `ui/dist`, every rebuild appeared to do
-    # nothing, and the months-old page that resulted was read as evidence about
-    # current code.
-    #
-    # **Visible only where the application configures logging**, which uvicorn's
-    # defaults do not — it sets up `uvicorn.*` and leaves root without a handler,
-    # so this INFO falls to `logging.lastResort` and is dropped. That is how every
-    # structured event docdoc emits behaves, and adding a handler here would be
-    # the library deciding for the application. `docdoc.api.ui.chosen_assets` is
-    # the answer that needs no logging at all, and it is what the documentation
-    # tells a developer to run.
-    #
-    # Not a second request-logging path, and so not the thing T019 forbids: it
-    # runs once at construction, and it carries a filesystem path and no document
-    # content, no values and no credentials (FR-033).
-    logging.getLogger("docdoc.api").info(
-        json.dumps({"event": "ui.assets", "source": source, "path": str(assets)})
-    )
-
-    # **Behind the same credential as everything else** (FR-059), which exempts
-    # liveness and readiness and nothing further. A mount is not a route, so it
-    # does not inherit the router's dependency and had to be given one.
-    #
-    # The assets carry no tenant data, so this is not closing a leak — it is
-    # keeping one sentence true. Without it a deployment that has enabled
-    # authentication still serves the viewer's shell to anyone who can reach the
-    # port, and the reader is told the opposite.
-    #
-    # What it costs is worth stating plainly: the viewer cannot send a bearer
-    # token, so with authentication on it does not work either way. Before this
-    # it loaded and then failed on every `/v1` call it made; now it does not
-    # load. The second is the honest failure — the interface is unavailable, and
-    # it says so at the door rather than after the page has rendered.
-    app.mount("/ui", StaticFiles(directory=assets, html=True), name="ui")
-
-    # And the sentence Milestone 11 had to qualify: *everything else*. The
-    # console's shell is exempt, for a reason that is about browsers rather than
-    # about trust — `_CONSOLE_PREFIX` states it.
-
-
 def _mount_console(app: FastAPI) -> None:
     """Serve the operations console, or explain its absence (specs/011 FR-001).
 
-    **Not behind the credential, and this is the milestone's one deliberate
-    divergence.** `_mount_ui` above records what gating a shell costs: with
-    authentication enabled the viewer *"does not load"*. For the viewer that was
-    the honest failure. For the console it would be fatal, because the console's
-    premise is that an operator pastes a key into a page that has **already
-    loaded** (FR-006) — a browser's top-level navigation carries no
+    **Not behind the credential, and that is deliberate.** The viewer's mount was
+    gated, and with authentication enabled it *"did not load"*. For the viewer
+    that was the honest failure. For the console it would be fatal, because the
+    console's premise is that an operator pastes a key into a page that has
+    **already loaded** (FR-006) — a browser's top-level navigation carries no
     `Authorization` header and cannot be made to. Gating this shell does not make
     the console strict; it makes it impossible on exactly the deployments it
     exists for.
@@ -775,13 +724,17 @@ def _mount_console(app: FastAPI) -> None:
     a cookie session, a credential in the URL — are rejected in ADR-0019 §4 and
     in the spec's FR-008, and both would have cost more than this exemption does.
 
-    Under ``/console``, which is distinct from the viewer's ``/ui`` and contains
-    none of the fifteen words `tests/contract/test_no_review_platform.py` forbids
-    in a path (FR-003).
-    """
-    from docdoc.api.ui import CONSOLE, absence_reason, chosen_assets
+    Under ``/console``, which contains none of the fifteen words
+    `tests/contract/test_no_review_platform.py` forbids in a path (FR-003). It
+    was chosen to be distinct from the viewer's ``/ui``; the viewer is gone
+    (ADR-0020) and the path stays, because it is in FR-001, in operators'
+    bookmarks, and worth nothing to reclaim.
 
-    source, assets = chosen_assets(CONSOLE)
+    **This is now the only mount.** `_mount_ui` sat above it until ADR-0020.
+    """
+    from docdoc.api.ui import absence_reason, chosen_assets
+
+    source, assets = chosen_assets()
 
     if assets is None:
         # A deployment without the console is ordinary. A blank page is not:
@@ -796,7 +749,7 @@ def _mount_console(app: FastAPI) -> None:
                 content={
                     "error": {
                         "class": "ConsoleNotInstalled",
-                        "message": absence_reason(CONSOLE),
+                        "message": absence_reason(),
                     }
                 },
             )
@@ -809,10 +762,10 @@ def _mount_console(app: FastAPI) -> None:
         json.dumps({"event": "console.assets", "source": source, "path": str(assets)})
     )
 
-    # `html=True` with the entry point named, because this build's entry is
-    # `console.html` rather than `index.html` — Vite writes the file it was given
-    # and `StaticFiles` looks for `index.html` by default, so without the copy
-    # made at build time the directory would serve a 404 at its own root.
+    # `html=True` serves the directory's `index.html` at its own root, which is
+    # what the build emits. It emitted `console.html` until ADR-0020, when the
+    # viewer stopped occupying the name — and the plugin that copied one to the
+    # other went with it.
     app.mount(
         _CONSOLE_PREFIX,
         StaticFiles(directory=assets, html=True),
@@ -1318,6 +1271,89 @@ def _router() -> APIRouter:
             )
 
         return _storeless_run_response(result)
+
+    @router.post("/ocr")
+    async def ocr(request: Request, parser: str | None = None, language: str | None = None) -> Any:
+        """Run OCR over submitted bytes and return the raw `Document`, storing nothing.
+
+        No schema, no extraction, no grounding, no validation -- this is the
+        ingest layer's own output, for a caller who wants the parse itself
+        rather than a value pulled out of it. Storeless for the same reason
+        ``POST /v1/extract`` is: a caller asking for OCR directly is asking for
+        exactly one stage, and demanding a store to run one is the coupling
+        FR-001 already rejected for the whole pipeline.
+
+        ``parser`` names a configured parser by id (ADR-0021 §1); omitted, the
+        usual capability-based selection chooses one. ``language`` becomes
+        ``options={"language": ...}`` -- the only option a PaddleX-protocol
+        endpoint recognizes, and only a value it declared. It **asserts**
+        rather than selects: the protocol has no language field, so this
+        checks that the chosen endpoint supports the language rather than
+        choosing a model that reads it. Either query parameter refused
+        raises `ParserCapabilityError` (422), never a silent substitution.
+        """
+        from fastapi.concurrency import run_in_threadpool
+
+        from docdoc.ingest import parse as ingest_parse
+        from docdoc.ingest.source import SourceFile
+
+        deployment = _deployment_of(request)
+        # The body still has to be read with `await` -- `_read_capped` drives
+        # `request.stream()`, an async generator a synchronous `def` handler
+        # has no event loop to iterate -- so this stays `async def`.
+        data = await _read_capped(request, deployment.max_request_bytes)
+
+        file = SourceFile.from_bytes(data, limits=deployment.limits)
+        file.check_limits(deployment.limits or _default_limits())
+
+        options = {} if language is None else {"language": language}
+        # `ingest_parse` is blocking (a named or selected parser may be
+        # service-backed, and the whole call is synchronous urllib underneath).
+        # Running it inline here would hold the event loop for the parse's full
+        # duration, stalling every other request this process is serving;
+        # `run_in_threadpool` is what a plain `def` handler gets for free and
+        # what this one has to ask for explicitly because the body read above
+        # needs `await`.
+        document = await run_in_threadpool(
+            ingest_parse,
+            file,
+            options=options,
+            registry=deployment.parser_registry(),
+            parser=parser,
+        )
+        return document.model_dump(mode="json")
+
+    # A plain `def`, not `async def`: FastAPI runs a synchronous handler in its
+    # worker thread pool, so the blocking health probes below -- one urlopen
+    # per configured parser, each up to its own timeout -- cannot stall the
+    # event loop the way they would inside a coroutine every other request on
+    # this process is waiting on.
+    @router.get("/parsers", response_model=ParserListing, response_model_exclude_none=True)
+    def parsers(request: Request) -> Any:
+        """The parsers this deployment has configured, in priority order.
+
+        Never a URL, never a header (Review Focus 3's HTTP half) -- a
+        `ParserChoice` has no field that could carry either. `unavailable_reason`,
+        `languages`, and `healthy` are absent rather than null when they do not
+        apply, which `response_model_exclude_none` is what actually omits them.
+        """
+        deployment = _deployment_of(request)
+        choices = []
+        for entry in deployment.parser_registry().candidates_all():
+            probe = getattr(entry.parser, "probe", None)
+            languages = tuple(getattr(entry.parser, "languages", ()) or ())
+            choices.append(
+                ParserChoice(
+                    id=entry.id,
+                    available=entry.available,
+                    unavailable_reason=entry.unavailable_reason,
+                    capabilities=entry.capabilities.to_kernel().model_dump(mode="json"),
+                    media_types=tuple(sorted(entry.capabilities.media_types)),
+                    languages=languages or None,
+                    healthy=probe() if callable(probe) else None,
+                )
+            )
+        return ParserListing(parsers=tuple(choices))
 
     # `status_code=202` is the *documented default* for this route; the handler
     # returns 200 on an idempotent replay. Declared rather than omitted so the

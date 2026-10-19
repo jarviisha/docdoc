@@ -13,17 +13,15 @@
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
 
-    // The two roots are named separately because the boundary between them is a
-    // requirement (FR-041, FR-043), not a folder convention. `@model/*` is
-    // importable from anywhere; `@components/*` is importable from everywhere
-    // except the model, which `scripts/check-model-boundary.mjs` enforces --
-    // TypeScript paths make the boundary expressible, not enforced.
+    // One root since the viewer was removed (ADR-0020). The model/component
+    // boundary inside it is a requirement (specs/011 FR-041, specs/008 FR-043)
+    // rather than a folder convention, and `scripts/check-model-boundary.mjs`
+    // is what enforces it -- TypeScript paths make a boundary expressible, not
+    // enforced.
     // No `baseUrl`: TypeScript 7 removed it, and non-relative targets with it.
     "paths": {
-      "@model/*": ["./src/model/*"],
-      "@components/*": ["./src/components/*"],
       "@console/*": ["./src/console/*"]
     }
   },
-  "include": ["src", "test", "vite.config.ts", "vite.console.config.ts"]
+  "include": ["src", "test", "vite.config.ts"]
 }

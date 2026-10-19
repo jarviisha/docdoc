@@ -216,6 +216,29 @@ confirm the console shows the attempts and the final at-rest state.
 - [X] T070 [P] Confirm `docdoc migrate --check` reports nothing to apply: this milestone adds zero migrations, and a migration wanting to run means something exists that the plan says should not
 - [X] T071 [P] Confirm the composition still has four containers and four process types, and that the offline suite passes with no database, no object store, and no browser (SC-014, FR-043, FR-044)
 - [X] T072 Run every scenario in [quickstart.md](./quickstart.md) end to end against the four-container composition, **ticking each of the ten individually**, and correct what it gets wrong. Three success criteria have no other coverage and are named here so they cannot be lost inside a single checkbox: **scenario 0 is FR-005's only check** (the API starts and serves with the console's assets absent), **scenario 5 is SC-010's** (a revoked credential refused within the propagation bound), and **scenario 7 is SC-017's** (an unauthenticated deployment is fully reachable with no key entered). Milestone 10's equivalent pass found eleven errors in a document that read perfectly; this one has not been run at all and says so in its header
+<!--
+  T073 is still open and still the right shape. What follows is not a substitute
+  for it — it is the first defect it would have found, found another way.
+
+  2026-09-15, while ADR-0020 was being written: the run detail read exactly one
+  field of the `GET /v1/runs/{run_id}` body, `routing`, so a **failed run opened
+  to a red badge reading `failed`, four timestamps, and no reason**. US2 scenario
+  7 asks for the failure "in the typed, provider-neutral form the API already
+  produces" and SC-015 times an operator stating why it failed; neither was
+  reachable from the screen. `failed_stage` and `error_class` had been on the
+  wire the whole time.
+
+  **Every guard in this milestone checks what the console must not show.** The
+  five nouns, result content, persistence, the network boundary — all absences.
+  Nothing checks for a fact that should be on screen and is not, and no
+  automated check can: that is what T073 is, and why it is the one task here
+  with a human in it. Fixed in `ui/src/console/model/runs.ts:toFailure`, pinned
+  from the browser side in `ui/test/console/runs.test.ts` and from the wire side
+  in `tests/contract/test_console_http_api.py`.
+
+  Run T073 anyway. It has not been performed, and the next thing it finds will
+  be the same shape as this one.
+-->
 - [ ] T073 Perform the SC-015 operator test: hand someone a key and the URL with a named failed run in the list, and time them to "here is why it failed". Under three minutes, no documentation open. Record what it found — this is the only check with a human in it and the only one that can find a status column that is a colour with no label
 
 ---

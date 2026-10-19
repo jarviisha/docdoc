@@ -239,6 +239,7 @@ CONFIG_MODULES = {
     "docdoc.extraction.adapters.gemini": ("MODEL_ENV",),
     "docdoc.ingest.parsers.azure_di": ("ENDPOINT_ENV", "KEY_ENV"),
     "docdoc.ingest.parsers.gcv": ("CREDENTIALS_ENV",),
+    "docdoc.ingest.parsers.paddlex": ("ENDPOINTS_FILE_ENV",),
     "docdoc.cli.config": ("STORE_ROOT_ENV", "RUN_DATABASE_URL_ENV", "STORE_URL_ENV"),
     "docdoc.grounding.view": ("MATCH_VIEW_CACHE_ENV",),
     # `settings`, not `app`: `app` imports FastAPI, and this check runs on a
@@ -251,7 +252,7 @@ CONFIG_MODULES = {
     # in one of them: the constant would vanish and this list would say so.
     "docdoc.api.settings": (
         "REQUEST_BYTES_ENV",
-        "UI_ROOT_ENV",
+        "CONSOLE_ROOT_ENV",
         "RUN_DATABASE_URL_ENV",
         "RUN_LEASE_SECONDS_ENV",
         "RUN_MAX_ATTEMPTS_ENV",
@@ -299,8 +300,30 @@ CONFIG_MODULES = {
 #: would then require a `--test-database-url` flag on `docdoc`, which is a
 #: command-line surface for configuring pytest. The real definitions, with their
 #: skip helpers, are in `tests/infra.py`.
+#:
+#: `DOCDOC_TEST_PADDLEX_URL` and `DOCDOC_TEST_TESSERACT_URL` are the same
+#: pattern, named by the gateway plan ahead of the integration test
+#: (`tests/integration/test_paddlex_live.py`, Task 3) that reads them -- added
+#: here now because this task is what first brings that plan's document into
+#: a document this file checks.
+#:
+#: `DOCDOC_EXTRAS` is a different shape entirely: a `docker build --build-arg`
+#: / compose build argument, read by neither docdoc nor pytest, so it has no
+#: module to define it and never will. It already appears undocumented-by-
+#: this-file's-standard in three earlier milestones' `specs/*/quickstart.md`
+#: (009, 010, 011) -- outside both the document list and the sweep below,
+#: which is why nothing caught it until the gateway design and plan, which
+#: are under `docs/`, repeated it. Recorded here rather than left to fail
+#: silently a second time.
 SUITE_ONLY_ENV = frozenset(
-    {"DOCDOC_TEST_DATABASE_URL", "DOCDOC_TEST_S3_ENDPOINT", "DOCDOC_TEST_OTLP_ENDPOINT"}
+    {
+        "DOCDOC_TEST_DATABASE_URL",
+        "DOCDOC_TEST_S3_ENDPOINT",
+        "DOCDOC_TEST_OTLP_ENDPOINT",
+        "DOCDOC_TEST_PADDLEX_URL",
+        "DOCDOC_TEST_TESSERACT_URL",
+        "DOCDOC_EXTRAS",
+    }
 )
 
 #: Wider than DOCUMENTS: configuration is described in places that carry no python
@@ -350,12 +373,27 @@ CONFIG_DOCUMENTS = (
     # it was being given. A guard refusing its author's shortcut is the guard
     # working.
     "docs/concepts/ingest.md",
-    "docs/concepts/viewer.md",
+    "docs/concepts/console.md",
+    # ADR-0020 names `DOCDOC_CONSOLE_ROOT`'s neighbourhood while recording the
+    # viewer's removal. Listed rather than exempted: the sweep below has no
+    # exemption list on purpose, and an ADR that names a setting goes stale in
+    # exactly the way every other document does.
+    "docs/adr/0020-retire-the-grounding-viewer.md",
     "examples/view_grounding.md",
     # And one the sweep found that no hand-written list would have: an ADR names
     # a setting too. Decision records are read by whoever is deciding whether to
     # trust the decision, so a stale variable name there is a stale premise.
     "docs/adr/0014-tenant-scoping-and-store-namespacing.md",
+    # The gateway design and its plan both name DOCDOC_OCR_ENDPOINTS_FILE ahead
+    # of the task that defines it (docdoc.ingest.parsers.paddlex.ENDPOINTS_FILE_ENV,
+    # added in Task 2).
+    "docs/superpowers/specs/2026-10-19-ocr-gateway-design.md",
+    "docs/superpowers/plans/2026-10-19-ocr-gateway.md",
+    # ADR-0021 named only the `DOCDOC_*_FILE` wildcard idiom until the 012
+    # review (Finding 10) replaced it with the literal variable name, so it
+    # no longer qualifies for that exemption -- a decision record that names
+    # a setting goes stale exactly like any other document.
+    "docs/adr/0021-caller-named-parsers-and-ocr-endpoints.md",
 )
 
 #: Requires at least one character after the prefix, so the `DOCDOC_*` wildcard

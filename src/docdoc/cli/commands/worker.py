@@ -113,6 +113,17 @@ def run(args: argparse.Namespace, settings: Settings) -> Rendering:
             "psycopg is not installed; run state needs `pip install docdoc[postgres]`"
         ) from exc
 
+    # Every run this worker claims re-parses through `ingest.parse`, which
+    # reads `DOCDOC_OCR_ENDPOINTS_FILE` through `default_registry()` on every
+    # call (ADR-0021 §3). A malformed file used to fail the first run that
+    # happened to need OCR, mid-pipeline, with nothing logged at process
+    # start to explain it -- the same gap `docdoc.api.app._default_deployment`
+    # closes on the API side (012 review, Finding 3). Raising here keeps the
+    # worker from claiming anything at all until the file is fixed.
+    from docdoc.ingest.registry import validate_configured_endpoints
+
+    validate_configured_endpoints()
+
     from docdoc.runs.observe import install_bridge
     from docdoc.runs.postgres import PostgresRunQueue
     from docdoc.telemetry import (

@@ -49,9 +49,17 @@ def analyze_with_retries(
     source: SourceFile,
     transport: TransportSettings,
     parser_id: str,
+    deadline: Deadline | None = None,
     sleep: Callable[[float], None] | None = None,
 ) -> T:
     """Run ``analyze``, retrying transient provider failures.
+
+    ``deadline`` is injectable so a caller that makes several calls under one
+    overall budget -- the PaddleX adapter splitting a long PDF into chunks,
+    each going through this function once -- can open the ``Deadline`` a
+    single time and pass the same object to every call. Left ``None``, this
+    opens its own via ``transport.start()``, exactly as it always has: every
+    existing single-call caller (Azure, GCV) is unaffected.
 
     ``sleep`` is injectable so a test can assert the *policy* -- how long it
     would have waited, and that it refused to wait past the deadline -- without
@@ -64,7 +72,7 @@ def analyze_with_retries(
     working.
     """
     sleep = sleep or time.sleep
-    deadline = transport.start()
+    deadline = deadline or transport.start()
     last: ProviderError | None = None
 
     for attempt in range(1, transport.max_attempts + 1):

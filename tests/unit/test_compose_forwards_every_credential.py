@@ -45,7 +45,12 @@ CREDENTIALS_BY_EXTRA: dict[str, tuple[str, ...]] = {
 #: Extras that carry no credential at all. Listed so the map above is checkable
 #: against the image rather than trusted: an extra in neither place is one
 #: nobody classified.
-CREDENTIAL_FREE_EXTRAS = frozenset({"api", "postgres", "s3", "pdf", "ui", "dev"})
+#:
+#: `ocr` is pypdfium2 -- a PDF reader for the PaddleX-protocol adapter's
+#: splitting, not a provider SDK. The adapter's own credential, if any, lives
+#: in its endpoint configuration file, not an environment variable this
+#: composition would forward.
+CREDENTIAL_FREE_EXTRAS = frozenset({"api", "postgres", "s3", "pdf", "ui", "dev", "ocr"})
 
 
 def _compose() -> str:

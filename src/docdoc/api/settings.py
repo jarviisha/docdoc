@@ -54,7 +54,6 @@ __all__ = [
     "SCHEMA_PATHS_ENV",
     "STORE_ROOT_ENV",
     "STORE_URL_ENV",
-    "UI_ROOT_ENV",
     "run_lease",
     "run_max_attempts",
     "store_from_url",
@@ -64,16 +63,14 @@ __all__ = [
 STORE_ROOT_ENV = "DOCDOC_STORE_ROOT"
 SCHEMA_PATHS_ENV = "DOCDOC_SCHEMA_PATHS"
 
-#: Where the browser client's built assets are, when a deployment wants to say so
-#: rather than let ``docdoc.api.ui`` find them. Research R7 kept this as the
-#: fallback for a deployment that would rather build the interface itself than
-#: install the ``docdoc-ui`` distribution; unset is the normal case.
-UI_ROOT_ENV = "DOCDOC_UI_ROOT"
-
-#: Where Milestone 11's operations console was built, if a deployment names it.
-#: Separate from ``UI_ROOT_ENV`` because they are two builds -- Vite's ``base``
-#: is per-build, and the console is served from a different path for a reason
-#: that is not cosmetic (specs/011 research R1).
+#: Where the operations console's built assets are, when a deployment wants to
+#: say so rather than let ``docdoc.api.ui`` find them. ``specs/008`` research R7
+#: kept this as the fallback for a deployment that would rather build the
+#: interface itself than install the ``docdoc-ui`` distribution; unset is the
+#: normal case.
+#:
+#: ``DOCDOC_UI_ROOT`` was its sibling, naming the viewer's build, and went with
+#: the viewer (ADR-0020).
 CONSOLE_ROOT_ENV = "DOCDOC_CONSOLE_ROOT"
 
 #: The request body cap, in bytes, applied while reading. Distinct from the

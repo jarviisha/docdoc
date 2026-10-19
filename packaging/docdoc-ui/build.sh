@@ -11,27 +11,24 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 package="$root/packaging/docdoc-ui"
-assets="$package/src/docdoc_ui/assets"
 console="$package/src/docdoc_ui/console"
 
-echo "==> building the browser client"
-(cd "$root/ui" && npm ci && npm run build && npm run build:console)
+echo "==> building the operations console"
+(cd "$root/ui" && npm ci && npm run build)
 
 if [[ ! -f "$root/ui/dist/index.html" ]]; then
   echo "ui/dist/index.html is missing — the build produced nothing to package" >&2
   exit 1
 fi
 
-if [[ ! -f "$root/ui/dist-console/console.html" ]]; then
-  echo "ui/dist-console/console.html is missing — the console build produced nothing" >&2
-  exit 1
-fi
-
+# `rm -rf` and not just an overwrite: a stale `assets/` from before ADR-0020
+# holds a built *viewer*, and a wheel that shipped one would serve it. Removed
+# here rather than left to a developer's `git clean`, because the directory is
+# gitignored and `git clean` is exactly what nobody runs.
 echo "==> copying assets into the distribution"
-rm -rf "$assets" "$console"
-mkdir -p "$assets" "$console"
-cp -R "$root/ui/dist/." "$assets/"
-cp -R "$root/ui/dist-console/." "$console/"
+rm -rf "$console" "$package/src/docdoc_ui/assets"
+mkdir -p "$console"
+cp -R "$root/ui/dist/." "$console/"
 
 # `uv build` rather than `python -m build`, which is what this said until T082
 # and which is not a dependency this repository declares — the documented

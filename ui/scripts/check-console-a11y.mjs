@@ -2,7 +2,7 @@
 /**
  * T010 — every control is named and reachable by keyboard (FR-045a, SC-014a).
  *
- * A source check rather than a test, for the reason `check-readonly.mjs` records
+ * A source check rather than a test, for the reason `check-no-persistence.mjs` records
  * about itself: the rendering layer carries no automated test by decision
  * (`specs/008`), and this milestone adds no browser driver. The only inspection
  * available is reading the source, so it is the one that runs.

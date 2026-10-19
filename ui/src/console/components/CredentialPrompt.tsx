@@ -4,7 +4,7 @@
  * A native `<input type="password">` inside a `Field`, so it carries an
  * accessible name and is operable by keyboard with nothing added (FR-045a).
  * `autoComplete="off"` because a browser password manager storing this would put
- * the credential at rest by a route FR-007 cannot see — `check-readonly.mjs`
+ * the credential at rest by a route FR-007 cannot see — `check-no-persistence.mjs`
  * scans this repository's source, not Chrome's.
  *
  * The value goes to the session model and nowhere else. It is not logged, not

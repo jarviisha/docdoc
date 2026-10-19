@@ -62,8 +62,8 @@ invocation's outcome, and these six cannot:
     (FR-069), so a flag here would be a flag for a concern this surface does not
     have.
 
-``DOCDOC_UI_ROOT``
-    Says where the browser client's built assets are. The command line serves
+``DOCDOC_CONSOLE_ROOT``
+    Says where the operations console's built assets are. The command line serves
     none, so the flag would name a directory nothing reads — the same shape of
     exclusion as ``DOCDOC_MAX_REQUEST_BYTES``.
 
@@ -153,12 +153,17 @@ _API_KEYS_FILE_ENV = "DOCDOC_API_KEYS_FILE"
 _DEFAULT_TENANT_ENV = "DOCDOC_DEFAULT_TENANT"
 
 #: Two settings that were read by the code and classified nowhere until Milestone
-#: 9's convergence. Neither is new — `DOCDOC_UI_ROOT` arrived with the viewer and
+#: 9's convergence. Neither was new — `DOCDOC_UI_ROOT` arrived with the viewer and
 #: `DOCDOC_GCV_CREDENTIALS` with the image OCR path — and both were invisible to
 #: the parity check below because that check reads a hand-maintained list of
-#: modules, and neither module was on it. The list is now checked against the
-#: code, so a third cannot hide the same way.
-_UI_ROOT_ENV = "DOCDOC_UI_ROOT"
+#: modules, and neither module was on it.
+#:
+#: **It happened again, and ADR-0020 is what found it.** `DOCDOC_CONSOLE_ROOT`
+#: arrived with Milestone 11, was never added to that list, and so was never
+#: classified either — the same hole, in the same list, two milestones later. It
+#: takes `DOCDOC_UI_ROOT`'s place below because it takes the viewer's place in
+#: the code.
+_CONSOLE_ROOT_ENV = "DOCDOC_CONSOLE_ROOT"
 _GCV_CREDENTIALS_ENV = "DOCDOC_GCV_CREDENTIALS"
 
 #: The docstring's table, as data. Declared so the parity check can read it
@@ -241,9 +246,9 @@ ENVIRONMENT_ONLY: dict[str, str] = {
         "names a credential file and enables HTTP authentication; the command line "
         "and the library require no credential in any configuration (FR-069)"
     ),
-    _UI_ROOT_ENV: (
-        "says where the browser client's built assets are; the command line serves "
-        "none, so the flag would name a directory nothing reads"
+    _CONSOLE_ROOT_ENV: (
+        "says where the operations console's built assets are; the command line "
+        "serves none, so the flag would name a directory nothing reads"
     ),
     "DOCDOC_LIMIT_SUBMISSIONS_PER_MINUTE": (
         "a per-tenant limit enforced at HTTP submission; the command line "
@@ -337,6 +342,18 @@ ENVIRONMENT_ONLY: dict[str, str] = {
         "sweeps and by the route that records one, so it belongs to the "
         "deployment -- and `docdoc sweep`'s own `--retention-days` is the run's, "
         "which is a different deadline on purpose"
+    ),
+    # Milestone 12 (the OCR gateway, ADR-0021 §3). Names a file of configured
+    # endpoints, each optionally carrying an `Authorization` or similar header
+    # -- a credential by another name, and the same reason `DOCDOC_API_KEYS_FILE`
+    # has no flag (FR-042). It is also a list, like `DOCDOC_LIMITS_FILE`: a flag
+    # cannot carry one, and every process in a deployment must agree on which
+    # endpoints exist.
+    "DOCDOC_OCR_ENDPOINTS_FILE": (
+        "names a file of configured OCR endpoints, each able to carry a "
+        "credential header; the command line requires no credential in any "
+        "configuration (FR-042), and a deployment's set of endpoints must agree "
+        "across every process rather than vary by invocation"
     ),
 }
 

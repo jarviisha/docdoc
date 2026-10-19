@@ -18,6 +18,7 @@ useful thing to be told (FR-018).
 from __future__ import annotations
 
 import importlib.util
+import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -29,7 +30,13 @@ if TYPE_CHECKING:
 
     from docdoc.ingest.parser import Parser
 
-__all__ = ["DEFAULT_PRIORITY", "ParserRegistry", "RegistryEntry", "default_registry"]
+__all__ = [
+    "DEFAULT_PRIORITY",
+    "ParserRegistry",
+    "RegistryEntry",
+    "default_registry",
+    "validate_configured_endpoints",
+]
 
 #: Offline before service-backed. A deployment reorders this; nothing in the
 #: code privileges one adapter over the other.
@@ -141,6 +148,50 @@ class ParserRegistry:
             ),
         )
 
+    def select_named(self, parser_id: str, require: CapabilityRequest) -> Parser:
+        """The parser a caller named, by id. Never a substitute (ADR-0021 §1).
+
+        Unlike ``select``, there is no tie-break and no second-best: an id a
+        deployment has not configured, one it has but cannot currently use, or
+        one that cannot serve this request all raise ``ParserCapabilityError``
+        naming exactly why -- never a quiet fall-through to whatever
+        capability-based selection would have picked instead.
+        """
+        candidates = tuple(
+            (entry.id, entry.available, entry.unavailable_reason) for entry in self.candidates_all()
+        )
+        entry = self._entries.get(parser_id)
+        if entry is None:
+            known = ", ".join(sorted(self._entries)) or "none configured"
+            raise ParserCapabilityError(
+                f"no parser named {parser_id!r} is configured; known parsers: {known}",
+                required=require.required_names(),
+                media_type=require.media_type,
+                candidates=candidates,
+            )
+        if not entry.available or entry.parser is None:
+            raise ParserCapabilityError(
+                f"parser {parser_id!r} is not available "
+                f"({entry.unavailable_reason or 'unavailable'})",
+                required=require.required_names(),
+                media_type=require.media_type,
+                candidates=candidates,
+            )
+        if not entry.capabilities.satisfies(require):
+            missing = entry.capabilities.missing_for(require)
+            detail = (
+                f"missing {', '.join(missing)}"
+                if missing
+                else f"does not serve media type {require.media_type}"
+            )
+            raise ParserCapabilityError(
+                f"parser {parser_id!r} cannot serve this request: {detail}",
+                required=require.required_names(),
+                media_type=require.media_type,
+                candidates=candidates,
+            )
+        return entry.parser
+
     def _explain(self, require: CapabilityRequest) -> str:
         matching = self.candidates(require)
         if matching:
@@ -205,12 +256,51 @@ def _register_service_parser(
     )
 
 
+def validate_configured_endpoints() -> None:
+    """Fail now, not on the first parse that needs it.
+
+    ``default_registry`` reads ``DOCDOC_OCR_ENDPOINTS_FILE`` and calls
+    ``load_endpoints`` on *every* call -- cheap when the file is fine, but a
+    malformed one used to surface only when some request happened to select
+    an OCR parser, as a `ValueError` with nobody watching for it (012
+    review, Finding 3). A process that starts -- the API or a worker -- calls
+    this once, up front, so the same `ValueError` -- file path and entry
+    index, never a value -- is a startup failure an operator sees in the log
+    that refused to come up, instead of a 502 on whichever request drew the
+    short straw first.
+
+    Does nothing when the variable is unset, which is most deployments: no
+    endpoints file means nothing here to validate, exactly as
+    ``default_registry`` itself treats it.
+    """
+    from docdoc.ingest.parsers import paddlex
+
+    endpoints_path = os.environ.get(paddlex.ENDPOINTS_FILE_ENV)
+    if endpoints_path:
+        paddlex.load_endpoints(endpoints_path)
+
+
 def default_registry(priority: Sequence[str] | None = None) -> ParserRegistry:
     """A registry holding whichever adapters this installation can use.
 
     An adapter whose extra is missing, or whose credentials are not configured,
     is recorded as unavailable rather than omitted.
     """
+    from docdoc.ingest.parsers import paddlex
+
+    endpoints_path = os.environ.get(paddlex.ENDPOINTS_FILE_ENV)
+    endpoints = paddlex.load_endpoints(endpoints_path) if endpoints_path else ()
+
+    if priority is None and endpoints:
+        # The gateway design says configured endpoints extend
+        # `DEFAULT_PRIORITY` "by configuration" -- and the configuration
+        # that expresses an order is the order the file lists them in, not
+        # the alphabetical tie-break `_rank` falls back to for two entries
+        # tied at the same position. Listing `tesseract` before `paddle`
+        # is how a deployment ranks `tesseract` first between the two
+        # (012 review, Finding 13).
+        priority = (*DEFAULT_PRIORITY, *(endpoint.id for endpoint in endpoints))
+
     registry = ParserRegistry(priority)
 
     try:
@@ -244,5 +334,20 @@ def default_registry(priority: Sequence[str] | None = None) -> ParserRegistry:
         sdk_module="google.cloud.vision",
         configured=gcv.credentials_available(),
     )
+
+    # Configuration, not code (ADR-0021 §3): one `PaddleXParser` instance per
+    # endpoint the file names, each immediately available for an image --
+    # there is no extra to install for that and no credential beyond what
+    # the endpoint's own `headers` already carry. A **PDF** is a different
+    # story: without `docdoc[ocr]` (`pypdfium2`) the adapter cannot learn a
+    # PDF's page count and therefore cannot prove a result is complete, so
+    # it refuses one with a typed error rather than sending it (012 review,
+    # Finding 9; `paddlex._pdf_chunks`). `load_endpoints` is strict and
+    # raises rather than silently skipping a malformed entry, so a
+    # deployment error surfaces here rather than as a confusing selection
+    # failure later -- and `validate_configured_endpoints` above exists so
+    # that it surfaces at process start rather than on the first request.
+    for endpoint in endpoints:
+        registry.register(paddlex.PaddleXParser(endpoint))
 
     return registry

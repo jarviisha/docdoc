@@ -168,13 +168,21 @@ Then every route except `/healthz` and `/readyz` requires
 tenant sees only its own blobs, runs, and results — cross-tenant reads return
 responses byte-identical to those for an identifier that never existed.
 
-**Every route** means every one: `/ui`, `/docs`, `/redoc` and `/openapi.json`
-included. The two probes are the whole exemption list, because kubelet and an
-ELB target group issue a bare request and requiring a key there would make an
-authenticated deployment permanently unhealthy. One consequence is worth knowing
-before you turn it on: a browser cannot send a bearer token, so **the viewer is
-unavailable on an authenticated deployment** — it fails at the door instead of
-loading and then failing on every call it makes.
+**Every route** means every one: `/docs`, `/redoc` and `/openapi.json` included.
+The probes are joined by one more exemption, `/console`, and by nothing else.
+Two probes because kubelet and an ELB target group issue a bare request and
+requiring a key there would make an authenticated deployment permanently
+unhealthy; `/console` because a browser's top-level navigation cannot carry a
+bearer token, and the console's premise is that an operator pastes a key **into
+a page that has already loaded**. What is exempt there is HTML, CSS and
+JavaScript — every `/v1` call the page makes is authenticated like any other
+client's.
+
+This is also what ended the grounding viewer. It had no credential entry, so
+there was nothing to exempt and nothing to paste: `/ui` simply required a key a
+browser could not send, and the interface was unavailable rather than protected
+on every deployment that turned authentication on. See
+[ADR-0020](../docs/adr/0020-retire-the-grounding-viewer.md).
 
 The file holds hashes and never keys, so a leak of it is not a set of working
 credentials. There is no flag and there never will be: `argv` is readable by
@@ -292,34 +300,39 @@ Behind a second extra, and absent unless you ask for it:
 
 ```bash
 pip install 'docdoc[api,ui]'
-# then open http://127.0.0.1:8000/ui/
+# then open http://127.0.0.1:8000/console/
 ```
 
-Read-only: it shows which page and which rectangle each value came from and says plainly when there is
-none. Three things to know before exposing it.
+The **operations console**: what ran, which credentials exist, what to erase. It is about the
+deployment rather than about a document — there is no reviewer assignment, no review queue, no
+workload, no review state and no disposition, and a build check greps for all five.
 
-**With no key file configured it is unauthenticated, so anyone who can reach it can spend your
-provider budget.** That is the default and it is unchanged from Milestone 8 — authentication exists
-now, and a deployment that has not enabled it is exactly as exposed as it always was.
+**Its shell loads without a credential and that is the only place docdoc does that** — see the
+Authentication section above for why, and for what is and is not exempt.
 
-**With a key file configured the viewer does not work at all.** `/ui` requires a credential like
-everything except the two probes, and a browser has no way to send a bearer token, so the interface is
-unavailable to it. That is the honest failure rather than a new limitation: before, the page loaded
-and then every `/v1` call it made was refused. A viewer usable under authentication needs a session
-mechanism this milestone deliberately does not add.
+**You paste your key into the page, and a reload asks again.** No login route, no cookie, no session
+record. An idle tab discards the key after fifteen minutes.
 
-**A run continues after the page is closed**, because closing a browser stops the waiting and not the
-work. If a proxy sits in front, allow a request duration at least as long as your slowest extraction,
-or it will terminate runs you have already paid for.
+**With no key file configured the console works with no key at all**, and says which mode it is in
+rather than presenting a field that checks nothing. That is the default, and a deployment that has
+not enabled authentication is exactly as exposed as it always was — anyone who can reach it can spend
+your provider budget.
 
-The interface belongs on a trusted network. docdoc ships no `serve` command, so it cannot pick a safer
-bind address for you.
+**Without the administrative scope, the credentials and erasure areas are invisible.** The API
+answers `404` rather than `403`, so they are indistinguishable from not existing.
+
+It belongs on a trusted network. docdoc ships no `serve` command, so it cannot pick a safer bind
+address for you, and for single sign-on you put an authenticating proxy in front of it.
+
+**There is no browser surface for grounding.** There was one, at `/ui`; it is retired (ADR-0020).
+`POST /v1/extract` is unchanged and returns the boxes — see
+[`examples/view_grounding.md`](view_grounding.md).
 
 ## See also
 
 - [`contracts/http-api.md`](../specs/007-pipeline-api-cli/contracts/http-api.md) — the full contract
 - [`contracts/http-api-additions.md`](../specs/008-grounding-viewer/contracts/http-api-additions.md) — the two newer endpoints
-- [`docs/concepts/viewer.md`](../docs/concepts/viewer.md) — how the viewer works, and what carries no test
+- [`docs/concepts/console.md`](../docs/concepts/console.md) — how the console works, and what carries no test
 - [`docs/concepts/pipeline.md`](../docs/concepts/pipeline.md) — why a job needs no queue
 - [`docs/concepts/runs.md`](../docs/concepts/runs.md) — the two identities, redelivery, and the limits of cancellation
 - [`examples/submit_async_run.py`](submit_async_run.py) — submit and poll to completion, runnable

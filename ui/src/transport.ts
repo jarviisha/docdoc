@@ -6,15 +6,36 @@
  * decision: it does not choose a path, a method, a query or a body, and it must
  * not start.
  *
- * It exists because of what SC-013 actually claims: that across the full set of
- * user actions, zero requests are constructed that write to a store. That is
- * only a guarantee if construction happens in one tested place, and until T083
- * a component was still assembling the URL and calling `fetch` itself — so the
- * claim rested on nobody adding a second call site. `check-model-boundary.mjs`
- * now fails if one appears under `src/components/`.
+ * It exists because a single call site is what makes the request surface
+ * checkable: the set of requests this application can construct is the set
+ * `console/model/client.ts` enumerates, and that is only true while nothing else
+ * calls `fetch`. `check-model-boundary.mjs` fails if a second call site appears
+ * under `src/console/components/`.
+ *
+ * `RequestPlan` and `toUrl` live here rather than in a model file because the
+ * viewer was removed (ADR-0020) and they were the only part of its
+ * `src/model/client.ts` the console ever used. A module holding two declarations
+ * for one importer is a module that exists to be deleted.
  */
 
-import { toUrl, type RequestPlan } from "./model/client.ts";
+export interface RequestPlan {
+  method: "GET" | "POST" | "DELETE";
+  path: string;
+  query: Record<string, string>;
+  hasBody: boolean;
+}
+
+/**
+ * The URL a plan addresses.
+ *
+ * Pure, and separate from `send`, because assembling a URL is a decision about
+ * where a request goes and `send` decides nothing. Tested through
+ * `console/model/client.ts`, which is where every plan is built.
+ */
+export function toUrl(plan: RequestPlan): string {
+  const query = new URLSearchParams(plan.query).toString();
+  return query === "" ? plan.path : `${plan.path}?${query}`;
+}
 
 export interface Response {
   ok: boolean;

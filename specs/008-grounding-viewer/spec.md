@@ -4,7 +4,19 @@
 
 **Created**: 2026-08-25
 
-**Status**: Implemented
+**Status**: Implemented; browser surface retired 2026-09-15 by [ADR-0020](../../docs/adr/0020-retire-the-grounding-viewer.md)
+
+> **What "retired" means here, precisely.** The viewer this document specifies was built, shipped,
+> and has been removed. Its two HTTP endpoints — `POST /v1/extract` (ADR-0012) and `GET /v1/schemas`
+> — are **unchanged and in use**, as are its view-model boundary, its no-persistence rule, and its
+> asset-location machinery, all of which now serve the operations console.
+>
+> The status vocabulary below has no word for this. `Superseded by NNN-name` would be wrong: no
+> later spec replaced the viewer, and nothing took over what it did. The requirements about the
+> browser surface — the overlay, the geometry states, the file picker, the read-only fence — describe
+> something that no longer exists, and the ones about the endpoints and the packaging describe
+> something that does. ADR-0020 §1 and §2 say which is which, and this line exists so a reader does
+> not have to find that out by grepping for `ui/src/components/`.
 
 <!--
   Status vocabulary, and who moves it. Every spec in this repository read "Draft"

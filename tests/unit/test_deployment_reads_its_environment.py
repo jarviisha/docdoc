@@ -22,14 +22,16 @@ Three refusals are asserted here rather than three conveniences:
 
 from __future__ import annotations
 
+import re
 import sys
 
 import pytest
 
 pytest.importorskip("fastapi", reason="the HTTP interface lives behind the docdoc[api] extra")
 
-from docdoc.api.app import _configured_run_queue, _default_deployment
+from docdoc.api.app import _configured_run_queue, _default_deployment, build_app
 from docdoc.api.settings import RUN_DATABASE_URL_ENV, STORE_ROOT_ENV
+from docdoc.ingest.parsers.paddlex import ENDPOINTS_FILE_ENV
 
 #: Never connected to. `_configured_run_queue` hands `PostgresRunQueue` a
 #: *factory*, so a queue is built without a socket — which is the property that
@@ -104,3 +106,33 @@ def test_a_store_root_is_read_from_the_environment(
         "not seen; one given store instances cannot, and refuses to start with "
         "authentication on"
     )
+
+
+# -- the OCR endpoints file (012 review, Finding 3) ---------------------------
+
+
+def test_a_malformed_endpoints_file_refuses_to_build(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bad `DOCDOC_OCR_ENDPOINTS_FILE` must not wait for the first OCR
+    request to be noticed -- `parser_registry()` would otherwise re-read and
+    re-raise the identical `ValueError` on every single one, unlogged
+    anywhere a startup failure is."""
+    config = tmp_path / "endpoints.json"
+    config.write_text("not json")
+    monkeypatch.setenv(ENDPOINTS_FILE_ENV, str(config))
+
+    with pytest.raises(ValueError, match=re.escape(str(config))):
+        build_app()
+
+
+def test_a_deployment_with_no_endpoints_file_is_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Most deployments set no `DOCDOC_OCR_ENDPOINTS_FILE` at all -- the new
+    startup check must cost those nothing and must not refuse to build."""
+    monkeypatch.delenv(ENDPOINTS_FILE_ENV, raising=False)
+
+    deployment = _default_deployment()
+
+    assert deployment.has_store is False

@@ -47,7 +47,9 @@ import {
   initialListing,
   isEmpty,
   loaded,
+  toFailure,
   toPage,
+  type RunFailure,
   type RunSummary,
 } from "../model/runs.ts";
 
@@ -228,6 +230,7 @@ function RunDetail({
 }) {
   const [delivery, setDelivery] = useState<Delivery | null>(null);
   const [routing, setRouting] = useState<string | null>(null);
+  const [failure, setFailure] = useState<RunFailure | null>(null);
   const [removed, setRemoved] = useState<{ deletedAt: string; policy: string } | null>(null);
 
   useEffect(() => {
@@ -238,6 +241,10 @@ function RunDetail({
         // configured rather than sending null, and a section headed "Routing"
         // with nothing under it is a second way of saying "not configured".
         setRouting(body.routing?.outcome ?? null);
+        // Why it failed, which this view did not show at all until it was
+        // noticed that US2 scenario 7 and SC-015 both depend on it. Read in the
+        // model, like the tombstone below, so the requirement has coverage.
+        setFailure(toFailure(answer.body));
         return;
       }
       // The model classified the `410` and read the tombstone; this only shows
@@ -260,6 +267,28 @@ function RunDetail({
       </HStack>
 
       <Code>{run.run_id}</Code>
+
+      {failure === null ? null : (
+        // US2 scenario 7, FR-039. A class name and a stage, exactly as the
+        // deployment produced them — no message, because the route sends none
+        // and a provider's message may quote the document it choked on.
+        //
+        // A banner rather than a row in the card below, because SC-015 times an
+        // operator answering "why did it fail?" and the answer should not be the
+        // fifth line of a metadata list. Announced for the same reason the
+        // removal is (FR-045b).
+        <div role="status" aria-live="polite">
+          <Banner
+            status="error"
+            title={
+              failure.stage === null
+                ? "This run failed before any stage ran"
+                : `This run failed at the ${failure.stage} stage`
+            }
+            description={failure.errorClass}
+          />
+        </div>
+      )}
 
       {removed === null ? null : (
         // FR-023: when, under which policy, and nothing else about what it held.

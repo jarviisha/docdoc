@@ -91,11 +91,16 @@ def test_no_new_optional_extra_was_added_for_evaluation() -> None:
     # `postgres` and `s3`: infrastructure the sanctioned stack names, opted into by
     # a deployment that wants it. Scoring is not gated by it, which is what this
     # test is actually about.
+    #
+    # `ocr` was added by the OCR gateway's Task 3 for the PaddleX-protocol
+    # adapter's PDF splitting (pypdfium2). It is a parser extra like `pdf`,
+    # `azure`, and `gcv` above, and scoring is not gated by it either.
     assert extras == {
         "pdf",
         "azure",
         "google",
         "gcv",
+        "ocr",
         "api",
         "ui",
         "postgres",

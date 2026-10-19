@@ -133,7 +133,17 @@ class ProviderError(IngestError):
     attempt (ING-21).
     """
 
-    REASONS = frozenset({"timeout", "deadline", "rate_limit", "auth", "transport", "service"})
+    #: ``incomplete`` is deliberately absent from ``TRANSIENT_REASONS``: a
+    #: short page count means the service already answered, in full, with
+    #: fewer pages than it was sent (PaddleX's own silent-truncation mode,
+    #: record.py). Retrying sends the identical request and, for a
+    #: deterministic truncation, gets the identical short answer back --
+    #: three attempts at the same wrong result, rather than failing on the
+    #: first (012 review, Finding 5; was ``"service"``, which the retry loop
+    #: treats as transient).
+    REASONS = frozenset(
+        {"timeout", "deadline", "rate_limit", "auth", "transport", "service", "incomplete"}
+    )
     TRANSIENT_REASONS = frozenset({"timeout", "rate_limit", "transport", "service"})
 
     def __init__(

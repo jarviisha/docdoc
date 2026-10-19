@@ -17,6 +17,7 @@ import {
   initialListing,
   isEmpty,
   loaded,
+  toFailure,
   toPage,
 } from "../../src/console/model/runs.ts";
 
@@ -92,4 +93,33 @@ test("a malformed body becomes an empty page rather than a crash", () => {
   assert.deepEqual(toPage(null), { runs: [], next_cursor: null });
   assert.deepEqual(toPage({ runs: "nope", next_cursor: 7 }), { runs: [], next_cursor: null });
   assert.deepEqual(toPage({ runs: [], next_cursor: "c" }), { runs: [], next_cursor: "c" });
+});
+
+// -- why a run failed ---------------------------------------------------------
+//
+// The detail view read one field of the detail body — `routing` — and showed a
+// failed run as a red badge over four timestamps. US2 scenario 7 and SC-015 both
+// need the reason, and the route has always sent it.
+
+test("a failed run reports its stage and its error class", () => {
+  const body = { status: "failed", failed_stage: "parse", error_class: "ParserCapabilityError" };
+  assert.deepEqual(toFailure(body), { stage: "parse", errorClass: "ParserCapabilityError" });
+});
+
+test("a run that failed before reaching a stage has no stage, and that is a fact", () => {
+  // An unresolvable schema fails a run with no stage having run. `null` is the
+  // distinction the API's own model draws, not a missing value to paper over.
+  const body = { status: "failed", failed_stage: null, error_class: "SchemaNotFound" };
+  assert.deepEqual(toFailure(body), { stage: null, errorClass: "SchemaNotFound" });
+});
+
+test("a succeeded run reports no failure", () => {
+  assert.equal(toFailure({ status: "succeeded", processing_id: "sha256:abc" }), null);
+});
+
+test("a malformed or empty body reports no failure rather than an empty label", () => {
+  assert.equal(toFailure(null), null);
+  assert.equal(toFailure("nope"), null);
+  assert.equal(toFailure({ error_class: "" }), null);
+  assert.equal(toFailure({ error_class: 7 }), null);
 });

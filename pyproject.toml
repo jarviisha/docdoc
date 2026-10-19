@@ -52,6 +52,20 @@ google = ["google-genai>=1.0"]
 # shared vendor: they are different SDKs serving different layers -- extraction
 # and ingest -- and a deployment wanting one has no reason to install the other.
 gcv = ["google-cloud-vision>=3.4"]
+# PDF splitting for the PaddleX-protocol adapter (ADR-0021, Task 3): a long PDF
+# is cut into endpoint-sized sub-PDFs before it is sent. pypdfium2 is
+# Apache-2.0/BSD-3, not PyMuPDF (AGPL-3.0, the `pdf` extra's licence
+# caveat) -- so this extra carries none of that obligation, deliberately, for
+# the same adapter that also talks to the hand-written Tesseract shim, which
+# renders with the same library. Without it, a PDF cannot be sent at all: the
+# adapter cannot know the page count, and so cannot prove the result it gets
+# back is complete (see paddlex.py's `_pdf_chunks`).
+#
+# `>=5.0`, not `>=4.30`: `PdfiumError.err_code`, which is how `_pdf_chunks`
+# tells an encrypted PDF from a merely corrupt one, does not exist before
+# 5.0 (`getattr` there falls back to "corrupt" instead of crashing, but the
+# floor should not require that fallback to behave correctly).
+ocr = ["pypdfium2>=5.0"]
 # The HTTP interface of Milestone 7, confined to `docdoc.api` and enforced there
 # by the forbidden-imports contracts below, which name `fastapi` for every
 # deterministic layer. An extra rather than a base dependency for the same reason
@@ -137,6 +151,11 @@ dev = [
     "mypy>=1.10",
     "ruff>=0.5",
     "import-linter>=2.0",
+    # Only for `tests/unit/test_tesseract_server.py`: that server (packaging/ocr/tesseract/)
+    # renders pages with Pillow directly, same as pypdfium2's own `.to_pil()`. It is dev-only
+    # here because the server is a separate deployable with its own requirements.txt, not
+    # something `docdoc[dev]` ships into anyone's install.
+    "pillow>=10.0",
 ]
 
 # One console script, and only one. `docdoc` costs nothing because the CLI is
@@ -247,6 +266,13 @@ ignore_missing_imports = true
 # else.
 [[tool.mypy.overrides]]
 module = ["boto3", "boto3.*", "botocore.*"]
+ignore_missing_imports = true
+
+# pypdfium2 ships no py.typed marker either, and is imported lazily inside the
+# PaddleX adapter for the same reason boto3 is inside the S3 store: the extra
+# (`docdoc[ocr]`) may be absent. Missing stubs for one third party only.
+[[tool.mypy.overrides]]
+module = ["pypdfium2", "pypdfium2.*"]
 ignore_missing_imports = true
 
 # ---------------------------------------------------------------------------
@@ -573,6 +599,24 @@ forbidden_modules = [
     "urllib",
     "opentelemetry",
 ]
+# A third exception, added deliberately rather than found by the contract: the
+# PaddleX-protocol adapter (ADR-0021, Task 3) is the one place in `docdoc.ingest`
+# that is *meant* to reach the network with the standard library's own client,
+# per the design doc's own call ("the standard library HTTP client ... unless an
+# existing dependency is clearly better"). Unlike `observe` above, there is no
+# code change that removes the need -- sending a document to a configured
+# endpoint IS the feature -- so this is granted the same way the neighbouring
+# "provider SDKs stay inside parser adapters" contract grants `gcv -> google`:
+# scoped to exactly the one module, by name, so a second module reaching for
+# `urllib` still fails here.
+#
+# `http` joins it for the same module in fix round 1: translating a stalled
+# connection (a bare `TimeoutError`/`ConnectionResetError`, neither wrapped
+# by `urllib`) needs `http.client.HTTPException` in the `except` clause.
+ignore_imports = [
+    "docdoc.ingest.parsers.paddlex -> urllib",
+    "docdoc.ingest.parsers.paddlex -> http",
+]
 
 # Grounding is deterministic all the way down: no network, no credentials, no
 # provider, and no model call under any circumstance (FR-048). That is this
@@ -700,6 +744,7 @@ forbidden_modules = [
     "fitz",
     "azure",
     "google",
+    "pypdfium2",
 ]
 ignore_imports = [
     "docdoc.ingest.parsers.pdf_text -> pymupdf",
@@ -707,6 +752,7 @@ ignore_imports = [
     "docdoc.ingest.parsers.azure_di -> azure",
     "docdoc.ingest.parsers.azure_di -> httpx",
     "docdoc.ingest.parsers.gcv -> google",
+    "docdoc.ingest.parsers.paddlex -> pypdfium2",
 ]
 # The adapters arrive task by task; an ignore naming a module that does not
 # exist yet is expected, not a misconfiguration.

@@ -10,7 +10,7 @@
  * deployment already has and already rotates (ADR-0019 §4).
  *
  * Nothing here touches `localStorage`, `sessionStorage`, IndexedDB, or the Cache
- * API, and `check-readonly.mjs` fails the build if anything under `src/` does
+ * API, and `check-no-persistence.mjs` fails the build if anything under `src/` does
  * (FR-007, SC-004).
  *
  * Every decision lives in this file rather than in a component, because the

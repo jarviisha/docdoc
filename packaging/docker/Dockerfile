@@ -45,7 +45,13 @@ COPY src/ ./src/
 #
 # Opt-in, named in full at the command line, and therefore a licence decision
 # somebody made rather than one this file made for them.
-ARG DOCDOC_EXTRAS=api,postgres,s3,google,azure,gcv
+#
+# `ocr` carries none of that caveat and is in the default: it is pypdfium2
+# (Apache-2.0/BSD-3), needed by the PaddleX-protocol adapter (ADR-0021) to
+# send a PDF at all -- without it the adapter still serves images, but a PDF
+# of any length is refused, because the adapter cannot know the page count
+# and so cannot prove the result is complete.
+ARG DOCDOC_EXTRAS=api,postgres,s3,google,azure,gcv,ocr
 RUN uv pip install --system --no-cache ".[${DOCDOC_EXTRAS}]"
 
 # ---------------------------------------------------------------------------

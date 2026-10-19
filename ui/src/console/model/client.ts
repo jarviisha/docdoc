@@ -1,21 +1,20 @@
 /**
  * Every request the console can make, constructed here and nowhere else.
  *
- * **Its own file, deliberately.** `src/model/client.ts` exists to prove a
- * different thing: its `ALLOWED` set holds two paths and `writesToStore()`
- * asserts that the viewer never writes. Adding console intents there would
- * weaken Milestone 8's guarantee in order to make this code shorter — the exact
- * trade `check-model-boundary.mjs` exists to prevent (specs/011 research R5).
+ * It was one of two clients until the viewer was removed (ADR-0020) and is now
+ * the only one. The split it used to justify is gone; what it bought — one
+ * allow-list, checked over every intent — is not, and `ALLOWED` below is still
+ * the whole of it.
  *
- * One transport, two clients. The transport keeps FR-041's single network call
- * site; the two clients keep two allow-lists, each of which says something true.
+ * `src/transport.ts` executes a plan and decides nothing, which is FR-041's
+ * single network call site.
  *
  * **No intent puts the credential in a URL** (FR-008). It travels as a header,
  * supplied to `send` by the caller, because a URL lands in browser history,
  * proxy logs, and referrer headers.
  */
 
-import type { RequestPlan } from "../../model/client.ts";
+import type { RequestPlan } from "../../transport.ts";
 
 export type { RequestPlan };
 

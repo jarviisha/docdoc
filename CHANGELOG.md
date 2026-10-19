@@ -25,9 +25,9 @@ Milestone 10 without knowing this milestone would be measured against it, is unc
 
 ### Added
 
-- **The operations console**, served at `/console` from the `docdoc-ui` distribution's second build
-  tree. Run listing and detail, routing outcome, delivery record, credential issuance and revocation,
-  tenant and document erasure.
+- **The operations console**, served at `/console` from the `docdoc-ui` distribution. Run listing and
+  detail, routing outcome, delivery record, credential issuance and revocation, tenant and document
+  erasure.
 
   A run's **delivery attempts are listed**, not summarised: the sentence answers *was anyone told*
   and the operator's actual question is *what did they say*. An attempt that never got an answer
@@ -76,10 +76,69 @@ Milestone 10 without knowing this milestone would be measured against it, is unc
   key is entered. `tests/contract/test_tenant_isolation.py` names the third exemption explicitly and
   its test had to be renamed to admit it, which is the point of putting the count in the name.
 
-- **`docdoc.api.ui` now locates two surfaces** rather than one, through the same three-candidate
-  search. An installed root that is not on disk is no longer treated as present — that made an
-  unbuilt console in a checkout answer "reinstall the distribution", which was accurate about the
-  installed copy and useless to the developer standing in the repository.
+- **`docdoc.api.ui`'s three-candidate search is unchanged and now serves one surface.** It briefly
+  located two, through a `Surface` named tuple that ADR-0020 collapsed again — a parameter with one
+  argument is a reader asking "what else is there?" and finding nothing. An installed root that is
+  not on disk is no longer treated as present, which made an unbuilt console in a checkout answer
+  "reinstall the distribution": accurate about the installed copy and useless to the developer
+  standing in the repository.
+
+### Fixed
+
+- **A failed run now says why it failed.** `GET /v1/runs/{run_id}` has always carried `failed_stage`
+  and `error_class`; the console's detail view read one field of that body, `routing`, so opening a
+  failed run showed a red badge reading `failed` over four timestamps and no reason anywhere on the
+  screen. User Story 2 scenario 7 asks for exactly this and SC-015 times an operator finding it in
+  under three minutes.
+
+  **Nothing caught it, and what would have is the one task in the milestone still unticked.** Every
+  build guard checks what the console must *not* show; none checks what it must. T073 — hand someone
+  a key and a URL, time them to "here is why it failed" — is the only check with a human in it, and
+  the only one that could have found a screen missing a fact rather than carrying a forbidden one.
+
+  Read in the model (`toFailure`) rather than in the component, like the tombstone beside it, so the
+  requirement has coverage. A **class name and never a message**: that is what the route sends, and
+  the reason it is safe to show at all — a provider's message may quote the document it choked on,
+  which is why `RunStateResponse` carries no message field. `failed_stage` is `null` on a run that
+  failed before any stage ran, and the screen says so rather than naming a stage that did not run.
+
+  Both ends are pinned. `tests/contract/test_console_http_api.py` now asserts the detail body carries
+  both fields — the pair to the test asserting a *list row* carries neither, which is correct and was
+  the only one written. Rename either field and the console goes quiet, not red.
+
+### Removed
+
+- **The grounding viewer** (**ADR-0020**). `ui/` builds the operations console and nothing else, and
+  `/ui` is a `404` — not a `501` and not a gate.
+
+  It could not work on a deployment with authentication enabled, and said so in its own
+  documentation: `/ui` required a credential like every other route, a browser's top-level
+  navigation cannot carry one, and the interface was unavailable rather than protected. It worked on
+  exactly one kind of deployment — the unauthenticated one — and the repository paid for two browser
+  applications in every shared file: two vite configs, two entry points, two model trees, two
+  allow-lists, two mounts, two environment variables, two asset trees in one wheel.
+
+  **What was kept is the point.** The view-model boundary, the three-root asset search, and the
+  packaging split were written for the viewer and every word of them applies to the console.
+  `check-readonly.mjs` guarded two unrelated claims in one file and was **split rather than
+  deleted**: the read-only half lost its subject, and the no-persistence half — which is what keeps
+  the console's API key out of `localStorage` — survives as `check-no-persistence.mjs`, gaining a
+  cookie rule that ADR-0019 §4 had rejected by name with nothing watching for it.
+
+  `specs/011` FR-022b, FR-040 and SC-012 are marked retired in the spec rather than deleted. All
+  three constrained *Milestone 11's restraint* and were discharged when it shipped; a requirement
+  that quietly disappears is how a spec stops being a record of what was decided.
+
+  `pdfjs-dist` leaves the dependency tree. `DOCDOC_UI_ROOT` is gone, and its removal surfaced that
+  `DOCDOC_CONSOLE_ROOT` had never been added to the configuration parity check at all — the third
+  time that hand-maintained list has hidden a setting, and the note in `docdoc/cli/config.py` now
+  says so.
+
+  **The cost, stated plainly**: grounding can no longer be inspected in a browser. It was already
+  impossible for a *stored* run — the viewer held a two-path allow-list and no route serves a stored
+  document's bytes. What is lost is picking a file from your own disk and seeing the boxes drawn.
+  `POST /v1/extract` is untouched and returns them; `examples/view_grounding.md` shows how to read
+  them.
 
 ### Not added, and deliberately
 

@@ -122,10 +122,18 @@ def test_no_route_edits_a_result(client: TestClient) -> None:
             assert set(methods) <= {"get"}, f"{path} is writable: {sorted(methods)}"
 
 
-def test_the_viewer_has_no_write_path(client: TestClient) -> None:
-    """FR-084. The viewer stays read-only and gains nothing from this milestone."""
+def test_the_static_mount_has_no_write_path(client: TestClient) -> None:
+    """The served shell is bytes, and bytes are fetched.
+
+    This read `path.startswith("/ui")` and guarded the viewer's read-only claim
+    (specs/010 FR-084) until ADR-0020 removed the viewer — at which point it
+    asserted over an empty set, which is this repository's own definition of
+    proving nothing. Re-pointed rather than deleted: the console writes, but it
+    writes through `/v1/admin`, and its *static* prefix accepting anything but
+    `GET` would mean something had been mounted there that is not a build.
+    """
     for path, methods in _paths(client).items():
-        if path.startswith("/ui"):
+        if path.startswith("/console"):
             assert set(methods) <= {"get"}, f"{path} accepts {sorted(methods)}"
 
 

@@ -113,6 +113,13 @@ _UNSUPPORTED_BY_REASON = {
     "page_count": 413,
     "media_type": 415,
     "type": 415,
+    # Milestone 012, Finding 5: a configured OCR endpoint answering its own
+    # page limit with HTTP 413 is translated to this reason
+    # (`paddlex._from_http_error`). Without this entry it fell through to
+    # the 415 default -- "wrong type" -- for a document that was the right
+    # type and simply too long, which is the 413 every other over-length
+    # refusal in this table already gets.
+    "page_limit": 413,
 }
 
 

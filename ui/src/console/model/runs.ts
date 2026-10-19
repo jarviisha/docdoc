@@ -118,6 +118,54 @@ export function emptyNotice(state: ListingState): string {
     : `This tenant has no ${state.status} runs.`;
 }
 
+/**
+ * What a failed run reports about itself.
+ *
+ * **The thing the detail view did not show.** User Story 2 scenario 7 asks that
+ * an opened failed run report "the failure … in the typed, provider-neutral form
+ * the API already produces", and SC-015 times an operator finding a named failed
+ * run and stating *why it failed*. `GET /v1/runs/{run_id}` has carried
+ * `failed_stage` and `error_class` the whole time; nothing read them, so the
+ * screen showed a red badge saying `failed` and four timestamps. T073 — the one
+ * check with a human in it, and the only unticked box in the milestone — is what
+ * would have caught it.
+ *
+ * `stage` is `null` on a run that failed **before reaching a stage**, which the
+ * API's own model calls a real distinction rather than a missing value: an
+ * unresolvable schema fails a run without any stage having run.
+ *
+ * **A class name and never a message.** That is what the route sends and it is
+ * the reason this is safe to show at all: a provider's message may quote the
+ * document it choked on, and `RunStateResponse` carries no message field for
+ * exactly that reason. Passing the class through invents no vocabulary (FR-039)
+ * and discloses no content (FR-037).
+ */
+export interface RunFailure {
+  /** The stage that failed, or `null` if the run failed before one ran. */
+  stage: string | null;
+  /** The typed error's class name. Never a message, never document text. */
+  errorClass: string;
+}
+
+/**
+ * Read a run's failure from a detail body, or `null` if it reports none.
+ *
+ * Keyed on `error_class` rather than on `status === "failed"`: the status says
+ * the run failed and this says what the deployment recorded about it, and a
+ * failed run whose class never made it into the row should show nothing rather
+ * than an empty label. The two are different questions and the caller already
+ * has the first.
+ */
+export function toFailure(body: unknown): RunFailure | null {
+  if (typeof body !== "object" || body === null) return null;
+  const record = body as { failed_stage?: unknown; error_class?: unknown };
+  if (typeof record.error_class !== "string" || record.error_class === "") return null;
+  return {
+    stage: typeof record.failed_stage === "string" ? record.failed_stage : null,
+    errorClass: record.error_class,
+  };
+}
+
 /** Read a page from a response body without trusting its shape. */
 export function toPage(body: unknown): RunPage {
   if (typeof body !== "object" || body === null) return { runs: [], next_cursor: null };
