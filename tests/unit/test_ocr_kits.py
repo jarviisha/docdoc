@@ -68,6 +68,32 @@ def test_kits_pin_images() -> None:
         assert not image.endswith(":latest"), f"{image!r} is :latest"
 
 
+def test_kits_declare_restart_policy() -> None:
+    # Neither kit runs under any supervisor but docker itself: a host reboot
+    # or an OOM kill (the paddlex kit's own `mem_limit: 6g` exists precisely
+    # because that is an expected outcome, not a rare one, per the source
+    # host this kit is ported from) must bring the container back without a
+    # human watching for it.
+    service_line = re.compile(r"^  (\w[\w-]*):\n", re.M)
+    for compose_file in _KIT_COMPOSE_FILES:
+        text = compose_file.read_text(encoding="utf-8")
+        services_block = re.search(r"^services:\n(.*)", text, re.S | re.M)
+        assert services_block is not None, f"{compose_file} has no services: block"
+        body = services_block.group(1)
+        service_names = service_line.findall(body)
+        assert service_names, f"{compose_file} declares no services"
+
+        for index, name in enumerate(service_names):
+            start = body.index(f"  {name}:\n")
+            end = (
+                body.index(f"  {service_names[index + 1]}:\n")
+                if index + 1 < len(service_names)
+                else len(body)
+            )
+            block = body[start:end]
+            assert "restart:" in block, f"{compose_file}: service {name!r} has no restart policy"
+
+
 def test_main_compose_has_no_model_service() -> None:
     text = _MAIN_COMPOSE.read_text(encoding="utf-8")
     services_block = re.search(r"^services:\n(.*?)^volumes:", text, re.S | re.M)

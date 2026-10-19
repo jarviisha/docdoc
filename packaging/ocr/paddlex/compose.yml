@@ -18,6 +18,11 @@
 services:
   paddlex:
     image: ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlex/paddlex:paddlex3.3.11-paddlepaddle3.2.0-cpu
+    # The source host ran this with the same policy: `mem_limit: 6g` below
+    # means an OOM kill is an expected outcome here, not a rare one, and
+    # with no restart policy the container would simply stay dead after one
+    # -- or after a host reboot -- until someone noticed.
+    restart: unless-stopped
 
     environment:
       # Forced to the public index regardless of whatever pip config the
@@ -62,3 +67,17 @@ services:
     # changing either number should re-measure both limits.
     shm_size: 1gb
     mem_limit: 6g
+
+    # Same check packaging/ocr/tesseract/compose.yml's own service makes --
+    # PaddleX serving answers `GET /health` with `{"errorCode":0,...}`
+    # (paddlex-27-files.md), and `python` is already on this image, so no
+    # extra tool is needed to ask it. `start_period` is generous because
+    # first boot (the `command` above) installs the `serving` plugin and
+    # downloads this pipeline's models before `--serve` ever starts
+    # listening -- a slow network makes that minutes, not seconds.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2).status == 200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10m

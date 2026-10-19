@@ -44,6 +44,10 @@ recognition model, the language, or `max_num_input_imgs` is an edit to that
 file and a container restart -- and, for `max_num_input_imgs`, the matching
 edit to the endpoints file described below.
 
+CPU is unbounded by default -- the production host this kit is ported from
+ran it with `cpus: 6`; add the same key under this kit's `paddlex` service
+in `compose.yml` to cap it.
+
 ## Register it in docdoc's endpoints file
 
 `docdoc` finds a PaddleX-protocol endpoint through

@@ -10,6 +10,11 @@
 
 services:
   tesseract-ocr:
+    # Same gap as packaging/ocr/paddlex/compose.yml's own service, and the
+    # same fix: this replaces a service that ran with this policy on the
+    # same host, so a crash or a reboot must not require a human to bring
+    # it back.
+    restart: unless-stopped
     build:
       context: .
       dockerfile: Dockerfile
