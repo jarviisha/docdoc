@@ -1,0 +1,13 @@
+# Pinned, not ranged: this directory is a separate deployable with its own
+# build, and `docdoc`'s own `uv.lock` says nothing about it. A floor (`>=`)
+# here would let a future `pip install` pick up whatever is newest on the
+# day an image happens to rebuild -- exactly the un-reproducible-build
+# failure the repository's other pins (docdoc-ui, the MinIO image in
+# packaging/docker/compose.yml) already exist to avoid.
+fastapi==0.141.1
+uvicorn==0.52.4
+# PDF rendering -- the same library `docdoc[ocr]` uses, Apache-2.0/BSD-3
+# rather than PyMuPDF's AGPL-3.0 (see pyproject.toml's `ocr` extra).
+pypdfium2==5.14.0
+# Renders pages to PNG for tesseract, and JPEG for `visualize`'s preview.
+pillow==13.0.0

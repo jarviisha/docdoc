@@ -151,6 +151,11 @@ dev = [
     "mypy>=1.10",
     "ruff>=0.5",
     "import-linter>=2.0",
+    # Only for `tests/unit/test_tesseract_server.py`: that server (packaging/ocr/tesseract/)
+    # renders pages with Pillow directly, same as pypdfium2's own `.to_pil()`. It is dev-only
+    # here because the server is a separate deployable with its own requirements.txt, not
+    # something `docdoc[dev]` ships into anyone's install.
+    "pillow>=10.0",
 ]
 
 # One console script, and only one. `docdoc` costs nothing because the CLI is

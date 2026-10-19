@@ -1,0 +1,30 @@
+# Run with:
+#   docker compose -f packaging/ocr/tesseract/compose.yml up -d --build
+#
+# Published on localhost only, same as .27's own deployment and
+# packaging/docker/compose.yml's own services: this has no TLS and no
+# authentication of its own, so it must never be reachable from outside the
+# host directly. Front it with a TLS- and auth-terminating reverse proxy
+# (the same role nginx plays on .27) before pointing docdoc's
+# `DOCDOC_OCR_ENDPOINTS_FILE` -- or mmerp -- at anything but localhost.
+
+services:
+  tesseract-ocr:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports: ["127.0.0.1:8081:8080"]
+    environment:
+      # Both languages the shim's host ever served. A deployment serving one
+      # language narrows this; one serving a third adds the matching
+      # `tesseract-ocr-<code>` package to the Dockerfile first.
+      TESSERACT_LANGS: ${TESSERACT_LANGS:-vie+eng}
+      # Unset: no page cap, unlike the shim's hard-coded `MAX_PAGES = 3`.
+      # Set a number to have the server refuse (413, not truncate) any
+      # document longer than that instead of reading all of it.
+      MAX_PAGES: ${MAX_PAGES:-}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2).status == 200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
