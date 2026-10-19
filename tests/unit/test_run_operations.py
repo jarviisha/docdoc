@@ -22,6 +22,7 @@ same as every other test that needs infrastructure.
 from __future__ import annotations
 
 import argparse
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -325,7 +326,7 @@ class TestTheWorkerCommandRefusesBeforeItStarts:
 
         settings = type("S", (), {"run_database_url": "postgresql://x/y", "has_store": True})()
 
-        with pytest.raises(ValueError, match=str(config)):
+        with pytest.raises(ValueError, match=re.escape(str(config))):
             worker.run(_args(), settings)  # type: ignore[arg-type]
 
     def test_the_worker_id_names_a_host_and_a_process(self) -> None:

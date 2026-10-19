@@ -268,6 +268,13 @@ ignore_missing_imports = true
 module = ["boto3", "boto3.*", "botocore.*"]
 ignore_missing_imports = true
 
+# pypdfium2 ships no py.typed marker either, and is imported lazily inside the
+# PaddleX adapter for the same reason boto3 is inside the S3 store: the extra
+# (`docdoc[ocr]`) may be absent. Missing stubs for one third party only.
+[[tool.mypy.overrides]]
+module = ["pypdfium2", "pypdfium2.*"]
+ignore_missing_imports = true
+
 # ---------------------------------------------------------------------------
 # pytest
 # ---------------------------------------------------------------------------

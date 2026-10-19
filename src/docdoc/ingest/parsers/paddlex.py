@@ -75,6 +75,7 @@ from __future__ import annotations
 import base64
 import datetime as dt
 import email.utils
+import functools
 import http.client
 import importlib.util
 import io
@@ -691,7 +692,10 @@ def _post_over_the_wire(
         raise failure
 
     try:
-        return json.loads(raw)
+        # Annotated rather than returned bare: `json.loads` is `Any`, and the
+        # shape is checked where it is read (`pages_of`), not here.
+        decoded: Mapping[str, Any] = json.loads(raw)
+        return decoded
     except ValueError:
         # `ValueError`, not `json.JSONDecodeError`: non-UTF-8 bytes raise
         # `UnicodeDecodeError` inside `json.loads` before it ever gets to
@@ -789,8 +793,6 @@ def _retry_after_seconds(value: str) -> float | None:
     try:
         parsed = email.utils.parsedate_to_datetime(value)
     except (TypeError, ValueError, OverflowError):
-        return None
-    if parsed is None:
         return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=dt.UTC)
@@ -933,9 +935,7 @@ class PaddleXParser:
         pages: list[OcrPage] = []
         for data, expected_pages in self._pdf_chunks(source):
             chunk_pages = analyze_with_retries(
-                lambda src, tr, dl, data=data, expected_pages=expected_pages: self._send(
-                    data, _FILE_TYPE_PDF, expected_pages, src, tr, dl
-                ),
+                functools.partial(self._send, data, _FILE_TYPE_PDF, expected_pages),
                 source=source,
                 transport=transport,
                 parser_id=self.id,

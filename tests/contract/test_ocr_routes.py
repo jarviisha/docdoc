@@ -56,10 +56,22 @@ def _no_sockets(monkeypatch: pytest.MonkeyPatch) -> None:
     test made up.
     """
 
-    def _refuse_connect(*args: object, **kwargs: object) -> None:
+    real_connect = socket.socket.connect
+
+    def _refuse_connect(self: socket.socket, address: Any, *args: Any, **kwargs: Any) -> Any:
+        # Loopback stays open: on Windows the event loop TestClient starts
+        # builds its self-pipe with the emulated `socket.socketpair`, which
+        # connects to 127.0.0.1. Refusing that broke every test here on
+        # Windows while proving nothing -- no endpoint in this file is local.
+        host = address[0] if isinstance(address, tuple) else address
+        if host in _LOOPBACK:
+            return real_connect(self, address, *args, **kwargs)
         raise OSError("tests/contract/test_ocr_routes.py opens no real socket")
 
     monkeypatch.setattr(socket.socket, "connect", _refuse_connect)
+
+
+_LOOPBACK = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
 def _endpoint(

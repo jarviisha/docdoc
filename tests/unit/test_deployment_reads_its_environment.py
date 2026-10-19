@@ -22,6 +22,7 @@ Three refusals are asserted here rather than three conveniences:
 
 from __future__ import annotations
 
+import re
 import sys
 
 import pytest
@@ -121,7 +122,7 @@ def test_a_malformed_endpoints_file_refuses_to_build(
     config.write_text("not json")
     monkeypatch.setenv(ENDPOINTS_FILE_ENV, str(config))
 
-    with pytest.raises(ValueError, match=str(config)):
+    with pytest.raises(ValueError, match=re.escape(str(config))):
         build_app()
 
 
