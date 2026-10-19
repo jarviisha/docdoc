@@ -11,7 +11,7 @@ somewhere outside this test run.
 
 `test_no_secret_in_parsers_or_errors` -- Review Focus 3's HTTP half -- still
 exercises the *real* translation path for the one case that matters most: a
-monkeypatched `urllib.request.urlopen` raises the same `HTTPError` a real
+monkeypatched `paddlex._OPENER.open` raises the same `HTTPError` a real
 service would, so the 502 body is produced by `PaddleXParser`'s actual
 `_post_over_the_wire`/`_from_http_error`, not by a fake `post=` that only
 proves the HTTP route itself adds nothing.
@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import socket
 import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +36,7 @@ from docdoc.api.auth import KeyRing
 from docdoc.artifacts import BlobStore, FileArtifactStore
 from docdoc.ingest.capabilities import ParserCapabilities
 from docdoc.ingest.errors import ProviderError
+from docdoc.ingest.parsers import paddlex
 from docdoc.ingest.parsers.paddlex import OcrEndpoint, PaddleXParser
 from docdoc.ingest.registry import ParserRegistry
 from docdoc.ingest.source import JPEG, PDF, PNG
@@ -49,7 +49,7 @@ def _no_sockets(monkeypatch: pytest.MonkeyPatch) -> None:
     """Nothing in this file may open a real connection.
 
     Every test here is expected to stub `.probe` and to route `post` through a
-    fake or through a monkeypatched `urlopen` -- never through a real socket.
+    fake or through a monkeypatched `paddlex._OPENER.open` -- never through a real socket.
     This is the backstop for the one that matters: a `PaddleXParser` built from
     a secret-bearing `OcrEndpoint` whose `.probe` or `post` was left real would
     otherwise send `Basic SEKRIT` to whatever actually answers at the host the
@@ -289,16 +289,16 @@ def test_no_secret_in_parsers_or_errors(monkeypatch: pytest.MonkeyPatch) -> None
     for leak in SECRETS:
         assert leak not in unknown.text
 
-    # Nor when the real transport actually fails. `urlopen` is monkeypatched
-    # rather than `post=`, so this exercises `PaddleXParser`'s own
-    # `_post_over_the_wire` / `_from_http_error` translation -- the real
+    # Nor when the real transport actually fails. The adapter's own opener is
+    # monkeypatched rather than `post=`, so this exercises `PaddleXParser`'s
+    # own `_post_over_the_wire` / `_from_http_error` translation -- the real
     # `HTTPError` carries `SECRET_URL` on itself, and it still must not reach
     # the response, because `_from_http_error` reads only `.code` and
     # `.headers`, never `.url` or `.filename`.
-    def fake_urlopen(request: Any, timeout: float | None = None) -> Any:
+    def fake_open(request: Any, timeout: float | None = None) -> Any:
         raise urllib.error.HTTPError(SECRET_URL, 500, "boom", None, None)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(paddlex._OPENER, "open", fake_open)
     failure = client.post("/v1/ocr", params={"parser": "secret"}, content=IMAGE)
     assert failure.status_code == 502
     for leak in SECRETS:

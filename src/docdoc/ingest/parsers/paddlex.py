@@ -613,15 +613,15 @@ class _NoRedirects(urllib.request.HTTPRedirectHandler):
         raise urllib.error.HTTPError(req.full_url, code, msg, headers, fp)
 
 
-#: Installed once, at import time, as the opener every bare
-#: ``urllib.request.urlopen`` call in this process uses from here on --
-#: ``_post_over_the_wire`` and ``probe`` are the two and only callers of it
-#: in docdoc (the import-linter contract confines ``urllib`` to this
-#: module), so there is nothing else in the process this could affect.
-#: ``build_opener`` with a subclass of a default handler *replaces* that
-#: default instance rather than running both (its own documented behaviour),
-#: so this is the one and only redirect policy ``urlopen`` has afterwards.
-urllib.request.install_opener(urllib.request.build_opener(_NoRedirects()))
+#: This module's own opener, used by ``_post_over_the_wire`` and ``probe``
+#: and by nothing else. **Not installed process-wide**: docdoc is also a
+#: library, and ``install_opener`` would change redirect handling for every
+#: bare ``urlopen`` in the host application -- while any opener the host
+#: installed afterwards would silently take the refusal away again and
+#: resend the credential. ``build_opener`` with a subclass of a default
+#: handler *replaces* that default rather than running both, so
+#: ``_NoRedirects`` is the only redirect policy this opener has.
+_OPENER = urllib.request.build_opener(_NoRedirects())
 
 
 def _post_over_the_wire(
@@ -665,7 +665,7 @@ def _post_over_the_wire(
     failure: ProviderError | UnsupportedDocumentError | None = None
     raw = b""
     try:
-        with urllib.request.urlopen(request, timeout=timeout_s) as response:
+        with _OPENER.open(request, timeout=timeout_s) as response:
             raw = response.read()
     except urllib.error.HTTPError as error:
         failure = _from_http_error(error, endpoint)
@@ -1061,7 +1061,7 @@ class PaddleXParser:
         url = urllib.parse.urljoin(self._endpoint.url, "health")
         try:
             request = urllib.request.Request(url, headers=dict(self._endpoint.headers))
-            with urllib.request.urlopen(request, timeout=timeout_s) as response:
+            with _OPENER.open(request, timeout=timeout_s) as response:
                 body = json.loads(response.read())
             # Inside the `try`, not after it: a body that decodes but is not
             # an object (a JSON list or string) makes `.get` raise

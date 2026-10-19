@@ -20,8 +20,11 @@ import http.server
 import io
 import json
 import socket
+import subprocess
+import sys
 import threading
 import time
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -760,6 +763,46 @@ class TestRedirectsAreRefused:
             assert parser.probe(timeout_s=2.0) is False
 
         assert received == []
+
+    def test_a_host_opener_installed_later_does_not_undo_the_refusal(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """docdoc is a library, and the application around it owns the
+        process-wide opener. One installed after docdoc was imported -- a
+        proxy, a cookie jar, or just the default that follows redirects --
+        must not quietly hand the credential back to a redirect target.
+        """
+        monkeypatch.setattr(urllib.request, "_opener", None)
+        urllib.request.install_opener(urllib.request.build_opener())
+
+        with (
+            _redirect_target() as (target_port, received),
+            _redirecting_server(status=302, target_port=target_port) as redirect_port,
+        ):
+            endpoint = _endpoint(
+                url=f"http://127.0.0.1:{redirect_port}/ocr", headers=SECRET_HEADERS
+            )
+            with pytest.raises(ProviderError):
+                paddlex._post_over_the_wire(endpoint, {"file": "", "fileType": 0}, 2.0)
+            assert PaddleXParser(endpoint).probe(timeout_s=2.0) is False
+
+        assert received == []
+
+
+def test_importing_the_adapter_leaves_the_process_opener_alone() -> None:
+    """The redirect refusal belongs to this adapter's own requests, not to
+    every `urlopen` in the host application. Asked in a fresh interpreter,
+    because this suite's process has long since imported the module.
+    """
+    probe = (
+        "import urllib.request\n"
+        "import docdoc.ingest.parsers.paddlex\n"
+        "print(urllib.request._opener is None)\n"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+    )
+    assert completed.stdout.strip() == "True"
 
 
 @contextlib.contextmanager
