@@ -132,6 +132,40 @@ There is **no fallback**. A failed parse surfaces; it does not quietly become
 another parser's problem, because a scan silently retried on the native reader
 would produce a near-empty document that looks like a success.
 
+### Naming a parser
+
+```python
+parse(data, parser="paddle")
+```
+
+`parser` picks a configured parser by id instead of leaving the choice to
+capability matching (ADR-0021 §1). An unknown id, an unavailable one, or one
+that cannot serve this document's media type all raise
+`ParserCapabilityError` naming why -- never a quiet substitution of whatever
+capability-based selection would have picked instead. Naming a
+network-backed parser on a document with a usable text layer still takes the
+recognition path; the text-layer rule still runs and its verdict is kept,
+marked `overridden` (ADR-0021 §2).
+
+### Endpoint-configured parsers (PaddleX protocol)
+
+`paddle` and `tesseract` are not two adapters — they are one wire protocol
+(`POST /ocr`, PaddleX's own serving CLI and a hand-written shim both speak
+it), configured rather than coded. `DOCDOC_OCR_ENDPOINTS_FILE` names a JSON
+file:
+
+```json
+{"endpoints": [{"id": "paddle", "url": "https://paddle.internal/ocr", "version": "1.0.0"}]}
+```
+
+Each entry becomes one `PaddleXParser`, registered under its own `id` and
+immediately available — there is no extra to install and no credential
+beyond whatever `headers` the entry carries. `url` and `headers` never
+appear in an error, a log event, a `repr`, or an HTTP body (ADR-0021 §3,
+Review Focus 3); every failure and every listing names the endpoint by `id`
+alone. Standing up a third PaddleX-protocol-compatible service, or pointing
+`paddle` at a different host, is an edit to this file, never a new adapter.
+
 ## What each adapter is responsible for
 
 Reading order and coordinate systems belong to the adapter, not to the core. Each

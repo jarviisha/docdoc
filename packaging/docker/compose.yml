@@ -103,6 +103,15 @@ services:
       # that reads as a credential problem and is not one.
       DOCDOC_GCV_CREDENTIALS: ${DOCDOC_GCV_CREDENTIALS:-}
       GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+      # A PaddleX-protocol endpoint (ADR-0021 §3) -- `paddle` or `tesseract`,
+      # or a third service speaking the same wire protocol. Unlike the
+      # credentials above, this names a **file**, not a value, and the file
+      # carries its own URL and headers, so it belongs under the operator's
+      # mounted `/secrets`, same as a key file:
+      #
+      #   DOCDOC_OCR_ENDPOINTS_FILE=/secrets/ocr-endpoints.json \
+      #     docker compose -f packaging/docker/compose.yml up -d
+      DOCDOC_OCR_ENDPOINTS_FILE: ${DOCDOC_OCR_ENDPOINTS_FILE:-}
       # Authentication is off by default here, exactly as it is off by default in
       # docdoc (FR-088). Point this at a key file to turn it on.
       DOCDOC_API_KEYS_FILE: ${DOCDOC_API_KEYS_FILE:-}

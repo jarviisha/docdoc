@@ -193,10 +193,18 @@ POST /v1/documents/{blob_id}/extract      → the job identity, and the result
 POST /v1/extract                          → the result, storing nothing
 GET  /v1/jobs/{job_id}                    → succeeded | unavailable | unknown
 GET  /v1/jobs/{job_id}/result             → the stored result
+POST /v1/ocr                              → the raw Document, storing nothing
+GET  /v1/parsers                          → the parsers this deployment has configured
 ```
 
 A result fetched over HTTP and the same run performed in-process agree on every value, verdict,
 location, and identity — asserted by a contract test that runs both and compares.
+
+`POST /v1/ocr` is the ingest layer's own output with no schema and no extraction on top — the body
+is the document, `?parser=<id>` names a configured parser instead of leaving selection to capability
+matching, and `?language=<code>` becomes a parse option. `GET /v1/parsers` lists them, each with its
+capabilities, media types, and (for a parser with a health probe) whether it currently answers —
+never a URL or a header (ADR-0021 §3).
 
 Three more accept work without holding the connection open, and need a database:
 

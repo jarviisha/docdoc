@@ -54,6 +54,8 @@ from docdoc.api.models import (
     BlobMetadata,
     JobStatus,
     JobStatusResponse,
+    ParserChoice,
+    ParserListing,
     RunAcceptedResponse,
     RunListResponse,
     RunResponse,
@@ -89,6 +91,7 @@ from docdoc.runs.model import DEFAULT_TENANT
 
 if TYPE_CHECKING:
     from docdoc.artifacts import ArtifactStore, BlobStore
+    from docdoc.ingest.registry import ParserRegistry
     from docdoc.pipeline import PipelineResult
 
 __all__ = ["build_app", "create_app"]
@@ -170,6 +173,7 @@ class _Deployment:
         store_root: Any = None,
         store_url: str | None = None,
         registry: Any = None,
+        parsers: ParserRegistry | None = None,
         adapter: Any = None,
         max_request_bytes: int | None = None,
         limits: Any = None,
@@ -202,6 +206,7 @@ class _Deployment:
         self._runs = runs
         self._readiness: Any = None
         self._registry = registry
+        self._parsers = parsers
         self._adapter = adapter
         self.limits = limits
         # The file ring first, the table second (ADR-0016 §7). A deployment
@@ -426,6 +431,19 @@ class _Deployment:
         from docdoc.extraction.adapter_registry import default_adapter
 
         return default_adapter()
+
+    def parser_registry(self) -> ParserRegistry:
+        """The parsers ``POST /v1/ocr`` and ``GET /v1/parsers`` choose from.
+
+        Mirrors ``registry()``: a deployment given one explicitly keeps it, and
+        one given none falls back to whichever adapters this installation can
+        use, including any ``DOCDOC_OCR_ENDPOINTS_FILE`` names (ADR-0021 §3).
+        """
+        if self._parsers is not None:
+            return self._parsers
+        from docdoc.ingest.registry import default_registry
+
+        return default_registry()
 
     def artifact_store(self) -> Any:
         from docdoc.artifacts import NullArtifactStore
@@ -1242,6 +1260,69 @@ def _router() -> APIRouter:
             )
 
         return _storeless_run_response(result)
+
+    @router.post("/ocr")
+    async def ocr(request: Request, parser: str | None = None, language: str | None = None) -> Any:
+        """Run OCR over submitted bytes and return the raw `Document`, storing nothing.
+
+        No schema, no extraction, no grounding, no validation -- this is the
+        ingest layer's own output, for a caller who wants the parse itself
+        rather than a value pulled out of it. Storeless for the same reason
+        ``POST /v1/extract`` is: a caller asking for OCR directly is asking for
+        exactly one stage, and demanding a store to run one is the coupling
+        FR-001 already rejected for the whole pipeline.
+
+        ``parser`` names a configured parser by id (ADR-0021 §1); omitted, the
+        usual capability-based selection chooses one. ``language`` becomes
+        ``options={"language": ...}`` -- the only option a PaddleX-protocol
+        endpoint recognizes, and only a value it declared; either query
+        parameter refused raises `ParserCapabilityError` (422), never a silent
+        substitution.
+        """
+        from docdoc.ingest import parse as ingest_parse
+        from docdoc.ingest.source import SourceFile
+
+        deployment = _deployment_of(request)
+        data = await _read_capped(request, deployment.max_request_bytes)
+
+        file = SourceFile.from_bytes(data, limits=deployment.limits)
+        file.check_limits(deployment.limits or _default_limits())
+
+        options = {} if language is None else {"language": language}
+        document = ingest_parse(
+            file,
+            options=options,
+            registry=deployment.parser_registry(),
+            parser=parser,
+        )
+        return document.model_dump(mode="json")
+
+    @router.get("/parsers", response_model=ParserListing, response_model_exclude_none=True)
+    async def parsers(request: Request) -> Any:
+        """The parsers this deployment has configured, in priority order.
+
+        Never a URL, never a header (Review Focus 3's HTTP half) -- a
+        `ParserChoice` has no field that could carry either. `unavailable_reason`,
+        `languages`, and `healthy` are absent rather than null when they do not
+        apply, which `response_model_exclude_none` is what actually omits them.
+        """
+        deployment = _deployment_of(request)
+        choices = []
+        for entry in deployment.parser_registry().candidates_all():
+            probe = getattr(entry.parser, "probe", None)
+            languages = tuple(getattr(entry.parser, "languages", ()) or ())
+            choices.append(
+                ParserChoice(
+                    id=entry.id,
+                    available=entry.available,
+                    unavailable_reason=entry.unavailable_reason,
+                    capabilities=entry.capabilities.to_kernel().model_dump(mode="json"),
+                    media_types=tuple(sorted(entry.capabilities.media_types)),
+                    languages=languages or None,
+                    healthy=probe() if callable(probe) else None,
+                )
+            )
+        return ParserListing(parsers=tuple(choices))
 
     # `status_code=202` is the *documented default* for this route; the handler
     # returns 200 on an idempotent replay. Declared rather than omitted so the

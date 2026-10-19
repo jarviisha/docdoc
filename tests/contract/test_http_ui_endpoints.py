@@ -114,6 +114,13 @@ ROUTES = {
     # leaving it to this set to imply.
     ("POST", "/v1/runs/{run_id}/corrections"),
     ("GET", "/v1/runs/{run_id}/corrections"),
+    # The OCR gateway (ADR-0021, Task 5). `POST /v1/ocr` is the ingest layer's
+    # own output with no schema on top, storeless for the reason `/v1/extract`
+    # is; `?parser=<id>` names a configured parser rather than leaving the
+    # choice to capability matching. `GET /v1/parsers` lists what this
+    # deployment has configured, by `id` only -- never a URL or a header.
+    ("POST", "/v1/ocr"),
+    ("GET", "/v1/parsers"),
 }
 
 
@@ -310,7 +317,7 @@ def test_a_deployment_with_no_schemas_returns_an_empty_list_and_not_an_error() -
 # -- FR-031, FR-060 what must never accumulate -------------------------------
 
 
-def test_the_route_set_is_exactly_these_twenty_one(storeless: TestClient) -> None:
+def test_the_route_set_is_exactly_these_twenty_three(storeless: TestClient) -> None:
     """FR-031, FR-060 — an exhaustive list is the only way to assert an absence.
 
     A route added without a decision shows up here, which is the point: this

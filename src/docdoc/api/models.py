@@ -24,6 +24,8 @@ __all__ = [
     "ErrorDetail",
     "JobStatus",
     "JobStatusResponse",
+    "ParserChoice",
+    "ParserListing",
     "RunListResponse",
     "RunResponse",
     "RunSummary",
@@ -134,6 +136,43 @@ class SchemaListing(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     schemas: tuple[SchemaChoice, ...] = ()
+
+
+class ParserChoice(BaseModel):
+    """One parser a deployment has configured, as ``GET /v1/parsers`` reports it.
+
+    Carries exactly what ``ParserRegistry.candidates_all()`` and a parser's own
+    attributes expose -- never a URL, never a header (Review Focus 3's HTTP
+    half, global-constraints.md). ``unavailable_reason``, ``languages``, and
+    ``healthy`` are **absent rather than null** when they do not apply: the
+    route serialises with ``response_model_exclude_none``, so a field left at
+    its ``None`` default never reaches the wire.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str
+    available: bool
+    #: Why this parser cannot be used. Absent whenever it can be.
+    unavailable_reason: str | None = None
+    #: The four capability booleans, and nothing else -- `ParserCapabilities.to_kernel()`.
+    capabilities: dict[str, bool]
+    media_types: tuple[str, ...]
+    #: Absent when empty: a parser that declares no languages has none to list,
+    #: which is a different fact from "every language" and worth telling apart.
+    languages: tuple[str, ...] | None = None
+    #: Present only for a parser with a `probe` method -- offline adapters have
+    #: no service to ask, and reporting `healthy: true` for one would claim a
+    #: check that never ran.
+    healthy: bool | None = None
+
+
+class ParserListing(BaseModel):
+    """What ``GET /v1/parsers`` returns: every configured parser, in priority order."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    parsers: tuple[ParserChoice, ...] = ()
 
 
 class _RunFields(BaseModel):

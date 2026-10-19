@@ -59,7 +59,22 @@ MILESTONE_10 = {
 }
 
 #: What Milestone 11 is allowed to have added. One entry, and it is a `GET`.
-ADDED = {("/v1/runs", "GET")}
+#: `test_the_one_new_route_is_a_read` below still pins this half by itself,
+#: scoped to `/v1/runs` alone -- that assertion is unaffected by anything a
+#: later milestone adds.
+MILESTONE_11_ADDED = {("/v1/runs", "GET")}
+
+#: The OCR gateway (Task 5, ADR-0021), added on top of Milestone 11's own
+#: surface: `POST /v1/ocr` is a write (it runs a parse), so it is additional to
+#: SC-003's "exactly one read" claim rather than a second instance of it.
+OCR_GATEWAY_ADDED = {("/v1/ocr", "POST"), ("/v1/parsers", "GET")}
+
+#: Everything this interface has added over Milestone 10's own surface, as of
+#: this milestone. A route added without a decision shows up here: this is the
+#: list a later milestone edits, and editing it is the moment somebody decides
+#: on purpose that the surface grew (the same argument `ROUTES` in
+#: `test_http_ui_endpoints.py` makes for the full set).
+ADDED = MILESTONE_11_ADDED | OCR_GATEWAY_ADDED
 
 #: Words a session mechanism arrives as (FR-009). None of them may name a route.
 SESSION_WORDS = ("login", "logout", "session", "token", "auth", "signin", "sign-in")
@@ -94,25 +109,36 @@ def client(tmp_path: Path) -> TestClient:
     return TestClient(build_app(_Deployment(store_root=tmp_path, runs=InMemoryRunQueue())))
 
 
-def test_the_surface_grew_by_exactly_one_route(client: TestClient) -> None:
-    """SC-003, first half."""
+def test_the_surface_matches_the_recorded_additions(client: TestClient) -> None:
+    """SC-003, first half, plus everything recorded since.
+
+    Originally "the surface grew by exactly one route" — true of Milestone 11
+    alone, against Milestone 10's own baseline. A later milestone that adds a
+    route is not a violation of that claim; it is a second, separate addition,
+    and `ADDED` is where it is recorded so this assertion keeps meaning
+    something rather than failing forever the first time anything is added.
+    """
     added = _routes(client) - MILESTONE_10
     removed = MILESTONE_10 - _routes(client)
 
     assert removed == set(), (
-        f"Milestone 11 removed routes Milestone 10 shipped: {sorted(removed)}. "
-        "Every write this console performs is supposed to reach a route that "
-        "already existed"
+        f"routes Milestone 10 shipped are gone: {sorted(removed)}. Every write "
+        "this console performs is supposed to reach a route that already existed"
     )
     assert added == ADDED, (
-        f"the API surface grew by {sorted(added)}, and SC-003 claims exactly one "
-        "new route. Either the addition is wrong, or the claim is — and the claim "
-        "is what four documents in specs/011 are built on"
+        f"the API surface grew by {sorted(added)}, and only {sorted(ADDED)} is "
+        "recorded as deliberate. Either the addition is wrong, or this list is — "
+        "and the list is what SC-003 and Task 5's own brief are built on"
     )
 
 
 def test_the_one_new_route_is_a_read(client: TestClient) -> None:
-    """SC-003, second half. A write here would make it a new capability."""
+    """SC-003, second half. A write here would make it a new capability.
+
+    Scoped to `/v1/runs` alone, so a later milestone's own routes — `/v1/ocr`
+    is deliberately a write — cannot make this assertion mean something it
+    never claimed.
+    """
     methods = {method for path, method in _routes(client) if path == "/v1/runs"}
 
     assert methods == {"GET"}
