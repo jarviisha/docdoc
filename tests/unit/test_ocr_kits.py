@@ -51,6 +51,19 @@ def test_paddle_max_pages_matches_kit() -> None:
     assert paddle.max_pages == kit_max_pages
 
 
+def test_example_endpoints_declare_generous_timeouts() -> None:
+    """CPU OCR of a multi-page scan can run for minutes; the generic
+    `TransportSettings` defaults (30s/120s) are too short for it (012
+    review, Finding 4). The example file is the template deployments copy,
+    so it must show a value worth copying, not the bare minimum that loads.
+    """
+    for endpoint in load_endpoints(_EXAMPLE):
+        assert endpoint.timeout_s is not None, endpoint.id
+        assert endpoint.timeout_s >= 60, endpoint.id
+        assert endpoint.deadline_s is not None, endpoint.id
+        assert endpoint.deadline_s >= 300, endpoint.id
+
+
 def test_kits_pin_images() -> None:
     # `packaging/ocr/tesseract/compose.yml` builds from its own Dockerfile
     # and declares no `image:` at all -- nothing to pin there. Only

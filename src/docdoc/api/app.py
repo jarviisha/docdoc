@@ -524,7 +524,18 @@ def _default_deployment() -> _Deployment:
     produce one. The default tenant's stores are built from it immediately, and
     they land exactly where a Milestone 8 deployment already wrote — unprefixed
     (FR-084a).
+
+    **Validates `DOCDOC_OCR_ENDPOINTS_FILE` first, before anything else is
+    built.** `parser_registry()` reads that file again on every call it
+    makes (ADR-0021 §3), so a malformed one used to fail silently-to-an-
+    operator on whichever request first asked for OCR, as a bare 500 with
+    nothing logged at startup to explain it. Raising here instead means a
+    bad file keeps this process from ever starting (012 review, Finding 3).
     """
+    from docdoc.ingest.registry import validate_configured_endpoints
+
+    validate_configured_endpoints()
+
     runs = _configured_run_queue()
 
     # An object store, if one was named. Checked first because a deployment that

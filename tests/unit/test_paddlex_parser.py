@@ -57,6 +57,8 @@ def _endpoint(
     headers: dict[str, str] | None = None,
     languages: tuple[str, ...] = (),
     max_pages: int | None = None,
+    timeout_s: float | None = None,
+    deadline_s: float | None = None,
 ) -> OcrEndpoint:
     return OcrEndpoint(
         id=endpoint_id,
@@ -65,6 +67,8 @@ def _endpoint(
         headers=headers or {},
         languages=languages,
         max_pages=max_pages,
+        timeout_s=timeout_s,
+        deadline_s=deadline_s,
     )
 
 
@@ -226,7 +230,10 @@ class TestShortResult:
             parser.parse(source, {}, FAST_TRANSPORT)
 
         error = excinfo.value
-        assert error.reason == "service"
+        # Not "service": a short result is the service answering in full and
+        # still coming back truncated, which a retry cannot fix (012 review,
+        # Finding 5) -- see `ProviderError.REASONS`'s own comment.
+        assert error.reason == "incomplete"
         message = str(error)
         assert "paddle" in message
         assert "1" in message
@@ -297,6 +304,45 @@ class TestSharedDeadline:
 
         assert excinfo.value.reason == "deadline"
         assert calls["n"] == 2
+
+
+class TestEndpointOwnTimeouts:
+    """Finding 4 of the 012 review: CPU OCR of a multi-page scan can run far
+    longer than `TransportSettings`' generic 30s/120s defaults assume, and
+    only the endpoint's own `timeout_s` / `deadline_s` -- not the caller's
+    `TransportSettings` -- knows how slow *this* deployment's hardware is.
+    """
+
+    def test_endpoint_timeout_overrides_the_callers_transport(self) -> None:
+        calls: list[float] = []
+
+        def fake_post(endpoint: OcrEndpoint, body: dict[str, Any], timeout_s: float) -> Any:
+            calls.append(timeout_s)
+            return _image_response()
+
+        endpoint = _endpoint(timeout_s=300.0, deadline_s=1800.0)
+        parser = PaddleXParser(endpoint, post=fake_post)
+        source = _source_image("sample_page.png")
+
+        # The caller's own (much shorter) defaults -- the endpoint's values
+        # must win.
+        parser.parse(source, {}, TransportSettings())
+
+        assert calls == [300.0]
+
+    def test_an_unset_endpoint_timeout_leaves_the_callers_transport_alone(self) -> None:
+        calls: list[float] = []
+
+        def fake_post(endpoint: OcrEndpoint, body: dict[str, Any], timeout_s: float) -> Any:
+            calls.append(timeout_s)
+            return _image_response()
+
+        parser = PaddleXParser(_endpoint(), post=fake_post)
+        source = _source_image("sample_page.png")
+
+        parser.parse(source, {}, TransportSettings(attempt_timeout_s=7.0, deadline_s=9.0))
+
+        assert calls == [7.0]
 
 
 # ---------------------------------------------------------------------------
@@ -434,6 +480,7 @@ _STATUS_TABLE: tuple[tuple[int, dict[str, str], type[Exception], str, float | No
     (403, {}, ProviderError, "auth", None),
     (429, {"Retry-After": "3"}, ProviderError, "rate_limit", 3.0),
     (400, {}, UnsupportedDocumentError, "corrupt", None),
+    (413, {}, UnsupportedDocumentError, "page_limit", None),
     (415, {}, UnsupportedDocumentError, "corrupt", None),
     (422, {}, UnsupportedDocumentError, "corrupt", None),
     (500, {}, ProviderError, "service", None),

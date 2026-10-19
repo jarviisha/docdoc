@@ -165,8 +165,25 @@ class OcrEndpoint(BaseModel):
     version: str = Field(min_length=1)
     headers: dict[str, str] = Field(default_factory=dict, repr=False)
     media_types: frozenset[str] = frozenset({PDF, JPEG, PNG})
+    #: What this endpoint *asserts* it can read, never what docdoc asks it
+    #: to read: the PaddleX `/ocr` protocol carries no language field, so
+    #: there is nothing in the request this could select (`_check_options`
+    #: below). A caller naming a language gets a pre-flight check against
+    #: this declaration -- "this endpoint supports Vietnamese" -- and
+    #: nothing more; it is the operator's job to point `language="vie"` at
+    #: an endpoint actually running a Vietnamese model.
     languages: tuple[str, ...] = ()
     max_pages: int | None = Field(default=None, ge=1)
+    #: Per-attempt and per-parse time budgets, in place of the caller's
+    #: `TransportSettings.attempt_timeout_s` / `.deadline_s` when set
+    #: (`PaddleXParser._effective_transport`). `None` -- the default --
+    #: leaves the caller's values untouched. CPU OCR of a multi-page scan
+    #: can run for minutes; the generic 30s/120s defaults exist for
+    #: service-backed parsers in general and are too short for that case
+    #: (012 review, Finding 4), and only the operator who stood up *this*
+    #: endpoint knows how slow its hardware actually is.
+    timeout_s: float | None = Field(default=None, gt=0)
+    deadline_s: float | None = Field(default=None, gt=0)
 
     @field_validator("url")
     @classmethod
@@ -717,6 +734,17 @@ def _from_http_error(
             reason="auth",
             parser_id=endpoint.id,
         )
+    if status == 413:
+        # A document-shaped refusal, not a transport one: the endpoint read
+        # the request and declined it for being too long (the Tesseract
+        # kit's own `MAX_PAGES`, 012 review Finding 5) -- `page_limit` is
+        # the same reason `ingest.source` already uses for the native
+        # page-count check, so both routes to the same refusal agree.
+        return UnsupportedDocumentError(
+            f"endpoint {endpoint.id!r} rejected the file for exceeding its page limit",
+            reason="page_limit",
+            parser_id=endpoint.id,
+        )
     if status in (400, 415, 422):
         return UnsupportedDocumentError(
             f"endpoint {endpoint.id!r} rejected the file as unreadable or unsupported",
@@ -806,6 +834,29 @@ class PaddleXParser:
         self.reading_order = READING_ORDER
         self.languages = endpoint.languages
 
+    def _effective_transport(self, transport: TransportSettings) -> TransportSettings:
+        """The endpoint's own `timeout_s` / `deadline_s`, when it set either,
+        in place of the caller's -- everything else about ``transport``
+        (attempt count, backoff, jitter) is the caller's and untouched.
+
+        CPU OCR of a multi-page scan can run for minutes; `TransportSettings`'
+        30s/120s defaults are sized for a service-backed parser in general,
+        not for this specific endpoint's hardware, and only the operator who
+        configured it knows how slow it actually is (012 review, Finding 4).
+        A caller who passed its own, more generous `TransportSettings` is
+        overridden here too -- the endpoint's declared budget is a fact
+        about the deployment, not a per-request suggestion.
+        """
+        endpoint = self._endpoint
+        if endpoint.timeout_s is None and endpoint.deadline_s is None:
+            return transport
+        updates: dict[str, float] = {}
+        if endpoint.timeout_s is not None:
+            updates["attempt_timeout_s"] = endpoint.timeout_s
+        if endpoint.deadline_s is not None:
+            updates["deadline_s"] = endpoint.deadline_s
+        return transport.model_copy(update=updates)
+
     def parse(
         self,
         source: SourceFile,
@@ -814,6 +865,7 @@ class PaddleXParser:
         text_layer: TextLayerRecord | None = None,
     ) -> Document:
         self._check_options(options, blob_id=source.blob_id)
+        transport = self._effective_transport(transport)
 
         # One budget for the whole parse, opened once and passed to every
         # chunk: `analyze_with_retries` opens its own `Deadline` when none is
@@ -957,10 +1009,18 @@ class PaddleXParser:
         transport: TransportSettings,
         deadline: Deadline,
     ) -> list[OcrPage]:
-        """One request, one chunk. Raises `ProviderError` on anything
-        `analyze_with_retries` should consider retrying -- including a short
-        result, which is PaddleX's own silent-truncation failure mode and
-        the one thing only this caller can detect (record.py, ING-7).
+        """One request, one chunk. Raises `ProviderError` on a short result,
+        which is PaddleX's own silent-truncation failure mode and the one
+        thing only this caller can detect (record.py, ING-7).
+
+        That reason is ``"incomplete"``, not ``"service"`` (012 review,
+        Finding 5): the service answered in full and still came back short,
+        which a retry cannot fix -- sending the identical request again gets
+        the identical truncated answer, for the same reason it truncated the
+        first time. ``"incomplete"`` is deliberately absent from
+        `ProviderError.TRANSIENT_REASONS`, so `analyze_with_retries` fails on
+        the first attempt instead of spending the deadline on two more
+        identical ones.
         """
         timeout_s = min(transport.attempt_timeout_s, deadline.remaining_s)
         body = {"file": base64.b64encode(data).decode("ascii"), "fileType": file_type}
@@ -970,7 +1030,7 @@ class PaddleXParser:
         if len(pages) != expected_pages:
             raise ProviderError(
                 f"endpoint {self.id!r} returned {len(pages)} pages for {expected_pages} sent",
-                reason="service",
+                reason="incomplete",
                 parser_id=self.id,
                 blob_id=source.blob_id,
             )

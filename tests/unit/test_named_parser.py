@@ -261,6 +261,36 @@ class TestDefaultRegistry:
 
         assert ids == {"pdf-text", "azure-di", "gcv"}
 
+    def test_configured_endpoints_rank_in_the_files_own_order(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The gateway design says configured endpoints extend
+        `DEFAULT_PRIORITY` "by configuration" -- Finding 13 of the 012
+        review is that the actual order used to be alphabetical (`_rank`'s
+        tie-break) rather than the file's own order. Listing `tesseract`
+        before `paddle` must rank `tesseract` first between the two.
+        """
+        config = tmp_path / "endpoints.json"
+        config.write_text(
+            json.dumps(
+                {
+                    "endpoints": [
+                        {
+                            "id": "tesseract",
+                            "url": "http://tesseract.example/ocr",
+                            "version": "1.0.0",
+                        },
+                        {"id": "paddle", "url": "http://paddle.example/ocr", "version": "1.0.0"},
+                    ]
+                }
+            )
+        )
+        monkeypatch.setenv(ENDPOINTS_FILE_ENV, str(config))
+
+        ids = [entry.id for entry in default_registry().candidates_all()]
+
+        assert ids.index("tesseract") < ids.index("paddle")
+
 
 class TestNamedParserChangesIdentity:
     def test_named_parser_changes_document_id(self) -> None:
