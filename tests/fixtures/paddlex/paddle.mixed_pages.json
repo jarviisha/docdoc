@@ -1,0 +1,365 @@
+{
+  "errorCode": 0,
+  "errorMsg": "Success",
+  "result": {
+    "ocrResults": [
+      {
+        "prunedResult": {
+          "rec_texts": [
+            "ACME SUPPLIES LIMITED",
+            "Invoice INV-001",
+            "Issued 2026-03-14 Due 2026-04-13",
+            "Bill to: Northwind Trading Company",
+            "12 Harbour Road, Port Meadow",
+            "Description",
+            "Qty",
+            "Unit",
+            "Amount",
+            "Widget, large",
+            "4",
+            "25.00",
+            "100.00",
+            "Widget, small",
+            "10",
+            "7.50",
+            "75.00",
+            "Delivery",
+            "1",
+            "15.00",
+            "15.00",
+            "Subtotal",
+            "190.00",
+            "VAT 20%",
+            "38.00",
+            "Total",
+            "228.00"
+          ],
+          "rec_boxes": [
+            [
+              119,
+              141,
+              389,
+              161
+            ],
+            [
+              118,
+              176,
+              273,
+              197
+            ],
+            [
+              117,
+              211,
+              481,
+              234
+            ],
+            [
+              116,
+              246,
+              466,
+              273
+            ],
+            [
+              118,
+              284,
+              432,
+              307
+            ],
+            [
+              117,
+              354,
+              231,
+              379
+            ],
+            [
+              322,
+              352,
+              368,
+              385
+            ],
+            [
+              386,
+              352,
+              438,
+              383
+            ],
+            [
+              463,
+              353,
+              549,
+              381
+            ],
+            [
+              113,
+              389,
+              252,
+              419
+            ],
+            [
+              342,
+              391,
+              365,
+              416
+            ],
+            [
+              385,
+              390,
+              448,
+              416
+            ],
+            [
+              472,
+              391,
+              546,
+              416
+            ],
+            [
+              115,
+              426,
+              254,
+              454
+            ],
+            [
+              338,
+              425,
+              373,
+              454
+            ],
+            [
+              399,
+              426,
+              451,
+              453
+            ],
+            [
+              479,
+              427,
+              543,
+              453
+            ],
+            [
+              113,
+              460,
+              202,
+              492
+            ],
+            [
+              321,
+              461,
+              348,
+              488
+            ],
+            [
+              366,
+              463,
+              429,
+              489
+            ],
+            [
+              458,
+              463,
+              521,
+              489
+            ],
+            [
+              115,
+              533,
+              202,
+              561
+            ],
+            [
+              423,
+              534,
+              499,
+              561
+            ],
+            [
+              116,
+              571,
+              214,
+              596
+            ],
+            [
+              446,
+              569,
+              510,
+              598
+            ],
+            [
+              111,
+              602,
+              173,
+              635
+            ],
+            [
+              409,
+              607,
+              484,
+              633
+            ]
+          ],
+          "rec_scores": [
+            0.9600117206573486,
+            0.9837433695793152,
+            0.9728082418441772,
+            0.9872675538063049,
+            0.9740433692932129,
+            0.9994914531707764,
+            0.9942910075187683,
+            0.9992655515670776,
+            0.9996939301490784,
+            0.9806665182113647,
+            0.9997579455375671,
+            0.9999294281005859,
+            0.9999212622642517,
+            0.9886080622673035,
+            0.9999319314956665,
+            0.9997661113739014,
+            0.9998841285705566,
+            0.9996732473373413,
+            0.9991833567619324,
+            0.9999123811721802,
+            0.9999561309814453,
+            0.9998190402984619,
+            0.9999675750732422,
+            0.974073588848114,
+            0.999952495098114,
+            0.9996687769889832,
+            0.9999310374259949
+          ],
+          "doc_preprocessor_res": {
+            "model_settings": {
+              "use_doc_orientation_classify": true,
+              "use_doc_unwarping": false
+            },
+            "angle": 0
+          }
+        }
+      },
+      {
+        "prunedResult": {
+          "rec_texts": [
+            "SERVICE AGREEMENT",
+            "This agreement is made between Acme Supplies Limited and",
+            "Northwind Trading Company on the fourteenth of March, 2026.",
+            "1. The supplier shall deliver the goods described in Schedule A",
+            "within thirty days of the order being accepted.",
+            "2. The customer shall pay each invoice within thirty days.",
+            "3. Either party may terminate on sixty days written notice."
+          ],
+          "rec_boxes": [
+            [
+              120,
+              140,
+              362,
+              161
+            ],
+            [
+              118,
+              212,
+              720,
+              235
+            ],
+            [
+              118,
+              247,
+              731,
+              271
+            ],
+            [
+              119,
+              321,
+              735,
+              344
+            ],
+            [
+              137,
+              356,
+              580,
+              380
+            ],
+            [
+              117,
+              391,
+              673,
+              417
+            ],
+            [
+              118,
+              429,
+              676,
+              453
+            ]
+          ],
+          "rec_scores": [
+            0.9797422885894775,
+            0.982865035533905,
+            0.9849764108657837,
+            0.9634665846824646,
+            0.9552983045578003,
+            0.96855628490448,
+            0.9559478759765625
+          ],
+          "doc_preprocessor_res": {
+            "model_settings": {
+              "use_doc_orientation_classify": true,
+              "use_doc_unwarping": false
+            },
+            "angle": 0
+          }
+        }
+      },
+      {
+        "prunedResult": {
+          "rec_texts": [
+            "Signed copy",
+            "Received and acknowledged."
+          ],
+          "rec_boxes": [
+            [
+              114,
+              134,
+              245,
+              170
+            ],
+            [
+              117,
+              208,
+              407,
+              237
+            ]
+          ],
+          "rec_scores": [
+            0.9706680774688721,
+            0.9623483419418335
+          ],
+          "doc_preprocessor_res": {
+            "model_settings": {
+              "use_doc_orientation_classify": true,
+              "use_doc_unwarping": false
+            },
+            "angle": 0
+          }
+        }
+      }
+    ],
+    "dataInfo": {
+      "numPages": 3,
+      "pages": [
+        {
+          "width": 1190,
+          "height": 1684
+        },
+        {
+          "width": 1190,
+          "height": 1684
+        },
+        {
+          "width": 1190,
+          "height": 1684
+        }
+      ],
+      "type": "pdf"
+    }
+  }
+}

@@ -343,6 +343,18 @@ ENVIRONMENT_ONLY: dict[str, str] = {
         "deployment -- and `docdoc sweep`'s own `--retention-days` is the run's, "
         "which is a different deadline on purpose"
     ),
+    # Milestone 12 (the OCR gateway, ADR-0021 §3). Names a file of configured
+    # endpoints, each optionally carrying an `Authorization` or similar header
+    # -- a credential by another name, and the same reason `DOCDOC_API_KEYS_FILE`
+    # has no flag (FR-042). It is also a list, like `DOCDOC_LIMITS_FILE`: a flag
+    # cannot carry one, and every process in a deployment must agree on which
+    # endpoints exist.
+    "DOCDOC_OCR_ENDPOINTS_FILE": (
+        "names a file of configured OCR endpoints, each able to carry a "
+        "credential header; the command line requires no credential in any "
+        "configuration (FR-042), and a deployment's set of endpoints must agree "
+        "across every process rather than vary by invocation"
+    ),
 }
 
 

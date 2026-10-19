@@ -21,8 +21,12 @@ SOURCE_ROOT = pathlib.Path(docdoc.ingest.__file__).parent.parent
 EXAMPLES = SOURCE_ROOT.parent.parent / "examples"
 
 #: The registry is the one module whose job is to know these names, and the
-#: adapters are the implementations themselves.
-ALLOWED = {"registry.py", "pdf_text.py", "azure_di.py", "gcv.py"}
+#: adapters are the implementations themselves. `paddlex.py` joins them for a
+#: narrower reason than being an adapter: `load_endpoints` must recognize the
+#: three built-in ids to *refuse* a configured endpoint that reuses one
+#: (ADR-0021 §3) -- the opposite of selecting a parser by id, but it still
+#: has to spell the ids to do it.
+ALLOWED = {"registry.py", "pdf_text.py", "azure_di.py", "gcv.py", "paddlex.py"}
 
 #: ``assess.py`` may name the native reader in an *error message*, and only
 #: there. The coupling is inherent rather than incidental: the text-layer

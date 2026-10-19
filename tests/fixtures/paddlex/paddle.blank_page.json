@@ -1,0 +1,109 @@
+{
+  "errorCode": 0,
+  "errorMsg": "Success",
+  "result": {
+    "ocrResults": [
+      {
+        "prunedResult": {
+          "rec_texts": [
+            "SERVICE AGREEMENT",
+            "This agreement is made between Acme Supplies Limited and",
+            "Northwind Trading Company on the fourteenth of March, 2026.",
+            "1. The supplier shall deliver the goods described in Schedule A",
+            "within thirty days of the order being accepted.",
+            "2. The customer shall pay each invoice within thirty days.",
+            "3. Either party may terminate on sixty days written notice."
+          ],
+          "rec_boxes": [
+            [
+              118,
+              137,
+              363,
+              162
+            ],
+            [
+              118,
+              211,
+              719,
+              235
+            ],
+            [
+              118,
+              248,
+              731,
+              272
+            ],
+            [
+              119,
+              321,
+              734,
+              344
+            ],
+            [
+              135,
+              354,
+              580,
+              379
+            ],
+            [
+              117,
+              390,
+              673,
+              417
+            ],
+            [
+              119,
+              428,
+              676,
+              452
+            ]
+          ],
+          "rec_scores": [
+            0.982907772064209,
+            0.9830219149589539,
+            0.9722541570663452,
+            0.9771371483802795,
+            0.9695600867271423,
+            0.9559164643287659,
+            0.9624636173248291
+          ],
+          "doc_preprocessor_res": {
+            "model_settings": {
+              "use_doc_orientation_classify": true,
+              "use_doc_unwarping": false
+            },
+            "angle": 0
+          }
+        }
+      },
+      {
+        "prunedResult": {
+          "rec_texts": [],
+          "rec_boxes": [],
+          "rec_scores": [],
+          "doc_preprocessor_res": {
+            "model_settings": {
+              "use_doc_orientation_classify": true,
+              "use_doc_unwarping": false
+            },
+            "angle": 0
+          }
+        }
+      }
+    ],
+    "dataInfo": {
+      "numPages": 2,
+      "pages": [
+        {
+          "width": 1190,
+          "height": 1684
+        },
+        {
+          "width": 1190,
+          "height": 1684
+        }
+      ],
+      "type": "pdf"
+    }
+  }
+}
