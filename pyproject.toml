@@ -60,7 +60,12 @@ gcv = ["google-cloud-vision>=3.4"]
 # renders with the same library. Without it, a PDF cannot be sent at all: the
 # adapter cannot know the page count, and so cannot prove the result it gets
 # back is complete (see paddlex.py's `_pdf_chunks`).
-ocr = ["pypdfium2>=4.30"]
+#
+# `>=5.0`, not `>=4.30`: `PdfiumError.err_code`, which is how `_pdf_chunks`
+# tells an encrypted PDF from a merely corrupt one, does not exist before
+# 5.0 (`getattr` there falls back to "corrupt" instead of crashing, but the
+# floor should not require that fallback to behave correctly).
+ocr = ["pypdfium2>=5.0"]
 # The HTTP interface of Milestone 7, confined to `docdoc.api` and enforced there
 # by the forbidden-imports contracts below, which name `fastapi` for every
 # deterministic layer. An extra rather than a base dependency for the same reason
@@ -592,7 +597,14 @@ forbidden_modules = [
 # "provider SDKs stay inside parser adapters" contract grants `gcv -> google`:
 # scoped to exactly the one module, by name, so a second module reaching for
 # `urllib` still fails here.
-ignore_imports = ["docdoc.ingest.parsers.paddlex -> urllib"]
+#
+# `http` joins it for the same module in fix round 1: translating a stalled
+# connection (a bare `TimeoutError`/`ConnectionResetError`, neither wrapped
+# by `urllib`) needs `http.client.HTTPException` in the `except` clause.
+ignore_imports = [
+    "docdoc.ingest.parsers.paddlex -> urllib",
+    "docdoc.ingest.parsers.paddlex -> http",
+]
 
 # Grounding is deterministic all the way down: no network, no credentials, no
 # provider, and no model call under any circumstance (FR-048). That is this

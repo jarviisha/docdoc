@@ -14,10 +14,14 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import datetime as dt
+import email.utils
 import http.server
 import io
+import json
 import socket
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -252,6 +256,49 @@ class TestShortResult:
         assert attempts["n"] == 2
 
 
+class TestSharedDeadline:
+    """`analyze_with_retries` opens its own `Deadline` when none is given --
+    fine for every other caller, which makes one call -- but `parse()` here
+    makes one call *per chunk*. Without a shared `Deadline`, a 20-chunk PDF
+    gets twenty times `transport.deadline_s`, not one; this pins that it
+    does not, using a fake clock so the test runs in real time regardless of
+    the (fake) budget.
+    """
+
+    def test_the_budget_is_spent_once_not_per_chunk(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        data = _build_pdf(3)
+        clock = {"t": 0.0}
+
+        def fake_monotonic() -> float:
+            return clock["t"]
+
+        monkeypatch.setattr("docdoc.ingest.options.time.monotonic", fake_monotonic)
+
+        calls = {"n": 0}
+
+        def fake_post(endpoint: OcrEndpoint, body: dict[str, Any], timeout_s: float) -> Any:
+            calls["n"] += 1
+            clock["t"] += 10.0  # a slow chunk -- 10s "elapses" per call
+            n = _page_count(base64.b64decode(body["file"]))
+            return _pdf_response(n)
+
+        source = SourceFile.from_bytes(data, filename="three.pdf")
+        parser = PaddleXParser(_endpoint(max_pages=1), post=fake_post)
+        # One shared budget of 15s. Chunk 1 passes the pre-flight check at
+        # t=0 (15 remaining) and advances the clock to 10; chunk 2 passes at
+        # t=10 (5 remaining) and advances it to 20; chunk 3's pre-flight
+        # check at t=20 sees -5 remaining and must fail *before* a third
+        # `fake_post` call -- a fresh 15s budget reopened per chunk would
+        # never see less than 5 remaining and all three would succeed.
+        transport = TransportSettings(max_attempts=1, deadline_s=15.0)
+
+        with pytest.raises(ProviderError) as excinfo:
+            parser.parse(source, {}, transport)
+
+        assert excinfo.value.reason == "deadline"
+        assert calls["n"] == 2
+
+
 # ---------------------------------------------------------------------------
 # Refused before any call: options, encryption, corruption, the missing extra.
 # ---------------------------------------------------------------------------
@@ -349,6 +396,39 @@ def _closed_port() -> int:
     return port
 
 
+@contextlib.contextmanager
+def _stalling_server():
+    """A server that accepts the connection, sends response headers, and then
+    stalls mid-response -- long enough that a short client timeout always
+    wins. `urlopen` only wraps the *connection* phase in `URLError`; this is
+    what reproduces the bare `TimeoutError` `response.read()` raises once the
+    connection itself succeeded (the gap `_post_over_the_wire` closes).
+    """
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            length = int(self.headers.get("Content-Length", 0))
+            self.rfile.read(length)
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            time.sleep(2.0)
+            with contextlib.suppress(Exception):
+                self.wfile.write(b"{}")
+
+        def log_message(self, log_format: str, *args: object) -> None:
+            pass
+
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield httpd.server_port
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
 _STATUS_TABLE: tuple[tuple[int, dict[str, str], type[Exception], str, float | None], ...] = (
     (401, {}, ProviderError, "auth", None),
     (403, {}, ProviderError, "auth", None),
@@ -401,6 +481,13 @@ class TestHttpStatusMapping:
             paddlex._post_over_the_wire(endpoint, {"file": "", "fileType": 0}, 2.0)
         assert excinfo.value.reason == "transport"
 
+    def test_stalled_response_is_a_timeout_error(self) -> None:
+        with _stalling_server() as port:
+            endpoint = _endpoint(url=f"http://127.0.0.1:{port}/ocr")
+            with pytest.raises(ProviderError) as excinfo:
+                paddlex._post_over_the_wire(endpoint, {"file": "", "fileType": 0}, 0.3)
+        assert excinfo.value.reason == "timeout"
+
     def test_headers_are_sent(self) -> None:
         with _server(200, body=b'{"errorCode":0,"result":{}}') as (port, received):
             endpoint = _endpoint(
@@ -408,6 +495,54 @@ class TestHttpStatusMapping:
             )
             paddlex._post_over_the_wire(endpoint, {"file": "", "fileType": 0}, 2.0)
         assert received.get("X-Api-Key") == "abc123"
+
+    def test_non_utf8_body_is_a_service_error(self) -> None:
+        # `json.loads` on non-UTF-8 bytes raises `UnicodeDecodeError`, not
+        # `json.JSONDecodeError` -- both are `ValueError`, but only one is
+        # caught by `except json.JSONDecodeError`. This body is never valid
+        # UTF-8 (0xFF is not a continuation byte anywhere), so it must still
+        # translate rather than escape as a raw `UnicodeDecodeError`.
+        with _server(200, body=b"\xff\xfe\x00\xff") as (port, _received):
+            endpoint = _endpoint(url=f"http://127.0.0.1:{port}/ocr")
+            with pytest.raises(ProviderError) as excinfo:
+                paddlex._post_over_the_wire(endpoint, {"file": "", "fileType": 0}, 2.0)
+        assert excinfo.value.reason == "service"
+
+
+class TestRetryAfterParsing:
+    """FR-038's interval has two wire forms (RFC 9110): a delta in seconds,
+    already covered by `_STATUS_TABLE`'s 429 row, and an HTTP-date. Neither
+    form, nor garbage that is neither, may ever raise out of translation.
+    """
+
+    def test_http_date_form_is_parsed(self) -> None:
+        future = email.utils.format_datetime(dt.datetime.now(dt.UTC) + dt.timedelta(seconds=30))
+        with _server(429, body=b"{}", extra_headers={"Retry-After": future}) as (port, _received):
+            endpoint = _endpoint(url=f"http://127.0.0.1:{port}/ocr")
+            with pytest.raises(ProviderError) as excinfo:
+                paddlex._post_over_the_wire(endpoint, {"file": "", "fileType": 0}, 2.0)
+
+        assert excinfo.value.reason == "rate_limit"
+        assert excinfo.value.retry_after_s is not None
+        # Generous bounds: this runs for real, so some seconds pass between
+        # the header being built above and the assertion running here.
+        assert 20.0 <= excinfo.value.retry_after_s <= 31.0
+
+    def test_unparseable_value_is_ignored_not_fatal(self) -> None:
+        with _server(429, body=b"{}", extra_headers={"Retry-After": "not a date or a number"}) as (
+            port,
+            _received,
+        ):
+            endpoint = _endpoint(url=f"http://127.0.0.1:{port}/ocr")
+            with pytest.raises(ProviderError) as excinfo:
+                paddlex._post_over_the_wire(endpoint, {"file": "", "fileType": 0}, 2.0)
+
+        assert excinfo.value.reason == "rate_limit"
+        assert excinfo.value.retry_after_s is None
+        # The real bug this guards: a garbage Retry-After must not crash the
+        # translation and chain a new exception onto the URL-bearing
+        # HTTPError via __context__.
+        assert excinfo.value.__context__ is None
 
 
 class TestNoSecretInAnyFailure:
@@ -446,6 +581,13 @@ class TestNoSecretInAnyFailure:
             paddlex._post_over_the_wire(endpoint, {"file": "", "fileType": 0}, 2.0)
         self._assert_clean(excinfo.value)
 
+    def test_stalled_response(self) -> None:
+        with _stalling_server() as port:
+            endpoint = _endpoint(url=f"http://127.0.0.1:{port}/ocr", headers=SECRET_HEADERS)
+            with pytest.raises(ProviderError) as excinfo:
+                paddlex._post_over_the_wire(endpoint, {"file": "", "fileType": 0}, 0.3)
+        self._assert_clean(excinfo.value)
+
     def test_credential_laden_url_that_cannot_even_connect(self) -> None:
         # The URL itself may carry credentials -- a misconfiguration docdoc
         # never relies on -- and even a connection failing because of it must
@@ -462,6 +604,42 @@ class TestNoSecretInAnyFailure:
         for secret in SECRETS:
             assert secret not in str(error)
             assert secret not in str(error.__cause__)
+            assert secret not in str(error.__context__)
+        # Not just "clean of these three substrings" -- genuinely nothing:
+        # `raise ... from None` alone leaves `__context__` pointing at the
+        # original HTTPError/URLError, which the fix (raising after the
+        # `except` block has already finished) removes entirely.
+        assert error.__context__ is None
+
+
+@contextlib.contextmanager
+def _health_server(*, error_code: int = 0):
+    """A server that answers GET with a health-shaped body on whatever path
+    it's asked for, recording every path requested -- what `test_probe_*`
+    needs to confirm `probe()` asks for `.../health`, not `.../ocr/health`.
+    """
+    paths: list[str] = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            paths.append(self.path)
+            body = json.dumps({"errorCode": error_code, "errorMsg": "Healthy"}).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, log_format: str, *args: object) -> None:
+            pass
+
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield httpd.server_port, paths
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
 
 
 class TestProbe:
@@ -470,3 +648,43 @@ class TestProbe:
         parser = PaddleXParser(endpoint)
 
         assert parser.probe(timeout_s=0.5) is False
+
+    def test_probe_true_when_healthy(self) -> None:
+        # Today only the unreachable case was tested, so a probe that always
+        # returned False would have passed -- this is the case that proves
+        # it actually asks the right URL and reads the right field.
+        with _health_server() as (port, paths):
+            endpoint = _endpoint(url=f"http://127.0.0.1:{port}/ocr")
+            parser = PaddleXParser(endpoint)
+
+            assert parser.probe(timeout_s=1.0) is True
+        assert paths == ["/health"]
+
+    def test_probe_joins_an_nginx_prefixed_path(self) -> None:
+        # `endpoint.url` is the full POST URL; the health route sits beside
+        # it, not under it: `.../tesseract/ocr` -> `.../tesseract/health`,
+        # not `.../tesseract/ocr/health`.
+        with _health_server() as (port, paths):
+            endpoint = _endpoint(url=f"http://127.0.0.1:{port}/tesseract/ocr")
+            parser = PaddleXParser(endpoint)
+
+            assert parser.probe(timeout_s=1.0) is True
+        assert paths == ["/tesseract/health"]
+
+    def test_probe_false_when_errorcode_nonzero(self) -> None:
+        with _health_server(error_code=1) as (port, _paths):
+            endpoint = _endpoint(url=f"http://127.0.0.1:{port}/ocr")
+            parser = PaddleXParser(endpoint)
+
+            assert parser.probe(timeout_s=1.0) is False
+
+    def test_probe_false_when_body_is_not_an_object(self) -> None:
+        # A JSON list/string body makes `.get("errorCode")` raise
+        # `AttributeError` unless probe() guards for it -- "never raises"
+        # must hold for a malformed health body too, not just an unreachable
+        # endpoint.
+        with _server(200, body=b"[1, 2, 3]") as (port, _received):
+            endpoint = _endpoint(url=f"http://127.0.0.1:{port}/ocr")
+            parser = PaddleXParser(endpoint)
+
+            assert parser.probe(timeout_s=1.0) is False

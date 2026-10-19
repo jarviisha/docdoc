@@ -71,10 +71,14 @@ that is.
 from __future__ import annotations
 
 import base64
+import datetime as dt
+import email.utils
+import http.client
 import importlib.util
 import io
 import json
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, NamedTuple
@@ -535,12 +539,21 @@ def _post_over_the_wire(
     and the reason ``post`` is an injected parameter rather than a fixed
     implementation: every other test replaces it and never opens a socket.
 
-    Every failure below is translated before it leaves this function, with
-    ``from None`` throughout: `urllib.error.HTTPError` and `URLError` embed
-    the request URL in their own ``str()``, and chaining them as `__cause__`
-    would smuggle it back in behind this adapter's own message (Review
-    Focus 3) -- `from None` is what actually drops it, not just omits it from
-    the message written here.
+    Every failure below is translated before it leaves this function. The
+    translated error is *raised after the except block that caught the
+    original has finished*, not from inside it -- `raise ... from None` sets
+    `__cause__` to `None`, but leaves `__context__` pointing at whatever was
+    being handled, and `urllib.error.HTTPError`/`URLError` embed the request
+    URL in their own `str()`. Python only attaches `__context__` to an
+    exception raised while another is *currently being handled*; one raised
+    after the `try`/`except` statement has already completed has no context
+    to attach, which `from None` alone does not achieve (Review Focus 3).
+
+    `urlopen` only wraps the *connection* phase in `URLError`; a server that
+    accepts the connection and then stalls mid-response raises a bare
+    `TimeoutError` out of `response.read()`, and a dropped connection raises
+    `ConnectionResetError`/`http.client.HTTPException` -- neither wrapped.
+    Both are caught here for the same reason `URLError` is.
     """
     request = urllib.request.Request(
         endpoint.url,
@@ -548,32 +561,61 @@ def _post_over_the_wire(
         headers={"Content-Type": "application/json", **endpoint.headers},
         method="POST",
     )
+
+    failure: ProviderError | UnsupportedDocumentError | None = None
+    raw = b""
     try:
         with urllib.request.urlopen(request, timeout=timeout_s) as response:
             raw = response.read()
     except urllib.error.HTTPError as error:
-        raise _from_http_error(error, endpoint) from None
+        failure = _from_http_error(error, endpoint)
     except urllib.error.URLError:
-        raise ProviderError(
+        failure = ProviderError(
             f"endpoint {endpoint.id!r} could not be reached",
             reason="transport",
             parser_id=endpoint.id,
-        ) from None
+        )
+    except TimeoutError:
+        failure = ProviderError(
+            f"endpoint {endpoint.id!r} timed out",
+            reason="timeout",
+            parser_id=endpoint.id,
+        )
+    except (OSError, http.client.HTTPException):
+        failure = ProviderError(
+            f"endpoint {endpoint.id!r} could not be reached",
+            reason="transport",
+            parser_id=endpoint.id,
+        )
+    if failure is not None:
+        raise failure
 
     try:
         return json.loads(raw)
-    except json.JSONDecodeError:
-        raise ProviderError(
+    except ValueError:
+        # `ValueError`, not `json.JSONDecodeError`: non-UTF-8 bytes raise
+        # `UnicodeDecodeError` inside `json.loads` before it ever gets to
+        # parsing, and that is a `ValueError` subclass too, not a
+        # `JSONDecodeError` -- a body this malformed must still translate,
+        # not escape.
+        failure = ProviderError(
             f"endpoint {endpoint.id!r} returned a response that was not valid JSON",
             reason="service",
             parser_id=endpoint.id,
-        ) from None
+        )
+    raise failure
 
 
 def _from_http_error(
     error: urllib.error.HTTPError, endpoint: OcrEndpoint
 ) -> ProviderError | UnsupportedDocumentError:
-    """Translate one HTTP status into docdoc's model. No URL, no header, no body."""
+    """Translate one HTTP status into docdoc's model. No URL, no header, no body.
+
+    Returns rather than raises: called from inside an `except` block, and a
+    translation failure here (nothing in this function should fail, but
+    `_retry_after_seconds` is deliberately exception-proof precisely so that
+    claim holds) must not itself chain onto the `HTTPError` being handled.
+    """
     status = error.code
     if status in (401, 403):
         return ProviderError(
@@ -596,8 +638,39 @@ def _from_http_error(
     )
     retry_after = error.headers.get("Retry-After") if error.headers is not None else None
     if retry_after:
-        translated.retry_after_s = float(retry_after)
+        seconds = _retry_after_seconds(retry_after)
+        if seconds is not None:
+            translated.retry_after_s = seconds
     return translated
+
+
+def _retry_after_seconds(value: str) -> float | None:
+    """Parse a ``Retry-After`` header value, never raising.
+
+    RFC 9110 allows two forms: a delta in seconds, or an HTTP-date. A
+    service sending the second form (`"Wed, 21 Oct 2026 07:28:00 GMT"`) must
+    not crash the translation that is supposed to turn its failure into a
+    typed error -- `float()` on that string raises `ValueError`, and if that
+    happened inside the `except HTTPError` block above, the new exception
+    would chain onto the URL-bearing `HTTPError` via `__context__`, exactly
+    the leak `_post_over_the_wire` otherwise avoids. Returns `None` -- no
+    `retry_after_s` is set -- for anything neither form parses as, rather
+    than guessing.
+    """
+    try:
+        return max(float(value), 0.0)
+    except ValueError:
+        pass
+
+    try:
+        parsed = email.utils.parsedate_to_datetime(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.UTC)
+    return max((parsed - dt.datetime.now(dt.UTC)).total_seconds(), 0.0)
 
 
 class PaddleXParser:
@@ -648,14 +721,21 @@ class PaddleXParser:
     ) -> Document:
         self._check_options(options, blob_id=source.blob_id)
 
+        # One budget for the whole parse, opened once and passed to every
+        # chunk: `analyze_with_retries` opens its own `Deadline` when none is
+        # given, and calling it once per chunk with no shared deadline would
+        # give a 20-chunk PDF twenty times `transport.deadline_s`, not one.
+        deadline = transport.start()
+
         if source.is_pdf:
-            pages = self._parse_pdf(source, transport)
+            pages = self._parse_pdf(source, transport, deadline)
         else:
             pages = analyze_with_retries(
                 lambda src, tr, dl: self._send(source.data, _FILE_TYPE_IMAGE, 1, src, tr, dl),
                 source=source,
                 transport=transport,
                 parser_id=self.id,
+                deadline=deadline,
             )
 
         return build_document(
@@ -690,7 +770,9 @@ class PaddleXParser:
                     blob_id=blob_id,
                 )
 
-    def _parse_pdf(self, source: SourceFile, transport: TransportSettings) -> list[OcrPage]:
+    def _parse_pdf(
+        self, source: SourceFile, transport: TransportSettings, deadline: Deadline
+    ) -> list[OcrPage]:
         pages: list[OcrPage] = []
         for data, expected_pages in self._pdf_chunks(source):
             chunk_pages = analyze_with_retries(
@@ -700,6 +782,7 @@ class PaddleXParser:
                 source=source,
                 transport=transport,
                 parser_id=self.id,
+                deadline=deadline,
             )
             pages.extend(chunk_pages)
         return pages
@@ -734,7 +817,11 @@ class PaddleXParser:
         try:
             document = pdfium.PdfDocument(source.data)
         except pdfium.PdfiumError as error:
-            reason = "encrypted" if error.err_code == pdfium.raw.FPDF_ERR_PASSWORD else "corrupt"
+            # `getattr`, not `.err_code` directly: the attribute only exists
+            # from pypdfium2 5.0 (hence the `ocr` extra's floor) -- a defensive
+            # fallback rather than trusting every install to honour it.
+            code = getattr(error, "err_code", None)
+            reason = "encrypted" if code == pdfium.raw.FPDF_ERR_PASSWORD else "corrupt"
             raise UnsupportedDocumentError(
                 f"endpoint {self.id!r} was sent a PDF that could not be opened",
                 reason=reason,
@@ -798,13 +885,22 @@ class PaddleXParser:
     def probe(self, timeout_s: float = 2.0) -> bool:
         """Whether the endpoint answers at all. Never raises: a health probe
         that could itself fail is not one a caller can rely on.
+
+        ``endpoint.url`` is the full ``POST /ocr`` URL, not a base -- for an
+        endpoint behind an nginx prefix (``https://host/tesseract/ocr``) the
+        health route sits beside it (``https://host/tesseract/health``), not
+        under it. ``urljoin`` with a bare relative reference replaces the
+        last path segment, which is exactly that: ``.../ocr`` -> ``.../health``,
+        ``.../tesseract/ocr`` -> ``.../tesseract/health``.
         """
+        url = urllib.parse.urljoin(self._endpoint.url, "health")
         try:
-            request = urllib.request.Request(
-                f"{self._endpoint.url}/health", headers=dict(self._endpoint.headers)
-            )
+            request = urllib.request.Request(url, headers=dict(self._endpoint.headers))
             with urllib.request.urlopen(request, timeout=timeout_s) as response:
                 body = json.loads(response.read())
+            # Inside the `try`, not after it: a body that decodes but is not
+            # an object (a JSON list or string) makes `.get` raise
+            # `AttributeError`, which "never raises" must catch too.
+            return bool(isinstance(body, dict) and body.get("errorCode") == 0)
         except Exception:
             return False
-        return bool(body.get("errorCode") == 0)

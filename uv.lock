@@ -684,7 +684,7 @@ requires-dist = [
     { name = "psycopg", extras = ["binary", "pool"], marker = "extra == 'postgres'", specifier = ">=3.1" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pymupdf", marker = "extra == 'pdf'", specifier = ">=1.24" },
-    { name = "pypdfium2", marker = "extra == 'ocr'", specifier = ">=4.30" },
+    { name = "pypdfium2", marker = "extra == 'ocr'", specifier = ">=5.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
     { name = "rapidfuzz", specifier = ">=3.0" },
