@@ -159,12 +159,24 @@ file:
 ```
 
 Each entry becomes one `PaddleXParser`, registered under its own `id` and
-immediately available — there is no extra to install and no credential
-beyond whatever `headers` the entry carries. `url` and `headers` never
-appear in an error, a log event, a `repr`, or an HTTP body (ADR-0021 §3,
-Review Focus 3); every failure and every listing names the endpoint by `id`
-alone. Standing up a third PaddleX-protocol-compatible service, or pointing
-`paddle` at a different host, is an edit to this file, never a new adapter.
+immediately available for an image — no extra to install and no credential
+beyond whatever `headers` the entry carries. A **PDF** needs `docdoc[ocr]`
+(`pypdfium2`) regardless: without it the adapter cannot learn a PDF's page
+count and so cannot prove a result is complete, and it refuses one with a
+typed error rather than guessing. `url` and `headers` never appear in an
+error, a log event, a `repr`, or an HTTP body (ADR-0021 §3, Review Focus 3);
+every failure and every listing names the endpoint by `id` alone. Standing
+up a third PaddleX-protocol-compatible service, or pointing `paddle` at a
+different host, is an edit to this file, never a new adapter.
+
+`language` **asserts** rather than selects: the protocol has no language
+field, so a request naming one only checks that the chosen endpoint
+declared it in `languages` and refuses before any call otherwise. Which
+language an endpoint's model actually reads is decided by how that
+endpoint is deployed, not by the request. An endpoint may also declare
+`timeout_s` / `deadline_s`, which override the caller's `TransportSettings`
+for that endpoint alone — CPU OCR of a multi-page scan can need far longer
+than the generic defaults assume.
 
 ## What each adapter is responsible for
 

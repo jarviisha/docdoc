@@ -386,10 +386,14 @@ CONFIG_DOCUMENTS = (
     "docs/adr/0014-tenant-scoping-and-store-namespacing.md",
     # The gateway design and its plan both name DOCDOC_OCR_ENDPOINTS_FILE ahead
     # of the task that defines it (docdoc.ingest.parsers.paddlex.ENDPOINTS_FILE_ENV,
-    # added in Task 2). ADR-0021, which amends the same design, names only the
-    # `DOCDOC_*_FILE` wildcard idiom and so needs no entry here.
+    # added in Task 2).
     "docs/superpowers/specs/2026-10-19-ocr-gateway-design.md",
     "docs/superpowers/plans/2026-10-19-ocr-gateway.md",
+    # ADR-0021 named only the `DOCDOC_*_FILE` wildcard idiom until the 012
+    # review (Finding 10) replaced it with the literal variable name, so it
+    # no longer qualifies for that exemption -- a decision record that names
+    # a setting goes stale exactly like any other document.
+    "docs/adr/0021-caller-named-parsers-and-ocr-endpoints.md",
 )
 
 #: Requires at least one character after the prefix, so the `DOCDOC_*` wildcard

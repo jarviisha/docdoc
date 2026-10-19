@@ -50,7 +50,10 @@ Two environment variables, both read once at process start:
       "id": "tesseract",
       "url": "http://localhost:8081/ocr",
       "version": "1.0.0",
-      "max_pages": 50
+      "languages": ["vie", "eng"],
+      "max_pages": 50,
+      "timeout_s": 300,
+      "deadline_s": 1800
     }
   ]
 }
@@ -61,6 +64,18 @@ never its URL (ADR-0021 §3), so it is worth choosing something that reads
 well in a log line. Point `DOCDOC_OCR_ENDPOINTS_FILE` at the file and the
 endpoint is available under that `id`, with no code change and no restart
 of this server required.
+
+`languages` must agree with `TESSERACT_LANGS` above -- it **asserts** that
+this server can read Vietnamese and English, it does not select between
+them at request time: the PaddleX `/ocr` protocol this server speaks has no
+language field, so `TESSERACT_LANGS` alone decides what `tesseract -l ...`
+actually reads. A caller asking for a language not listed here is refused
+before any call reaches this server.
+
+`timeout_s` / `deadline_s` override `TransportSettings`' generic 30s/120s
+defaults, which are too short for CPU OCR of a multi-page scan. The values
+above are a starting point for a modest host, not a measured number --
+raise both if a real document times out before `tesseract` finishes it.
 
 **If you set `MAX_PAGES` on this server, set the endpoint's own `max_pages`
 to the same number.** Without it, `docdoc` has no reason to believe a long

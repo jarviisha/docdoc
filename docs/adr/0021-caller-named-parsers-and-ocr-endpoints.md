@@ -41,8 +41,10 @@ every time an operator stands up another PaddleX-protocol-compatible service.
 ### 1. A request may name a configured parser. Code never does.
 
 Principle IV's rule becomes: parsers are selected by declared capabilities, never by a provider
-name hard-coded *in docdoc*. A request — an HTTP body, a CLI flag — may name one of the parsers
-the deployment has configured. **The request then fails rather than falling back**: an unknown
+name hard-coded *in docdoc*. A request — `POST /v1/ocr?parser=...`, the `parser=` argument to
+`ingest.parse` for an in-process caller — may name one of the parsers the deployment has
+configured. There is no CLI flag: `docdoc parse` has no `--parser`, naming a parser is an HTTP or
+library-level concern. **The request then fails rather than falling back**: an unknown
 name, a name that is currently unavailable, or a name that cannot serve the document's media type
 or the capabilities asked for raises `ParserCapabilityError` (HTTP 422) naming the parser and the
 reason. It never silently substitutes a different parser for the one asked for.
@@ -81,10 +83,13 @@ taken; it does not stop docdoc from recording what it would have decided on its 
 The PaddleX serving protocol (`POST /ocr`, `result.ocrResults[i].prunedResult`) is implemented by
 **one** adapter, confined to `docdoc.ingest.parsers.paddlex` per Principle IV's adapter-directory
 rule. That adapter is parametrised by any number of configured endpoints — an id, a URL, optional
-headers, declared capabilities and media types, a declared page limit — read from a configuration
-file named by an environment variable a later task defines, following the `DOCDOC_*_FILE`
-convention the gateway design already settles on. Standing up a third PaddleX-protocol service, or
-pointing `tesseract`
+headers, declared media types, languages, a page limit, and optional per-attempt/per-parse
+timeouts — read from a configuration file named by the `DOCDOC_OCR_ENDPOINTS_FILE` environment
+variable, following the `DOCDOC_*_FILE` convention the gateway design already settles on. None of
+this is a *capability* in `ParserCapabilities`' sense — only `media_types` (plus `requires_network`,
+fixed for this adapter) is; `languages`, the page limit, and the timeouts are declared data this
+adapter consults, not capabilities a caller's `require` can ask for. Standing up a third
+PaddleX-protocol service, or pointing `tesseract`
 at a different host, is a configuration change, never a new adapter file and never a new docdoc
 release. This is what lets "the caller picks the provider" (the gateway design's Goal 2) scale past
 two names without multiplying code: the alternative — one adapter per configured endpoint name — is

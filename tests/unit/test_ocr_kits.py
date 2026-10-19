@@ -107,6 +107,22 @@ def test_kits_declare_restart_policy() -> None:
             assert "restart:" in block, f"{compose_file}: service {name!r} has no restart policy"
 
 
+def test_paddlex_compose_quotes_the_version_pin_in_its_shell_command() -> None:
+    """`compose.yml`'s `command:` runs through `bash -lc`, where an unquoted
+    `filetype>=1.2` is a redirect (`>`) into a file named `=1.2`, not a pip
+    version spec -- `pip install ... filetype` (no floor) plus a stray file
+    (012 review, Finding 7). Every `pip install` argument with a bare
+    comparison operator must be quoted.
+    """
+    text = pathlib.Path("packaging/ocr/paddlex/compose.yml").read_text(encoding="utf-8")
+    for line in text.splitlines():
+        if "pip install" not in line:
+            continue
+        for word in line.split():
+            if re.fullmatch(r"[A-Za-z0-9_.-]+(>=|<=|==|>|<)[\w.]+", word):
+                raise AssertionError(f"unquoted version spec in a shell command: {line!r}")
+
+
 def test_main_compose_has_no_model_service() -> None:
     text = _MAIN_COMPOSE.read_text(encoding="utf-8")
     services_block = re.search(r"^services:\n(.*?)^volumes:", text, re.S | re.M)

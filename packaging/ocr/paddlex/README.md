@@ -18,7 +18,12 @@ this kit must set `max_pages` to the *same* number as `max_num_input_imgs`
 here: with it, `PaddleXParser` cuts a longer PDF into `max_pages`-sized
 pieces itself and sends one request per piece, so the whole document still
 parses; without it, docdoc has no reason to split, sends the whole PDF in one
-request, and gets back a silently short document instead of an error.
+request, and the response comes back short of what was sent. That is *not*
+a silently short document -- `PaddleXParser._send` compares pages sent
+against pages returned and raises `ProviderError(reason="incomplete")`
+naming both counts, which is never retried (a short result is deterministic,
+and retrying gets the identical short answer back). It is an error instead
+of a document, but still the wrong number to have to discover in production.
 `tests/unit/test_ocr_kits.py::test_paddle_max_pages_matches_kit` pins the two
 numbers agreeing.
 
@@ -62,7 +67,9 @@ in `compose.yml` to cap it.
       "url": "http://localhost:8080/ocr",
       "version": "3.3.11",
       "languages": ["vie", "eng"],
-      "max_pages": 3
+      "max_pages": 3,
+      "timeout_s": 300,
+      "deadline_s": 1800
     }
   ]
 }
@@ -73,3 +80,18 @@ never its URL (ADR-0021 §3). `max_pages: 3` is not a guess: it is
 `OCR.yaml`'s own `max_num_input_imgs`, copied -- see the warning above for
 what disagreeing between the two would cost. `packaging/ocr/endpoints.example.json`
 carries this same entry alongside `packaging/ocr/tesseract/`'s.
+
+`languages` **asserts** that this endpoint can read Vietnamese and English;
+it does not select between them -- the PaddleX `/ocr` protocol has no
+language field for `docdoc` to set, so which language this server actually
+recognizes is decided by `OCR.yaml`'s own recognition model, not by a
+request. A caller asking for a language not listed here is refused before
+any call is made.
+
+`timeout_s` (per attempt) and `deadline_s` (per whole parse, across every
+chunk a long PDF is split into) override `TransportSettings`' generic
+30s/120s defaults for this endpoint specifically. CPU OCR of a multi-page
+scan is slow, and those generic defaults are sized for a service-backed
+parser in general, not for this one -- 300s/1800s above is a starting point
+for a modest CPU host, not a measured number; raise both if `paddle` times
+out on your own hardware before it finishes.

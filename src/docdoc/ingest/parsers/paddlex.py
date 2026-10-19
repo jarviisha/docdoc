@@ -18,8 +18,10 @@ the same split `gcv.map_annotate_result` draws between "the service answered"
 and "here is what the answer means" (ADR-0021's whole adapter is testable
 without the service it configures). The HTTP half — sending the request,
 splitting a long PDF into endpoint-sized chunks, stitching the per-chunk page
-lists this module hands back into one call to `build_document` — is a later
-task's addition to this same module, not a different one.
+lists this module hands back into one call to `build_document` — lives in
+this same module rather than a different one (`PaddleXParser`,
+`_post_over_the_wire`, `_pdf_chunks`), below the offline half this
+docstring describes first.
 
 **Line granularity, not words.** PaddleX recognizes *lines*, not words — there
 is no word-level box to split a line into, and splitting on whitespace would
@@ -898,6 +900,15 @@ class PaddleXParser:
         """Option checks first, and before any network call (ADR-0021 §3):
         the only recognized key is ``language``, and only a value the
         endpoint actually declared.
+
+        **This asserts, it does not select.** The PaddleX `/ocr` protocol
+        carries no language field, so there is nothing in the request body
+        a value here could change -- `language="vie"` checks that *this*
+        endpoint declares Vietnamese and otherwise refuses before any call
+        is made; it never picks a different model, a different endpoint, or
+        anything else on the far side of the wire. Choosing which model an
+        endpoint runs is the operator's job, done when the endpoint is
+        configured, not a caller's at request time (012 review, Finding 6).
         """
         for key, value in options.items():
             if key != "language":

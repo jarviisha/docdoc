@@ -1286,9 +1286,11 @@ def _router() -> APIRouter:
         ``parser`` names a configured parser by id (ADR-0021 §1); omitted, the
         usual capability-based selection chooses one. ``language`` becomes
         ``options={"language": ...}`` -- the only option a PaddleX-protocol
-        endpoint recognizes, and only a value it declared; either query
-        parameter refused raises `ParserCapabilityError` (422), never a silent
-        substitution.
+        endpoint recognizes, and only a value it declared. It **asserts**
+        rather than selects: the protocol has no language field, so this
+        checks that the chosen endpoint supports the language rather than
+        choosing a model that reads it. Either query parameter refused
+        raises `ParserCapabilityError` (422), never a silent substitution.
         """
         from fastapi.concurrency import run_in_threadpool
 

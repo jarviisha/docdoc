@@ -45,7 +45,7 @@ services:
         set -e
         if [ ! -f /opt/paddlex-serving-installed ]; then
           python -m pip config unset global.index-url || true
-          python -m pip install --index-url https://pypi.org/simple filetype>=1.2
+          python -m pip install --index-url https://pypi.org/simple "filetype>=1.2"
           paddlex --install serving
           touch /opt/paddlex-serving-installed
         fi
