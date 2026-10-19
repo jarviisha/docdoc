@@ -49,7 +49,8 @@ Two environment variables, both read once at process start:
     {
       "id": "tesseract",
       "url": "http://localhost:8081/ocr",
-      "version": "1.0.0"
+      "version": "1.0.0",
+      "max_pages": 50
     }
   ]
 }
@@ -60,3 +61,11 @@ never its URL (ADR-0021 §3), so it is worth choosing something that reads
 well in a log line. Point `DOCDOC_OCR_ENDPOINTS_FILE` at the file and the
 endpoint is available under that `id`, with no code change and no restart
 of this server required.
+
+**If you set `MAX_PAGES` on this server, set the endpoint's own `max_pages`
+to the same number.** Without it, `docdoc` has no reason to believe a long
+PDF needs splitting, sends the whole thing in one request, and gets back
+this server's `413` instead of a document. With it, `PaddleXParser` cuts a
+longer PDF into `max_pages`-sized pieces itself and sends one request per
+piece, so a document longer than this server's cap still parses -- it is
+one setting on each side of the same number, not a setting on only one.

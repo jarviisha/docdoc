@@ -39,15 +39,43 @@ app = FastAPI()
 #: instead of its hard-coded ``-l vie`` alone.
 TESSERACT_LANGS = os.environ.get("TESSERACT_LANGS", "vie+eng")
 
-#: Unset by default: no cap, unlike the shim's hard-coded ``MAX_PAGES = 3``.
-#: A deployment that wants one sets ``MAX_PAGES`` and gets a 413 over it --
+
+def _parse_max_pages(raw: str | None) -> int | None:
+    """Unset means no cap (`None`), unlike the shim's hard-coded
+    ``MAX_PAGES = 3``. Anything else must be a positive integer -- a typo'd
+    ``MAX_PAGES=0`` (or a negative number) would otherwise silently reject
+    *every* request forever, which is a deployment mistake that deserves to
+    fail loudly at startup, not be discovered one 413 at a time in
+    production.
+    """
+    if not raw:
+        return None
+    try:
+        parsed = int(raw)
+    except ValueError:
+        raise RuntimeError(f"MAX_PAGES={raw!r} is not an integer") from None
+    if parsed < 1:
+        raise RuntimeError(
+            f"MAX_PAGES={raw!r} must be a positive integer; a value below 1 would refuse "
+            "every request, which is never what setting this cap is meant to do"
+        )
+    return parsed
+
+
+#: A deployment that wants a cap sets `MAX_PAGES` and gets a 413 over it --
 #: never a document silently read only partway through.
-_max_pages_env = os.environ.get("MAX_PAGES")
-MAX_PAGES: int | None = int(_max_pages_env) if _max_pages_env else None
+MAX_PAGES: int | None = _parse_max_pages(os.environ.get("MAX_PAGES"))
 
 #: The shim's own preview width: readable, light enough that `visualize`'s
 #: callers do not pay much for it.
 PREVIEW_WIDTH = 1200
+
+#: Modes Pillow's PNG writer accepts directly. CMYK (and a handful of other
+#: modes a scanner or a converted image can carry) raise `OSError` from
+#: `Image.save(..., "PNG")` -- a valid, readable input failing with a 500
+#: that has nothing to do with tesseract. Converted to RGB instead of left
+#: to crash.
+_PNG_SAFE_MODES = frozenset({"1", "L", "LA", "I", "P", "RGB", "RGBA"})
 
 
 class OcrRequest(BaseModel):
@@ -68,6 +96,8 @@ def _error(status: int, message: str) -> JSONResponse:
 
 
 def _png_bytes(image: Image.Image) -> bytes:
+    if image.mode not in _PNG_SAFE_MODES:
+        image = image.convert("RGB")
     buffer = BytesIO()
     image.save(buffer, "PNG")
     return buffer.getvalue()
@@ -98,47 +128,59 @@ def run_ocr(req: OcrRequest) -> JSONResponse:
     except binascii.Error:
         return _error(400, "file is not valid base64")
 
-    try:
-        images, is_pdf = ocr.pages(data, req.fileType)
-    except Exception as error:  # any unreadable file maps to one body shape
-        return _error(400, f"file could not be read: {type(error).__name__}")
+    if ocr.is_pdf(data, req.fileType):
+        try:
+            page_count = ocr.pdf_page_count(data)
+        except Exception as error:  # any unreadable file maps to one body shape
+            return _error(400, f"file could not be read: {type(error).__name__}")
+        if MAX_PAGES is not None and page_count > MAX_PAGES:
+            # Refused before a single page is rendered, let alone OCR'd --
+            # `pdf_page_count` above is the only pdfium work this document
+            # costs. A silently short result is never acceptable (global
+            # constraints: "never truncate silently"), so this is a whole
+            # rejection instead.
+            return _error(413, f"document has {page_count} pages, over the {MAX_PAGES} limit")
+    else:
+        page_count = 1  # An image is always exactly one page.
 
-    # ponytail: every page is rendered before the cap below can reject the
-    # document -- simplest correct option (one render path, no second way to
-    # peek a PDF's page count), ceiling is wasted rendering on a document
-    # that gets refused anyway. Upgrade if a deployment with `MAX_PAGES` set
-    # actually receives oversized PDFs often enough to notice: peek the page
-    # count with `pdfium.PdfDocument` before calling `ocr.pages`.
-    if MAX_PAGES is not None and len(images) > MAX_PAGES:
-        # Rejected whole, not truncated: a 413 over the cap is the one
-        # defence that lets a caller tell "read completely" from "read
-        # partway" apart, which a silently short result would not (global
-        # constraints: "never truncate silently").
-        return _error(413, f"document has {len(images)} pages, over the {MAX_PAGES} limit")
+    pages_iter, is_pdf_file = ocr.iter_pages(data, req.fileType)
 
-    try:
-        results = []
-        for index, image in enumerate(images):
+    results: list[dict[str, Any]] = []
+    sizes: list[dict[str, int]] = []
+    index = 0
+    while True:
+        try:
+            image = next(pages_iter)
+        except StopIteration:
+            break
+        except ocr.UnsupportedImageError as error:
+            return _error(400, str(error))
+        except Exception as error:  # a render/decode failure, not a tesseract one
+            return _error(400, f"file could not be read: {type(error).__name__}")
+
+        sizes.append({"width": image.width, "height": image.height})
+        try:
             tsv = ocr.run_tesseract(_png_bytes(image), TESSERACT_LANGS)
             lines = ocr.lines_from_tsv(tsv)
-            pruned = {
-                "rec_texts": [text for text, _, _ in lines],
-                "rec_boxes": [box for _, box, _ in lines],
-                "rec_scores": [score for _, _, score in lines],
-            }
-            page: dict[str, Any] = {"prunedResult": pruned}
-            if req.visualize and index == 0:
-                page["inputImage"] = _preview(image)
-            results.append(page)
-    except Exception as error:  # subprocess failure or timeout, one body shape
-        return _error(500, f"tesseract failed: {type(error).__name__}")
+        except Exception as error:  # subprocess failure or timeout, one body shape
+            return _error(500, f"tesseract failed: {type(error).__name__}")
 
-    sizes = [{"width": image.width, "height": image.height} for image in images]
-    if is_pdf:
-        # `numPages` names the whole document's page count -- every page is
-        # always rendered (the over-cap case returns 413 above instead), so
-        # this is simply `len(images)`, never a chunk's count.
-        data_info = {"type": "pdf", "numPages": len(images), "pages": sizes}
+        pruned = {
+            "rec_texts": [text for text, _, _ in lines],
+            "rec_boxes": [box for _, box, _ in lines],
+            "rec_scores": [score for _, _, score in lines],
+        }
+        page: dict[str, Any] = {"prunedResult": pruned}
+        if req.visualize and index == 0:
+            page["inputImage"] = _preview(image)
+        results.append(page)
+        index += 1
+
+    if is_pdf_file:
+        # `numPages` names the whole document's page count, learned up
+        # front from `pdf_page_count` -- never a chunk's count, and the same
+        # number regardless of how this loop happened to iterate.
+        data_info = {"type": "pdf", "numPages": page_count, "pages": sizes}
     else:
         data_info = {"type": "image", **sizes[0]}
 

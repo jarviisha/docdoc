@@ -12,9 +12,14 @@ import csv
 import io
 import subprocess
 import tempfile
+import threading
+from typing import TYPE_CHECKING
 
 import pypdfium2 as pdfium
 from PIL import Image
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 #: 300 dpi, long side capped at `MAX_SIDE` -- the shim's own choice. A4 at
 #: 300 dpi is already 3508px on its long side, so the cap only bites on a
@@ -25,6 +30,25 @@ MAX_SIDE = 3500
 #: The shim's own timeout: long enough for a dense scanned page, short
 #: enough that one stuck request does not hang a worker forever.
 TESSERACT_TIMEOUT_S = 120
+
+#: pypdfium2 is explicitly documented as not thread-safe -- not just two
+#: calls touching the *same* document, but any two calls into the library
+#: from different threads at once, because PDFium keeps process-global state
+#: under the hood. `app.py`'s `POST /ocr` is a plain (sync) `def`, which
+#: FastAPI/Starlette runs in a worker-thread pool -- so two concurrent
+#: requests really can call into pdfium from two threads at the same moment,
+#: and the documented failure mode is a segfault, not an exception either
+#: side could catch. Every call into `pdfium` in this module -- open, page
+#: count, get a page's size, render it, close -- goes through this lock, one
+#: call at a time, process-wide.
+_PDFIUM_LOCK = threading.Lock()
+
+
+class UnsupportedImageError(ValueError):
+    """A file this server deliberately refuses to OCR rather than silently
+    reading only part of it. Right now that is exactly one case: a
+    multi-frame image (an animated or multi-page TIFF) -- see `_load_image`.
+    """
 
 
 def run_tesseract(png: bytes, langs: str) -> str:
@@ -98,28 +122,88 @@ def lines_from_tsv(tsv: str) -> list[tuple[str, list[int], float | None]]:
     return out
 
 
-def pages(data: bytes, file_type: int | None) -> tuple[list[Image.Image], bool]:
-    """Every page of ``data``, rendered to a PIL image, plus whether it was
-    a PDF. Renders **all** of them -- unlike the shim's ``MAX_PAGES``, there
-    is no cap here; enforcing one without truncating is `app.py`'s job,
-    before this is ever called.
+def is_pdf(data: bytes, file_type: int | None) -> bool:
+    """Whether ``data`` is a PDF, by the same test the shim used: a declared
+    ``fileType`` of 0, or the bytes' own signature. Shared between the
+    page-count check and the actual render so the two never disagree.
     """
-    if file_type == 0 or data[:5] == b"%PDF-":
+    return file_type == 0 or data[:5] == b"%PDF-"
+
+
+def pdf_page_count(data: bytes) -> int:
+    """Just the page count: opens the document, reads its length, closes it
+    -- no page is rendered. This is what lets `app.py` refuse a document
+    over ``MAX_PAGES`` with a 413 *before* doing any rendering work on it,
+    rather than rendering everything and only then deciding to reject it.
+
+    Raises whatever `pdfium.PdfDocument` raises on a corrupt or encrypted
+    file; `app.py` maps that to 400, the same as any other unreadable file.
+    """
+    with _PDFIUM_LOCK:
         document = pdfium.PdfDocument(data)
         try:
-            rendered = []
-            for index in range(len(document)):
-                width, height = document[index].get_size()
-                scale = min(_DPI_SCALE, MAX_SIDE / max(width, height))
-                rendered.append(document[index].render(scale=scale).to_pil())
-            return rendered, True
+            return len(document)
         finally:
             document.close()
 
+
+def iter_pages(data: bytes, file_type: int | None) -> tuple[Iterator[Image.Image], bool]:
+    """Every page of ``data``, one at a time, plus whether it was a PDF.
+
+    A generator, not a list: a caller OCRs and discards each page before
+    asking for the next one, so peak memory is one rendered page (roughly
+    26MB for a 3500x3500 RGB image), never the whole document at once. No
+    page is skipped and no cap is applied here -- enforcing one without
+    truncating is `app.py`'s job, using `pdf_page_count` above, before this
+    is ever called.
+    """
+    if is_pdf(data, file_type):
+        return _iter_pdf_pages(data), True
+    return _iter_single_image(data), False
+
+
+def _iter_single_image(data: bytes) -> Iterator[Image.Image]:
+    yield _load_image(data)
+
+
+def _iter_pdf_pages(data: bytes) -> Iterator[Image.Image]:
+    with _PDFIUM_LOCK:
+        document = pdfium.PdfDocument(data)
+        count = len(document)
+    try:
+        for index in range(count):
+            with _PDFIUM_LOCK:
+                width, height = document[index].get_size()
+                scale = min(_DPI_SCALE, MAX_SIDE / max(width, height))
+                image = document[index].render(scale=scale).to_pil()
+            # Released between pages on purpose: OCR-ing the page just
+            # rendered (the slow step, a tesseract subprocess) does not
+            # touch pdfium and so must not hold this lock while it runs --
+            # only the render call above needs to be serialized.
+            yield image
+    finally:
+        with _PDFIUM_LOCK:
+            document.close()
+
+
+def _load_image(data: bytes) -> Image.Image:
     image = Image.open(io.BytesIO(data))
     # Forced now rather than left lazy: a truncated or malformed image can
     # open successfully and only fail once its pixels are decoded, which
     # would otherwise surface later as a 500 (a tesseract failure) rather
     # than the 400 (an unreadable file) it actually is.
     image.load()
-    return [image], False
+
+    # A multi-frame image (an animated or multi-page TIFF) has no page
+    # count this protocol can report truthfully from one `prunedResult`: OCR
+    # would read frame 0 alone and the response would claim one page while
+    # silently discarding the rest. Refused outright instead (ING-7's
+    # "no silent partial result", applied here even though this path never
+    # reaches docdoc's own check for it).
+    n_frames = getattr(image, "n_frames", 1)
+    if n_frames > 1:
+        raise UnsupportedImageError(
+            f"image has {n_frames} frames; only the first would be read, and this "
+            "server refuses that rather than silently returning a partial result"
+        )
+    return image

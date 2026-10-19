@@ -54,19 +54,23 @@ CAPABILITIES = ParserCapabilities(
 )
 
 
-def _load(name: str) -> Any:
+def _load(name: str, monkeypatch: pytest.MonkeyPatch) -> Any:
+    """Loaded the same way `test_tesseract_server.py` does -- see that
+    module's own docstring on `_load` for why `monkeypatch.setitem` rather
+    than assigning `sys.modules` directly.
+    """
     spec = importlib.util.spec_from_file_location(name, SERVER_DIR / f"{name}.py")
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
+    monkeypatch.setitem(sys.modules, name, module)
     spec.loader.exec_module(module)
     return module
 
 
-def _load_app() -> Any:
-    _load("ocr")
-    return _load("app")
+def _load_app(monkeypatch: pytest.MonkeyPatch) -> Any:
+    _load("ocr", monkeypatch)
+    return _load("app", monkeypatch)
 
 
 def _two_page_pdf() -> bytes:
@@ -85,7 +89,7 @@ def test_tesseract_response_maps_to_a_valid_two_page_document(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("MAX_PAGES", raising=False)
-    app_module = _load_app()
+    app_module = _load_app(monkeypatch)
     monkeypatch.setattr(app_module.ocr, "run_tesseract", lambda png, langs: FAKE_TSV)
 
     data = _two_page_pdf()
