@@ -754,10 +754,11 @@ def _plan_parse(
     *,
     limits: Limits | None,
     options: Mapping[str, Any] | None,
+    parser: str | None = None,
 ) -> Any:
     from docdoc.ingest.parse import plan_parse
 
-    return plan_parse(source, limits=limits, options=options)
+    return plan_parse(source, limits=limits, options=options, parser=parser)
 
 
 def _execute_parse(plan: Any) -> Document:

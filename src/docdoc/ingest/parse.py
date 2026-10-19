@@ -87,6 +87,7 @@ def parse(
     force: Path | None = None,
     limits: Limits | None = None,
     rule: TextLayerRule | None = None,
+    parser: str | None = None,
 ) -> Document:
     """Turn a source file into a canonical Document.
 
@@ -109,6 +110,14 @@ def parse(
         rule: The text-layer rule and its thresholds. Both are configurable;
             changing a default requires a new rule id, so past verdicts stay
             interpretable.
+        parser: A configured parser's id, named by the caller rather than
+            chosen by capability (ADR-0021 §1). Honoured or refused, never
+            substituted: an unknown, unavailable, or incapable id raises
+            ``ParserCapabilityError`` rather than falling back to whatever
+            ``require`` would otherwise have selected. Naming a recognition
+            parser on a document with a usable text layer takes the
+            recognition path anyway -- the rule still runs and its verdict is
+            kept, marked overridden (ADR-0021 §2).
 
     Returns:
         A Document satisfying every kernel invariant, with provenance recording
@@ -116,7 +125,8 @@ def parse(
 
     Raises:
         UnsupportedDocumentError: the file cannot be accepted at all.
-        ParserCapabilityError: no available parser satisfies the request.
+        ParserCapabilityError: no available parser satisfies the request, or
+            the named ``parser`` cannot.
         ParserError: a parser produced something invalid.
         ProviderError: a service-backed parse failed.
     """
@@ -131,6 +141,7 @@ def parse(
         limits=limits,
         rule=rule,
         started=started,
+        parser=parser,
     )
     return execute_plan(plan, started=started)
 
@@ -146,6 +157,7 @@ def plan_parse(
     limits: Limits | None = None,
     rule: TextLayerRule | None = None,
     started: float | None = None,
+    parser: str | None = None,
 ) -> ParsePlan:
     """Everything up to and not including running the parser.
 
@@ -157,6 +169,13 @@ def plan_parse(
     Cheap and local by construction: routing reads page text and the selection is
     a capability match. No credentials, no network, and no provider call happen
     here, which is what FR-059 requires of every identity computation.
+
+    ``parser``, when given, names a configured parser instead of leaving the
+    choice to capability-based selection (ADR-0021 §1). The path it takes is
+    decided by what it declares, not by a caller-supplied ``force``: a
+    network-backed parser takes the recognition path, anything else takes the
+    native one, and either way ``_route`` still runs the rule and records its
+    verdict as overridden (ADR-0021 §2).
     """
     limits = limits or Limits()
     transport = transport or TransportSettings()
@@ -175,12 +194,22 @@ def plan_parse(
     verdict: TextLayerRecord | None = None
 
     try:
-        verdict = _route(file, rule=rule, force=force)
-        if verdict.pages:
-            # The page count is known as soon as the rule has run, which is the
-            # earliest point it can be checked (ING-2).
-            file.check_page_count(len(verdict.pages), limits)
-        parser = _select(registry, file, require=require, native=verdict.text_layer_usable)
+        if parser is None:
+            verdict = _route(file, rule=rule, force=force)
+            if verdict.pages:
+                # The page count is known as soon as the rule has run, which is
+                # the earliest point it can be checked (ING-2).
+                file.check_page_count(len(verdict.pages), limits)
+            chosen = _select(registry, file, require=require, native=verdict.text_layer_usable)
+        else:
+            chosen = _select_named(registry, file, parser_id=parser, require=require)
+            verdict = _route(
+                file,
+                rule=rule,
+                force="recognition" if chosen.capabilities.requires_network else "native",
+            )
+            if verdict.pages:
+                file.check_page_count(len(verdict.pages), limits)
         canonical, options_hash = options_fingerprint(options)
     except Exception as error:
         _log_failure(error, file=file, verdict=verdict, started=started)
@@ -188,7 +217,7 @@ def plan_parse(
 
     return ParsePlan(
         file=file,
-        parser=parser,
+        parser=chosen,
         verdict=verdict,
         options=canonical,
         options_hash=options_hash,
@@ -301,6 +330,30 @@ def _elapsed_ms(started: float) -> int:
     return int((time.monotonic() - started) * 1000)
 
 
+def _request_for(file: SourceFile, require: CapabilityRequest | None) -> CapabilityRequest:
+    """The capability request a selection runs against, checked against the
+    file's own media type.
+
+    This used to let a mismatched request through, rewriting it to match the
+    bytes and carrying on, so a caller asking for a PNG parser on a PDF got a
+    PDF parse and no word about it. The bytes do decide what the file is
+    (ING-1) -- but silently answering a question nobody asked is the habit
+    this project rejects everywhere else, and the caller's own belief about
+    the file is worth correcting out loud.
+    """
+    request = require or CapabilityRequest(media_type=file.media_type, geometry=True)
+    if request.media_type != file.media_type:
+        raise UnsupportedDocumentError(
+            f"the request asks for {request.media_type} but the bytes are "
+            f"{file.media_type}; docdoc decides the type from the bytes, so drop "
+            "the media_type from your request or correct it",
+            reason="mime_type",
+            blob_id=file.blob_id,
+            media_type=file.media_type,
+        )
+    return request
+
+
 def _select(
     registry: ParserRegistry,
     file: SourceFile,
@@ -315,23 +368,7 @@ def _select(
     ``requires_network`` rather than by naming a provider. There is no fallback
     between the two paths -- a refusal here is explicit (FR-014, FR-017).
     """
-    request = require or CapabilityRequest(media_type=file.media_type, geometry=True)
-    if request.media_type != file.media_type:
-        # This used to rewrite the request to match the bytes and carry on, so a
-        # caller asking for a PNG parser on a PDF got a PDF parse and no word
-        # about it. The bytes do decide what the file is (ING-1) -- but silently
-        # answering a question nobody asked is the habit this project rejects
-        # everywhere else, and the caller's own belief about the file is worth
-        # correcting out loud.
-        raise UnsupportedDocumentError(
-            f"the request asks for {request.media_type} but the bytes are "
-            f"{file.media_type}; docdoc decides the type from the bytes, so drop "
-            "the media_type from your request or correct it",
-            reason="mime_type",
-            blob_id=file.blob_id,
-            media_type=file.media_type,
-        )
-
+    request = _request_for(file, require)
     parser = registry.select(request)
     if native or parser.capabilities.requires_network:
         return parser
@@ -350,3 +387,22 @@ def _select(
         ),
         blob_id=file.blob_id,
     )
+
+
+def _select_named(
+    registry: ParserRegistry,
+    file: SourceFile,
+    *,
+    parser_id: str,
+    require: CapabilityRequest | None,
+) -> Parser:
+    """Choose the parser a caller named, after the same media-type check
+    ``_select`` applies.
+
+    No native/recognition gate here, unlike ``_select``: a caller who named a
+    parser gets exactly that parser regardless of the text-layer verdict
+    (ADR-0021 §2) -- the gate exists only to keep *unnamed* selection from
+    handing a text-only parser a document it cannot read.
+    """
+    request = _request_for(file, require)
+    return registry.select_named(parser_id, request)
