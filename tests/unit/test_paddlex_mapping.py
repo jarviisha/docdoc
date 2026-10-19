@@ -187,26 +187,47 @@ class TestMultiPage:
 
 class TestRotatedPage:
     def test_rotated_page_stays_on_page(self) -> None:
-        # Review Focus 1: PaddleX's own doc_preprocessor_res already corrects the
-        # image before OCR runs, so `rec_boxes` and `dataInfo`'s page size both
-        # describe the *corrected* page. The recorded response confirms this --
-        # angle: 90, and every box still lands inside the (swapped) reported
-        # width and height -- so this fixture produces normalized boxes, not a
-        # GeometryError. Both outcomes are accepted here because the contract
-        # this adapter makes is "stays on the page, or says so typed", not
-        # "always succeeds".
-        recorded = _recorded("paddle.rotated_90")
+        # Review Focus 1: `dataInfo` names the page *as rendered* (landscape,
+        # 1684x1190), before PaddleX's own doc_preprocessor_res straightens it
+        # for display (angle: 90). `rec_boxes` describes that straightened,
+        # portrait frame -- the adapter must swap width and height back
+        # itself, or the box normalizes against the wrong aspect ratio
+        # without raising anything: a value can land inside [0, 1] and still
+        # describe the wrong rectangle. So "every bbox in [0, 1]" alone is a
+        # postcondition of `normalize_bbox`, not evidence this adapter chose
+        # the right frame to normalize against -- the assertion below instead
+        # checks the *rectangle*, against the one independent source of truth
+        # available: the same invoice, recognized unrotated.
+        rotated = _recorded("paddle.rotated_90")
         assert (
-            recorded["result"]["ocrResults"][0]["prunedResult"]["doc_preprocessor_res"]["angle"]
+            rotated["result"]["ocrResults"][0]["prunedResult"]["doc_preprocessor_res"]["angle"]
             == 90
         )
 
-        document = _mapped(recorded, _source("rotated_90.pdf"))
+        invoice = _recorded("paddle.digital_invoice")
+        invoice_pruned = invoice["result"]["ocrResults"][0]["prunedResult"]
+        invoice_size = invoice["result"]["dataInfo"]["pages"][0]
+        x1, y1, x2, y2 = invoice_pruned["rec_boxes"][0]
+        expected = (
+            x1 / invoice_size["width"],
+            y1 / invoice_size["height"],
+            x2 / invoice_size["width"],
+            y2 / invoice_size["height"],
+        )
 
-        for token in document.tokens:
-            assert token.geometry is not None
-            for value in token.geometry.bbox:
-                assert 0.0 <= value <= 1.0
+        document = _mapped(rotated, _source("rotated_90.pdf"))
+        (page,) = document.pages
+        first = next(iter(document.tokens))
+
+        # Portrait, like the unrotated invoice -- not the landscape size
+        # `dataInfo` reported before doc_preprocessor_res corrected it.
+        assert page.width < page.height
+        assert first.geometry is not None
+        # Pixel-level OCR jitter (a line or two of difference between the two
+        # recognition runs), not exact equality -- but tight enough that the
+        # pre-fix bug (dividing by the unswapped, landscape size) fails this
+        # by roughly an order of magnitude more than jitter alone explains.
+        assert first.geometry.bbox == pytest.approx(expected, abs=0.01)
 
 
 class TestErrorModel:

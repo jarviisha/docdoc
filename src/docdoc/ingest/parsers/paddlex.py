@@ -31,32 +31,41 @@ uses, so page spans tile and tokens stay ordered by construction rather than
 by adapter discipline.
 
 **Boxes travel in pixels until normalization, deliberately.** `OcrLine.box` is
-`(x1, y1, x2, y2)` exactly as `rec_boxes` reports it — pixels of the *rendered*
-page, which the adapter does not control and does not try to undo. Normalizing
-only in `build_document`, against the page size `dataInfo` reports for that
-same response, is what keeps a pixel coordinate from ever surviving into a
-`Document` (FR-005) while leaving `pages_of` a pure, reusable extraction step
-a future chunked caller can run once per chunk before any page size is known
-to have survived intact.
+`(x1, y1, x2, y2)` exactly as `rec_boxes` reports it — pixels of whatever frame
+OCR actually ran against (see `_oriented_size` below for when that differs
+from the page size `dataInfo` names). `OcrPage.width`/`height` already carry
+that corrected size, so `build_document`'s call to `normalize_bbox` is the
+only place a pixel coordinate is divided down to the kernel's 0..1 space; it
+never survives into a `Document` (FR-005), and `pages_of` stays a pure,
+reusable extraction step a future chunked caller can run once per chunk.
 
 **Bbox only, no polygons.** `rec_polys` is PaddleX-only and the kernel has no
 polygon field; dropping it here is the gateway design's own call, not a gap
 to close, and it is why `_pruned` in the fixture recorder never keeps it
 either.
 
-**A rotated page's boxes are not re-derived here, on purpose.** PaddleX's own
-`doc_preprocessor_res` already corrects the image for display before OCR ever
-runs on it — `rec_boxes` and `dataInfo`'s page size both describe the
-*corrected* page, confirmed against a recorded `rotated_90.pdf` response where
-`angle: 90` and every box still falls inside the reported (swapped) width and
-height. So every page opens at `rotation=0`: there is no undisplayed rotation
-left for this adapter to carry. If a box ever *did* fall outside the page —
-evidence of a coordinate system this adapter does not understand, not
-ordinary rendering slop — `normalize_bbox` raises `GeometryError` and it is
-left to propagate unwrapped, unlike every `ParserError` this module raises
-deliberately: a geometry bug is not a shape this protocol is expected to
-produce, and folding it into `ParserError(reason="internal")` would make it
-indistinguishable from one that is.
+**A rotated page's boxes are re-derived here, deliberately not against
+`dataInfo` alone.** PaddleX's own `doc_preprocessor_res` corrects the image
+for display *before* OCR ever runs on it, so `rec_boxes` describes the
+corrected frame — but `dataInfo` keeps reporting the page **as rendered**,
+before that correction. For a quarter turn (`angle` 90 or 270) those two
+frames have width and height swapped, confirmed against a recorded
+`rotated_90.pdf` response: `dataInfo` says `1684x1190` with `angle: 90`, and
+the first box is barely different from the *unrotated* `digital_invoice.pdf`
+fixture's own first box once width and height are swapped back. Dividing by
+the unswapped size instead does not crash — the result still happens to fall
+inside `[0, 1]` — it is simply the wrong rectangle, silently. `_oriented_size`
+is where this swap happens, once, before either `normalize_bbox` or the
+`Document`'s own page dimensions see a size. Every page still opens at
+`rotation=0`: once the frame is right, there is no further undisplayed
+rotation left for this adapter to carry. If a box still falls outside the
+(now correctly oriented) page — evidence of a coordinate system this adapter
+does not understand, not ordinary rendering slop — `normalize_bbox` raises
+`GeometryError` and it is left to propagate unwrapped, unlike every
+`ParserError` this module raises deliberately: a geometry bug is not a shape
+this protocol is expected to produce, and folding it into
+`ParserError(reason="internal")` would make it indistinguishable from one
+that is.
 """
 
 from __future__ import annotations
@@ -188,13 +197,17 @@ def load_endpoints(path: str | Path) -> tuple[OcrEndpoint, ...]:
         try:
             endpoint = OcrEndpoint(**entry)
         except ValidationError as error:
-            # Deliberately not `str(error)`: pydantic's own message can quote
-            # the offending value (a url, a header), which is exactly what
-            # this function promises never to do.
+            # Deliberately not `str(error)`, and deliberately `from None`
+            # rather than `from error`: pydantic's own message -- and its
+            # `errors()[i]["input"]` -- can carry the offending value (a url,
+            # a header). Chaining with `from error` would still attach it as
+            # `__cause__`, which `traceback.format_exception` walks and
+            # prints in full; `from None` is what actually keeps it out of
+            # view, not just out of this function's own message.
             raise ValueError(
                 f"{path}: endpoints[{index}] is not a valid endpoint "
                 f"({len(error.errors())} field error(s))"
-            ) from error
+            ) from None
 
         # The id itself is not a secret -- it is the one thing every error in
         # this project *is* allowed to name an endpoint by -- so, unlike the
@@ -282,7 +295,8 @@ def _raise_for_status(response: Mapping[str, Any], *, parser_id: str, blob_id: s
 
 
 def _page_sizes(data_info: Mapping[str, Any]) -> list[tuple[float, float]]:
-    """One `(width, height)` per page, from `dataInfo` alone.
+    """One `(width, height)` per page, from `dataInfo` alone -- the size of
+    the page **as rendered**, before `doc_preprocessor_res` corrects it.
 
     Two shapes, because the protocol reports page geometry differently for
     the two file types it accepts: a PDF carries one entry per page under
@@ -290,10 +304,52 @@ def _page_sizes(data_info: Mapping[str, Any]) -> list[tuple[float, float]]:
     level. Anything else -- a renamed key, a type this adapter has never
     seen -- raises `KeyError` here and is wrapped into `ParserError` by the
     caller, rather than being guessed at.
+
+    This is deliberately *not* the frame `rec_boxes` is relative to when the
+    page was rotated a quarter turn -- see `_oriented_size`, which every
+    caller of this function must apply before trusting either number.
     """
     if data_info.get("type") == "image":
         return [(float(data_info["width"]), float(data_info["height"]))]
     return [(float(page["width"]), float(page["height"])) for page in data_info["pages"]]
+
+
+#: The angles `doc_preprocessor_res.angle` reports that swap which of a
+#: page's two reported dimensions is the width. The classifier only ever
+#: reports a right angle (0, 90, 180, 270); a half turn leaves width and
+#: height as they were, so only these two matter here.
+_SWAPPED_ANGLES = (90, 270)
+
+
+def _oriented_size(size: tuple[float, float], pruned: Mapping[str, Any]) -> tuple[float, float]:
+    """The page size `rec_boxes` is actually relative to -- not always the
+    one `dataInfo` reports.
+
+    `dataInfo` names the page **as rendered**, before PaddleX's own
+    `doc_preprocessor_res` straightens it for display. When that correction
+    is a quarter turn, OCR runs on the *straightened* image and `rec_boxes`
+    describes that image's frame, which has its width and height swapped
+    from what `dataInfo` reported for the as-rendered one.
+
+    Confirmed against a recorded `rotated_90.pdf` response: `dataInfo`
+    reports `1684x1190` with `angle: 90`, and the first box
+    (`[119, 142, 389, 162]`) is barely different from the *unrotated*
+    `digital_invoice.pdf` fixture's own first box (`[119, 141, 389, 161]`,
+    against a reported `1190x1684`) -- the same invoice, recognized in
+    nearly the same place, once width and height are swapped back. Dividing
+    that box by the unswapped `1684x1190` instead lands it in the wrong
+    aspect ratio silently: still inside `[0, 1]` (so `normalize_bbox` never
+    objects), just describing the wrong rectangle.
+
+    The Tesseract shim never reports `doc_preprocessor_res` at all, so its
+    pages are never swapped here -- consistent with it performing no
+    orientation correction of its own.
+    """
+    angle = (pruned.get("doc_preprocessor_res") or {}).get("angle")
+    if angle in _SWAPPED_ANGLES:
+        width, height = size
+        return height, width
+    return size
 
 
 def _page_of(pruned: Mapping[str, Any], *, width: float, height: float) -> OcrPage:
@@ -343,12 +399,14 @@ def _pages_of(response: Mapping[str, Any], *, parser_id: str, blob_id: str) -> l
 
     result = response.get("result") or {}
     ocr_results = result.get("ocrResults") or ()
-    sizes = _page_sizes(result.get("dataInfo") or {})
+    rendered_sizes = _page_sizes(result.get("dataInfo") or {})
+    pruned_results = [one["prunedResult"] for one in ocr_results]
 
-    return [
-        _page_of(one["prunedResult"], width=width, height=height)
-        for one, (width, height) in zip(ocr_results, sizes, strict=True)
-    ]
+    pages = []
+    for pruned, rendered_size in zip(pruned_results, rendered_sizes, strict=True):
+        width, height = _oriented_size(rendered_size, pruned)
+        pages.append(_page_of(pruned, width=width, height=height))
+    return pages
 
 
 def build_document(

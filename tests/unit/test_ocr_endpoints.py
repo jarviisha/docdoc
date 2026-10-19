@@ -12,6 +12,7 @@ quoting the value that made an entry bad.
 from __future__ import annotations
 
 import json
+import traceback
 from pathlib import Path
 
 import pytest
@@ -65,13 +66,19 @@ class TestLoadEndpoints:
             load_endpoints(path)
 
     def test_error_names_index_not_values(self, tmp_path: Path) -> None:
+        # The bad entry's url itself fails validation (wrong scheme), which is
+        # exactly the case where pydantic's own `ValidationError` embeds the
+        # offending value (`errors()[i]["input"]`) -- so this is the scenario
+        # that actually exercises whether SEKRIT can leak, not just one where
+        # a *coincidentally* unrelated field (id) is the one that is invalid
+        # while a well-formed secret rides along unexamined.
         path = _write(
             tmp_path,
             [
                 {"id": "paddle", "url": "http://host-a/ocr", "version": "1"},
                 {
-                    "id": "Not A Valid Id",
-                    "url": "https://user:SEKRIT@host-b/ocr",
+                    "id": "paddle-2",
+                    "url": "ftp://user:SEKRIT@host-b/ocr",
                     "version": "1",
                     "headers": {"Authorization": "Basic SEKRIT"},
                 },
@@ -82,6 +89,14 @@ class TestLoadEndpoints:
             load_endpoints(path)
 
         assert "SEKRIT" not in str(caught.value)
+        # Not just this function's own message: `from None` (rather than
+        # `from error`) is what keeps pydantic's underlying `ValidationError`
+        # -- which *does* embed the bad url verbatim -- off `__cause__`, so it
+        # never appears when something downstream (a log handler, an
+        # unhandled-exception report) formats the full chain.
+        rendered = "".join(traceback.format_exception(caught.value))
+        assert "SEKRIT" not in rendered
+        assert caught.value.__cause__ is None
 
 
 class TestOcrEndpointRepr:
