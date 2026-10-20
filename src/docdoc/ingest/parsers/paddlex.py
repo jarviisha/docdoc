@@ -170,7 +170,7 @@ class OcrEndpoint(BaseModel):
     media_types: frozenset[str] = frozenset({PDF, JPEG, PNG})
     #: What this endpoint *asserts* it can read, never what docdoc asks it
     #: to read: the PaddleX `/ocr` protocol carries no language field, so
-    #: there is nothing in the request this could select (`_check_options`
+    #: there is nothing in the request this could select (`check_options`
     #: below). A caller naming a language gets a pre-flight check against
     #: this declaration -- "this endpoint supports Vietnamese" -- and
     #: nothing more; it is the operator's job to point `language="vie"` at
@@ -868,7 +868,7 @@ class PaddleXParser:
         transport: TransportSettings,
         text_layer: TextLayerRecord | None = None,
     ) -> Document:
-        self._check_options(options, blob_id=source.blob_id)
+        self.check_options(options, blob_id=source.blob_id)
         transport = self._effective_transport(transport)
 
         # One budget for the whole parse, opened once and passed to every
@@ -898,7 +898,7 @@ class PaddleXParser:
             capabilities=self.capabilities,
         )
 
-    def _check_options(self, options: Mapping[str, Any], *, blob_id: str) -> None:
+    def check_options(self, options: Mapping[str, Any], *, blob_id: str | None = None) -> None:
         """Option checks first, and before any network call (ADR-0021 §3):
         the only recognized key is ``language``, and only a value the
         endpoint actually declared.
@@ -911,6 +911,11 @@ class PaddleXParser:
         anything else on the far side of the wire. Choosing which model an
         endpoint runs is the operator's job, done when the endpoint is
         configured, not a caller's at request time (012 review, Finding 6).
+
+        Public since 014: `POST /v1/ocr` runs it at submission, so a language
+        the endpoint never declared is refused with 422 before a slot in the
+        queue is taken, rather than failing on a worker minutes later
+        (ADR-0022).
         """
         for key, value in options.items():
             if key != "language":

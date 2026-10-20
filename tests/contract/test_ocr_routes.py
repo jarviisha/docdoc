@@ -1,5 +1,12 @@
 """`POST /v1/ocr` and `GET /v1/parsers` -- the raw OCR gateway over HTTP.
 
+Since 014 (ADR-0022) `POST /v1/ocr` queues: it answers 202 with a run, a worker
+performs the OCR, and `GET /v1/runs/{id}/result` serves the `Document`. What
+this file asserts about the gateway -- the provider-neutral shape, naming a
+parser, refusing rather than substituting, and never leaking an endpoint's
+secrets -- is unchanged; each test reaches the result the asynchronous way.
+`tests/contract/test_ocr_queue.py` covers the queue and its caps.
+
 Every registry here is built from fake-post `PaddleXParser`s, and every
 `.probe` that could otherwise reach a fictitious host (`paddle.example`,
 `ocr.internal`) is replaced before it is ever registered. `_no_sockets` below
@@ -21,6 +28,7 @@ from __future__ import annotations
 
 import socket
 import urllib.error
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +37,7 @@ import pytest
 pytest.importorskip("fastapi", reason="the HTTP interface lives behind the docdoc[api] extra")
 
 from fastapi.testclient import TestClient
+from tests.fixtures.run_queue import InMemoryRunQueue
 from tests.support import KEYS_FILE, bearer
 
 from docdoc.api.app import _Deployment, build_app
@@ -40,7 +49,10 @@ from docdoc.ingest.parsers import paddlex
 from docdoc.ingest.parsers.paddlex import OcrEndpoint, PaddleXParser
 from docdoc.ingest.registry import ParserRegistry
 from docdoc.ingest.source import JPEG, PDF, PNG
+from docdoc.runs.model import RunKind
+from docdoc.runs.worker import execute_one
 
+_NOW = datetime(2026, 10, 20, 9, 0, tzinfo=UTC)
 IMAGE = (Path(__file__).parent.parent / "fixtures" / "image" / "sample_page.png").read_bytes()
 
 
@@ -137,15 +149,54 @@ def registry() -> ParserRegistry:
 
 
 @pytest.fixture
-def client(registry: ParserRegistry) -> TestClient:
-    return _client(_Deployment(parsers=registry))
+def queue() -> InMemoryRunQueue:
+    return InMemoryRunQueue()
+
+
+@pytest.fixture
+def client(registry: ParserRegistry, queue: InMemoryRunQueue, tmp_path: Path) -> TestClient:
+    return _client(_Deployment(store_root=tmp_path, parsers=registry, runs=queue))
+
+
+def _work(queue: InMemoryRunQueue, registry: ParserRegistry, tmp_path: Path) -> None:
+    """What `docdoc worker --kind ocr` does with the one queued run."""
+    run = queue.claim(
+        worker_id="w", now=_NOW, lease=timedelta(seconds=90), max_attempts=3, kind=RunKind.OCR
+    )
+    assert run is not None
+    execute_one(
+        run,
+        queue=queue,
+        blobs=BlobStore(tmp_path),
+        store=FileArtifactStore(tmp_path),
+        registry=None,
+        adapter=None,
+        parsers=registry,
+        now=_NOW,
+    )
+
+
+def _ocr_result(
+    client: TestClient,
+    queue: InMemoryRunQueue,
+    registry: ParserRegistry,
+    tmp_path: Path,
+    **params: Any,
+) -> Any:
+    """Submit, work, and fetch: the asynchronous round trip a consumer makes."""
+    accepted = client.post("/v1/ocr", params=params, content=IMAGE)
+    assert accepted.status_code == 202
+    _work(queue, registry, tmp_path)
+    return client.get(f"/v1/runs/{accepted.json()['run_id']}/result")
 
 
 # -- POST /v1/ocr -------------------------------------------------------------
 
 
-def test_ocr_returns_document_json(client: TestClient) -> None:
-    response = client.post("/v1/ocr", params={"parser": "paddle"}, content=IMAGE)
+def test_ocr_returns_document_json(
+    client: TestClient, queue: InMemoryRunQueue, registry: ParserRegistry, tmp_path: Path
+) -> None:
+    response = _ocr_result(client, queue, registry, tmp_path, parser="paddle")
 
     assert response.status_code == 200
     payload = response.json()
@@ -153,8 +204,10 @@ def test_ocr_returns_document_json(client: TestClient) -> None:
     assert payload["provenance"]["parser_id"] == "paddle"
 
 
-def test_ocr_without_parser_uses_capability_selection(client: TestClient) -> None:
-    response = client.post("/v1/ocr", content=IMAGE)
+def test_ocr_without_parser_uses_capability_selection(
+    client: TestClient, queue: InMemoryRunQueue, registry: ParserRegistry, tmp_path: Path
+) -> None:
+    response = _ocr_result(client, queue, registry, tmp_path)
 
     assert response.status_code == 200
     assert response.json()["provenance"]["parser_id"] == "paddle"
@@ -179,7 +232,11 @@ def test_ocr_language_refused_is_422(client: TestClient) -> None:
     assert "language" in response.json()["error"]["message"]
 
 
-def test_ocr_provider_failure_is_502(registry: ParserRegistry) -> None:
+def test_ocr_provider_failure_fails_the_run(
+    registry: ParserRegistry, queue: InMemoryRunQueue, tmp_path: Path
+) -> None:
+    """Was a synchronous 502. The run now fails at the parse, naming the class."""
+
     def failing_post(endpoint: OcrEndpoint, body: dict[str, Any], timeout_s: float) -> Any:
         raise ProviderError(
             f"endpoint {endpoint.id!r} could not be reached",
@@ -187,24 +244,21 @@ def test_ocr_provider_failure_is_502(registry: ParserRegistry) -> None:
             parser_id=endpoint.id,
         )
 
-    registry.register(PaddleXParser(_endpoint("broken"), post=failing_post))
-    response = _client(_Deployment(parsers=registry)).post(
-        "/v1/ocr", params={"parser": "broken"}, content=IMAGE
-    )
+    registry.register(_stub_probe(PaddleXParser(_endpoint("broken"), post=failing_post)))
+    client = _client(_Deployment(store_root=tmp_path, parsers=registry, runs=queue))
+    accepted = client.post("/v1/ocr", params={"parser": "broken"}, content=IMAGE)
+    assert accepted.status_code == 202
+    _work(queue, registry, tmp_path)
 
-    assert response.status_code == 502
+    state = client.get(f"/v1/runs/{accepted.json()['run_id']}").json()
+    assert state["status"] == "failed"
+    assert state["failed_stage"] == "parse"
+    assert state["error_class"] == "ProviderError"
 
 
-def test_ocr_stores_nothing(registry: ParserRegistry, tmp_path: Path) -> None:
-    deployment = _Deployment(
-        store=FileArtifactStore(tmp_path), blobs=BlobStore(tmp_path), parsers=registry
-    )
-    before = sorted(tmp_path.rglob("*"))
-
-    response = _client(deployment).post("/v1/ocr", params={"parser": "paddle"}, content=IMAGE)
-
-    assert response.status_code == 200
-    assert sorted(tmp_path.rglob("*")) == before
+# `test_ocr_stores_nothing` is gone with the synchronous route: an accepted OCR
+# now stores its document, by design (ADR-0022). What still stores nothing is a
+# refused submission -- `test_ocr_queue.py::test_refusals_store_nothing`.
 
 
 # -- GET /v1/parsers -----------------------------------------------------------
@@ -276,7 +330,7 @@ SECRET_URL = "http://user:pw@ocr.internal/ocr"
 SECRETS = ("SEKRIT", "pw@", "ocr.internal")
 
 
-def test_no_secret_in_parsers_or_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_no_secret_in_parsers_or_errors(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     secret = _stub_probe(
         PaddleXParser(
             _endpoint("secret", headers={"Authorization": "Basic SEKRIT"}, url=SECRET_URL)
@@ -285,7 +339,8 @@ def test_no_secret_in_parsers_or_errors(monkeypatch: pytest.MonkeyPatch) -> None
     )
     reg = ParserRegistry()
     reg.register(secret)
-    client = _client(_Deployment(parsers=reg))
+    queue = InMemoryRunQueue()
+    client = _client(_Deployment(store_root=tmp_path, parsers=reg, runs=queue))
 
     # Never a URL or a header in the listing itself -- true by construction
     # (`ParserChoice` has no field that could carry either), checked anyway.
@@ -311,17 +366,30 @@ def test_no_secret_in_parsers_or_errors(monkeypatch: pytest.MonkeyPatch) -> None
         raise urllib.error.HTTPError(SECRET_URL, 500, "boom", None, None)  # type: ignore[arg-type]
 
     monkeypatch.setattr(paddlex._OPENER, "open", fake_open)
-    failure = client.post("/v1/ocr", params={"parser": "secret"}, content=IMAGE)
-    assert failure.status_code == 502
-    for leak in SECRETS:
-        assert leak not in failure.text
+    accepted = client.post("/v1/ocr", params={"parser": "secret"}, content=IMAGE)
+    assert accepted.status_code == 202
+    _work(queue, reg, tmp_path)
+    run_id = accepted.json()["run_id"]
+    # Since 014 the failure surfaces on the run, not in the submission's
+    # response -- and the run, like the response before it, names a class only.
+    for surface in (client.get(f"/v1/runs/{run_id}"), client.get(f"/v1/runs/{run_id}/result")):
+        for leak in SECRETS:
+            assert leak not in surface.text
+    assert client.get(f"/v1/runs/{run_id}").json()["error_class"] == "ProviderError"
 
 
 # -- Authentication ------------------------------------------------------------
 
 
-def test_routes_require_auth_when_enabled(registry: ParserRegistry) -> None:
-    client = _client(_Deployment(parsers=registry, keys=KeyRing.from_file(Path(KEYS_FILE))))
+def test_routes_require_auth_when_enabled(registry: ParserRegistry, tmp_path: Path) -> None:
+    client = _client(
+        _Deployment(
+            store_root=tmp_path,
+            parsers=registry,
+            runs=InMemoryRunQueue(),
+            keys=KeyRing.from_file(Path(KEYS_FILE)),
+        )
+    )
 
     no_auth_list = client.get("/v1/parsers")
     no_auth_ocr = client.post("/v1/ocr", content=IMAGE)
@@ -338,4 +406,4 @@ def test_routes_require_auth_when_enabled(registry: ParserRegistry) -> None:
     authenticated_ocr = client.post(
         "/v1/ocr", params={"parser": "paddle"}, content=IMAGE, headers=bearer("acme")
     )
-    assert authenticated_ocr.status_code == 200
+    assert authenticated_ocr.status_code == 202
