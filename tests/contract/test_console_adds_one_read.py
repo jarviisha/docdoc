@@ -83,6 +83,14 @@ CONSOLE_ADDED = {
     ("/v1/console/runs/{run_id}", "GET"),
     ("/v1/console/runs/{run_id}/delivery", "GET"),
     ("/v1/console/runs/{run_id}/result", "GET"),
+    # Task 6 (ADR-0023 §2, §3): credentials and erasure, mirroring the admin
+    # routes of the same shape behind the console session instead of a Bearer
+    # key.
+    ("/v1/console/credentials", "GET"),
+    ("/v1/console/credentials", "POST"),
+    ("/v1/console/credentials/{credential_id}", "DELETE"),
+    ("/v1/console/tenants/{tenant_id}", "DELETE"),
+    ("/v1/console/tenants/{tenant_id}/documents/{blob_id}", "DELETE"),
 }
 
 #: Everything this interface has added over Milestone 10's own surface, as of

@@ -28,7 +28,9 @@ from pydantic import BaseModel, Field
 
 from docdoc.api.models import ConsoleRunListResponse, ConsoleRunSummary, RunStateResponse
 from docdoc.api.paging import DEFAULT_RUN_PAGE
+from docdoc.artifacts.paths import root_tenant
 from docdoc.runs import identity
+from docdoc.runs.principal import TENANT_PATTERN
 
 if TYPE_CHECKING:
     from datetime import timedelta
@@ -132,6 +134,22 @@ class _Login(BaseModel):
     #: large input; nobody's password or username is near either bound.
     username: str = Field(max_length=256)
     password: str = Field(max_length=1024)
+
+
+class _ConsoleCredentialRequest(BaseModel):
+    """`POST /v1/console/credentials`'s body. No `scopes` (ADR-0023 §2).
+
+    `scopes` is typed `Any` and defaulted so the model always parses; the
+    refusal in `issue_credential` is on the key being *present* at all
+    (`model_fields_set`), not on what it holds. An admin-scoped key stays
+    CLI-only, and a console session is one browser tab away from a key an
+    operator did not mean to mint, so there is no "which scopes" question to
+    ask here.
+    """
+
+    tenant_id: str = Field(max_length=256)
+    label: str | None = Field(default=None, max_length=256)
+    scopes: Any = None
 
 
 def _accounts(request: Request) -> Any:
@@ -336,5 +354,131 @@ def console_router() -> APIRouter:
             # The run row outlived its content, as `_ocr_document` says of its own.
             return JSONResponse(status_code=410, content={"error": "result_expired"})
         return _stored_result(store, run.processing_id, validation)
+
+    # The three credential routes and the two erasure routes below are plain
+    # `def`, for the reason every other handler in this file is: each makes a
+    # blocking database call.
+
+    @router.get("/credentials")
+    def list_credentials(request: Request, operator: Operator, tenant: str) -> Any:
+        """`GET /v1/admin/credentials`'s body, over the console's own query name."""
+        from docdoc.api.app import _iso
+
+        if not TENANT_PATTERN.match(tenant):
+            return JSONResponse(status_code=422, content={"error": "invalid_tenant_id"})
+        deployment = request.app.state.deployment
+        return {
+            "credentials": [
+                {
+                    "credential_id": str(credential.credential_id),
+                    "tenant_id": credential.tenant_id,
+                    "label": credential.label,
+                    "scopes": sorted(credential.scopes),
+                    "created_at": _iso(credential.created_at),
+                    "last_used_at": _iso(credential.last_used_at),
+                    "revoked_at": _iso(credential.revoked_at),
+                }
+                for credential in deployment.keys.list_for(tenant)
+            ]
+        }
+
+    @router.post("/credentials", status_code=201)
+    def issue_credential(
+        request: Request, operator: Operator, body: _ConsoleCredentialRequest
+    ) -> Any:
+        """Issue a tenant credential, as `POST /v1/admin/credentials` does.
+
+        **No `scopes`, ever** (ADR-0023 §2): any `scopes` key in the body is
+        refused outright, which is narrower than the admin route's "any scope
+        but `admin`" -- the admin route is reached with a key that already
+        carries the scope; this one is reached with a browser session.
+        """
+        from docdoc.api.app import _audit
+
+        if "scopes" in body.model_fields_set:
+            return JSONResponse(status_code=422, content={"error": "scopes_not_accepted"})
+        tenant_id = body.tenant_id.strip()
+        if not TENANT_PATTERN.match(tenant_id):
+            return JSONResponse(status_code=422, content={"error": "invalid_tenant_id"})
+
+        deployment = request.app.state.deployment
+        secret, credential = deployment.keys.issue(
+            tenant_id=tenant_id, scopes=frozenset(), label=body.label, now=identity.now()
+        )
+        _audit(actor=f"console:{operator}", operation="issue", credential=credential)
+        return JSONResponse(
+            status_code=201,
+            content={
+                "credential_id": str(credential.credential_id),
+                "tenant_id": credential.tenant_id,
+                "key": secret,
+                "created_at": credential.created_at.isoformat() if credential.created_at else None,
+            },
+        )
+
+    @router.delete("/credentials/{credential_id}", status_code=204)
+    def revoke_credential(request: Request, credential_id: str, operator: Operator) -> Response:
+        """Revoke, idempotently, as `DELETE /v1/admin/credentials/{id}` does."""
+        from uuid import UUID
+
+        from docdoc.api.app import _audit
+
+        try:
+            identity_ = UUID(credential_id)
+        except ValueError:
+            return JSONResponse(status_code=404, content={"error": "not_found"})
+
+        deployment = request.app.state.deployment
+        deployment.keys.revoke(identity_, now=identity.now())
+        _audit(actor=f"console:{operator}", operation="revoke", credential_id=identity_)
+        return Response(status_code=204)
+
+    @router.delete("/tenants/{tenant_id}")
+    def erase_tenant(request: Request, tenant_id: str, operator: Operator) -> Any:
+        """Erase a tenant's data, as `DELETE /v1/admin/tenants/{id}` does.
+
+        The default tenant is refused here on the same terms (ADR-0015 §5): its
+        namespace is the store root, so erasing it would remove content no run
+        ever produced.
+        """
+        from docdoc.api.app import _erase, _unknown_run
+
+        if not TENANT_PATTERN.match(tenant_id):
+            return JSONResponse(status_code=422, content={"error": "invalid_tenant_id"})
+
+        deployment = request.app.state.deployment
+        if not deployment.has_runs:
+            return _unknown_run(tenant_id)
+
+        if tenant_id == root_tenant():
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": "default_tenant_erasure_refused",
+                    "detail": (
+                        "the default tenant's namespace is the store root, so this "
+                        "would remove content no run ever produced. Use `docdoc "
+                        "erase --tenant " + tenant_id + "` for its run-derived "
+                        "content, or --purge-store-root for the whole store"
+                    ),
+                },
+            )
+
+        return _erase(request, tenant_id=tenant_id, blob_id=None)
+
+    @router.delete("/tenants/{tenant_id}/documents/{blob_id}")
+    def erase_document(request: Request, tenant_id: str, blob_id: str, operator: Operator) -> Any:
+        """Erase one document in a named tenant.
+
+        `DELETE /v1/admin/documents/{blob_id}` is scoped to the administrator's
+        own tenant; the console names the tenant in the path instead, since an
+        operator's session carries no tenant of its own (ADR-0023 §3).
+        """
+        from docdoc.api.app import _erase
+
+        if not TENANT_PATTERN.match(tenant_id):
+            return JSONResponse(status_code=422, content={"error": "invalid_tenant_id"})
+
+        return _erase(request, tenant_id=tenant_id, blob_id=blob_id)
 
     return router
