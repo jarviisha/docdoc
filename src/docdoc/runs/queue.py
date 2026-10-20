@@ -349,6 +349,31 @@ class RunQueue(Protocol):
         """
         ...
 
+    def page_all_runs(
+        self,
+        *,
+        tenant_id: str | None,
+        status: str | None,
+        before: tuple[datetime, UUID] | None,
+        limit: int,
+    ) -> tuple[Run, ...]:
+        """`page_runs` across tenants: the predicate is dropped when `tenant_id` is `None`.
+
+        The console's read (ADR-0023 §3). Only a signed-in operator reaches it;
+        a tenant's own listing stays `page_runs`, where the predicate is not
+        optional.
+        """
+        ...
+
+    def owner_of(self, run_id: UUID) -> str | None:
+        """The tenant a run, or its tombstone, belongs to; `None` if neither exists.
+
+        How the console resolves a run it was handed by identity alone, so that
+        every read after it goes through the tenant-scoped `get` and
+        `tombstone` exactly as a tenant's own would.
+        """
+        ...
+
     def tombstone(self, run_id: UUID, tenant_id: str) -> Tombstone | None:
         """What remains of a removed run, for the tenant that owned it.
 

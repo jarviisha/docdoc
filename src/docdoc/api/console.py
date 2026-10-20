@@ -26,6 +26,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from docdoc.api.models import ConsoleRunListResponse, ConsoleRunSummary, RunStateResponse
+from docdoc.api.paging import DEFAULT_RUN_PAGE
 from docdoc.runs import identity
 
 if TYPE_CHECKING:
@@ -136,8 +138,47 @@ def _accounts(request: Request) -> Any:
     return request.app.state.deployment.console_accounts()
 
 
+def _owner(request: Request, run_id: str) -> tuple[JSONResponse | None, str, Any]:
+    """`(refusal, owner, identity)` for a run named by identity alone.
+
+    `owner_of` names the tenant, and every read after it is the tenant-scoped
+    one a tenant's own route makes, so the console is answered about a run
+    exactly as its owner is (ADR-0023 §3). Unknown and malformed are one 404.
+    """
+    from uuid import UUID
+
+    from docdoc.api.app import _no_runs, _unknown_run
+
+    deployment = request.app.state.deployment
+    if not deployment.has_runs:
+        return _no_runs(), "", None
+    try:
+        identity = UUID(run_id)
+    except ValueError:
+        return _unknown_run(run_id), "", None
+    owner = deployment.runs().owner_of(identity)
+    if owner is None:
+        return _unknown_run(run_id), "", None
+    return None, owner, identity
+
+
+def _run(request: Request, run_id: str) -> tuple[JSONResponse | None, str, Any]:
+    """`(refusal, owner, run)`: `_owner`, then the run, or its owner's 410."""
+    from docdoc.api.app import _run_erased, _unknown_run
+
+    refusal, owner, identity = _owner(request, run_id)
+    if refusal is not None:
+        return refusal, owner, None
+    queue = request.app.state.deployment.runs()
+    run = queue.get(identity, owner)
+    if run is None:
+        stone = queue.tombstone(identity, owner)
+        return (_unknown_run(run_id) if stone is None else _run_erased(stone)), owner, None
+    return None, owner, run
+
+
 def console_router() -> APIRouter:
-    """`/v1/console`: sign in, who am I, sign out (ADR-0023 §1)."""
+    """`/v1/console`: sessions (ADR-0023 §1) and cross-tenant run reads (§3)."""
     router = APIRouter(prefix=CONSOLE_API_PREFIX)
 
     # Plain `def`, not `async def`: `login` runs scrypt and a blocking database
@@ -190,5 +231,110 @@ def console_router() -> APIRouter:
             secure=request.url.scheme == "https",
         )
         return response
+
+    # The run reads below are plain `def` for the reason `sign_in` is: every one
+    # makes blocking database and store reads.
+
+    @router.get("/runs", response_model=ConsoleRunListResponse)
+    def list_runs(
+        request: Request,
+        operator: Operator,
+        tenant: str | None = None,
+        status: str | None = None,
+        limit: int = DEFAULT_RUN_PAGE,
+        cursor: str | None = None,
+    ) -> Any:
+        """Every tenant's runs, or one tenant's, newest first; each row names its tenant.
+
+        `GET /v1/runs` with the tenant predicate made optional. A cursor is
+        bound to the filter that produced it: to `tenant`, or to `"*"` when
+        there is none, which no tenant identifier can match.
+        """
+        from docdoc.api.app import _next_cursor, _no_runs, _page_request, _summary_fields
+
+        deployment = request.app.state.deployment
+        if not deployment.has_runs:
+            return _no_runs()
+        bound = tenant or "*"
+        refusal, before = _page_request(status, limit, cursor, cursor_tenant=bound)
+        if refusal is not None:
+            return refusal
+        runs = deployment.runs().page_all_runs(
+            tenant_id=tenant, status=status, before=before, limit=limit
+        )
+        return ConsoleRunListResponse(
+            runs=tuple(
+                ConsoleRunSummary(**_summary_fields(run), tenant_id=run.tenant_id) for run in runs
+            ),
+            next_cursor=_next_cursor(runs, limit, cursor_tenant=bound),
+        )
+
+    @router.get("/runs/{run_id}")
+    def run_state(request: Request, run_id: str, operator: Operator) -> Any:
+        """`GET /v1/runs/{run_id}`'s body, plus the run's `tenant_id`."""
+        from docdoc.api.app import _routing_for
+
+        refusal, owner, run = _run(request, run_id)
+        if refusal is not None:
+            return refusal
+        body = {
+            **RunStateResponse(**run.dump_public()).model_dump(mode="json"),
+            "tenant_id": owner,
+        }
+        decision = _routing_for(request, run)
+        if decision is not None:
+            body["routing"] = decision.model_dump(mode="json")
+        return JSONResponse(content=body)
+
+    @router.get("/runs/{run_id}/delivery")
+    def run_delivery(request: Request, run_id: str, operator: Operator) -> Any:
+        """`GET /v1/runs/{run_id}/delivery`, looked up under the run's owner."""
+        from docdoc.api.app import _iso, _unknown_run
+
+        refusal, owner, identity = _owner(request, run_id)
+        if refusal is not None:
+            return refusal
+        deliverer = request.app.state.deployment.deliverer()
+        if deliverer is None:
+            return _unknown_run(run_id)
+        delivery = deliverer.for_run(run_id=identity, tenant_id=owner)
+        if delivery is None:
+            return _unknown_run(run_id)
+        return {
+            "delivery_id": str(delivery.delivery_id),
+            "state": str(delivery.state),
+            "attempts": delivery.attempts,
+            "last_status": delivery.last_status,
+            "last_error": delivery.last_error,
+            "next_attempt_at": _iso(delivery.next_attempt_at),
+        }
+
+    @router.get("/runs/{run_id}/result")
+    def run_result(request: Request, run_id: str, operator: Operator) -> Any:
+        """A succeeded run's result, whichever kind it is (ADR-0023 §4).
+
+        An OCR run's `Document`, as `GET /v1/runs/{run_id}/result` serves it; an
+        extraction run's stored result, as `GET /v1/jobs/{id}/result` does. One
+        route because the console holds a run, not a `processing_id`.
+        """
+        from docdoc.api.app import _ocr_document, _stored_result, _terminal
+        from docdoc.runs.model import RunKind, RunStatus
+
+        refusal, owner, run = _run(request, run_id)
+        if refusal is not None:
+            return refusal
+        if run.kind is RunKind.OCR:
+            return _ocr_document(request, owner, run)
+        if run.status is not RunStatus.SUCCEEDED or run.processing_id is None:
+            return JSONResponse(
+                status_code=409,
+                content={"error": "run_not_succeeded", "status": str(run.status)},
+            )
+        store, _ = request.app.state.deployment.stores_for(owner)
+        validation = _terminal(store, run.processing_id)
+        if validation is None:
+            # The run row outlived its content, as `_ocr_document` says of its own.
+            return JSONResponse(status_code=410, content={"error": "result_expired"})
+        return _stored_result(store, run.processing_id, validation)
 
     return router

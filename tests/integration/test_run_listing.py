@@ -15,6 +15,7 @@ Three claims, and each fails in a different way:
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
@@ -215,3 +216,55 @@ def test_a_removed_run_is_a_404_to_another_tenant(
     )
 
     assert response.status_code == 404
+
+
+# -- across tenants, against Postgres -------------------------------------------
+
+
+@pytest.mark.postgres
+def test_page_all_runs_spans_tenants_and_pages_exactly_once() -> None:
+    """SC-009 for the console's read: no tenant, pages of two, every run once."""
+    psycopg = pytest.importorskip("psycopg")
+    from tests.infra import require_database
+
+    from docdoc.runs import migrations
+    from docdoc.runs.postgres import PostgresRunQueue
+
+    dsn = require_database()
+    with psycopg.connect(dsn, autocommit=True) as connection:
+        migrations.apply(connection, now=datetime.now(UTC))
+        connection.execute("TRUNCATE runs")
+    queue = PostgresRunQueue(lambda: psycopg.connect(dsn))
+
+    @dataclass
+    class Spec:
+        tenant_id: str
+        blob_id: str = SHARED_BLOB
+        schema_identity: str = "invoice@1"
+        request_id: None = None
+        idempotency_key: None = None
+
+    submitted = [
+        queue.submit(
+            Spec(tenant),  # type: ignore[arg-type]
+            run_id=uuid4(),
+            now=NOW - timedelta(minutes=age),
+            expires_at=NOW + timedelta(days=30),
+        )
+        for age, tenant in enumerate(["acme", "globex"] * 3)
+    ]
+
+    seen = []
+    before = None
+    for _ in range(50):
+        page = queue.page_all_runs(tenant_id=None, status=None, before=before, limit=2)
+        seen.extend(page)
+        if len(page) < 2:
+            break
+        before = (page[-1].created_at, page[-1].run_id)
+
+    assert [run.run_id for run in seen] == [run.run_id for run in submitted]
+    assert queue.owner_of(submitted[1].run_id) == "globex"
+    assert queue.owner_of(uuid4()) is None
+    queue.entomb([submitted[0]], now=NOW, policy="retention")
+    assert queue.owner_of(submitted[0].run_id) == "acme"  # from the tombstone

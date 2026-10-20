@@ -78,6 +78,11 @@ CONSOLE_ADDED = {
     ("/v1/console/session", "POST"),
     ("/v1/console/session", "GET"),
     ("/v1/console/session", "DELETE"),
+    # ADR-0023 §3: run reads across tenants, all four reads.
+    ("/v1/console/runs", "GET"),
+    ("/v1/console/runs/{run_id}", "GET"),
+    ("/v1/console/runs/{run_id}/delivery", "GET"),
+    ("/v1/console/runs/{run_id}/result", "GET"),
 }
 
 #: Everything this interface has added over Milestone 10's own surface, as of

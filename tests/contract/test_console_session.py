@@ -7,9 +7,7 @@ authentication being off. Equally, a console session opens nothing outside it.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import ClassVar
 
 import pytest
 
@@ -18,40 +16,15 @@ pytest.importorskip("fastapi", reason="the HTTP interface lives behind the docdo
 from fastapi.testclient import TestClient
 from tests.fixtures.console_accounts import InMemoryConsoleAccounts
 from tests.fixtures.run_queue import InMemoryRunQueue
+from tests.support.console import ADMIN_KEY, PLAIN_KEY, H, accounts_with_alice, sign_in
+from tests.support.console import Ring as _Ring
 
 from docdoc.api.app import _Deployment, build_app
-from docdoc.runs.principal import ADMIN_SCOPE, Principal, digest_of
-
-H = {"X-Docdoc-Console": "1"}
-ADMIN_KEY = "an-admin-key"
-PLAIN_KEY = "a-plain-key"
-
-
-class _Ring:
-    """Authentication on, with one admin-scoped key and one ordinary one.
-
-    The file `KeyRing` builds principals with no scopes, so the admin key is
-    held here — enough to head a `ChainedKeyStore`, which is all `_Deployment`
-    asks of a ring once authentication is on.
-    """
-
-    enabled = True
-    _by_digest: ClassVar[dict[str, Principal]] = {
-        digest_of(ADMIN_KEY): Principal(tenant_id="ops", scopes=frozenset({ADMIN_SCOPE})),
-        digest_of(PLAIN_KEY): Principal(tenant_id="acme"),
-    }
-
-    def resolve(self, digest: str) -> Principal | None:
-        return self._by_digest.get(digest)
 
 
 @pytest.fixture
 def accounts() -> InMemoryConsoleAccounts:
-    store = InMemoryConsoleAccounts()
-    store.add(
-        "alice", "long enough pass", salt=b"\x01" * 16, now=datetime(2026, 10, 20, tzinfo=UTC)
-    )
-    return store
+    return accounts_with_alice()
 
 
 @pytest.fixture
@@ -67,21 +40,8 @@ def client(tmp_path: Path, accounts: InMemoryConsoleAccounts) -> TestClient:
 
 @pytest.fixture
 def signed_in(client: TestClient) -> tuple[TestClient, dict[str, str]]:
-    """The client after a login, and the session cookie as an explicit header.
-
-    The header is what makes the two tests below assert the *server*: the
-    client's cookie jar honours `Path=/v1/console` and `Max-Age=0`, so relying
-    on it would pass even if the server opened `/v1/runs` to a session or kept
-    a logged-out one alive.
-    """
-    r = client.post(
-        "/v1/console/session",
-        json={"username": "alice", "password": "long enough pass"},
-        headers=H,
-    )
-    assert r.status_code == 200
-    token = r.cookies["docdoc_console"]
-    return client, {"Cookie": f"docdoc_console={token}"}
+    """The client after a login, and the session cookie as an explicit header (see `sign_in`)."""
+    return client, sign_in(client)
 
 
 def test_login_sets_an_httponly_strict_cookie(client: TestClient) -> None:

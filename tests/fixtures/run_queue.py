@@ -176,11 +176,22 @@ class InMemoryRunQueue:
         Postgres query applies it in SQL: a test whose fake filters afterwards
         would pass against an implementation that leaks.
         """
+        return self.page_all_runs(tenant_id=tenant_id, status=status, before=before, limit=limit)
+
+    def page_all_runs(
+        self,
+        *,
+        tenant_id: str | None,
+        status: str | None,
+        before: tuple[datetime, UUID] | None,
+        limit: int,
+    ) -> tuple[Run, ...]:
         self._check_reachable()
         found = [
             run
             for run in self._runs.values()
-            if run.tenant_id == tenant_id and (status is None or str(run.status) == status)
+            if (tenant_id is None or run.tenant_id == tenant_id)
+            and (status is None or str(run.status) == status)
         ]
         found.sort(key=lambda run: (run.created_at, run.run_id), reverse=True)
         if before is not None:
@@ -191,6 +202,11 @@ class InMemoryRunQueue:
         self._check_reachable()
         found = self._tombstones.get(run_id)
         return found if found is not None and found.tenant_id == tenant_id else None
+
+    def owner_of(self, run_id: UUID) -> str | None:
+        self._check_reachable()
+        found = self._runs.get(run_id) or self._tombstones.get(run_id)
+        return None if found is None else found.tenant_id
 
     def ping(self) -> None:
         self._check_reachable()
