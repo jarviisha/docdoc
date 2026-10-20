@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Any
 
 from docdoc.runs import retention
 from docdoc.runs.errors import RunError
+from docdoc.runs.model import RunKind
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -117,9 +118,11 @@ def tick(
 ) -> TickReport:
     """One bounded pass of unrequested work: deliveries, then the sweep.
 
-    Returns having done nothing when neither is configured — ``retention_period``
-    of ``None`` means retention is off (FR-014) and a ``deliverer`` of ``None``
-    means nothing is delivered (FR-064). Both are the default.
+    ``retention_period`` of ``None`` means run retention is off (FR-014): no
+    extraction run is swept. OCR runs are the stated exception -- swept a day
+    after finishing by default, whatever this says (ADR-0022) -- so a tick with
+    nothing configured still removes expired OCR results and nothing else. A
+    ``deliverer`` of ``None`` means nothing is delivered (FR-064).
 
     Never raises into the worker's claim loop. A maintenance failure is a
     degradation to log, not a reason to stop claiming runs — the runs are the
@@ -144,8 +147,11 @@ def tick(
     if elapsed() < budget_ms:
         _expire_counters(deps, now=now)
 
-    if retention_period is None:
-        return report
+    # **Retention off still sweeps OCR results** (ADR-0022): they are on by
+    # default, a day after finishing, and their deadline is already on the row.
+    # What "off" keeps is every extraction run, so the sweep is narrowed to OCR
+    # rather than skipped.
+    kind = RunKind.OCR if retention_period is None else None
 
     while elapsed() < budget_ms:
         try:
@@ -155,6 +161,7 @@ def tick(
                 now=now,
                 batch=batch,
                 corrections=deps.corrections,
+                kind=kind,
             )
         except RunError as error:
             # The database went away, or the sweep refused. Either way the runs

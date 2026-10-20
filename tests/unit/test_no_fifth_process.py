@@ -150,11 +150,17 @@ class _EndlessQueue:
 
     def __init__(self) -> None:
         self.calls = 0
+        self.kinds: list[object] = []
 
-    def expiring(self, *, now, limit, exclude=()):
-        from docdoc.runs.model import Run, RunStatus
+    def expiring(self, *, now, limit, exclude=(), kind=None):
+        from docdoc.runs.model import Run, RunKind, RunStatus
 
         self.calls += 1
+        self.kinds.append(kind)
+        # Every run here is an extraction run, so a sweep narrowed to OCR
+        # (ADR-0022) finds none -- as the real `expiring` would.
+        if kind is RunKind.OCR:
+            return ()
         return tuple(
             Run(
                 run_id=__import__("uuid").uuid4(),
@@ -212,7 +218,14 @@ def test_a_tick_stops_at_its_budget() -> None:
 
 
 def test_a_tick_with_nothing_configured_does_nothing() -> None:
-    """The default. No retention period, no deliverer, no limiter."""
+    """The default. No retention period, no deliverer, no limiter.
+
+    014 (ADR-0022): "nothing" now means nothing but the OCR sweep, which is on
+    by default. The tick asks for expired **OCR** runs once and touches no
+    extraction run, however many of those have passed their deadline.
+    """
+    from docdoc.runs.model import RunKind
+
     queue = _EndlessQueue()
 
     report = maintenance.tick(
@@ -225,7 +238,7 @@ def test_a_tick_with_nothing_configured_does_nothing() -> None:
         batch=10,
     )
 
-    assert queue.calls == 0
+    assert queue.kinds == [RunKind.OCR]
     assert report.swept.runs == 0
     assert report.attempted == 0
 
@@ -256,7 +269,7 @@ def test_deliveries_are_attempted_before_the_sweep() -> None:
             return ()
 
     class _Queue(_EndlessQueue):
-        def expiring(self, *, now, limit, exclude=()):
+        def expiring(self, *, now, limit, exclude=(), kind=None):
             order.append("sweep")
             return ()
 

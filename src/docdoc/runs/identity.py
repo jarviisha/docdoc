@@ -46,6 +46,7 @@ __all__ = [
     "DEFAULT_FAIRNESS_WINDOW",
     "DEFAULT_LEASE",
     "DEFAULT_MAX_ATTEMPTS",
+    "DEFAULT_OCR_RETENTION",
     "DEFAULT_RETENTION",
     "DEFAULT_STARVATION",
     "DEFAULT_SWEEP_BATCH",
@@ -62,6 +63,7 @@ __all__ = [
     "MAINTENANCE_BUDGET_ENV",
     "MAINTENANCE_INTERVAL_ENV",
     "MAX_ATTEMPTS_ENV",
+    "OCR_RETENTION_HOURS_ENV",
     "RETENTION_DAYS_ENV",
     "STARVATION_SECONDS_ENV",
     "SWEEP_BATCH_ENV",
@@ -359,6 +361,28 @@ def configured_retention(explicit: int | None = None) -> timedelta | None:
         return timedelta(days=_demand_positive(explicit, "--retention-days"))
     days = _positive_int(os.environ.get(RETENTION_DAYS_ENV, ""))
     return None if days is None else timedelta(days=days)
+
+
+#: 014 (ADR-0022). How long an **OCR** run's result is kept, in hours, counted
+#: from the run finishing. Unlike `DOCDOC_RUN_RETENTION_DAYS` this one is **on
+#: by default** -- an OCR result exists to be fetched once and is swept a day
+#: later unless configured otherwise -- and it has no "off" value: a deployment
+#: that wants results kept longer sets a larger number.
+OCR_RETENTION_HOURS_ENV = "DOCDOC_OCR_RETENTION_HOURS"
+DEFAULT_OCR_RETENTION = timedelta(hours=24)
+
+
+def configured_ocr_retention(explicit: int | None = None) -> timedelta:
+    """How long an OCR result is kept: explicit, then environment, then a day.
+
+    The precedence every tuning knob here has, and the same tolerance: an
+    unreadable or non-positive environment value falls back to the default
+    rather than stopping the process, and an explicit one is refused.
+    """
+    if explicit is not None:
+        return timedelta(hours=_demand_positive(explicit, "--ocr-retention-hours"))
+    hours = _positive_int(os.environ.get(OCR_RETENTION_HOURS_ENV, ""))
+    return DEFAULT_OCR_RETENTION if hours is None else timedelta(hours=hours)
 
 
 def configured_sweep_batch(explicit: int | None = None) -> int:
