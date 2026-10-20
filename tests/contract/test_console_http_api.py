@@ -23,8 +23,8 @@ pytest.importorskip("fastapi", reason="the HTTP interface lives behind the docdo
 from fastapi.testclient import TestClient
 from tests.fixtures.run_queue import InMemoryRunQueue
 
-from docdoc.api.app import DEFAULT_RUN_PAGE, MAX_RUN_PAGE, _Deployment, build_app
-from docdoc.api.paging import Cursor, encode
+from docdoc.api.app import _Deployment, build_app
+from docdoc.api.paging import DEFAULT_RUN_PAGE, MAX_RUN_PAGE, Cursor, encode
 from docdoc.runs.model import Run, RunStatus
 from docdoc.runs.principal import digest_of
 

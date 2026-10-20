@@ -21,7 +21,8 @@ from fastapi.testclient import TestClient
 from tests.fixtures.run_queue import InMemoryRunQueue
 from tests.support.ocr import CountingPost, paddle_registry
 
-from docdoc.api.app import _Deployment, _load_ceilings, build_app
+from docdoc.api.app import _Deployment, build_app
+from docdoc.api.deps import _load_ceilings
 from docdoc.artifacts import BlobStore, FileArtifactStore
 from docdoc.runs.errors import RunStateUnavailableError
 from docdoc.runs.model import RunKind, RunOutcome, RunStatus
