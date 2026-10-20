@@ -268,6 +268,15 @@ def build_parser() -> argparse.ArgumentParser:
     # network collides. No environment variable pairs with it: which port a
     # process listens on is a property of how it was started, like the API's
     # `uvicorn --port`, and not a setting docdoc reads.
+    # 014 (ADR-0022): which kind of run this worker claims. Absent claims any,
+    # which is every worker before 014. The composition runs one of each, so an
+    # OCR backlog never delays extraction and OCR workers scale on their own.
+    worker.add_argument(
+        "--kind",
+        choices=("ocr", "extraction"),
+        default=None,
+        help="claim only runs of this kind; any kind when absent",
+    )
     worker.add_argument(
         "--health-port",
         type=int,

@@ -39,13 +39,14 @@ from docdoc.runs.identity import (
     DEFAULT_MAX_ATTEMPTS,
     DEFAULT_SWEEP_BATCH,
 )
-from docdoc.runs.model import RunOutcome, RunStatus
+from docdoc.runs.model import RunKind, RunOutcome, RunStatus, StageOutcomeRecord
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from datetime import datetime, timedelta
 
     from docdoc.artifacts import ArtifactStore, BlobStore
+    from docdoc.ingest.registry import ParserRegistry
     from docdoc.pipeline.result import PipelineResult
     from docdoc.runs.model import Run
     from docdoc.runs.queue import RunQueue
@@ -83,6 +84,10 @@ def execute_one(
     # would read as one under a shared name.
     limiter: Any = None,
     stopping: Callable[[], bool] | None = None,
+    #: The parsers an OCR run may name. `None` is whichever this installation
+    #: can use, `DOCDOC_OCR_ENDPOINTS_FILE` included -- what extraction's parse
+    #: already selects from.
+    parsers: ParserRegistry | None = None,
 ) -> PipelineResult | None:
     """Execute one claimed run and record what happened.
 
@@ -103,6 +108,14 @@ def execute_one(
     require starting a worker and waiting for it to notice.
     """
     from docdoc.pipeline import run as run_pipeline
+
+    # An OCR run is the parse alone (ADR-0022): no schema to resolve, no
+    # provider tokens to count, one stage and no boundary to stop at.
+    if run.kind is RunKind.OCR:
+        _execute_ocr(
+            run, queue=queue, blobs=blobs, store=store, parsers=parsers, limits=limits, now=now
+        )
+        return None
 
     # Resolve the schema before anything else. A withdrawn schema is a
     # configuration fault, not a transient one, so it fails terminally on the
@@ -210,6 +223,85 @@ def execute_one(
     return result
 
 
+def _execute_ocr(
+    run: Run,
+    *,
+    queue: RunQueue,
+    blobs: BlobStore,
+    store: ArtifactStore,
+    parsers: ParserRegistry | None,
+    limits: Any,
+    now: datetime,
+) -> None:
+    """Parse one OCR run's document and record what happened (ADR-0022).
+
+    The document is filed as the parse-stage artifact and its id becomes
+    `processing_id`, so the result is reachable, swept, and reused by the same
+    rules as every other artifact. A redelivered attempt finds it already filed
+    and calls no OCR host.
+
+    A failed parse is terminal and names the parse stage. An unreachable store
+    or database is not: `ArtifactError` and `RunStateUnavailableError`
+    propagate, so the lease lapses and the run is redelivered, exactly as for
+    an extraction run.
+    """
+    from docdoc.ingest.errors import IngestError
+    from docdoc.pipeline import parse_only
+
+    data = blobs.get(run.blob_id)
+    if data is None:
+        _finish(
+            queue,
+            run,
+            RunOutcome(status=RunStatus.FAILED, failed_stage=None, error_class="UnknownBlob"),
+            now=now,
+        )
+        return
+
+    options = {} if run.ocr_language is None else {"language": run.ocr_language}
+    try:
+        document, stage = parse_only(
+            data,
+            store=store,
+            limits=limits,
+            options=options,
+            parser=run.ocr_parser,
+            registry=parsers,
+            request_id=run.request_id,
+        )
+    except IngestError as exc:
+        # ING-7: one complete document or a failure. The class name only --
+        # a provider's message can carry what the document said.
+        _finish(
+            queue,
+            run,
+            RunOutcome(
+                status=RunStatus.FAILED,
+                failed_stage="parse",
+                error_class=type(exc).__name__,
+            ),
+            now=now,
+        )
+        return
+
+    record = StageOutcomeRecord(
+        stage=str(stage.stage),
+        status=str(stage.status),
+        artifact_id=stage.artifact_id,
+        duration_ms=stage.duration_ms,
+    )
+    outcome = _demand_the_result_is_retrievable(
+        store,
+        RunOutcome(
+            status=RunStatus.SUCCEEDED,
+            processing_id=document.id,
+            stage_outcomes=(record,),
+        ),
+        stage="parse",
+    )
+    queue.finish(run.run_id, outcome, now=now, worker_id=run.worker_id)
+
+
 def _record_tokens(limiter: Any, run: Run, result: Any, *, now: datetime) -> None:
     """Count what the run consumed, beside the terminal state (FR-042, T092).
 
@@ -236,7 +328,9 @@ def _record_tokens(limiter: Any, run: Run, result: Any, *, now: datetime) -> Non
         _logger.warning('{"event": "limit.tokens_unrecorded", "error": "%s"}', type(error).__name__)
 
 
-def _demand_the_result_is_retrievable(store: ArtifactStore, outcome: RunOutcome) -> RunOutcome:
+def _demand_the_result_is_retrievable(
+    store: ArtifactStore, outcome: RunOutcome, *, stage: str = "validation"
+) -> RunOutcome:
     """The same outcome, or a failed one when the result did not survive.
 
     One metadata read against a store this process has just written to, on the
@@ -263,8 +357,9 @@ def _demand_the_result_is_retrievable(store: ArtifactStore, outcome: RunOutcome)
     )
     return RunOutcome(
         status=RunStatus.FAILED,
-        failed_stage="validation",
-        # Not a stage failure: validation ran and produced a result. What failed
+        failed_stage=stage,
+        # Not a stage failure: the last stage -- validation, or an OCR run's
+        # parse -- ran and produced a result. What failed
         # is keeping it, and the class says so rather than blaming the document.
         error_class="ResultNotStored",
         stage_outcomes=outcome.stage_outcomes,
@@ -329,6 +424,11 @@ class Worker:
         deliverer: Any = None,
         delivery_batch: int = DEFAULT_DELIVERY_BATCH,
         maintenance_budget_ms: int = maintenance.DEFAULT_BUDGET_MS,
+        #: Claim only runs of this kind; `None` claims any (ADR-0022). How an
+        #: OCR backlog is kept from delaying extraction: separate workers, not
+        #: a priority.
+        kind: RunKind | None = None,
+        parsers: ParserRegistry | None = None,
     ) -> None:
         self._queue = queue
         self._blobs = blobs
@@ -356,6 +456,8 @@ class Worker:
         self._delivery_batch = delivery_batch
         self._maintenance_budget_ms = maintenance_budget_ms
         self._ticker = maintenance.Ticker(interval_seconds=maintenance_interval_seconds)
+        self._kind = kind
+        self._parsers = parsers
 
     def stop(self) -> None:
         """Ask the loop to finish its current run and exit."""
@@ -388,6 +490,7 @@ class Worker:
                     now=identity.now(),
                     lease=self._lease,
                     max_attempts=self._max_attempts,
+                    kind=self._kind,
                 )
             except RunStateUnavailableError:
                 # The database is unreachable. Not fatal: it is exactly the state
@@ -564,6 +667,7 @@ class Worker:
                 now=identity.now(),
                 limits=self._limits,
                 limiter=self._limiter,
+                parsers=self._parsers,
                 # FR-042's "finish or relinquish". `execute_one` stops the
                 # pipeline at the next stage boundary once this reads True, and
                 # releases the run so it re-queues immediately (FR-043).

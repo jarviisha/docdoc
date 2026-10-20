@@ -214,6 +214,11 @@ services:
   # flag, because a threaded worker can starve a heartbeat until a live run
   # loses its lease — a utilisation choice becoming a correctness bug
   # (FR-025, research R9a).
+  #
+  # 014 (ADR-0022, constitution v1.11.0): one worker service per run kind.
+  # `worker` claims extraction runs and `ocr-worker` claims OCR runs, so an OCR
+  # backlog never delays extraction, and `--scale ocr-worker=N` matches the OCR
+  # hosts' capacity without touching the rest.
   worker:
     build: *docdoc_build
     depends_on:
@@ -225,9 +230,25 @@ services:
     # API uses. No port is published — replicas are scaled and a published port
     # cannot be — so this is reachable on the compose network, which is where a
     # probe comes from.
-    command: ["docdoc", "worker", "--health-port", "8000"]
+    command: ["docdoc", "worker", "--kind", "extraction", "--health-port", "8000"]
     # The worker needs it more than the API does: it is the process that attempts
     # deliveries and the one whose `run.transition` spans an operator most wants.
+    extra_hosts: *docdoc_hosts
+    environment: *docdoc_env
+    volumes: *docdoc_mounts
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2).status == 200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+
+  ocr-worker:
+    build: *docdoc_build
+    depends_on:
+      postgres: {condition: service_healthy}
+      seaweedfs: {condition: service_healthy}
+    command: ["docdoc", "worker", "--kind", "ocr", "--health-port", "8000"]
     extra_hosts: *docdoc_hosts
     environment: *docdoc_env
     volumes: *docdoc_mounts

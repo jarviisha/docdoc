@@ -61,7 +61,10 @@ def test_the_composition_has_exactly_four_services() -> None:
     it to. That is the constitutional scope constraint holding: the composition
     demonstrates docdoc, and a collector is somebody else's infrastructure.
     """
-    assert _services() == {"api", "worker", "postgres", "seaweedfs"}, (
+    # 014 (constitution v1.11.0): the worker process type appears once per run
+    # kind it claims. Still four process types -- `ocr-worker` is the same image
+    # at the same entry point -- and still nothing else.
+    assert _services() == {"api", "worker", "ocr-worker", "postgres", "seaweedfs"}, (
         f"the composition has {sorted(_services())}. SC-025 asserts four, and "
         f"every capability this milestone added was built into a loop that "
         f"already runs rather than into a process to deploy and monitor"
@@ -85,7 +88,8 @@ def test_the_two_docdoc_services_run_the_two_commands() -> None:
     """`docdoc-api` and `docdoc worker`, from one image. Not a third entry point."""
     text = COMPOSE.read_text(encoding="utf-8")
 
-    assert 'command: ["docdoc", "worker"' in text
+    assert 'command: ["docdoc", "worker", "--kind", "extraction"' in text
+    assert 'command: ["docdoc", "worker", "--kind", "ocr"' in text
     assert "docdoc sweep" not in text, (
         "the sweep runs inside the worker's tick. A compose service for it would "
         "be the fifth process type FR-116 forbids, wearing a different name"
@@ -339,14 +343,14 @@ def test_a_limiter_with_no_expiry_is_not_an_error() -> None:
     )
 
 
-@pytest.mark.parametrize("name", ["api", "worker"])
+@pytest.mark.parametrize("name", ["api", "worker", "ocr-worker"])
 def test_both_docdoc_services_run_the_same_image(name: str) -> None:
     """One image, two entry points. A second image would be a second thing to
     version, and the two would eventually disagree about a schema."""
     text = COMPOSE.read_text(encoding="utf-8")
 
     assert f"  {name}:" in text
-    assert text.count("build: &docdoc_build") + text.count("build: *docdoc_build") >= 2
+    assert text.count("build: &docdoc_build") + text.count("build: *docdoc_build") >= 3
 
 
 # -- T183: SC-024's second half -----------------------------------------------

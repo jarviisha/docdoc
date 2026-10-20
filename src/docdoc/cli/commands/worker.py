@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     import argparse
 
     from docdoc.cli.config import Settings
+    from docdoc.runs.model import RunKind
 
 __all__ = ["run"]
 
@@ -171,6 +172,7 @@ def run(args: argparse.Namespace, settings: Settings) -> Rendering:
         max_attempts=configured_max_attempts(getattr(args, "max_attempts", None)),
         limits=settings.limits(),
         health_port=getattr(args, "health_port", None),
+        kind=_kind(getattr(args, "kind", None)),
         # A worker executes whatever it claims, and what it claims belongs to
         # whichever tenant submitted it. Without this it would run every tenant's
         # document against the default tenant's namespace — finding no blob for
@@ -194,3 +196,10 @@ def run(args: argparse.Namespace, settings: Settings) -> Rendering:
     worker.run_forever()
 
     return Rendering(code=0, data={"worker": "stopped"}, lines=["stopped"])
+
+
+def _kind(value: str | None) -> RunKind | None:
+    """`--kind`, as the queue reads it. Absent claims any kind (ADR-0022)."""
+    from docdoc.runs.model import RunKind
+
+    return None if value is None else RunKind(value)
