@@ -18,6 +18,8 @@ import type { Failure } from "./failure.ts";
 /** One row. The projection FR-019 fixes, and nothing from a result. */
 export interface RunSummary {
   run_id: string;
+  /** Which tenant owns the run: the console lists every tenant's (ADR-0023 §3). */
+  tenant_id: string;
   status: RunStatus;
   created_at: string;
   finished_at: string | null;
@@ -37,6 +39,8 @@ export type Listing =
   | { state: "failed"; failure: Failure };
 
 export interface ListingState {
+  /** One tenant's runs, or `null` for every tenant's. */
+  tenant: string | null;
   status: RunStatus | null;
   /** Cursors already used, so "back" is a pop. The first page has none. */
   stack: string[];
@@ -44,7 +48,7 @@ export interface ListingState {
 }
 
 export function initialListing(): ListingState {
-  return { status: null, stack: [], listing: { state: "loading" } };
+  return { tenant: null, status: null, stack: [], listing: { state: "loading" } };
 }
 
 /** Whether there is a previous page to return to. */
@@ -83,7 +87,22 @@ export function back(state: ListingState): ListingState {
  * tenant's; it would simply skip rows nobody could explain.
  */
 export function filtered(state: ListingState, status: RunStatus | null): ListingState {
-  return { status, stack: [], listing: { state: "loading" } };
+  return { ...state, status, stack: [], listing: { state: "loading" } };
+}
+
+/**
+ * Narrow to one tenant, or widen back to all with a blank, for the same
+ * reason `filtered` returns to page one: the server binds a cursor to the
+ * tenant filter that produced it.
+ */
+export function forTenant(state: ListingState, tenant: string): ListingState {
+  const trimmed = tenant.trim();
+  return { ...state, tenant: trimmed === "" ? null : trimmed, stack: [], listing: { state: "loading" } };
+}
+
+/** Read the current page again, from where it is. */
+export function reloaded(state: ListingState): ListingState {
+  return { ...state, listing: { state: "loading" } };
 }
 
 export function loaded(state: ListingState, page: RunPage): ListingState {
@@ -113,9 +132,8 @@ export function isEmpty(state: ListingState): boolean {
  * function exist (Edge Cases).
  */
 export function emptyNotice(state: ListingState): string {
-  return state.status === null
-    ? "This tenant has no runs."
-    : `This tenant has no ${state.status} runs.`;
+  const who = state.tenant === null ? "No tenant has" : `Tenant ${state.tenant} has`;
+  return state.status === null ? `${who} no runs.` : `${who} no ${state.status} runs.`;
 }
 
 /**

@@ -69,22 +69,11 @@ test("the console boundary fails on each of the five nouns", async () => {
   }
 });
 
-test("the console boundary fails on rendered result content", async () => {
+test("the console boundary passes result content (ADR-0023 §6)", async () => {
+  // The retired RESULT_CONTENT rule set failed on these. A console allowed to
+  // render a result must not be failed for naming one.
   const directory = await fixture({
-    "components/Thing.tsx": "export const show = (v) => v.claimed_text;\n",
-  });
-  const { code, output } = await guard("check-console-boundary.mjs", directory);
-  assert.equal(code, 1);
-  assert.match(output, /claimed text/);
-  await rm(directory, { recursive: true, force: true });
-});
-
-test("the console boundary passes a control prop and a delivery outcome", async () => {
-  // The two identifiers deliberately left off the result-content list. A guard
-  // that fails correct code is a guard somebody switches off, and this one
-  // carries the five nouns too.
-  const directory = await fixture({
-    "components/Fine.tsx": "export const a = <input value={x} />;\nexport const b = attempt.outcomes;\n",
+    "components/Fine.tsx": "export const show = (v) => v.claimed_text;\nexport const a = <input value={x} />;\n",
   });
   const { code } = await guard("check-console-boundary.mjs", directory);
   assert.equal(code, 0);

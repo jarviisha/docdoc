@@ -12,7 +12,10 @@
  * the deployment's is the one that is true.
  */
 
-export type Target = { kind: "tenant"; id: string } | { kind: "document"; id: string };
+/** A document is named within its tenant: the route is `/tenants/{t}/documents/{id}`. */
+export type Target =
+  | { kind: "tenant"; id: string }
+  | { kind: "document"; id: string; tenantId: string };
 
 export interface ErasureIntent {
   target: Target;
@@ -42,8 +45,10 @@ export function armed(intent: ErasureIntent): boolean {
 
 /** What the operator is asked to do, in one sentence. */
 export function confirmationPrompt(intent: ErasureIntent): string {
-  const noun = intent.target.kind === "tenant" ? "tenant" : "document";
-  return `Type the ${noun} identifier to confirm: ${intent.target.id}`;
+  const target = intent.target;
+  return target.kind === "tenant"
+    ? `Type the tenant identifier to confirm: ${target.id}`
+    : `Type the document identifier to confirm: ${target.id} (tenant ${target.tenantId})`;
 }
 
 /** The counts a completed erasure reported, in the deployment's own words. */

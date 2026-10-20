@@ -45,8 +45,8 @@ test("a pasted credential in the confirmation field fails closed", () => {
 test("the prompt names what is about to go", () => {
   assert.match(confirmationPrompt(intendedFor(TENANT)), /tenant identifier to confirm: acme/);
   assert.match(
-    confirmationPrompt(intendedFor({ kind: "document", id: "sha256:aa" })),
-    /document identifier to confirm/,
+    confirmationPrompt(intendedFor({ kind: "document", id: "sha256:aa", tenantId: "acme" })),
+    /document identifier to confirm: sha256:aa \(tenant acme\)/,
   );
 });
 
