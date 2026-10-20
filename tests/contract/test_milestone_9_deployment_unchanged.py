@@ -180,12 +180,13 @@ def test_a_tick_with_no_retention_period_touches_nothing() -> None:
     from datetime import UTC, datetime
 
     from docdoc.runs import maintenance, retention
+    from docdoc.runs.model import RunKind
 
     class _Queue:
-        calls = 0
+        kinds: list[object] = []
 
-        def expiring(self, **_: object) -> tuple:
-            type(self).calls += 1
+        def expiring(self, **kwargs: object) -> tuple:
+            type(self).kinds.append(kwargs.get("kind"))
             return ()
 
     class _Nothing:
@@ -205,7 +206,10 @@ def test_a_tick_with_no_retention_period_touches_nothing() -> None:
         batch=500,
     )
 
-    assert _Queue.calls == 0
+    # 014 (ADR-0022): the one sweep left on by default is OCR's, and a
+    # Milestone 9 deployment has no OCR run -- every row it holds is
+    # `kind = 'extraction'` -- so the tick asks for OCR runs and removes nothing.
+    assert _Queue.kinds == [RunKind.OCR]
     assert report.swept.runs == 0
 
 

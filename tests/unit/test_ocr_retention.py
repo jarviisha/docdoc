@@ -137,5 +137,5 @@ def test_configured_ocr_retention_default_and_env(monkeypatch: pytest.MonkeyPatc
     # An unreadable value falls back, as every tuning knob in `identity` does.
     monkeypatch.setenv(identity.OCR_RETENTION_HOURS_ENV, "0")
     assert identity.configured_ocr_retention() == DAY
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="--ocr-retention-hours"):
         identity.configured_ocr_retention(0)
