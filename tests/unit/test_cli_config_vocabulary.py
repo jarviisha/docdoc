@@ -492,6 +492,13 @@ FLAGS_WITHOUT_A_SETTING: dict[str, str] = {
         "configured once and forgot (FR-032)"
     ),
     "--document": "which document to erase; an argument",
+    "--password-stdin": (
+        "whether this invocation's new password comes from stdin instead of a "
+        "double prompt is a per-invocation scripting choice, not a deployment "
+        "setting -- and the password it reads is never a setting at all (FR-042's "
+        "reasoning): argv is readable by any process on the host, which is "
+        "exactly why it is a line read from stdin rather than a flag's value"
+    ),
     "--purge-store-root": (
         "a per-invocation confirmation that the operator means the store root, "
         "not a deployment setting. A variable enabling this would let an "

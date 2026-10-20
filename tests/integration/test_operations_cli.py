@@ -1,25 +1,29 @@
-"""``docdoc sweep``, ``docdoc erase`` and ``docdoc credential``, run as typed.
+"""``docdoc sweep``, ``docdoc erase``, ``docdoc credential``, and
+``docdoc console-user``, run as typed.
 
-**All three were at zero coverage.** They are the operator half of this
-milestone — the retention sweep a deployment with no worker would otherwise
-never run, the erasure that answers a deletion request, and the only way an
-administrative credential comes into existence (FR-032) — and not one line of
-any of them was executed by the test suite. The stores beneath them are well
-covered; the commands that dispatch to them were not, so an argument named
-wrongly, a report field renamed, or an exit code inverted would have shipped.
+**All four were at zero coverage** when this module started. They are the
+operator half of this milestone — the retention sweep a deployment with no
+worker would otherwise never run, the erasure that answers a deletion
+request, the only way an administrative credential comes into existence
+(FR-032), and — ADR-0023 §1 — the only way a console account comes into
+existence at all, since the console has no account-management screen of its
+own. The stores beneath them are well covered; the commands that dispatch to
+them were not, so an argument named wrongly, a report field renamed, or an
+exit code inverted would have shipped.
 
 Driven through ``main(argv)`` rather than by calling ``run(args, settings)``,
 because the thing an operator types is the argument vector: a test that built
 the `Namespace` itself would pass while ``--purge-store-root`` was spelled
 ``--purge-root`` in the parser.
 
-`postgres`-marked because all three need run state. That is not a testing
+`postgres`-marked because all four need run state. That is not a testing
 convenience — `docdoc credential` refuses to start without a database and says
 so, which is the first thing asserted below.
 """
 
 from __future__ import annotations
 
+import io
 import json
 from datetime import UTC, datetime, timedelta
 
@@ -45,7 +49,8 @@ def dsn() -> str:
     with psycopg.connect(url, autocommit=True) as connection:
         migrations.apply(connection, now=datetime.now(UTC))
         connection.execute(
-            "TRUNCATE runs, corrections, run_tombstones, deliveries, callbacks, credentials"
+            "TRUNCATE runs, corrections, run_tombstones, deliveries, callbacks, credentials, "
+            "console_sessions, console_users"
         )
     return url
 
@@ -440,3 +445,91 @@ def test_credential_without_a_database_names_the_missing_setting(
 
     assert code != 0
     assert "DOCDOC_RUN_DATABASE_URL" in err
+
+
+# -- docdoc console-user ------------------------------------------------------
+
+
+def test_console_user_add_then_list_shows_it_without_any_hash(
+    dsn: str, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0023 §1. `add` takes a password only from stdin or a prompt, never
+    argv, and `list` reports a username and whether it is disabled — never a
+    `scrypt$...` hash."""
+    monkeypatch.setattr("sys.stdin", io.StringIO("long enough pass\n"))
+    code, added = run(
+        capsys,
+        "console-user",
+        "add",
+        "alice",
+        "--password-stdin",
+        "--run-database-url",
+        dsn,
+    )
+    assert code == 0
+
+    _, listed = run(capsys, "console-user", "list", "--run-database-url", dsn)
+    only = next(account for account in listed["accounts"] if account["username"] == "alice")
+
+    assert only == {
+        "username": "alice",
+        "disabled": False,
+        "created_at": only["created_at"],
+        "disabled_at": None,
+    }
+    assert "scrypt$" not in json.dumps(listed)
+    assert "scrypt$" not in json.dumps(added)
+
+
+def test_console_user_refuses_a_short_password(
+    dsn: str, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0023 §1's floor, and the refusal has to name it: 12 characters."""
+    from docdoc.cli import main
+
+    monkeypatch.setattr("sys.stdin", io.StringIO("too short\n"))
+    code = main(
+        [
+            "console-user",
+            "add",
+            "bob",
+            "--password-stdin",
+            "--run-database-url",
+            dsn,
+            "--json",
+        ]
+    )
+    err = capsys.readouterr().err
+
+    assert code != 0
+    assert "12" in err
+
+
+def test_console_user_disable_is_idempotent(
+    dsn: str, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Disabling a disabled account succeeds and changes nothing, exactly as
+    `docdoc credential revoke` does for a revoked one."""
+    from docdoc.cli import main
+
+    monkeypatch.setattr("sys.stdin", io.StringIO("long enough pass\n"))
+    run(
+        capsys,
+        "console-user",
+        "add",
+        "carol",
+        "--password-stdin",
+        "--run-database-url",
+        dsn,
+    )
+
+    first_code, first = run(capsys, "console-user", "disable", "carol", "--run-database-url", dsn)
+    # The second call reads the human form rather than `--json`, so the
+    # "already disabled" sentence the brief asks for is actually checked
+    # rather than inferred from `was_active` alone.
+    second_code = main(["console-user", "disable", "carol", "--run-database-url", dsn])
+    second_out = capsys.readouterr().out
+
+    assert first_code == second_code == 0
+    assert first["was_active"] is True
+    assert "already disabled" in second_out

@@ -57,7 +57,7 @@ def run(argv: Sequence[str], capsys: pytest.CaptureFixture[str]) -> tuple[int, s
 # -- §1 the command set ------------------------------------------------------
 
 
-def test_the_command_set_is_the_eleven_the_contract_names() -> None:
+def test_the_command_set_is_the_twelve_the_contract_names() -> None:
     parser = build_parser()
     subcommands = next(
         action for action in parser._actions if hasattr(action, "choices") and action.choices
@@ -91,6 +91,10 @@ def test_the_command_set_is_the_eleven_the_contract_names() -> None:
         # that could mint an administrative credential is a route that needs no
         # credential (FR-032).
         "credential",
+        # ADR-0023 §1. The console itself has no account-management screen, so
+        # this is the only place a console account is created, re-keyed,
+        # disabled, or listed.
+        "console-user",
     }
 
 
