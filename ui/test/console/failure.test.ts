@@ -105,3 +105,35 @@ test("no classification invents a message the deployment did not send", () => {
   assert.equal(failure.kind, "reported");
   assert.match(describe(failure), /gave no message/);
 });
+
+test("a string detail is preferred over a bare error code", () => {
+  const failure = failureOf({
+    ok: false,
+    status: 409,
+    body: { error: "tenant_has_runs", detail: "the tenant still holds runs" },
+  });
+  assert.equal(describe(failure), "the tenant still holds runs");
+});
+
+test("a FastAPI validation 422 reads as a sentence, not an array", () => {
+  const failure = failureOf({
+    ok: false,
+    status: 422,
+    body: {
+      detail: [{ type: "int_parsing", loc: ["query", "limit"], msg: "Input should be a valid integer" }],
+    },
+  });
+  assert.equal(failure.kind, "reported");
+  assert.equal(describe(failure), "the request was invalid: Input should be a valid integer");
+});
+
+test("a validation 422 with no usable entry still reads as invalid", () => {
+  const failure = failureOf({ ok: false, status: 422, body: { detail: [] } });
+  assert.equal(describe(failure), "the request was invalid");
+});
+
+test("an expired result is reported, not a removed run", () => {
+  const failure = failureOf({ ok: false, status: 410, body: { error: "result_expired" } });
+  assert.equal(failure.kind, "reported");
+  assert.equal(describe(failure), "this run's result is no longer stored");
+});

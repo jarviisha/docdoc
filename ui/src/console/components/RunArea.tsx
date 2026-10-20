@@ -323,8 +323,8 @@ function RunDetail({
   const download = async () => {
     const answer = await request({ type: "run-result", runId: run.run_id });
     if (!answer.ok) {
-      // Every kind, `removed` included: here it means the result's content
-      // is gone (`410 result_expired`), and a button that does nothing says less.
+      // Every kind: an expired result (`410 result_expired`) arrives as a
+      // `reported` failure saying so, and a button that does nothing says less.
       setProblem(describe(answer.failure));
       return;
     }
@@ -335,7 +335,9 @@ function RunDetail({
     anchor.href = url;
     anchor.download = `${run.run_id}.json`;
     anchor.click();
-    URL.revokeObjectURL(url);
+    // Revoked on the next tick: revoking synchronously can cancel the download
+    // before the browser has started reading the blob.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   };
 
   return (

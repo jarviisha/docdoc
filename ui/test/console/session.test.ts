@@ -11,7 +11,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { emptySession, ready, signedIn, signedOut } from "../../src/console/model/session.ts";
+import {
+  afterSignOut,
+  emptySession,
+  ready,
+  signedIn,
+  signedOut,
+} from "../../src/console/model/session.ts";
 
 test("a fresh session has not been checked and signs in nobody", () => {
   const session = emptySession();
@@ -38,4 +44,26 @@ test("a 401 on the first GET /session is itself an answer: checked, signed out",
   const session = signedOut(emptySession());
   assert.equal(session.username, null);
   assert.equal(session.checked, true);
+});
+
+test("a sign-out that succeeds signs out with no notice", () => {
+  const after = afterSignOut(signedIn(emptySession(), "alice"), null);
+  assert.equal(ready(after.session), false);
+  assert.equal(after.notice, null);
+});
+
+test("a sign-out that fails keeps the session and says why", () => {
+  const before = signedIn(emptySession(), "alice");
+  const after = afterSignOut(before, { kind: "transport", message: "the request did not complete" });
+  assert.deepEqual(after.session, before);
+  assert.equal(after.notice, "the request did not complete");
+});
+
+test("a sign-out refused because the session is already gone signs out", () => {
+  const after = afterSignOut(signedIn(emptySession(), "alice"), {
+    kind: "unauthenticated",
+    message: "sign in to the console",
+  });
+  assert.equal(ready(after.session), false);
+  assert.equal(after.notice, null);
 });

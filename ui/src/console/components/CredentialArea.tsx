@@ -32,12 +32,15 @@ import {
   initialCredentials,
   issueBody,
   isActive,
+  listedFor,
+  listFailedFor,
+  listingNote,
   needsWarning,
   scopesOf,
+  showing,
   toRecords,
   warned,
   withDisclosure,
-  withRecords,
 } from "../model/credentials.ts";
 import type { CredentialRecord } from "../model/credentials.ts";
 import type { Failure } from "../model/failure.ts";
@@ -61,7 +64,7 @@ export function CredentialArea({ request, onFailure }: Props) {
   // Which tenant's credentials to list: typed, then shown on Show — the route
   // requires one, and listing on every keystroke asks about tenants nobody meant.
   const [listing, setListing] = useState("");
-  const [shown, setShown] = useState("");
+  const shown = state.shown;
   // The row awaiting "Revoke this key?", by credential id.
   const [confirming, setConfirming] = useState<string | null>(null);
 
@@ -69,8 +72,11 @@ export function CredentialArea({ request, onFailure }: Props) {
     async (which: string) => {
       if (which === "") return;
       const answer = await request({ type: "list-credentials", tenant: which });
-      if (answer.ok) setState((previous) => withRecords(previous, toRecords(answer.body)));
-      else onFailure(answer.failure);
+      if (answer.ok) setState((previous) => listedFor(previous, which, toRecords(answer.body)));
+      else {
+        setState((previous) => listFailedFor(previous, which));
+        onFailure(answer.failure);
+      }
     },
     [request, onFailure],
   );
@@ -139,9 +145,8 @@ export function CredentialArea({ request, onFailure }: Props) {
             isDisabled={listing.trim() === ""}
             onClick={() => {
               const which = listing.trim();
-              setShown(which);
               setConfirming(null);
-              setState((previous) => withRecords(previous, []));
+              setState((previous) => showing(previous, which));
               void load(which);
             }}
           />
@@ -149,12 +154,8 @@ export function CredentialArea({ request, onFailure }: Props) {
 
         {needsWarning(state) ? <Banner status="info" title={SELF_REVOCATION_WARNING} /> : null}
 
-        {state.records.length === 0 ? (
-          <Text size="sm">
-            {shown === ""
-              ? "Name a tenant and choose Show to list its credentials."
-              : "This tenant holds no credentials."}
-          </Text>
+        {listingNote(state) !== null ? (
+          <Text size="sm">{listingNote(state)}</Text>
         ) : (
           <Card>
             <Table

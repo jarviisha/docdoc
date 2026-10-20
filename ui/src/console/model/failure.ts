@@ -67,9 +67,15 @@ function messageOf(body: unknown): string {
       const cls = (wrapper as { class?: unknown }).class;
       if (typeof cls === "string") return cls;
     }
-    if (typeof wrapper === "string") return wrapper;
+    // A sentence beats a bare code: `{"error": "tenant_has_runs", "detail": "…"}`.
     const detail = (body as { detail?: unknown }).detail;
     if (typeof detail === "string") return detail;
+    if (typeof wrapper === "string") return wrapper;
+    // FastAPI's own 422: `{"detail": [{"loc": [...], "msg": "...", ...}]}`.
+    if (Array.isArray(detail)) {
+      const msg = (detail[0] as { msg?: unknown } | undefined)?.msg;
+      return typeof msg === "string" ? `the request was invalid: ${msg}` : "the request was invalid";
+    }
   }
   return "the deployment reported a failure and gave no message";
 }
@@ -83,6 +89,13 @@ function classOf(body: unknown): string | null {
   return typeof cls === "string" ? cls : null;
 }
 
+/** A bare string error code, as `{"error": "result_expired"}` carries it. */
+function errorCodeOf(body: unknown): string | null {
+  if (typeof body !== "object" || body === null) return null;
+  const code = (body as { error?: unknown }).error;
+  return typeof code === "string" ? code : null;
+}
+
 /** The tombstone's two fields, or `null` when the body is not one. */
 function tombstoneIn(body: unknown): { deletedAt: string; policy: string } | null {
   if (typeof body !== "object" || body === null) return null;
@@ -93,6 +106,10 @@ function tombstoneIn(body: unknown): { deletedAt: string; policy: string } | nul
 
 /** Classify an answered request. Callers pass only responses that are not ok. */
 export function failureOf(response: Response): Failure {
+  // An expired result is a `410` too, but the run itself is still here.
+  if (response.status === 410 && errorCodeOf(response.body) === "result_expired") {
+    return { kind: "reported", status: 410, message: "this run's result is no longer stored" };
+  }
   if (response.status === 410) {
     const stone = tombstoneIn(response.body);
     // A `410` whose body is not a tombstone is still a removal, and saying so

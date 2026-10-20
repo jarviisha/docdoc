@@ -94,17 +94,44 @@ export interface CredentialState {
   disclosure: Disclosure | null;
   /** Whether the once-per-session warning has been shown. */
   warned: boolean;
+  /** The tenant whose credentials are listed; `""` before the first Show. */
+  shown: string;
+  /** Where that listing stands — only `loaded` may say "holds none". */
+  listing: "pending" | "loaded" | "failed";
 }
 
 export function initialCredentials(): CredentialState {
-  return { records: [], disclosure: null, warned: false };
+  return { records: [], disclosure: null, warned: false, shown: "", listing: "loaded" };
 }
 
-export function withRecords(
+/** Show pressed: a new tenant's listing is on its way; the old rows go. */
+export function showing(state: CredentialState, tenant: string): CredentialState {
+  return { ...state, shown: tenant, records: [], listing: "pending" };
+}
+
+/**
+ * A listing answered. Ignored when it is for a tenant no longer shown — a
+ * slow answer for the previous Show must not overwrite the current one.
+ */
+export function listedFor(
   state: CredentialState,
+  tenant: string,
   records: CredentialRecord[],
 ): CredentialState {
-  return { ...state, records };
+  return tenant === state.shown ? { ...state, records, listing: "loaded" } : state;
+}
+
+/** A listing failed. Ignored, like `listedFor`, for a tenant no longer shown. */
+export function listFailedFor(state: CredentialState, tenant: string): CredentialState {
+  return tenant === state.shown ? { ...state, records: [], listing: "failed" } : state;
+}
+
+/** What is said in place of the table, or `null` when there are rows to show. */
+export function listingNote(state: CredentialState): string | null {
+  if (state.shown === "") return "Name a tenant and choose Show to list its credentials.";
+  if (state.listing === "pending") return "Listing credentials…";
+  if (state.listing === "failed") return "The credentials for this tenant could not be listed.";
+  return state.records.length === 0 ? "This tenant holds no credentials." : null;
 }
 
 export function withDisclosure(

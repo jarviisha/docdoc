@@ -16,6 +16,8 @@
  * transport already distinguishes (`failure.ts`).
  */
 
+import { describe, type Failure } from "./failure.ts";
+
 export interface Session {
   /** The operator's name, or `null` before a login and after a sign-out. */
   username: string | null;
@@ -46,4 +48,22 @@ export function signedOut(session: Session): Session {
 /** Whether the console has a signed-in operator to act as. */
 export function ready(session: Session): boolean {
   return session.username !== null;
+}
+
+/**
+ * What a sign-out's answer leaves behind.
+ *
+ * Only a success, or a refusal meaning the session is already gone, signs the
+ * console out. Any other failure leaves the cookie's session alive on the
+ * server, so showing the sign-in form would claim a sign-out that did not
+ * happen: the session stays and the failure is said instead.
+ */
+export function afterSignOut(
+  session: Session,
+  failure: Failure | null,
+): { session: Session; notice: string | null } {
+  if (failure === null || failure.kind === "unauthenticated") {
+    return { session: signedOut(session), notice: null };
+  }
+  return { session, notice: describe(failure) };
 }

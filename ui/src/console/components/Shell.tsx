@@ -14,7 +14,14 @@ import { Banner, Button, HStack, Stack, Text } from "@astryxdesign/core";
 import { send } from "../../transport.ts";
 import { requestFor, type Intent } from "../model/client.ts";
 import { describe, failureOf, failureOfThrown, type Failure } from "../model/failure.ts";
-import { emptySession, ready, signedIn, signedOut, type Session } from "../model/session.ts";
+import {
+  afterSignOut,
+  emptySession,
+  ready,
+  signedIn,
+  signedOut,
+  type Session,
+} from "../model/session.ts";
 import { LoginForm } from "./LoginForm.tsx";
 import { RunArea } from "./RunArea.tsx";
 import { CredentialArea } from "./CredentialArea.tsx";
@@ -103,10 +110,11 @@ export function Shell() {
   }, []);
 
   const signOut = useCallback(async () => {
-    await call({ type: "sign-out" });
-    setNotice(null);
-    setSession(signedOut);
-  }, []);
+    const answer = await call({ type: "sign-out" });
+    const after = afterSignOut(session, answer.ok ? null : answer.failure);
+    setNotice(after.notice);
+    setSession(after.session);
+  }, [session]);
 
   if (!ready(session)) {
     return (

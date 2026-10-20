@@ -20,12 +20,15 @@ import {
   initialCredentials,
   isActive,
   issueBody,
+  listedFor,
+  listFailedFor,
+  listingNote,
   needsWarning,
   scopesOf,
+  showing,
   toRecords,
   warned,
   withDisclosure,
-  withRecords,
 } from "../../src/console/model/credentials.ts";
 
 test("issuing a credential sends no scope", () => {
@@ -110,7 +113,37 @@ test("scopes read as the route sends them, and an empty set is a dash", () => {
 });
 
 test("the records replace rather than accumulate", () => {
-  const one = withRecords(initialCredentials(), [{ credential_id: "a" } as never]);
-  const two = withRecords(one, [{ credential_id: "b" } as never]);
+  const shown = showing(initialCredentials(), "acme");
+  const one = listedFor(shown, "acme", [{ credential_id: "a" } as never]);
+  const two = listedFor(one, "acme", [{ credential_id: "b" } as never]);
   assert.equal(two.records.length, 1);
+});
+
+test("before any Show, the note asks for a tenant", () => {
+  assert.equal(listingNote(initialCredentials()), "Name a tenant and choose Show to list its credentials.");
+});
+
+test("an empty answer says the tenant holds none", () => {
+  const state = listedFor(showing(initialCredentials(), "acme"), "acme", []);
+  assert.equal(listingNote(state), "This tenant holds no credentials.");
+});
+
+test("a failed listing never claims the tenant holds none", () => {
+  const state = listFailedFor(showing(initialCredentials(), "acme"), "acme");
+  assert.equal(listingNote(state), "The credentials for this tenant could not be listed.");
+});
+
+test("while a listing is on its way, it does not claim the tenant holds none", () => {
+  assert.equal(listingNote(showing(initialCredentials(), "acme")), "Listing credentials…");
+});
+
+test("a late answer for a tenant no longer shown is ignored", () => {
+  const first = showing(initialCredentials(), "acme");
+  const second = showing(first, "globex");
+  const late = listedFor(second, "acme", [{ credential_id: "a" } as never]);
+  assert.deepEqual(late, second);
+  assert.deepEqual(listFailedFor(second, "acme"), second);
+  const current = listedFor(second, "globex", [{ credential_id: "g" } as never]);
+  assert.equal(current.records.length, 1);
+  assert.equal(listingNote(current), null);
 });
