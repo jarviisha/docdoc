@@ -535,6 +535,29 @@ def test_console_user_disable_is_idempotent(
     assert "already disabled" in second_out
 
 
+def test_console_user_add_of_a_disabled_account_says_restored(
+    dsn: str, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Re-adding a disabled account revives it, and the output says so rather
+    than "created"."""
+    from docdoc.cli import main
+
+    monkeypatch.setattr("sys.stdin", io.StringIO("long enough pass\n"))
+    _, first = run(
+        capsys, "console-user", "add", "dave", "--password-stdin", "--run-database-url", dsn
+    )
+    run(capsys, "console-user", "disable", "dave", "--run-database-url", dsn)
+
+    monkeypatch.setattr("sys.stdin", io.StringIO("another long pass\n"))
+    code = main(["console-user", "add", "dave", "--password-stdin", "--run-database-url", dsn])
+    out = capsys.readouterr().out
+
+    assert first["restored"] is False
+    assert code == 0
+    assert "restored" in out
+    assert "created" not in out
+
+
 def test_console_user_disable_of_an_unknown_user_fails(
     dsn: str, capsys: pytest.CaptureFixture[str]
 ) -> None:

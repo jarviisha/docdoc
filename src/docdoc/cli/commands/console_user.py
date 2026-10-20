@@ -64,11 +64,22 @@ def run(args: argparse.Namespace, settings: Settings) -> Rendering:
 def _add(args: argparse.Namespace, accounts: PostgresConsoleAccounts) -> Rendering:
     """Create an account, or restore a disabled one with a new password."""
     password = _read_password(args)
-    account = accounts.add(args.username, password, salt=new_password_salt(), now=clock())
+    now = clock()
+    account = accounts.add(args.username, password, salt=new_password_salt(), now=now)
+    # A revived account keeps its original `created_at`; a new one carries `now`.
+    restored = account.created_at != now
     return Rendering(
         code=0,
-        data={"username": account.username, "created_at": _iso(account.created_at)},
-        lines=[f"console account {account.username!r} created"],
+        data={
+            "username": account.username,
+            "created_at": _iso(account.created_at),
+            "restored": restored,
+        },
+        lines=[
+            f"console account {account.username!r} restored with a new password"
+            if restored
+            else f"console account {account.username!r} created"
+        ],
     )
 
 
