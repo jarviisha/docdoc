@@ -41,6 +41,7 @@ __all__ = [
     "RunProvenance",
     "StageOutcome",
     "StageStatus",
+    "reason_of",
 ]
 
 
@@ -73,10 +74,38 @@ class StageOutcome(BaseModel):
     #: The typed error's **class name**. Never its message.
     failure_class: str | None = None
 
+    #: Why, drawn from the error's own closed vocabulary. `None` when the stage
+    #: did not fail, or when it failed with an error that declares no `REASONS`
+    #: the closed-vocabulary rule can vouch for. Never free text (spec decision 7,
+    #: console monitoring plan) — the same no-content rule `failure_class` exists
+    #: to hold, for the same reason: a message can quote the document.
+    failure_reason: str | None = None
+
     @property
     def ran(self) -> bool:
         """Whether this stage actually did the work, as opposed to reusing it."""
         return self.status is StageStatus.EXECUTED
+
+
+def reason_of(error: BaseException) -> str | None:
+    """The error's declared reason, if its own type vouches for it.
+
+    Returns ``error.reason`` only when ``type(error)`` declares a ``REASONS``
+    frozenset containing it, and ``None`` otherwise. That is the whole of the
+    no-content rule for this field: nothing stops a caller from setting
+    ``.reason`` to arbitrary text, so trusting the attribute alone would make
+    this exactly as leaky as a message. Checking it against the type's own
+    closed vocabulary is what keeps it one of a fixed, named set of words.
+
+    Exact ``type(error)``, not ``isinstance`` — a subclass that narrows its own
+    ``REASONS`` (``ModelProviderError`` beside ``ProviderError``) must be judged
+    against its own set, not its parent's.
+    """
+    reasons = getattr(type(error), "REASONS", None)
+    if not reasons:
+        return None
+    reason = getattr(error, "reason", None)
+    return reason if reason in reasons else None
 
 
 class RunProvenance(BaseModel):

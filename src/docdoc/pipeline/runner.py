@@ -49,6 +49,7 @@ from docdoc.pipeline.result import (
     RunProvenance,
     StageOutcome,
     StageStatus,
+    reason_of,
 )
 from docdoc.pipeline.stages import (
     PIPELINE_ID,
@@ -496,6 +497,7 @@ def _run(
                 # content it choked on, and this field reaches logs and error
                 # bodies.
                 failure_class=type(error).__name__,
+                failure_reason=reason_of(error),
             )
         )
         outcomes.extend(_skipped_after(failed_stage))

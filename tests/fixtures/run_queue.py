@@ -365,6 +365,10 @@ class InMemoryRunQueue:
                 "worker_id": worker_id,
                 "lease_until": now + lease,
                 "updated_at": now,
+                # The most recent claim, not the first: a redelivery moves this
+                # forward too (console monitoring plan, Task 1), matching
+                # `PostgresRunQueue.claim`'s `started_at = %(now)s`.
+                "started_at": now,
             }
         )
         self._runs[run.run_id] = claimed
@@ -468,6 +472,7 @@ class InMemoryRunQueue:
                 "processing_id": outcome.processing_id,
                 "failed_stage": outcome.failed_stage,
                 "error_class": outcome.error_class,
+                "error_reason": outcome.error_reason,
                 "stage_outcomes": outcome.stage_outcomes,
                 "worker_id": None,
                 "lease_until": None,

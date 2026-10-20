@@ -89,6 +89,22 @@ inventing one.
 A terminal state is terminal. No transition leaves `succeeded`, `failed`, or `cancelled`, and no code
 path deletes a row.
 
+### `started_at` and `error_reason`
+
+`started_at` is the **most recent** claim, not the first. A redelivery is a second claim of the same
+run, and the claim statement moves it forward every time — an operator reading it on a run that is
+still `running` wants to know when *this* attempt began, which is the one that can still be stuck.
+It is `null` before a run's first claim.
+
+A failed run also carries `error_reason`: one word from the failing error's own closed vocabulary
+(`ProviderError.REASONS`, `ParserError.REASONS`, `UnsupportedDocumentError.REASONS` — things like
+`timeout`, `rate_limit`, `encrypted`), drawn by `docdoc.pipeline.result.reason_of`, never the error's
+message. It exists beside `error_class` for the same reason `error_class` exists: today `error_class`
+alone cannot tell a host timeout from a host 5xx from a rejected language, and `error_reason`
+answers that without touching the no-content rule (FR-037) — it is `null` whenever the error declared
+no reason the closed vocabulary can vouch for, same as `error_class` is `null` on a run that has not
+failed.
+
 ### How often to poll
 
 **Poll every 2–5 seconds, and back off.** There is no push, no webhook, and no long poll; polling is

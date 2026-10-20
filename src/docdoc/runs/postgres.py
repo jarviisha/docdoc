@@ -60,7 +60,10 @@ _COLUMNS = (
     # `_row_to_run` receives -- and adding these is exactly that migration.
     "priority, tokens_used, callback_id, "
     # 014 (ADR-0022): what a run executes, and an OCR run's own choices.
-    "kind, ocr_parser, ocr_language"
+    "kind, ocr_parser, ocr_language, "
+    # Console monitoring plan, Task 1: the most recent claim, and a
+    # content-free reason for a failure.
+    "started_at, error_reason"
 )
 
 #: The same list, qualified, for the statements that ``RETURNING`` out of a join.
@@ -699,7 +702,10 @@ class PostgresRunQueue:
                    attempts = runs.attempts + 1,
                    worker_id = %(worker_id)s,
                    lease_until = %(now)s + %(lease)s,
-                   updated_at = %(now)s
+                   updated_at = %(now)s,
+                   -- The most recent claim, not the first: a redelivery moves
+                   -- this forward too (console monitoring plan, Task 1).
+                   started_at = %(now)s
               FROM candidate
              WHERE runs.run_id = candidate.run_id
             RETURNING {_QUALIFIED}, candidate.from_state
@@ -914,6 +920,7 @@ class PostgresRunQueue:
                        processing_id = %(processing_id)s,
                        failed_stage = %(failed_stage)s,
                        error_class = %(error_class)s,
+                       error_reason = %(error_reason)s,
                        stage_outcomes = %(stage_outcomes)s::jsonb,
                        worker_id = NULL,
                        lease_until = NULL,
@@ -952,6 +959,7 @@ class PostgresRunQueue:
                 "processing_id": outcome.processing_id,
                 "failed_stage": outcome.failed_stage,
                 "error_class": outcome.error_class,
+                "error_reason": outcome.error_reason,
                 "stage_outcomes": json.dumps(
                     [record.model_dump(mode="json") for record in outcome.stage_outcomes]
                 ),

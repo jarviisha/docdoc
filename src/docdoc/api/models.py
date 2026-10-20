@@ -404,6 +404,10 @@ class RunStateResponse(BaseModel):
     updated_at: str
     expires_at: str
 
+    #: The most recent claim, ISO 8601. `None` before the first claim (console
+    #: monitoring plan, Task 1).
+    started_at: str | None = None
+
     #: Always present, including when the submission requested none (FR-087a).
     #: A request above its tenant's ceiling is accepted *at* the ceiling, and this
     #: is the only way the caller learns what it was granted — a ceiling is not
@@ -418,6 +422,9 @@ class RunStateResponse(BaseModel):
     processing_id: str | None = None
     failed_stage: str | None = None
     error_class: str | None = None
+    #: A member of the failing error's own closed vocabulary, never a message
+    #: (spec decision 7). `None` on a run that has not failed.
+    error_reason: str | None = None
     worker_id: str | None = None
     lease_until: str | None = None
     request_id: str | None = None

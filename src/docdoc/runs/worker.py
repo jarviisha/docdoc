@@ -255,6 +255,7 @@ def _execute_ocr(
     """
     from docdoc.ingest.errors import IngestError
     from docdoc.pipeline import parse_only
+    from docdoc.pipeline.result import reason_of
 
     data = blobs.get(run.blob_id)
     if data is None:
@@ -290,7 +291,8 @@ def _execute_ocr(
         )
     except IngestError as exc:
         # ING-7: one complete document or a failure. The class name only --
-        # a provider's message can carry what the document said.
+        # a provider's message can carry what the document said. `reason_of`
+        # holds the same rule for `error_reason` (spec decision 7).
         _finish(
             queue,
             run,
@@ -298,6 +300,7 @@ def _execute_ocr(
                 status=RunStatus.FAILED,
                 failed_stage="parse",
                 error_class=type(exc).__name__,
+                error_reason=reason_of(exc),
             ),
             now=now,
         )
