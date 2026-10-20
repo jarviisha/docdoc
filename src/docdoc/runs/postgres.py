@@ -58,7 +58,9 @@ _COLUMNS = (
     # Milestone 10. Named here rather than left to a `SELECT *` for the reason
     # this list exists: a migration adding a column must not silently change what
     # `_row_to_run` receives -- and adding these is exactly that migration.
-    "priority, tokens_used, callback_id"
+    "priority, tokens_used, callback_id, "
+    # 014 (ADR-0022): what a run executes, and an OCR run's own choices.
+    "kind, ocr_parser, ocr_language"
 )
 
 #: The same list, qualified, for the statements that ``RETURNING`` out of a join.
@@ -382,9 +384,9 @@ class PostgresRunQueue:
             INSERT INTO runs (
                 run_id, tenant_id, blob_id, schema_identity, status,
                 request_id, idempotency_key, created_at, updated_at, expires_at,
-                priority, callback_id
+                priority, callback_id, kind, ocr_parser, ocr_language
             )
-            VALUES (%s, %s, %s, %s, 'queued', %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, 'queued', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (tenant_id, idempotency_key)
                 WHERE idempotency_key IS NOT NULL DO NOTHING
             RETURNING {_COLUMNS}
@@ -405,6 +407,9 @@ class PostgresRunQueue:
                 # as they did (FR-101).
                 int(getattr(spec, "priority", 0) or 0),
                 getattr(spec, "callback_id", None),
+                getattr(spec, "kind", "extraction") or "extraction",
+                getattr(spec, "ocr_parser", None),
+                getattr(spec, "ocr_language", None),
             ),
             fetch="one",
         )

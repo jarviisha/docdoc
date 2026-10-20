@@ -25,6 +25,13 @@ exactly what this milestone *is*: a caller naming a configured parser
 re-scope, not a relaxation (FR-095): the kernel and the three layers downstream
 of it stay exactly as protected as before, and nothing here makes it any easier
 for a future milestone to touch them unnoticed.
+
+**Re-pointed at Milestone 014 (async OCR through a bounded queue, ADR-0022,
+`docs/superpowers/specs/2026-10-19-async-ocr-queue-design.md`), 2026-10-20.**
+The protected set is unchanged: 014 adds a run kind, OCR caps, and OCR
+retention, all in `runs/`, `api/`, and the pipeline runner, and touches none of
+the layers above. Only the guard-the-guard check moved, from `ingest/` to
+`runs/`, which is where this milestone's work is.
 """
 
 from __future__ import annotations
@@ -200,7 +207,7 @@ def test_the_diff_is_not_empty() -> None:
     changed = _changed()
 
     assert changed, "the diff against `main` is empty, so nothing above was checked"
-    assert any(path.startswith("src/docdoc/ingest/") for path in changed), (
-        "this milestone's work is in `docdoc.ingest` (the OCR gateway, ADR-0021), "
+    assert any(path.startswith("src/docdoc/runs/") for path in changed), (
+        "this milestone's work is in `docdoc.runs` (async OCR, ADR-0022), "
         "and the diff shows none of it. The comparison is against the wrong ref"
     )

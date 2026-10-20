@@ -33,6 +33,7 @@ __all__ = [
     "TERMINAL_STATES",
     "Priority",
     "Run",
+    "RunKind",
     "RunOutcome",
     "RunStatus",
     "StageOutcomeRecord",
@@ -83,6 +84,20 @@ TERMINAL_STATES = frozenset({RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CA
 # `Tombstone` below, four fields, in its own table. `tests/unit/
 # test_run_status_set_is_closed.py` asserts the five by name (SC-023).
 # ---------------------------------------------------------------------------
+
+
+class RunKind(StrEnum):
+    """What a run executes. A second axis beside `RunStatus`, not a sixth state.
+
+    ``extraction`` is the four-stage pipeline against a schema, and is what every
+    run was before 014. ``ocr`` is the parse stage alone, with the caller's
+    parser and language instead of a schema (ADR-0022). The column defaults to
+    ``extraction``, so every existing row and every Milestone 9 caller keeps
+    meaning what it meant.
+    """
+
+    EXTRACTION = "extraction"
+    OCR = "ocr"
 
 
 class Priority(IntEnum):
@@ -263,8 +278,17 @@ class Run(BaseModel):
     run_id: UUID
     tenant_id: str
     blob_id: str
-    schema_identity: str
+    #: Present exactly for an extraction run. An OCR run is the parse alone and
+    #: has no schema to name (ADR-0022) -- enforced below and by a check
+    #: constraint, as `processing_id` is.
+    schema_identity: str | None
     status: RunStatus
+
+    kind: RunKind = RunKind.EXTRACTION
+    #: The caller's choices for an OCR run, as `POST /v1/ocr` took them. Absent
+    #: on an extraction run, which never had them.
+    ocr_parser: str | None = None
+    ocr_language: str | None = None
 
     attempts: int = Field(default=0, ge=0)
     worker_id: str | None = None
@@ -291,6 +315,18 @@ class Run(BaseModel):
     created_at: datetime
     updated_at: datetime
     expires_at: datetime
+
+    @model_validator(mode="after")
+    def _schema_belongs_to_extraction(self) -> Self:
+        """An extraction run names a schema; an OCR run names a parser instead."""
+        if self.kind is RunKind.EXTRACTION:
+            if self.schema_identity is None:
+                raise ValueError("an extraction run must carry its schema_identity")
+            if self.ocr_parser is not None or self.ocr_language is not None:
+                raise ValueError("an extraction run carries no OCR choices")
+        elif self.schema_identity is not None:
+            raise ValueError("an OCR run carries no schema_identity")
+        return self
 
     @property
     def is_terminal(self) -> bool:

@@ -46,7 +46,7 @@ class RunSpec(Protocol):
 
     tenant_id: str
     blob_id: str
-    schema_identity: str
+    schema_identity: str | None
     request_id: str | None
     idempotency_key: str | None
 
@@ -61,6 +61,11 @@ class RunSpec(Protocol):
     #: used to escalate past another tenant's queue (FR-087b).
     priority: int
     callback_id: UUID | None
+    #: 014, read with `getattr` on the same terms: a spec that names no kind is
+    #: an extraction run, and only an OCR spec carries a parser and a language.
+    kind: str
+    ocr_parser: str | None
+    ocr_language: str | None
 
 
 class RunQueue(Protocol):

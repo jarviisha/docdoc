@@ -244,6 +244,9 @@ class InMemoryRunQueue:
             # real queue's callers could not be tested against.
             priority=int(getattr(spec, "priority", 0) or 0),
             callback_id=getattr(spec, "callback_id", None),
+            kind=getattr(spec, "kind", "extraction") or "extraction",
+            ocr_parser=getattr(spec, "ocr_parser", None),
+            ocr_language=getattr(spec, "ocr_language", None),
         )
         self._runs[run_id] = run
         log_transition(

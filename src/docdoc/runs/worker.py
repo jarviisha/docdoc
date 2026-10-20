@@ -139,6 +139,9 @@ def execute_one(
         )
         return None
 
+    # An extraction run always names its schema: the model and a check
+    # constraint both refuse one that does not (ADR-0022).
+    assert run.schema_identity is not None
     result = run_pipeline(
         data,
         schema=run.schema_identity,

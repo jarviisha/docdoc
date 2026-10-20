@@ -370,7 +370,12 @@ class RunStateResponse(BaseModel):
     #: a run is only readable under the tenant that owns it, so returning what
     #: was submitted discloses nothing the submitter did not send.
     blob_id: str
-    schema_identity: str
+    #: ``None`` for an OCR run, which names a parser rather than a schema
+    #: (ADR-0022). ``kind`` says which of the two this is.
+    schema_identity: str | None
+    kind: str = "extraction"
+    ocr_parser: str | None = None
+    ocr_language: str | None = None
     attempts: int = Field(ge=0)
     created_at: str
     updated_at: str
