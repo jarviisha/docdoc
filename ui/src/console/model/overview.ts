@@ -99,3 +99,8 @@ export function toOverview(body: unknown): Overview {
     running: Array.isArray(record.running) ? (record.running as RunSummary[]) : [],
   };
 }
+
+/** A card's tone: danger for a failed card with failures in it, else neutral. */
+export function cardTone(card: keyof OverviewCards, split: KindSplit): "danger" | "neutral" {
+  return card === "failed" && split.total > 0 ? "danger" : "neutral";
+}

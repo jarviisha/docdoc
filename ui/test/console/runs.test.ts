@@ -11,19 +11,25 @@ import {
   canGoBack,
   canGoForward,
   currentCursor,
+  autoRefreshes,
   emptyNotice,
   failed,
   filtered,
   forTenant,
   forward,
   initialListing,
+  isCancellable,
   isEmpty,
+  kindLabel,
   loaded,
+  polled,
   reasonLabel,
   reloaded,
   timeline,
   toFailure,
   toPage,
+  toRecord,
+  type RunSummary,
 } from "../../src/console/model/runs.ts";
 
 const PAGE = { runs: [{ run_id: "r1" }] as never, next_cursor: "c1" };
@@ -95,6 +101,9 @@ test("an empty list says which emptiness it is", () => {
 
   const oneTenant = loaded(forTenant(filteredEmpty, "acme"), { runs: [], next_cursor: null });
   assert.equal(emptyNotice(oneTenant), "Tenant acme has no failed runs.");
+
+  assert.equal(emptyNotice(byKind(oneTenant, "ocr")), "Tenant acme has no failed OCR runs.");
+  assert.equal(emptyNotice(byKind(all, "extraction")), "No tenant has no extraction runs.");
 });
 
 test("a tenant filter returns to page one and keeps the state filter", () => {
@@ -238,4 +247,81 @@ test("an unknown reason falls back to the class, or to itself", () => {
 
 test("no reason and no class is nothing to report", () => {
   assert.equal(reasonLabel(null, null), null);
+});
+
+// -- cancel, kind label, auto-refresh, detail record ----------------------
+
+test("only a queued or running run can be cancelled", () => {
+  assert.equal(isCancellable("queued"), true);
+  assert.equal(isCancellable("running"), true);
+  assert.equal(isCancellable("succeeded"), false);
+  assert.equal(isCancellable("failed"), false);
+  assert.equal(isCancellable("cancelled"), false);
+});
+
+test("an OCR run's kind names its parser, once one claimed it", () => {
+  assert.equal(kindLabel({ kind: "ocr", ocr_parser: "paddle" }), "OCR (paddle)");
+  assert.equal(kindLabel({ kind: "ocr", ocr_parser: null }), "OCR");
+  assert.equal(kindLabel({ kind: "extraction", ocr_parser: null }), "Extraction");
+});
+
+test("the listing refreshes itself only on page one", () => {
+  const first = loaded(initialListing(), PAGE);
+  assert.equal(autoRefreshes(first), true);
+  const second = loaded(forward(first), { runs: [], next_cursor: null });
+  assert.equal(autoRefreshes(second), false);
+  assert.equal(autoRefreshes(back(second)), true);
+});
+
+test("a background page lands only on the listing it was asked for", () => {
+  const fresh = { runs: [{ run_id: "r9" }] as never, next_cursor: null };
+  const asked = loaded(initialListing(), PAGE);
+
+  const applied = polled(asked, asked, fresh);
+  assert.equal(applied.listing.state === "loaded" && applied.listing.page, fresh);
+
+  const otherFilter = loaded(filtered(asked, "failed"), PAGE);
+  assert.equal(polled(otherFilter, asked, fresh), otherFilter, "a filter changed meanwhile");
+
+  const otherKind = loaded(byKind(asked, "ocr"), PAGE);
+  assert.equal(polled(otherKind, asked, fresh), otherKind, "a kind changed meanwhile");
+
+  const paged = forward(asked);
+  assert.equal(polled(paged, asked, fresh), paged, "the reader paged meanwhile");
+
+  const busy = reloaded(asked);
+  assert.equal(polled(busy, asked, fresh), busy, "a foreground load is under way");
+});
+
+const SUMMARY = {
+  run_id: "r1",
+  tenant_id: "acme",
+  status: "running",
+  kind: "ocr",
+  created_at: "2026-10-20T10:00:00Z",
+  started_at: null,
+  finished_at: null,
+  blob_id: "sha256:x",
+  schema_identity: "s",
+  processing_id: null,
+  ocr_parser: null,
+  error_class: null,
+  error_reason: null,
+} satisfies RunSummary;
+
+test("a detail body is read as a record", () => {
+  const record = toRecord({ ...SUMMARY, worker_id: "w1", attempts: 2, ocr_language: "vie" });
+  assert.equal(record?.tenant_id, "acme");
+  assert.equal(record?.worker_id, "w1");
+  assert.equal(record?.attempts, 2);
+  assert.equal(record?.ocr_language, "vie");
+});
+
+test("a record's detail-only fields default to null, and a non-object is none", () => {
+  const record = toRecord(SUMMARY);
+  assert.equal(record?.worker_id, null);
+  assert.equal(record?.attempts, null);
+  assert.equal(record?.ocr_language, null);
+  assert.equal(toRecord(null), null);
+  assert.equal(toRecord("nope"), null);
 });

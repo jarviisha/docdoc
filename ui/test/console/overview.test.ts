@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { toOverview } from "../../src/console/model/overview.ts";
+import { cardTone, toOverview } from "../../src/console/model/overview.ts";
 
 test("cards of empty counts are zero", () => {
   const body = { window_minutes: 60, counts: [], recent_failures: [], running: [] };
@@ -73,4 +73,13 @@ test("a body without a counts array is refused rather than read as empty", () =>
   assert.throws(() => toOverview(null));
   assert.throws(() => toOverview({}));
   assert.throws(() => toOverview({ counts: "nope" }));
+});
+
+test("only a failed card with failures in it reads as danger", () => {
+  const none = { total: 0, ocr: 0, extraction: 0 };
+  const some = { total: 3, ocr: 1, extraction: 2 };
+  assert.equal(cardTone("failed", some), "danger");
+  assert.equal(cardTone("failed", none), "neutral");
+  assert.equal(cardTone("queued", some), "neutral");
+  assert.equal(cardTone("done", some), "neutral");
 });

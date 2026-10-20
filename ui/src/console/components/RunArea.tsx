@@ -10,7 +10,7 @@
  * filter that resets when you page.
  */
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import {
   Badge,
   Banner,
@@ -21,21 +21,22 @@ import {
   HStack,
   MetadataList,
   MetadataListItem,
-  Selector,
   Stack,
   Table,
   Text,
   pixel,
-  proportional,
 } from "@astryxdesign/core";
 
 import { RUN_STATUSES, type Intent, type RunStatus } from "../model/client.ts";
 import { describe, type Failure } from "../model/failure.ts";
 import { toDelivery, type Delivery } from "../model/delivery.ts";
-import { shortDigest, shortId, when } from "../model/format.ts";
+import { duration, shortId, when } from "../model/format.ts";
 import { DeliveryRecord } from "./DeliveryRecord.tsx";
+import { usePolling } from "./OverviewArea.tsx";
 import {
+  autoRefreshes,
   back,
+  byKind,
   canGoBack,
   canGoForward,
   currentCursor,
@@ -45,12 +46,21 @@ import {
   forTenant,
   forward,
   initialListing,
+  isCancellable,
   isEmpty,
+  kindLabel,
   loaded,
+  polled,
+  reasonLabel,
   reloaded,
+  timeline,
   toFailure,
   toPage,
+  toRecord,
+  type ListingState,
   type RunFailure,
+  type RunKind,
+  type RunRecord,
   type RunSummary,
 } from "../model/runs.ts";
 
@@ -62,6 +72,9 @@ type Request = (
 interface Props {
   request: Request;
   onFailure: (failure: Failure) => void;
+  /** The run whose detail is shown, held by the shell so the overview can open one. */
+  openRunId: string | null;
+  onOpenRun: (runId: string | null) => void;
 }
 
 /** The state's colour, and the word that must always be beside it. */
@@ -73,15 +86,33 @@ const TONE: Record<RunStatus, "success" | "error" | "warning" | "neutral"> = {
   cancelled: "neutral",
 };
 
-export function RunArea({ request, onFailure }: Props) {
+const KINDS: { value: RunKind; label: string }[] = [
+  { value: "ocr", label: "OCR" },
+  { value: "extraction", label: "Extraction" },
+];
+
+/** The request for the listing's current page and filters. */
+function listIntent(
+  state: Pick<ListingState, "tenant" | "status" | "kind">,
+  cursor: string | undefined,
+): Intent {
+  return {
+    type: "list-runs",
+    ...(state.tenant === null ? {} : { tenant: state.tenant }),
+    ...(state.status === null ? {} : { status: state.status }),
+    ...(state.kind === null ? {} : { kind: state.kind }),
+    ...(cursor === undefined ? {} : { cursor }),
+  };
+}
+
+export function RunArea({ request, onFailure, openRunId, onOpenRun }: Props) {
   const [state, setState] = useState(initialListing);
-  const [selected, setSelected] = useState<RunSummary | null>(null);
   // What is typed, apart from what is applied: the list reloads on Enter or
   // Apply, not on every keystroke.
   const [tenantInput, setTenantInput] = useState("");
 
   const cursor = currentCursor(state);
-  const { status, tenant } = state;
+  const { status, tenant, kind } = state;
   const loading = state.listing.state === "loading";
 
   // Every transition that wants a page — paging, a filter, Refresh — sets the
@@ -89,12 +120,7 @@ export function RunArea({ request, onFailure }: Props) {
   useEffect(() => {
     if (!loading) return;
     let current = true;
-    void request({
-      type: "list-runs",
-      ...(tenant === null ? {} : { tenant }),
-      ...(status === null ? {} : { status }),
-      ...(cursor === undefined ? {} : { cursor }),
-    }).then((answer) => {
+    void request(listIntent({ tenant, status, kind }, cursor)).then((answer) => {
       if (!current) return;
       if (answer.ok) {
         setState((previous) => loaded(previous, toPage(answer.body)));
@@ -106,10 +132,22 @@ export function RunArea({ request, onFailure }: Props) {
     return () => {
       current = false;
     };
-  }, [request, onFailure, loading, tenant, status, cursor]);
+  }, [request, onFailure, loading, tenant, status, kind, cursor]);
 
-  if (selected !== null) {
-    return <RunDetail run={selected} request={request} onBack={() => setSelected(null)} />;
+  // A background refresh replaces page one in place, without the loading
+  // state, so rows are never blanked under the reader. A failed one keeps the
+  // rows and reports, as the overview does.
+  const poll = useCallback(() => {
+    const askedFor = state;
+    void request(listIntent(askedFor, currentCursor(askedFor))).then((answer) => {
+      if (answer.ok) setState((previous) => polled(previous, askedFor, toPage(answer.body)));
+      else onFailure(answer.failure);
+    });
+  }, [request, onFailure, state]);
+  usePolling(poll, autoRefreshes(state) && openRunId === null);
+
+  if (openRunId !== null) {
+    return <RunDetail runId={openRunId} request={request} onBack={() => onOpenRun(null)} />;
   }
 
   const rows = state.listing.state === "loaded" ? state.listing.page.runs : [];
@@ -136,21 +174,40 @@ export function RunArea({ request, onFailure }: Props) {
             <Button type="submit" label="Apply" variant="secondary" />
           </HStack>
         </form>
-        <Selector
-          label="State"
-          placeholder="Any state"
-          options={[...RUN_STATUSES]}
-          {...(state.status === null ? {} : { value: state.status })}
-          onChange={(chosen: string) =>
-            setState((previous) => filtered(previous, chosen as RunStatus))
-          }
-        />
-        <Button
-          label="All states"
-          variant="ghost"
-          isDisabled={state.status === null}
-          onClick={() => setState((previous) => filtered(previous, null))}
-        />
+        <Field label="Kind" inputID="run-kind">
+          <select
+            id="run-kind"
+            value={state.kind ?? ""}
+            onChange={(event) => {
+              const chosen = event.target.value;
+              setState((previous) => byKind(previous, chosen === "" ? null : (chosen as RunKind)));
+            }}
+          >
+            <option value="">All</option>
+            {KINDS.map(({ value, label }) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="State" inputID="run-state">
+          <select
+            id="run-state"
+            value={state.status ?? ""}
+            onChange={(event) => {
+              const chosen = event.target.value;
+              setState((previous) => filtered(previous, chosen === "" ? null : (chosen as RunStatus)));
+            }}
+          >
+            <option value="">All</option>
+            {RUN_STATUSES.map((value) => (
+              <option key={value} value={value}>
+                {value}
+              </option>
+            ))}
+          </select>
+        </Field>
         <Button
           label="Refresh"
           variant="secondary"
@@ -197,6 +254,14 @@ export function RunArea({ request, onFailure }: Props) {
                 ),
               },
               {
+                key: "kind",
+                header: "Kind",
+                width: pixel(160),
+                renderCell: (row) => (
+                  <Text size="sm">{kindLabel(row as unknown as RunSummary)}</Text>
+                ),
+              },
+              {
                 key: "tenant_id",
                 header: "Tenant",
                 width: pixel(140),
@@ -209,17 +274,13 @@ export function RunArea({ request, onFailure }: Props) {
                 renderCell: (row) => <Text size="sm">{when(row.created_at as string)}</Text>,
               },
               {
-                key: "schema_identity",
-                header: "Schema",
-                width: pixel(160),
-                renderCell: (row) => <Code>{row.schema_identity as string}</Code>,
-              },
-              {
-                key: "blob_id",
-                header: "Document",
-                width: proportional(1),
+                key: "started_at",
+                header: "Duration",
+                width: pixel(140),
                 renderCell: (row) => (
-                  <Text size="sm">{shortDigest(row.blob_id as string)}</Text>
+                  <Text size="sm">
+                    {duration(timeline(row as unknown as RunSummary, Date.now()).runMs)}
+                  </Text>
                 ),
               },
               {
@@ -232,7 +293,7 @@ export function RunArea({ request, onFailure }: Props) {
                     label={shortId(row.run_id as string)}
                     variant="ghost"
                     size="sm"
-                    onClick={() => setSelected(row as unknown as RunSummary)}
+                    onClick={() => onOpenRun(row.run_id as string)}
                   />
                 ),
               },
@@ -260,20 +321,23 @@ export function RunArea({ request, onFailure }: Props) {
 }
 
 function RunDetail({
-  run,
+  runId,
   request,
   onBack,
 }: {
-  run: RunSummary;
+  runId: string;
   request: Request;
   onBack: () => void;
 }) {
   const [loading, setLoading] = useState(true);
+  const [run, setRun] = useState<RunRecord | null>(null);
   const [delivery, setDelivery] = useState<Delivery | null>(null);
   const [routing, setRouting] = useState<string | null>(null);
   const [failure, setFailure] = useState<RunFailure | null>(null);
   const [removed, setRemoved] = useState<{ deletedAt: string; policy: string } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [cancelProblem, setCancelProblem] = useState<string | null>(null);
 
   /**
    * A failure worth saying out loud. `removed` has its own banner, and
@@ -285,9 +349,10 @@ function RunDetail({
 
   useEffect(() => {
     let current = true;
-    const detail = request({ type: "run-detail", runId: run.run_id }).then((answer) => {
+    const detail = request({ type: "run-detail", runId }).then((answer) => {
       if (!current) return;
       if (answer.ok) {
+        setRun(toRecord(answer.body));
         const body = answer.body as { routing?: { outcome?: string } };
         // Absent, not empty: the route omits `routing` when no policy is
         // configured rather than sending null, and a section headed "Routing"
@@ -306,7 +371,7 @@ function RunDetail({
       report(answer.failure);
     });
 
-    const record = request({ type: "run-delivery", runId: run.run_id }).then((answer) => {
+    const record = request({ type: "run-delivery", runId }).then((answer) => {
       if (!current) return;
       if (answer.ok) setDelivery(toDelivery(answer.body));
       else report(answer.failure);
@@ -318,10 +383,10 @@ function RunDetail({
     return () => {
       current = false;
     };
-  }, [request, run.run_id]);
+  }, [request, runId]);
 
   const download = async () => {
-    const answer = await request({ type: "run-result", runId: run.run_id });
+    const answer = await request({ type: "run-result", runId });
     if (!answer.ok) {
       // Every kind: an expired result (`410 result_expired`) arrives as a
       // `reported` failure saying so, and a button that does nothing says less.
@@ -333,26 +398,43 @@ function RunDetail({
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `${run.run_id}.json`;
+    anchor.download = `${runId}.json`;
     anchor.click();
     // Revoked on the next tick: revoking synchronously can cancel the download
     // before the browser has started reading the blob.
     setTimeout(() => URL.revokeObjectURL(url), 0);
   };
 
+  /** The answer is the run as it now stands, and replaces the one shown; a `409` says why not. */
+  const cancel = async () => {
+    const answer = await request({ type: "cancel-run", runId });
+    setConfirming(false);
+    if (answer.ok) {
+      setRun(toRecord(answer.body));
+      setCancelProblem(null);
+    } else {
+      setCancelProblem(describe(answer.failure));
+    }
+  };
+
+  const times = run === null ? null : timeline(run, Date.now());
+
   return (
     <Stack direction="vertical" gap={3}>
       <HStack gap={2} align="center">
         <Button label="← Runs" variant="ghost" onClick={onBack} />
-        <Badge variant={TONE[run.status]} label={run.status} />
+        {run === null ? null : <Badge variant={TONE[run.status]} label={run.status} />}
       </HStack>
 
-      <Code>{run.run_id}</Code>
+      <Code>{runId}</Code>
 
       <div role="status" aria-live="polite">
         {loading ? <Text size="sm">Loading…</Text> : null}
         {problem === null ? null : (
           <Banner status="error" title="Part of this run could not be read" description={problem} />
+        )}
+        {cancelProblem === null ? null : (
+          <Banner status="error" title="The run could not be cancelled" description={cancelProblem} />
         )}
       </div>
 
@@ -388,31 +470,66 @@ function RunDetail({
         </div>
       )}
 
-      <Card>
-        <MetadataList>
-          <MetadataListItem label="Tenant">
-            <Code>{run.tenant_id}</Code>
-          </MetadataListItem>
-          <MetadataListItem label="Submitted">{when(run.created_at)}</MetadataListItem>
-          <MetadataListItem label="Finished">{when(run.finished_at)}</MetadataListItem>
-          <MetadataListItem label="Schema">
-            <Code>{run.schema_identity}</Code>
-          </MetadataListItem>
-          <MetadataListItem label="Document">
-            <Code>{run.blob_id}</Code>
-          </MetadataListItem>
-          {routing === null ? null : (
-            <MetadataListItem label="Routing">{routing}</MetadataListItem>
-          )}
-        </MetadataList>
-      </Card>
+      {run === null || times === null ? null : (
+        <>
+          <Text size="sm">
+            Submitted {when(run.created_at)} → Started {when(run.started_at)} (wait{" "}
+            {duration(times.waitMs)}) → Finished {when(run.finished_at)} (run{" "}
+            {duration(times.runMs)})
+          </Text>
 
-      {/* Any succeeded run has a result, OCR or extraction: the route picks. */}
-      {run.status === "succeeded" ? (
-        <HStack gap={2}>
-          <Button label="Download result" variant="secondary" onClick={() => void download()} />
-        </HStack>
-      ) : null}
+          <Card>
+            <MetadataList>
+              <MetadataListItem label="Tenant">
+                <Code>{run.tenant_id}</Code>
+              </MetadataListItem>
+              <MetadataListItem label="Kind">{kindLabel(run)}</MetadataListItem>
+              {run.kind === "ocr" ? (
+                <>
+                  <MetadataListItem label="Parser">{run.ocr_parser ?? "—"}</MetadataListItem>
+                  <MetadataListItem label="Language">{run.ocr_language ?? "—"}</MetadataListItem>
+                </>
+              ) : null}
+              <MetadataListItem label="Worker">{run.worker_id ?? "—"}</MetadataListItem>
+              <MetadataListItem label="Attempts">{run.attempts ?? "—"}</MetadataListItem>
+              <MetadataListItem label="Error class">{run.error_class ?? "—"}</MetadataListItem>
+              <MetadataListItem label="Failure reason">
+                {reasonLabel(run.error_reason, run.error_class) ?? "—"}
+              </MetadataListItem>
+              <MetadataListItem label="Schema">
+                <Code>{run.schema_identity}</Code>
+              </MetadataListItem>
+              <MetadataListItem label="Document">
+                <Code>{run.blob_id}</Code>
+              </MetadataListItem>
+              {routing === null ? null : (
+                <MetadataListItem label="Routing">{routing}</MetadataListItem>
+              )}
+            </MetadataList>
+          </Card>
+
+          {isCancellable(run.status) ? (
+            confirming ? (
+              <HStack gap={2} align="center">
+                <Text size="sm">Cancel this run?</Text>
+                <Button label="Confirm" variant="primary" onClick={() => void cancel()} />
+                <Button label="Keep running" variant="secondary" onClick={() => setConfirming(false)} />
+              </HStack>
+            ) : (
+              <HStack gap={2}>
+                <Button label="Cancel run" variant="secondary" onClick={() => setConfirming(true)} />
+              </HStack>
+            )
+          ) : null}
+
+          {/* Any succeeded run has a result, OCR or extraction: the route picks. */}
+          {run.status === "succeeded" ? (
+            <HStack gap={2}>
+              <Button label="Download result" variant="secondary" onClick={() => void download()} />
+            </HStack>
+          ) : null}
+        </>
+      )}
 
       {delivery === null ? null : <DeliveryRecord delivery={delivery} />}
     </Stack>

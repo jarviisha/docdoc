@@ -155,7 +155,66 @@ export function isEmpty(state: ListingState): boolean {
  */
 export function emptyNotice(state: ListingState): string {
   const who = state.tenant === null ? "No tenant has" : `Tenant ${state.tenant} has`;
-  return state.status === null ? `${who} no runs.` : `${who} no ${state.status} runs.`;
+  const what = [state.status, state.kind === null ? null : KIND_WORD[state.kind]]
+    .filter((word) => word !== null)
+    .join(" ");
+  return what === "" ? `${who} no runs.` : `${who} no ${what} runs.`;
+}
+
+const KIND_WORD: Record<RunKind, string> = { ocr: "OCR", extraction: "extraction" };
+
+/** A run's kind as a column shows it: an OCR run names the parser that claimed it. */
+export function kindLabel(run: { kind: RunKind; ocr_parser: string | null }): string {
+  if (run.kind === "extraction") return "Extraction";
+  return run.ocr_parser === null ? "OCR" : `OCR (${run.ocr_parser})`;
+}
+
+/** Whether a run can still be cancelled: only before it reaches an outcome. */
+export function isCancellable(status: RunStatus): boolean {
+  return status === "queued" || status === "running";
+}
+
+/**
+ * Whether the listing refreshes itself. Page one only: on a later page new
+ * runs would shift every row under the reader, and the cursor that reached
+ * the page would no longer describe it. Returning to page one resumes it.
+ */
+export function autoRefreshes(state: ListingState): boolean {
+  return state.stack.length === 0;
+}
+
+/**
+ * A background refresh's page, applied only if the listing is still the one
+ * it was asked for — same filters, still page one, and no load of the
+ * reader's own under way. Otherwise the answer is stale and dropped.
+ */
+export function polled(state: ListingState, askedFor: ListingState, page: RunPage): ListingState {
+  const same =
+    state.tenant === askedFor.tenant &&
+    state.status === askedFor.status &&
+    state.kind === askedFor.kind &&
+    autoRefreshes(state) &&
+    state.listing.state !== "loading";
+  return same ? loaded(state, page) : state;
+}
+
+/** One run as its detail view shows it: the row, plus what only the detail body carries. */
+export interface RunRecord extends RunSummary {
+  ocr_language: string | null;
+  worker_id: string | null;
+  attempts: number | null;
+}
+
+/**
+ * Read a detail body (or a cancel answer, which is the same body), or `null`
+ * if it is not an object. Trusts the body's shape the way `toPage` trusts a
+ * row's: it is the same projection plus three fields, from the same route
+ * family. The three default to `null` so an older deployment reads as
+ * "not recorded" rather than as `undefined`.
+ */
+export function toRecord(body: unknown): RunRecord | null {
+  if (typeof body !== "object" || body === null) return null;
+  return { ocr_language: null, worker_id: null, attempts: null, ...(body as RunSummary) };
 }
 
 /**

@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Banner, Button, HStack, Stack, Text } from "@astryxdesign/core";
+import { Banner, Button, Stack, Text } from "@astryxdesign/core";
 
 import { send } from "../../transport.ts";
 import { requestFor, type Intent } from "../model/client.ts";
@@ -26,11 +26,16 @@ import { LoginForm } from "./LoginForm.tsx";
 import { RunArea } from "./RunArea.tsx";
 import { CredentialArea } from "./CredentialArea.tsx";
 import { EraseArea } from "./EraseArea.tsx";
+import { OverviewArea } from "./OverviewArea.tsx";
 
-type Area = "runs" | "credentials" | "erasure";
+type Area = "overview" | "runs" | "credentials" | "erasure";
 
-const AREAS: { name: Area; label: string }[] = [
+const MONITORING: { name: Area; label: string }[] = [
+  { name: "overview", label: "Overview" },
   { name: "runs", label: "Runs" },
+];
+
+const ADMIN: { name: Area; label: string }[] = [
   { name: "credentials", label: "Credentials" },
   { name: "erasure", label: "Erasure" },
 ];
@@ -60,7 +65,8 @@ export function Shell() {
   const [session, setSession] = useState<Session>(emptySession);
   const [notice, setNotice] = useState<string | null>(null);
   const [unavailable, setUnavailable] = useState<string | null>(null);
-  const [area, setArea] = useState<Area>("runs");
+  const [area, setArea] = useState<Area>("overview");
+  const [openRunId, setOpenRunId] = useState<string | null>(null);
 
   // Ask once whether a session already exists: a reload keeps the cookie.
   useEffect(() => {
@@ -102,7 +108,8 @@ export function Shell() {
     const answer = await call({ type: "sign-in" }, JSON.stringify({ username, password }));
     if (answer.ok) {
       setNotice(null);
-      setArea("runs");
+      setArea("overview");
+      setOpenRunId(null);
       setSession((s) => signedIn(s, usernameOf(answer.body)));
     } else {
       setNotice(describe(answer.failure));
@@ -133,37 +140,68 @@ export function Shell() {
     );
   }
 
+  const navButton = ({ name, label }: { name: Area; label: string }) => (
+    <Button
+      key={name}
+      label={label}
+      variant={area === name ? "primary" : "ghost"}
+      aria-current={area === name ? "page" : undefined}
+      onClick={() => {
+        setArea(name);
+        setOpenRunId(null);
+      }}
+    />
+  );
+
   return (
-    <Stack direction="vertical" gap={4} padding={4}>
-      <HStack gap={2} align="center">
-        <Text size="lg" weight="bold">
-          docdoc operations console
-        </Text>
-        <Text size="sm">Signed in as {session.username}</Text>
-        <Button label="Sign out" variant="secondary" size="sm" onClick={() => void signOut()} />
-      </HStack>
+    <div style={{ display: "flex", minHeight: "100vh" }}>
+      {/* Plain buttons rather than a tab component: each a real control with a
+          real accessible name, and nothing here needs the roving-focus
+          behaviour a tab list brings with it. */}
+      <nav aria-label="Console" style={{ width: 200, flexShrink: 0, display: "flex" }}>
+        <Stack direction="vertical" gap={2} padding={4} justify="between" width="100%">
+          <Stack direction="vertical" gap={2}>
+            <Text weight="bold">docdoc console</Text>
+            {MONITORING.map(navButton)}
+            <Text size="sm" color="secondary">
+              Admin
+            </Text>
+            {ADMIN.map(navButton)}
+          </Stack>
+          <Stack direction="vertical" gap={2}>
+            <Text size="sm">Signed in as {session.username}</Text>
+            <Button label="Sign out" variant="secondary" size="sm" onClick={() => void signOut()} />
+          </Stack>
+        </Stack>
+      </nav>
 
-      <div role="status" aria-live="polite">
-        {notice === null ? null : <Banner status="warning" title={notice} />}
-      </div>
+      <main style={{ flex: 1, minWidth: 0 }}>
+        <Stack direction="vertical" gap={4} padding={4}>
+          <div role="status" aria-live="polite">
+            {notice === null ? null : <Banner status="warning" title={notice} />}
+          </div>
 
-      {/* Plain buttons rather than a tab component: three of them, each a real
-          control with a real accessible name, and nothing here needs the
-          roving-focus behaviour a tab list brings with it. */}
-      <HStack gap={2}>
-        {AREAS.map(({ name, label }) => (
-          <Button
-            key={name}
-            label={label}
-            variant={area === name ? "primary" : "secondary"}
-            onClick={() => setArea(name)}
-          />
-        ))}
-      </HStack>
-
-      {area === "runs" ? <RunArea request={request} onFailure={handle} /> : null}
-      {area === "credentials" ? <CredentialArea request={request} onFailure={handle} /> : null}
-      {area === "erasure" ? <EraseArea request={request} onFailure={handle} /> : null}
-    </Stack>
+          {area === "overview" ? (
+            <OverviewArea
+              request={request}
+              onOpenRun={(runId) => {
+                setOpenRunId(runId);
+                setArea("runs");
+              }}
+            />
+          ) : null}
+          {area === "runs" ? (
+            <RunArea
+              request={request}
+              onFailure={handle}
+              openRunId={openRunId}
+              onOpenRun={setOpenRunId}
+            />
+          ) : null}
+          {area === "credentials" ? <CredentialArea request={request} onFailure={handle} /> : null}
+          {area === "erasure" ? <EraseArea request={request} onFailure={handle} /> : null}
+        </Stack>
+      </main>
+    </div>
   );
 }
