@@ -68,13 +68,16 @@ MILESTONE_11_ADDED = {("/v1/runs", "GET")}
 #: surface: `POST /v1/ocr` is a write (it runs a parse), so it is additional to
 #: SC-003's "exactly one read" claim rather than a second instance of it.
 OCR_GATEWAY_ADDED = {("/v1/ocr", "POST"), ("/v1/parsers", "GET")}
+#: 014 (ADR-0022): the queued OCR run's result. A read of an OCR run, not a
+#: console route.
+ASYNC_OCR_ADDED = {("/v1/runs/{run_id}/result", "GET")}
 
 #: Everything this interface has added over Milestone 10's own surface, as of
 #: this milestone. A route added without a decision shows up here: this is the
 #: list a later milestone edits, and editing it is the moment somebody decides
 #: on purpose that the surface grew (the same argument `ROUTES` in
 #: `test_http_ui_endpoints.py` makes for the full set).
-ADDED = MILESTONE_11_ADDED | OCR_GATEWAY_ADDED
+ADDED = MILESTONE_11_ADDED | OCR_GATEWAY_ADDED | ASYNC_OCR_ADDED
 
 #: Words a session mechanism arrives as (FR-009). None of them may name a route.
 SESSION_WORDS = ("login", "logout", "session", "token", "auth", "signin", "sign-in")
