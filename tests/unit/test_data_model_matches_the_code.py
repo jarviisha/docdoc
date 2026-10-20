@@ -242,6 +242,13 @@ RUNS_DATA_MODEL = pathlib.Path("specs/009-asynchronous-runs/data-model.md")
 #: not retrofitted into Milestone 9's. A document describing a schema it did not
 #: design is a document nobody updates.
 OPERATIONS_DATA_MODEL = pathlib.Path("specs/010-operations-and-corrections/data-model.md")
+
+#: ADR-0023's two tables, on the same reasoning: this milestone does not use the
+#: `specs/0NN-name/` convention `RUNS_DATA_MODEL`/`OPERATIONS_DATA_MODEL` do, so
+#: their data model lives in the ADR that decided the schema rather than in a
+#: `specs/` directory invented just to hold it.
+CONSOLE_ADR = pathlib.Path("docs/adr/0023-console-login-and-cross-tenant-operations.md")
+
 RUNS_MIGRATION = pathlib.Path("src/docdoc/runs/migrations/0001_runs.sql")
 
 #: A column definition in the `CREATE TABLE runs` body: four leading spaces, a
@@ -449,6 +456,9 @@ def test_the_table_scan_finds_all_three() -> None:
         "callbacks",
         "deliveries",
         "corrections",
+        # ADR-0023.
+        "console_users",
+        "console_sessions",
     }, (
         f"the migrations create {sorted(tables)}; the scan or the migrations "
         f"changed, and the check below is now describing something else"
@@ -476,12 +486,16 @@ TABLE_SECTIONS = {
     "callbacks": "## `callbacks`",
     "deliveries": "## `deliveries`",
     "corrections": "## `corrections`",
+    "console_users": "## `console_users`",
+    "console_sessions": "## `console_sessions`",
 }
 
 SECTION_DOCUMENTS = {
     "runs": RUNS_DATA_MODEL,
     "docdoc_default_tenant": RUNS_DATA_MODEL,
     "docdoc_schema_version": RUNS_DATA_MODEL,
+    "console_users": CONSOLE_ADR,
+    "console_sessions": CONSOLE_ADR,
     "run_tombstones": OPERATIONS_DATA_MODEL,
     "credentials": OPERATIONS_DATA_MODEL,
     "limit_counters": OPERATIONS_DATA_MODEL,

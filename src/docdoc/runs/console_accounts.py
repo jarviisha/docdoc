@@ -15,8 +15,14 @@ imported rather than constructed — see the note on it in
 `docdoc.runs.identity`), and the three policy questions this buys — is an
 account locked, what a failure does to that lock, and whether a session is
 still alive — are `locked`, `after_failure`, and `alive`: free functions, so
-`PostgresConsoleAccounts` and the in-memory fixture both call one definition
-of the policy rather than each carrying their own.
+the in-memory fixture calls one definition of the policy rather than carrying
+its own. `PostgresConsoleAccounts` cannot call them from inside a SQL
+statement — and has to, because computing a failure's effect in Python from a
+value read a statement earlier is exactly the stale-read race that let N
+concurrent wrong passwords all land on "1" instead of counting up to the
+lockout. `_record_failure` and `_open_session_if_still_verified` restate the
+same rule as one atomic `UPDATE`/`INSERT` apiece instead, each pointing back at
+the function it must stay in sync with.
 
 A session is a bearer token (`docdoc.runs.identity.new_console_token`); only
 `digest_of(token)` is ever stored, exactly as a credential's key never is
@@ -61,6 +67,9 @@ __all__ = [
     "hash_password",
     "locked",
     "normalise_username",
+    "validate_password",
+    "validate_username",
+    "verify_dummy_password",
     "verify_password",
 ]
 
@@ -153,15 +162,36 @@ def verify_password(password: str, encoded: str) -> bool:
     return hmac.compare_digest(candidate, expected)
 
 
-#: A hash of a password nobody will ever type, so an unknown username costs
-#: `login` the same `verify_password` call a wrong password on a real account
-#: does (ADR-0023 §1's four indistinguishable refusals, held at the timing
-#: layer too). Computed once, at import time, from a fixed salt — this value
-#: is never compared against a real account and never written anywhere.
+#: A hash of a password nobody will ever type, so an unknown username, a
+#: disabled account, and a locked account each cost `login` the same
+#: `verify_password` call a wrong password on a real account does (ADR-0023
+#: §1's four indistinguishable refusals, held at the timing layer too, not
+#: only in the response body). Computed once, at import time, from a fixed
+#: salt — this value is never compared against a real account and never
+#: written anywhere.
 _DUMMY_HASH = hash_password("no account is ever issued this password", salt=b"\x00" * 16)
 
 
-def _validate_username(username: str) -> None:
+def verify_dummy_password(password: str) -> None:
+    """Spend the cost a real `verify_password` call has, and keep nothing.
+
+    Called by both backends — `PostgresConsoleAccounts` and
+    `tests/fixtures/console_accounts.py`'s `InMemoryConsoleAccounts` — for an
+    unknown username, a disabled account, and a locked account, so none of
+    the three answers `login` gives before it even reaches a password
+    comparison is faster than a wrong password on a real, unlocked account.
+    One dummy hash shared by both, rather than two, is the same reasoning
+    `locked`/`after_failure`/`alive` are shared functions.
+    """
+    verify_password(password, _DUMMY_HASH)
+
+
+def validate_username(username: str) -> None:
+    """Raise `ConsoleAccountError` unless `username` matches `USERNAME_PATTERN`.
+
+    Public, and called by `add` in both backends, so the rule a username must
+    satisfy is written once rather than copied into each store.
+    """
     if not USERNAME_PATTERN.fullmatch(username):
         raise ConsoleAccountError(
             f"{username!r} is not a valid console username; it must match "
@@ -169,7 +199,11 @@ def _validate_username(username: str) -> None:
         )
 
 
-def _validate_password(password: str) -> None:
+def validate_password(password: str) -> None:
+    """Raise `ConsoleAccountError` unless `password` meets `MIN_PASSWORD_LENGTH`.
+
+    Public, and called by `add` and `set_password` in both backends.
+    """
     if len(password) < MIN_PASSWORD_LENGTH:
         raise ConsoleAccountError(
             f"a console password must be at least {MIN_PASSWORD_LENGTH} characters"
@@ -189,14 +223,27 @@ def locked(failed_logins: int, locked_until: datetime | None, now: datetime) -> 
 def after_failure(failed_logins: int, now: datetime) -> tuple[int, datetime | None]:
     """The counter and lock a failed login produces, as one pure function.
 
-    Only the failure that *reaches* `MAX_FAILED_LOGINS` sets a lock; a caller
-    that is already locked does not reach here at all (`login` returns before
-    counting one), so a correct password offered while locked neither resets
-    nor extends the five minutes.
+    The failure that *reaches* `MAX_FAILED_LOGINS` both locks **and resets the
+    counter to zero**. Without the reset, the counter would sit at
+    `MAX_FAILED_LOGINS` through the whole lockout, and the first failure after
+    it lapses would read as the *sixth* consecutive one and relock
+    immediately — turning "five consecutive failures lock for five minutes"
+    into "five failures, ever, with the clock merely pausing every five
+    minutes". Resetting to zero is what makes five *fresh* failures the
+    requirement again once the lock expires.
+
+    A caller that is already locked does not reach here at all (`login`
+    returns before counting one), so a correct password offered while locked
+    neither resets nor extends the five minutes.
+
+    `PostgresConsoleAccounts._record_failure` encodes this exact rule in SQL,
+    because a database statement cannot call this function — keep the two in
+    sync if this policy ever changes.
     """
     count = failed_logins + 1
-    locked_until = now + LOCKOUT if count >= MAX_FAILED_LOGINS else None
-    return count, locked_until
+    if count >= MAX_FAILED_LOGINS:
+        return 0, now + LOCKOUT
+    return count, None
 
 
 def alive(last_seen_at: datetime, now: datetime, idle: timedelta) -> bool:
@@ -270,8 +317,8 @@ class PostgresConsoleAccounts:
     execute: Callable[..., Any]
 
     def add(self, username: str, password: str, *, salt: bytes, now: datetime) -> ConsoleAccount:
-        _validate_username(username)
-        _validate_password(password)
+        validate_username(username)
+        validate_password(password)
         row = self.execute(
             "INSERT INTO console_users (username, password_hash, created_at) "
             "VALUES (%s, %s, %s) "
@@ -287,7 +334,7 @@ class PostgresConsoleAccounts:
         )
 
     def set_password(self, username: str, password: str, *, salt: bytes, now: datetime) -> None:
-        _validate_password(password)
+        validate_password(password)
         rows = self.execute(
             "UPDATE console_users SET password_hash = %s WHERE username = %s RETURNING username",
             (hash_password(password, salt=salt), username),
@@ -334,36 +381,99 @@ class PostgresConsoleAccounts:
             fetch="one",
         )
         if row is None:
-            verify_password(password, _DUMMY_HASH)  # timing only; no such account
+            verify_dummy_password(password)  # timing only; no such account
             return False
         if row["disabled_at"] is not None:
+            verify_dummy_password(password)  # timing only; account is disabled
             return False
         if locked(row["failed_logins"], row["locked_until"], now):
+            verify_dummy_password(password)  # timing only; account is locked
             return False
 
-        if verify_password(password, row["password_hash"]):
-            self.execute(
-                "UPDATE console_users SET failed_logins = 0, locked_until = NULL "
-                "WHERE username = %s",
-                (normalised,),
-            )
-            self.execute(
-                "INSERT INTO console_sessions (digest, username, created_at, last_seen_at) "
-                "VALUES (%s, %s, %s, %s) "
-                "ON CONFLICT (digest) DO UPDATE SET "
-                "username = EXCLUDED.username, "
-                "created_at = EXCLUDED.created_at, "
-                "last_seen_at = EXCLUDED.last_seen_at",
-                (digest_of(token), normalised, now, now),
-            )
-            return True
+        if not verify_password(password, row["password_hash"]):
+            self._record_failure(normalised, now=now)
+            return False
 
-        count, locked_until = after_failure(row["failed_logins"], now)
-        self.execute(
-            "UPDATE console_users SET failed_logins = %s, locked_until = %s WHERE username = %s",
-            (count, locked_until, normalised),
+        opened = self._open_session_if_still_verified(
+            normalised, row["password_hash"], token=token, now=now
         )
-        return False
+        if not opened:
+            # The row this password was checked against is not the row this
+            # would commit against: the password changed, the account was
+            # disabled, or it was relocked, in the gap between the read above
+            # and here. That is the same answer a wrong password gets, not a
+            # silent no-op (closes the set_password/disable race).
+            self._record_failure(normalised, now=now)
+            return False
+        return True
+
+    def _open_session_if_still_verified(
+        self, username: str, verified_password_hash: str, *, token: str, now: datetime
+    ) -> bool:
+        """Commit the login as one statement, re-checking what `login` just checked.
+
+        `login` reads the row, verifies the password against it, and only then
+        calls this — two statements with a gap between them, and anything can
+        change the account in that gap: `set_password`, `disable`, or another
+        `login` locking it. Re-reading here would still leave a gap, so instead
+        this re-states every precondition inside the statement that writes the
+        session: still this `password_hash`, still not disabled, still not
+        locked. `FOR UPDATE` takes the row lock before any of that is decided,
+        so a concurrent `disable`/`set_password` (each a single `UPDATE`, which
+        always takes the row lock) serializes against this rather than racing
+        it. Zero rows back means the precondition failed; `login` treats that
+        exactly as a wrong password.
+        """
+        row = self.execute(
+            "WITH verified AS ("
+            "  SELECT username FROM console_users "
+            "  WHERE username = %(username)s AND password_hash = %(password_hash)s "
+            "    AND disabled_at IS NULL "
+            "    AND (locked_until IS NULL OR locked_until <= %(now)s) "
+            "  FOR UPDATE"
+            "), reset AS ("
+            "  UPDATE console_users SET failed_logins = 0, locked_until = NULL "
+            "  WHERE username IN (SELECT username FROM verified) "
+            "  RETURNING username"
+            ") "
+            "INSERT INTO console_sessions (digest, username, created_at, last_seen_at) "
+            "SELECT %(digest)s, username, %(now)s, %(now)s FROM reset "
+            "ON CONFLICT (digest) DO UPDATE SET "
+            "username = EXCLUDED.username, "
+            "created_at = EXCLUDED.created_at, "
+            "last_seen_at = EXCLUDED.last_seen_at "
+            "RETURNING username",
+            {
+                "username": username,
+                "password_hash": verified_password_hash,
+                "now": now,
+                "digest": digest_of(token),
+            },
+            fetch="one",
+        )
+        return row is not None
+
+    def _record_failure(self, username: str, *, now: datetime) -> None:
+        """One atomic `UPDATE` encoding exactly the rule `after_failure` does.
+
+        A database statement cannot call a Python function, so the arithmetic
+        is restated here — and restated so that it reads `failed_logins` off
+        the row at the moment this `UPDATE` takes the row lock, not off a
+        value `login` read earlier in the request. That is what makes N
+        concurrent wrong passwords serialize into 1, 2, 3, ... N rather than
+        all reading the same stale count and all writing 1, which is the
+        lockout-bypass this method exists to close. Keep this in sync with
+        `after_failure` if that policy changes.
+        """
+        self.execute(
+            "UPDATE console_users SET "
+            "failed_logins = CASE WHEN failed_logins + 1 >= %(max)s THEN 0 "
+            "ELSE failed_logins + 1 END, "
+            "locked_until = CASE WHEN failed_logins + 1 >= %(max)s THEN %(locked_until)s "
+            "ELSE NULL END "
+            "WHERE username = %(username)s",
+            {"max": MAX_FAILED_LOGINS, "locked_until": now + LOCKOUT, "username": username},
+        )
 
     def resolve(self, token: str, *, now: datetime, idle: timedelta) -> str | None:
         digest = digest_of(token)

@@ -1,4 +1,4 @@
-"""T? — console accounts and sessions, against the in-memory fake.
+"""Console accounts and sessions, against the in-memory fake.
 
 Written against `InMemoryConsoleAccounts`, and every function here is
 imported and re-run against `PostgresConsoleAccounts` by
@@ -77,6 +77,46 @@ def test_five_failures_lock_for_five_minutes(accounts):
         "alice", "long enough pass", token="t1", now=NOW + timedelta(minutes=4)
     )
     assert accounts.login("alice", "long enough pass", token="t2", now=NOW + timedelta(minutes=5))
+
+
+def test_lock_expiry_resets_the_counter_so_one_more_failure_does_not_relock(accounts):
+    """One typo right after a lock lapses must not immediately re-lock.
+
+    Without resetting `failed_logins` to zero at the moment the lock is set,
+    the counter sits at `MAX_FAILED_LOGINS` through the whole five minutes,
+    and the first failure after it lapses reads as the sixth consecutive one
+    — relocking at once. "Five consecutive failures" has to mean five fresh
+    ones each time, not five, ever, with the clock merely pausing.
+    """
+    accounts.add("alice", "long enough pass", salt=SALT, now=NOW)
+    for _ in range(5):
+        assert not accounts.login("alice", "wrong password!", token="x", now=NOW)
+    later = NOW + timedelta(minutes=5)
+    assert not accounts.login("alice", "wrong password!", token="y", now=later)
+    assert accounts.login("alice", "long enough pass", token="t", now=later)
+
+
+def test_logout_ends_a_session(accounts):
+    accounts.add("alice", "long enough pass", salt=SALT, now=NOW)
+    accounts.login("alice", "long enough pass", token="t1", now=NOW)
+    accounts.logout("t1")
+    assert accounts.resolve("t1", now=NOW, idle=IDLE) is None
+
+
+def test_logout_of_an_unknown_token_is_a_no_op(accounts):
+    accounts.logout("never issued")  # does not raise
+
+
+def test_disable_is_false_for_an_unknown_or_already_disabled_account(accounts):
+    assert accounts.disable("nobody", now=NOW) is False
+    accounts.add("alice", "long enough pass", salt=SALT, now=NOW)
+    assert accounts.disable("alice", now=NOW) is True
+    assert accounts.disable("alice", now=NOW) is False
+
+
+def test_set_password_on_an_unknown_user_raises(accounts):
+    with pytest.raises(ConsoleAccountError):
+        accounts.set_password("nobody", "long enough pass", salt=SALT, now=NOW)
 
 
 def test_disable_and_passwd_end_live_sessions(accounts):

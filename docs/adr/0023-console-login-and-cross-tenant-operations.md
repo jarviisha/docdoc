@@ -118,6 +118,40 @@ operator signs in once and sees every tenant, where a reload used to ask for a k
 and a result is reachable from the console at all, with the five nouns of §5 as the only remaining
 fence — there is no second one behind it if that word list is ever wrong.
 
+## Data model
+
+Migration `0009_console_accounts.sql`. Two tables, both new; nothing here reuses or alters a table
+Milestone 9 or 10 created.
+
+### `console_users`
+
+One row per operator. `docdoc console-user add|passwd|disable` is the only writer; the console
+itself has no account-management screen (§1).
+
+| Column | Type | Notes |
+|---|---|---|
+| `username` | `text` primary key | matches `^[a-z0-9_.-]{1,64}$`; compared as given — `login` lower-cases and trims what it is handed, `add` does not |
+| `password_hash` | `text` not null | `hashlib.scrypt`, self-describing: `scrypt$16384$8$1$<salt>$<key>`. **Never the password itself** |
+| `created_at` | `timestamptz` not null | |
+| `disabled_at` | `timestamptz`, nullable | set once by `disable`; there is no "enable" — a disabled account is re-created |
+| `failed_logins` | `int` not null, default `0` | consecutive failures; reset to `0` either on a successful login or by the same failure that sets `locked_until` (§1) |
+| `locked_until` | `timestamptz`, nullable | past this instant the account is no longer locked; the comparison is against the server's clock, never a value the client supplies |
+
+### `console_sessions`
+
+One row per live session; a row's absence *is* "not signed in" — there is no soft-deleted or
+expired state to distinguish from a row that was never created.
+
+| Column | Type | Notes |
+|---|---|---|
+| `digest` | `text` primary key | `sha256(token)` (`principal.digest_of`). **Never the token itself** — a dumped table does not hand over a usable session |
+| `username` | `text` not null, references `console_users` on delete cascade | |
+| `created_at` | `timestamptz` not null | |
+| `last_seen_at` | `timestamptz` not null | the idle clock; compared against the server's `now` on every request that resolves the session, touched on each live read |
+
+An index, `console_sessions_by_user (username)`, is what `disable` and `set_password` use to delete
+every session belonging to the account they just acted on.
+
 ## Alternatives considered
 
 - **Keep the pasted key and add cross-tenant reads behind it.** Rejected: a key authenticates one

@@ -19,8 +19,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from docdoc.runs.console_accounts import (
-    MIN_PASSWORD_LENGTH,
-    USERNAME_PATTERN,
     ConsoleAccount,
     ConsoleAccountError,
     after_failure,
@@ -28,6 +26,9 @@ from docdoc.runs.console_accounts import (
     hash_password,
     locked,
     normalise_username,
+    validate_password,
+    validate_username,
+    verify_dummy_password,
     verify_password,
 )
 from docdoc.runs.principal import digest_of
@@ -36,26 +37,6 @@ if TYPE_CHECKING:
     from datetime import datetime, timedelta
 
 __all__ = ["InMemoryConsoleAccounts"]
-
-#: A hash of a password nobody will ever type (see `console_accounts._DUMMY_HASH`
-#: for why): an unknown username costs `login` the same `verify_password` call a
-#: wrong password on a real account does.
-_DUMMY_HASH = hash_password("no account is ever issued this password", salt=b"\x00" * 16)
-
-
-def _validate_username(username: str) -> None:
-    if not USERNAME_PATTERN.fullmatch(username):
-        raise ConsoleAccountError(
-            f"{username!r} is not a valid console username; it must match "
-            f"{USERNAME_PATTERN.pattern!r}"
-        )
-
-
-def _validate_password(password: str) -> None:
-    if len(password) < MIN_PASSWORD_LENGTH:
-        raise ConsoleAccountError(
-            f"a console password must be at least {MIN_PASSWORD_LENGTH} characters"
-        )
 
 
 @dataclass
@@ -82,8 +63,8 @@ class InMemoryConsoleAccounts:
     _sessions: dict[str, _Session] = field(default_factory=dict)
 
     def add(self, username: str, password: str, *, salt: bytes, now: datetime) -> ConsoleAccount:
-        _validate_username(username)
-        _validate_password(password)
+        validate_username(username)
+        validate_password(password)
         if username in self._users:
             raise ConsoleAccountError(f"a console account named {username!r} already exists")
         self._users[username] = _User(
@@ -92,7 +73,7 @@ class InMemoryConsoleAccounts:
         return ConsoleAccount(username=username, created_at=now, disabled_at=None)
 
     def set_password(self, username: str, password: str, *, salt: bytes, now: datetime) -> None:
-        _validate_password(password)
+        validate_password(password)
         user = self._users.get(username)
         if user is None:
             raise ConsoleAccountError(f"no console account named {username!r}")
@@ -117,11 +98,13 @@ class InMemoryConsoleAccounts:
         normalised = normalise_username(username)
         user = self._users.get(normalised)
         if user is None:
-            verify_password(password, _DUMMY_HASH)  # timing only; no such account
+            verify_dummy_password(password)  # timing only; no such account
             return False
         if user.disabled_at is not None:
+            verify_dummy_password(password)  # timing only; account is disabled
             return False
         if locked(user.failed_logins, user.locked_until, now):
+            verify_dummy_password(password)  # timing only; account is locked
             return False
 
         if verify_password(password, user.password_hash):
