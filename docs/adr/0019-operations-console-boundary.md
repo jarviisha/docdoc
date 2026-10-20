@@ -1,6 +1,6 @@
 # ADR-0019: An Operations Console Is Permitted; A Review Platform Stays Deferred
 
-- **Status**: Accepted
+- **Status**: Accepted; partly superseded by ADR-0023
 - **Date**: 2026-09-11
 - **Implements**: Milestone 11 (`specs/011-operations-console/spec.md`, to be written against this decision)
 - **Relates to**: [ADR-0014](0014-tenant-scoping-and-store-namespacing.md) (tenant scoping, and the existence oracle), [ADR-0015](0015-deletion-over-a-content-addressed-store.md) (erasure), [ADR-0016](0016-credential-lifecycle.md) (credential lifecycle, and the administrative scope), [ADR-0017](0017-confidence-routing-policy.md) (routing has two outcomes and no disposition)

@@ -1,9 +1,11 @@
 /**
- * T075 — the four things that can go wrong, told apart.
+ * T102 (ADR-0023 §1) — what went wrong, told apart.
  *
- * The `removed` case is the one convergence found missing: a `410` arrived as an
- * ordinary reported failure, so the two fields FR-023 names were parsed by
- * nobody and shown by nobody, while a comment claimed otherwise.
+ * A session now fails in three new ways a pasted key never did: the run-state
+ * database is absent (`ConsoleUnavailable`, 503), the session was never opened
+ * or has expired (`ConsoleSessionRequired`, 401, now `unauthenticated`), and a
+ * login itself was refused (`LoginRefused`, also 401, but a wrong password is
+ * not the same fact as a stale session and must not be told as one).
  */
 
 import assert from "node:assert/strict";
@@ -12,52 +14,74 @@ import { test } from "node:test";
 import { describe, failureOf, failureOfThrown } from "../../src/console/model/failure.ts";
 import { TransportError } from "../../src/transport.ts";
 
-const TOMBSTONE = {
-  error: "run_erased",
-  run_id: "a4e03746-11be-4e79-ab27-f079481fed52",
-  deleted_at: "2026-09-11T09:17:00+00:00",
-  policy: "retention",
-};
+test("a refusal signs the operator out with a notice", () => {
+  const f = failureOf({
+    ok: false,
+    status: 401,
+    body: { error: { class: "ConsoleSessionRequired", message: "sign in to the console" } },
+  });
+  assert.equal(f.kind, "unauthenticated");
+});
+
+test("unavailable is not a wrong password", () => {
+  const f = failureOf({
+    ok: false,
+    status: 503,
+    body: {
+      error: {
+        class: "ConsoleUnavailable",
+        message: "the console needs a run-state database; …",
+      },
+    },
+  });
+  assert.equal(f.kind, "unavailable");
+  assert.match(describe(f), /run-state database/);
+});
+
+test("a wrong username or password is its own kind, not a stale session", () => {
+  const f = failureOf({
+    ok: false,
+    status: 401,
+    body: {
+      error: {
+        class: "LoginRefused",
+        message: "wrong username or password, or the account is locked",
+      },
+    },
+  });
+  assert.equal(f.kind, "refused");
+  assert.match(describe(f), /wrong username or password/);
+});
+
+test("a 403 for a missing console header is still unauthenticated", () => {
+  const f = failureOf({
+    ok: false,
+    status: 403,
+    body: {
+      error: {
+        class: "ConsoleHeaderMissing",
+        message: "a console request that changes anything must carry X-Docdoc-Console: 1",
+      },
+    },
+  });
+  assert.equal(f.kind, "unauthenticated");
+});
+
+test("a 404 is absence, unrelated to a stale session", () => {
+  assert.deepEqual(failureOf({ ok: false, status: 404, body: {} }), { kind: "absent" });
+});
 
 test("a 410 is a removal, and carries when and under which policy", () => {
-  const failure = failureOf({ ok: false, status: 410, body: TOMBSTONE });
-
-  assert.equal(failure.kind, "removed");
+  const failure = failureOf({
+    ok: false,
+    status: 410,
+    body: { deleted_at: "2026-09-11T09:17:00+00:00", policy: "retention" },
+  });
   assert.deepEqual(failure, {
     kind: "removed",
     deletedAt: "2026-09-11T09:17:00+00:00",
     policy: "retention",
   });
-});
-
-test("the sentence names both fields and nothing about what it held", () => {
-  const sentence = describe(failureOf({ ok: false, status: 410, body: TOMBSTONE }));
-
-  assert.match(sentence, /2026-09-11/);
-  assert.match(sentence, /retention/);
-  // A tombstone carries four fields precisely so that being told about one
-  // discloses nothing about its contents.
-  assert.doesNotMatch(sentence, /invoice|sha256|blob/i);
-});
-
-test("a 410 whose body is not a tombstone is still a removal", () => {
-  const failure = failureOf({ ok: false, status: 410, body: { error: "gone" } });
-
-  assert.equal(failure.kind, "removed");
-  assert.match(describe(failure), /removed/);
-});
-
-test("a 401 is a refused credential, not a reported failure", () => {
-  const failure = failureOf({ ok: false, status: 401, body: {} });
-
-  assert.equal(failure.kind, "unauthenticated");
-  assert.match(describe(failure), /not accepted/);
-});
-
-test("a 404 is absence, because that is what an administrative route says", () => {
-  // ADR-0016 §6: a principal without the scope is told the area does not exist,
-  // and the console hides it rather than explaining it.
-  assert.deepEqual(failureOf({ ok: false, status: 404, body: {} }), { kind: "absent" });
 });
 
 test("anything else is reported, in the deployment's own words", () => {
@@ -66,21 +90,50 @@ test("anything else is reported, in the deployment's own words", () => {
     status: 422,
     body: { error: { class: "InvalidRunStatus", message: "status must be one of …" } },
   });
-
   assert.equal(failure.kind, "reported");
   assert.match(describe(failure), /status must be one of/);
 });
 
 test("a lost request is never reported as the deployment's failure", () => {
   const failure = failureOfThrown(new TransportError("the deployment answered 504"));
-
   assert.equal(failure.kind, "transport");
   assert.match(describe(failure), /504/);
 });
 
 test("no classification invents a message the deployment did not send", () => {
   const failure = failureOf({ ok: false, status: 500, body: null });
-
   assert.equal(failure.kind, "reported");
   assert.match(describe(failure), /gave no message/);
+});
+
+test("a string detail is preferred over a bare error code", () => {
+  const failure = failureOf({
+    ok: false,
+    status: 409,
+    body: { error: "tenant_has_runs", detail: "the tenant still holds runs" },
+  });
+  assert.equal(describe(failure), "the tenant still holds runs");
+});
+
+test("a FastAPI validation 422 reads as a sentence, not an array", () => {
+  const failure = failureOf({
+    ok: false,
+    status: 422,
+    body: {
+      detail: [{ type: "int_parsing", loc: ["query", "limit"], msg: "Input should be a valid integer" }],
+    },
+  });
+  assert.equal(failure.kind, "reported");
+  assert.equal(describe(failure), "the request was invalid: Input should be a valid integer");
+});
+
+test("a validation 422 with no usable entry still reads as invalid", () => {
+  const failure = failureOf({ ok: false, status: 422, body: { detail: [] } });
+  assert.equal(describe(failure), "the request was invalid");
+});
+
+test("an expired result is reported, not a removed run", () => {
+  const failure = failureOf({ ok: false, status: 410, body: { error: "result_expired" } });
+  assert.equal(failure.kind, "reported");
+  assert.equal(describe(failure), "this run's result is no longer stored");
 });

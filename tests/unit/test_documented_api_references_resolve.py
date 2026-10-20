@@ -289,6 +289,8 @@ CONFIG_MODULES = {
         "CORRECTION_RETENTION_DAYS_ENV",
         "MAINTENANCE_INTERVAL_ENV",
         "MAINTENANCE_BUDGET_ENV",
+        # ADR-0023's idle bound.
+        "CONSOLE_IDLE_ENV",
     ),
     "docdoc.ingest.source": ("MAX_DOCUMENT_BYTES_ENV", "MAX_PAGES_ENV"),
     "docdoc.artifacts.paths": ("DEFAULT_TENANT_ENV",),
@@ -402,6 +404,12 @@ CONFIG_DOCUMENTS = (
     # no longer qualifies for that exemption -- a decision record that names
     # a setting goes stale exactly like any other document.
     "docs/adr/0021-caller-named-parsers-and-ocr-endpoints.md",
+    # ADR-0023 and its design/plan name `DOCDOC_CONSOLE_IDLE_SECONDS`,
+    # `DOCDOC_RUN_DATABASE_URL`, and `DOCDOC_API_KEYS_FILE` — the same pattern
+    # the OCR gateway's design/plan pair above set.
+    "docs/adr/0023-console-login-and-cross-tenant-operations.md",
+    "docs/superpowers/specs/2026-10-20-console-upgrade-design.md",
+    "docs/superpowers/plans/2026-10-20-console-foundation.md",
 )
 
 #: Requires at least one character after the prefix, so the `DOCDOC_*` wildcard

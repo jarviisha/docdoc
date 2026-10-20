@@ -124,6 +124,24 @@ ROUTES = {
     ("POST", "/v1/ocr"),
     ("GET", "/v1/parsers"),
     ("GET", "/v1/runs/{run_id}/result"),
+    # The console's own route family (ADR-0023 §3), answering only to a console
+    # session: sign in, who is signed in, sign out -- and four reads of runs
+    # across tenants, the tenant routes above with the predicate lifted.
+    ("POST", "/v1/console/session"),
+    ("GET", "/v1/console/session"),
+    ("DELETE", "/v1/console/session"),
+    ("GET", "/v1/console/runs"),
+    ("GET", "/v1/console/runs/{run_id}"),
+    ("GET", "/v1/console/runs/{run_id}/delivery"),
+    ("GET", "/v1/console/runs/{run_id}/result"),
+    # Task 6 (ADR-0023 §2, §3): credentials and erasure, mirroring the admin
+    # routes of the same shape behind the console session instead of a Bearer
+    # key.
+    ("GET", "/v1/console/credentials"),
+    ("POST", "/v1/console/credentials"),
+    ("DELETE", "/v1/console/credentials/{credential_id}"),
+    ("DELETE", "/v1/console/tenants/{tenant_id}"),
+    ("DELETE", "/v1/console/tenants/{tenant_id}/documents/{blob_id}"),
 }
 
 

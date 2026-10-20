@@ -218,6 +218,54 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_common_arguments(listing)
 
+    # ADR-0023 §1: the console itself has no account-management screen, so this
+    # is the only place an account is created, re-keyed, or disabled. The
+    # password is never a flag -- argv is readable by any process on the host
+    # (FR-042's reasoning, applied to a console password rather than a
+    # credential) -- it is read interactively, twice, or from stdin for a
+    # script.
+    console_user = subcommands.add_parser(
+        "console-user", help="add, re-key, disable, or list console accounts"
+    )
+    console_user_actions = console_user.add_subparsers(dest="action", metavar="ACTION")
+
+    cu_add = console_user_actions.add_parser("add", help="create one")
+    cu_add.add_argument("username", metavar="USERNAME")
+    cu_add.add_argument(
+        "--password-stdin",
+        action="store_true",
+        help="read the new password from stdin instead of prompting twice",
+    )
+    cu_add.add_argument(
+        "--run-database-url", default=None, metavar="URL", help="where console accounts live"
+    )
+    add_common_arguments(cu_add)
+
+    cu_passwd = console_user_actions.add_parser("passwd", help="replace one's password")
+    cu_passwd.add_argument("username", metavar="USERNAME")
+    cu_passwd.add_argument(
+        "--password-stdin",
+        action="store_true",
+        help="read the new password from stdin instead of prompting twice",
+    )
+    cu_passwd.add_argument(
+        "--run-database-url", default=None, metavar="URL", help="where console accounts live"
+    )
+    add_common_arguments(cu_passwd)
+
+    cu_disable = console_user_actions.add_parser("disable", help="disable one; idempotent")
+    cu_disable.add_argument("username", metavar="USERNAME")
+    cu_disable.add_argument(
+        "--run-database-url", default=None, metavar="URL", help="where console accounts live"
+    )
+    add_common_arguments(cu_disable)
+
+    cu_list = console_user_actions.add_parser("list", help="every account; never a password hash")
+    cu_list.add_argument(
+        "--run-database-url", default=None, metavar="URL", help="where console accounts live"
+    )
+    add_common_arguments(cu_list)
+
     # The one place `--purge-store-root` exists. It is on the command line and at
     # no URL, because the default tenant's namespace is the store root and that
     # reading of "erase the tenant" has to be typed rather than routed to
@@ -418,6 +466,13 @@ def _dispatch(args: argparse.Namespace) -> Any:
         if getattr(args, "action", None) not in {"issue", "revoke", "list"}:
             raise ValueError("usage: docdoc credential issue|revoke|list")
         return credential.run
+
+    if args.command == "console-user":
+        from docdoc.cli.commands import console_user
+
+        if getattr(args, "action", None) not in {"add", "passwd", "disable", "list"}:
+            raise ValueError("usage: docdoc console-user add|passwd|disable|list")
+        return console_user.run
 
     if args.command == "store":
         if getattr(args, "action", None) != "clear":

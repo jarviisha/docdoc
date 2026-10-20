@@ -1,25 +1,24 @@
 /**
- * The run list, and one run's detail.
+ * The run list across every tenant, and one run's detail.
  *
- * **It renders no part of a result** (FR-022a, SC-016). A succeeded run offers a
- * link to the representation the API already serves, and the console does not
- * fetch it, parse it, or derive a figure from it — `check-console-boundary.mjs`
- * fails the build if this file grows one.
+ * A succeeded run's result can be downloaded as the JSON the deployment
+ * serves (ADR-0023 §4): fetched through `run-result` and handed to the
+ * browser as a file, re-serialised but otherwise untouched.
  *
  * The state colour always has a word beside it. A status column that is a colour
  * alone is the first thing the operator test (SC-015) finds, and the second is a
  * filter that resets when you page.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import {
   Badge,
   Banner,
   Button,
   Card,
   Code,
+  Field,
   HStack,
-  Link,
   MetadataList,
   MetadataListItem,
   Selector,
@@ -30,7 +29,7 @@ import {
   proportional,
 } from "@astryxdesign/core";
 
-import { RUN_STATUSES, resultHref, type Intent, type RunStatus } from "../model/client.ts";
+import { RUN_STATUSES, type Intent, type RunStatus } from "../model/client.ts";
 import { describe, type Failure } from "../model/failure.ts";
 import { toDelivery, type Delivery } from "../model/delivery.ts";
 import { shortDigest, shortId, when } from "../model/format.ts";
@@ -43,10 +42,12 @@ import {
   emptyNotice,
   failed,
   filtered,
+  forTenant,
   forward,
   initialListing,
   isEmpty,
   loaded,
+  reloaded,
   toFailure,
   toPage,
   type RunFailure,
@@ -75,14 +76,22 @@ const TONE: Record<RunStatus, "success" | "error" | "warning" | "neutral"> = {
 export function RunArea({ request, onFailure }: Props) {
   const [state, setState] = useState(initialListing);
   const [selected, setSelected] = useState<RunSummary | null>(null);
+  // What is typed, apart from what is applied: the list reloads on Enter or
+  // Apply, not on every keystroke.
+  const [tenantInput, setTenantInput] = useState("");
 
   const cursor = currentCursor(state);
-  const status = state.status;
+  const { status, tenant } = state;
+  const loading = state.listing.state === "loading";
 
+  // Every transition that wants a page — paging, a filter, Refresh — sets the
+  // listing to loading, and loading is what fetches.
   useEffect(() => {
+    if (!loading) return;
     let current = true;
     void request({
       type: "list-runs",
+      ...(tenant === null ? {} : { tenant }),
       ...(status === null ? {} : { status }),
       ...(cursor === undefined ? {} : { cursor }),
     }).then((answer) => {
@@ -97,7 +106,7 @@ export function RunArea({ request, onFailure }: Props) {
     return () => {
       current = false;
     };
-  }, [request, onFailure, status, cursor]);
+  }, [request, onFailure, loading, tenant, status, cursor]);
 
   if (selected !== null) {
     return <RunDetail run={selected} request={request} onBack={() => setSelected(null)} />;
@@ -105,9 +114,28 @@ export function RunArea({ request, onFailure }: Props) {
 
   const rows = state.listing.state === "loaded" ? state.listing.page.runs : [];
 
+  const applyTenant = (event: FormEvent) => {
+    event.preventDefault();
+    setState((previous) => forTenant(previous, tenantInput));
+  };
+
   return (
     <Stack direction="vertical" gap={3}>
       <HStack gap={2} align="end">
+        <form onSubmit={applyTenant}>
+          <HStack gap={2} align="end">
+            <Field label="Tenant" inputID="run-tenant">
+              <input
+                id="run-tenant"
+                type="text"
+                placeholder="Every tenant"
+                value={tenantInput}
+                onChange={(event) => setTenantInput(event.target.value)}
+              />
+            </Field>
+            <Button type="submit" label="Apply" variant="secondary" />
+          </HStack>
+        </form>
         <Selector
           label="State"
           placeholder="Any state"
@@ -122,6 +150,12 @@ export function RunArea({ request, onFailure }: Props) {
           variant="ghost"
           isDisabled={state.status === null}
           onClick={() => setState((previous) => filtered(previous, null))}
+        />
+        <Button
+          label="Refresh"
+          variant="secondary"
+          isDisabled={loading}
+          onClick={() => setState(reloaded)}
         />
       </HStack>
 
@@ -151,7 +185,7 @@ export function RunArea({ request, onFailure }: Props) {
             idKey="run_id"
             hasHover
             density="compact"
-            aria-label="This tenant's runs, newest first"
+            aria-label="Runs, newest first"
             columns={[
               {
                 key: "status",
@@ -161,6 +195,12 @@ export function RunArea({ request, onFailure }: Props) {
                   // The word is the label; the colour is decoration beside it.
                   <Badge variant={TONE[row.status as RunStatus]} label={row.status as string} />
                 ),
+              },
+              {
+                key: "tenant_id",
+                header: "Tenant",
+                width: pixel(140),
+                renderCell: (row) => <Code>{row.tenant_id as string}</Code>,
               },
               {
                 key: "created_at",
@@ -228,22 +268,33 @@ function RunDetail({
   request: Request;
   onBack: () => void;
 }) {
+  const [loading, setLoading] = useState(true);
   const [delivery, setDelivery] = useState<Delivery | null>(null);
   const [routing, setRouting] = useState<string | null>(null);
   const [failure, setFailure] = useState<RunFailure | null>(null);
   const [removed, setRemoved] = useState<{ deletedAt: string; policy: string } | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  /**
+   * A failure worth saying out loud. `removed` has its own banner, and
+   * `absent` is a run with no delivery record, which is not a fault.
+   */
+  const report = (answer: Failure) => {
+    if (answer.kind !== "removed" && answer.kind !== "absent") setProblem(describe(answer));
+  };
 
   useEffect(() => {
-    void request({ type: "run-detail", runId: run.run_id }).then((answer) => {
+    let current = true;
+    const detail = request({ type: "run-detail", runId: run.run_id }).then((answer) => {
+      if (!current) return;
       if (answer.ok) {
         const body = answer.body as { routing?: { outcome?: string } };
         // Absent, not empty: the route omits `routing` when no policy is
         // configured rather than sending null, and a section headed "Routing"
         // with nothing under it is a second way of saying "not configured".
         setRouting(body.routing?.outcome ?? null);
-        // Why it failed, which this view did not show at all until it was
-        // noticed that US2 scenario 7 and SC-015 both depend on it. Read in the
-        // model, like the tombstone below, so the requirement has coverage.
+        // Why it failed: read in the model, like the tombstone below, so the
+        // requirement has coverage (US2 scenario 7, SC-015).
         setFailure(toFailure(answer.body));
         return;
       }
@@ -252,12 +303,42 @@ function RunDetail({
       if (answer.failure.kind === "removed") {
         setRemoved({ deletedAt: answer.failure.deletedAt, policy: answer.failure.policy });
       }
+      report(answer.failure);
     });
 
-    void request({ type: "run-delivery", runId: run.run_id }).then((answer) => {
+    const record = request({ type: "run-delivery", runId: run.run_id }).then((answer) => {
+      if (!current) return;
       if (answer.ok) setDelivery(toDelivery(answer.body));
+      else report(answer.failure);
     });
+
+    void Promise.all([detail, record]).then(() => {
+      if (current) setLoading(false);
+    });
+    return () => {
+      current = false;
+    };
   }, [request, run.run_id]);
+
+  const download = async () => {
+    const answer = await request({ type: "run-result", runId: run.run_id });
+    if (!answer.ok) {
+      // Every kind: an expired result (`410 result_expired`) arrives as a
+      // `reported` failure saying so, and a button that does nothing says less.
+      setProblem(describe(answer.failure));
+      return;
+    }
+    // `send` already parsed the body; written back out as the same JSON.
+    const blob = new Blob([JSON.stringify(answer.body, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${run.run_id}.json`;
+    anchor.click();
+    // Revoked on the next tick: revoking synchronously can cancel the download
+    // before the browser has started reading the blob.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  };
 
   return (
     <Stack direction="vertical" gap={3}>
@@ -268,15 +349,17 @@ function RunDetail({
 
       <Code>{run.run_id}</Code>
 
+      <div role="status" aria-live="polite">
+        {loading ? <Text size="sm">Loading…</Text> : null}
+        {problem === null ? null : (
+          <Banner status="error" title="Part of this run could not be read" description={problem} />
+        )}
+      </div>
+
       {failure === null ? null : (
         // US2 scenario 7, FR-039. A class name and a stage, exactly as the
         // deployment produced them — no message, because the route sends none
         // and a provider's message may quote the document it choked on.
-        //
-        // A banner rather than a row in the card below, because SC-015 times an
-        // operator answering "why did it fail?" and the answer should not be the
-        // fifth line of a metadata list. Announced for the same reason the
-        // removal is (FR-045b).
         <div role="status" aria-live="polite">
           <Banner
             status="error"
@@ -292,8 +375,6 @@ function RunDetail({
 
       {removed === null ? null : (
         // FR-023: when, under which policy, and nothing else about what it held.
-        // A tombstone carries four fields precisely so that being told about one
-        // discloses nothing about what it contained.
         <div role="status" aria-live="polite">
           <Banner
             status="info"
@@ -309,6 +390,9 @@ function RunDetail({
 
       <Card>
         <MetadataList>
+          <MetadataListItem label="Tenant">
+            <Code>{run.tenant_id}</Code>
+          </MetadataListItem>
           <MetadataListItem label="Submitted">{when(run.created_at)}</MetadataListItem>
           <MetadataListItem label="Finished">{when(run.finished_at)}</MetadataListItem>
           <MetadataListItem label="Schema">
@@ -323,16 +407,12 @@ function RunDetail({
         </MetadataList>
       </Card>
 
-      {run.processing_id === null ? null : (
-        <Stack direction="vertical" gap={1}>
-          <Text size="sm" weight="bold">
-            Result
-          </Text>
-          {/* console-boundary-exempt: link only — the console renders no part of
-              a result. One result representation, reachable one way. */}
-          <Link href={resultHref(run.processing_id)}>Open the result this run produced</Link>
-        </Stack>
-      )}
+      {/* Any succeeded run has a result, OCR or extraction: the route picks. */}
+      {run.status === "succeeded" ? (
+        <HStack gap={2}>
+          <Button label="Download result" variant="secondary" onClick={() => void download()} />
+        </HStack>
+      ) : null}
 
       {delivery === null ? null : <DeliveryRecord delivery={delivery} />}
     </Stack>

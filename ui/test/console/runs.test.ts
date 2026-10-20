@@ -13,10 +13,12 @@ import {
   emptyNotice,
   failed,
   filtered,
+  forTenant,
   forward,
   initialListing,
   isEmpty,
   loaded,
+  reloaded,
   toFailure,
   toPage,
 } from "../../src/console/model/runs.ts";
@@ -87,6 +89,28 @@ test("an empty list says which emptiness it is", () => {
 
   const filteredEmpty = filtered(all, "failed");
   assert.match(emptyNotice(filteredEmpty), /no failed runs/);
+
+  const oneTenant = loaded(forTenant(filteredEmpty, "acme"), { runs: [], next_cursor: null });
+  assert.equal(emptyNotice(oneTenant), "Tenant acme has no failed runs.");
+});
+
+test("a tenant filter returns to page one and keeps the state filter", () => {
+  const deep = forward(loaded(filtered(initialListing(), "failed"), PAGE));
+  const narrowed = forTenant(deep, "  acme ");
+  assert.equal(narrowed.tenant, "acme");
+  assert.equal(narrowed.status, "failed");
+  assert.deepEqual(narrowed.stack, []);
+  assert.equal(narrowed.listing.state, "loading");
+
+  assert.equal(forTenant(narrowed, "   ").tenant, null, "a blank filter means every tenant");
+  assert.equal(filtered(narrowed, null).tenant, "acme", "a state filter keeps the tenant");
+});
+
+test("a reload keeps its place", () => {
+  const deep = forward(loaded(initialListing(), PAGE));
+  const again = reloaded(loaded(deep, PAGE));
+  assert.deepEqual(again.stack, deep.stack);
+  assert.equal(again.listing.state, "loading");
 });
 
 test("a malformed body becomes an empty page rather than a crash", () => {

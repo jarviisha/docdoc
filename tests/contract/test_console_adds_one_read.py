@@ -9,7 +9,8 @@ measured by assertion.
 It also carries FR-009 — no login route, no session record, no token exchange —
 because that is the one absence claim in this spec that no other guard watches.
 An unwatched absence claim is the failure mode every check in this repository
-exists to answer.
+exists to answer. ADR-0023 §1 has since given the console a login; §3 confines
+it to `/v1/console/`, and that confinement is what this file now watches.
 
 **How the "one" is counted**: against a list of the routes Milestone 10 shipped,
 written out below. A snapshot rather than a computation, because the alternative
@@ -71,15 +72,36 @@ OCR_GATEWAY_ADDED = {("/v1/ocr", "POST"), ("/v1/parsers", "GET")}
 #: 014 (ADR-0022): the queued OCR run's result. A read of an OCR run, not a
 #: console route.
 ASYNC_OCR_ADDED = {("/v1/runs/{run_id}/result", "GET")}
+#: 015 (ADR-0023 §1, §3): the console's own route family, behind a session
+#: rather than a Bearer key. Tasks 5 and 6 extend this set.
+CONSOLE_ADDED = {
+    ("/v1/console/session", "POST"),
+    ("/v1/console/session", "GET"),
+    ("/v1/console/session", "DELETE"),
+    # ADR-0023 §3: run reads across tenants, all four reads.
+    ("/v1/console/runs", "GET"),
+    ("/v1/console/runs/{run_id}", "GET"),
+    ("/v1/console/runs/{run_id}/delivery", "GET"),
+    ("/v1/console/runs/{run_id}/result", "GET"),
+    # Task 6 (ADR-0023 §2, §3): credentials and erasure, mirroring the admin
+    # routes of the same shape behind the console session instead of a Bearer
+    # key.
+    ("/v1/console/credentials", "GET"),
+    ("/v1/console/credentials", "POST"),
+    ("/v1/console/credentials/{credential_id}", "DELETE"),
+    ("/v1/console/tenants/{tenant_id}", "DELETE"),
+    ("/v1/console/tenants/{tenant_id}/documents/{blob_id}", "DELETE"),
+}
 
 #: Everything this interface has added over Milestone 10's own surface, as of
 #: this milestone. A route added without a decision shows up here: this is the
 #: list a later milestone edits, and editing it is the moment somebody decides
 #: on purpose that the surface grew (the same argument `ROUTES` in
 #: `test_http_ui_endpoints.py` makes for the full set).
-ADDED = MILESTONE_11_ADDED | OCR_GATEWAY_ADDED | ASYNC_OCR_ADDED
+ADDED = MILESTONE_11_ADDED | OCR_GATEWAY_ADDED | ASYNC_OCR_ADDED | CONSOLE_ADDED
 
-#: Words a session mechanism arrives as (FR-009). None of them may name a route.
+#: Words a session mechanism arrives as (FR-009). Since ADR-0023 §3 they may
+#: name a route only under `/v1/console/`.
 SESSION_WORDS = ("login", "logout", "session", "token", "auth", "signin", "sign-in")
 
 
@@ -147,20 +169,22 @@ def test_the_one_new_route_is_a_read(client: TestClient) -> None:
     assert methods == {"GET"}
 
 
-def test_no_route_names_a_session_mechanism(client: TestClient) -> None:
-    """FR-009, and nothing else in this repository is watching it.
+def test_session_words_appear_only_under_the_console_api(client: TestClient) -> None:
+    """FR-009, narrowed by ADR-0023 rather than dropped.
 
-    The console holds a pasted key in memory for the life of a page. A login
-    route would mean a session record, CSRF, and an expiry policy — four security
-    surfaces written by this project to guard a credential the deployment already
-    issues and already rotates (ADR-0019 §4).
+    ADR-0023 §1 superseded ADR-0019 §4: the console now signs in with a
+    username and password and holds a session. §3 confines that session to its
+    own route family, so a session mechanism is allowed exactly there and still
+    nowhere else — a login word on any other `/v1` path would be a session
+    leaking into the Bearer-key surface.
     """
     for path, _ in _routes(client):
         for word in SESSION_WORDS:
-            assert word not in path.lower(), (
-                f"the route {path} names {word!r}. There is no session in this "
-                "design: the credential is entered into the page and held there"
-            )
+            if word in path.lower():
+                assert path.startswith("/v1/console/"), (
+                    f"the route {path} names {word!r} outside /v1/console/. "
+                    "Sessions belong to the console's route family alone (ADR-0023 §3)"
+                )
 
 
 def test_no_route_reports_the_callers_own_scope(client: TestClient) -> None:
@@ -171,6 +195,11 @@ def test_no_route_reports_the_callers_own_scope(client: TestClient) -> None:
     the second would be an unauthenticated oracle about the deployment's posture.
     """
     for path, _ in _routes(client):
+        if path == "/v1/console/session":
+            # ADR-0023 §1: a signed-in console asks who it is signed in as. It
+            # reports a console username, never a Bearer credential's scope, and
+            # answers nothing without a session -- not a posture oracle.
+            continue
         assert not path.endswith("/me")
         assert "whoami" not in path.lower()
         assert "auth-mode" not in path.lower()

@@ -50,6 +50,7 @@ from docdoc.api.auth import (
     Principal,
     bearer_of,
 )
+from docdoc.api.console import console_gate, console_router, is_console_api
 from docdoc.api.models import (
     BlobMetadata,
     JobStatus,
@@ -67,6 +68,7 @@ from docdoc.api.models import (
     StorelessRunResponse,
     SubmissionResponse,
 )
+from docdoc.api.paging import DEFAULT_RUN_PAGE, MAX_RUN_PAGE
 from docdoc.api.settings import (
     DEFAULT_MAX_REQUEST_BYTES,
     DEFAULT_OCR_QUEUE_PER_TENANT,
@@ -135,6 +137,11 @@ _UNAUTHENTICATED = frozenset({LIVENESS_PATH, READINESS_PATH})
 #: assets. It is checked with `startswith` against this exact string plus the
 #: bare path, so a route named `/consoleroom` later would not be exempted by
 #: accident.
+#:
+#: **Not to be confused with `/v1/console`** (ADR-0023 §3), the console's own API.
+#: That is not exempt: it skips the Bearer check only to face its own session
+#: gate, `docdoc.api.console.console_gate`. Since ADR-0023 the shell no longer
+#: takes a pasted key — it signs in there.
 _CONSOLE_PREFIX = "/console"
 
 
@@ -142,14 +149,6 @@ def _is_console_asset(path: str) -> bool:
     """Whether a path is the console's shell rather than the API."""
     return path == _CONSOLE_PREFIX or path.startswith(f"{_CONSOLE_PREFIX}/")
 
-
-#: The run listing's page size (Milestone 11 FR-015).
-#:
-#: A default and a maximum, both documented, and a request above the maximum is
-#: a `422` rather than a silent clamp: a clamped page is one a client pages
-#: through wrongly forever, having been told nothing.
-DEFAULT_RUN_PAGE = 50
-MAX_RUN_PAGE = 200
 
 #: The run layer's errors, mapped. Kept beside `api_errors.STATUS_BY_ERROR`
 #: rather than inside it, because that table is the constitution's error model
@@ -187,6 +186,9 @@ class _Deployment:
         deliverer: Any = None,
         corrections: Any = None,
         routing: Any = None,
+        #: The console accounts store (ADR-0023 §1). `None` builds one from the
+        #: run-state database, see `console_accounts`.
+        console: Any = None,
         #: The two OCR caps (ADR-0022). `None` reads the environment, then the
         #: default -- both are on with no configuration.
         ocr_queue_per_tenant: int | None = None,
@@ -204,6 +206,12 @@ class _Deployment:
             else _configured_cap(OCR_QUEUE_TOTAL_ENV, DEFAULT_OCR_QUEUE_TOTAL)
         )
         self._corrections = corrections
+        self._console = console
+        #: The console's idle bound (ADR-0023 §1), read once like every other
+        #: configuration value here rather than per gated request.
+        from docdoc.runs.identity import configured_console_idle
+
+        self.console_idle = configured_console_idle()
         self._routing = routing
         #: Distinguishes "not read yet" from "read, and there is none". Without
         #: it a deployment with no policy would re-read the environment on every
@@ -333,6 +341,23 @@ class _Deployment:
 
         self._corrections = PostgresCorrectionStore(execute=execute)
         return self._corrections
+
+    def console_accounts(self) -> Any:
+        """The console accounts store, or ``None``, built once (ADR-0023 §1).
+
+        ``None`` whenever there is no run-state database — the same condition
+        as `corrections` — and the console gate answers 503 naming the fix.
+        """
+        if self._console is not None:
+            return self._console
+        execute = getattr(self._runs, "_execute", None)
+        if execute is None:
+            return None
+
+        from docdoc.runs.console_accounts import PostgresConsoleAccounts
+
+        self._console = PostgresConsoleAccounts(execute=execute)
+        return self._console
 
     def routing_policy(self) -> Any:
         """The configured routing policy, or ``None``. Read once, at startup.
@@ -649,6 +674,7 @@ def build_app(deployment: _Deployment | None = None) -> FastAPI:
     app.state.deployment = resolved
     _require_credential_everywhere_else(app)
     app.include_router(_router())
+    app.include_router(console_router())
     # Before the versioned router is irrelevant to routing and relevant to
     # reading: the health routes are not part of the document API and are
     # registered on the application rather than on it (FR-058).
@@ -678,6 +704,13 @@ def _require_credential_everywhere_else(app: FastAPI) -> None:
     exists, because that is where the operator types one. See `_CONSOLE_PREFIX`
     for what is exempt and what it is worth to an unauthenticated reader.
 
+    **ADR-0023 §3 moved `/v1/console` off the Bearer check, not out from behind
+    a credential.** That route family answers only to a console session, so its
+    paths go to `docdoc.api.console.console_gate` *instead of* the branch below:
+    a Bearer key is never consulted there, and a missing session is refused
+    there. The rest of `/v1` is unchanged, and a console session opens none of
+    it.
+
     **Before routing**, which means an unknown path answers 401 rather than 404
     on an authenticated deployment. That is the better answer: a 404 would say
     which paths exist to someone who cannot use any of them.
@@ -690,6 +723,14 @@ def _require_credential_everywhere_else(app: FastAPI) -> None:
     @app.middleware("http")
     async def _credential(request: Request, call_next: Any) -> Response:
         if request.url.path in _UNAUTHENTICATED or _is_console_asset(request.url.path):
+            return await call_next(request)  # type: ignore[no-any-return]
+        if is_console_api(request.url.path):
+            deployment = _deployment_of(request)
+            refused = console_gate(
+                request, deployment.console_accounts(), idle=deployment.console_idle
+            )
+            if refused is not None:
+                return refused
             return await call_next(request)  # type: ignore[no-any-return]
         try:
             _deployment_of(request).keys.principal_for(
@@ -1105,6 +1146,149 @@ def _install_telemetry() -> str:
         lambda: bridge(endpoint=endpoint, headers=parse_headers(headers)),
         endpoint=endpoint,
     )
+
+
+def _run_erased(stone: Any) -> JSONResponse:
+    """The 410 a run's owner gets for a removed run (`specs/010` FR-011).
+
+    When, and under which policy, and nothing else: a tombstone holds four
+    fields precisely so that being told about one discloses nothing about what
+    it held.
+    """
+    return JSONResponse(
+        status_code=410,
+        content={
+            "error": "run_erased",
+            "run_id": str(stone.run_id),
+            "deleted_at": stone.deleted_at.isoformat(),
+            "policy": stone.policy,
+        },
+    )
+
+
+def _ocr_document(request: Request, tenant_id: str, run: Any) -> Any:
+    """An OCR run's `Document` from `tenant_id`'s store, or why not (ADR-0022).
+
+    Shared by `GET /v1/runs/{run_id}/result` and its console twin, which reach
+    the run differently and must answer about it identically.
+    """
+    from docdoc.kernel import Document
+    from docdoc.pipeline.stages import Stage, spec_for
+    from docdoc.runs.model import RunKind, RunStatus
+
+    if run.kind is not RunKind.OCR:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": "not_an_ocr_run",
+                "detail": "use GET /v1/jobs/{processing_id}/result",
+            },
+        )
+    if run.status is not RunStatus.SUCCEEDED or run.processing_id is None:
+        return JSONResponse(
+            status_code=409,
+            content={"error": "run_not_succeeded", "status": str(run.status)},
+        )
+
+    store, _ = _deployment_of(request).stores_for(tenant_id)
+    document = store.get(
+        run.processing_id,
+        model=Document,
+        artifact_format_version=spec_for(Stage.PARSE).artifact_format_version,
+    )
+    if document is None:
+        # The run row outlived its content -- a sweep interrupted between
+        # its steps finishes on the next tick. Gone either way.
+        return JSONResponse(status_code=410, content={"error": "result_expired"})
+    return document.model_dump(mode="json")
+
+
+def _no_runs() -> JSONResponse:
+    """`503` for a run read on a deployment that records no runs.
+
+    A configuration a deployment may have, not a fault; an empty list would read
+    as "nothing has ever been submitted".
+    """
+    return JSONResponse(
+        status_code=503,
+        content={
+            "error": {
+                "class": "RunStateUnavailableError",
+                "message": "this deployment records no runs",
+            }
+        },
+    )
+
+
+def _page_request(
+    status: str | None, limit: int, cursor: str | None, *, cursor_tenant: str
+) -> tuple[JSONResponse | None, tuple[Any, Any] | None]:
+    """`(refusal, before)` for a run listing's query: one of the two is `None`.
+
+    Shared by `GET /v1/runs` and the console's listing, so the two validate a
+    page identically. `cursor_tenant` is what a cursor is bound to.
+    """
+    from docdoc.api.paging import CursorError, decode
+    from docdoc.runs.model import RunStatus
+
+    def refuse(code: int, error_class: str, message: str) -> tuple[JSONResponse, None]:
+        return JSONResponse(
+            status_code=code, content={"error": {"class": error_class, "message": message}}
+        ), None
+
+    if status is not None and status not in {member.value for member in RunStatus}:
+        # A `422` and not an empty page. The set is the five members
+        # `specs/009` closed it at, and a filter nobody can satisfy is a
+        # client bug the deployment should name rather than absorb.
+        return refuse(
+            422,
+            "InvalidRunStatus",
+            "status must be one of " + ", ".join(sorted(member.value for member in RunStatus)),
+        )
+
+    if limit < 1 or limit > MAX_RUN_PAGE:
+        return refuse(422, "InvalidPageSize", f"limit must be between 1 and {MAX_RUN_PAGE}")
+
+    if cursor is None:
+        return None, None
+    try:
+        position = decode(cursor, tenant_id=cursor_tenant)
+    except CursorError:
+        # One answer for malformed and for another tenant's, because two
+        # would tell a caller which foreign cursors are well formed (FR-016).
+        return refuse(400, "InvalidCursor", "this cursor cannot be read")
+    return None, (position.created_at, position.run_id)
+
+
+def _summary_fields(run: Any) -> dict[str, Any]:
+    """A run as a listing row: `RunSummary`'s fields, shared with the console's."""
+    return {
+        "run_id": str(run.run_id),
+        "status": str(run.status),
+        "created_at": run.created_at.isoformat(),
+        # `updated_at` is when a terminal run reached its terminal state.
+        # `None` while it has not: an absent field says "still going",
+        # and a timestamp that moved with every heartbeat would not.
+        "finished_at": run.updated_at.isoformat() if run.is_terminal else None,
+        "blob_id": run.blob_id,
+        "schema_identity": run.schema_identity,
+        "kind": str(run.kind),
+        "processing_id": run.processing_id,
+    }
+
+
+def _next_cursor(runs: Any, limit: int, *, cursor_tenant: str) -> str | None:
+    """The cursor after a page, bound to `cursor_tenant`; `None` on the last page.
+
+    A full page means there may be more; a short one is the end. One extra
+    round trip on the boundary case, against a `COUNT(*)` on every page.
+    """
+    from docdoc.api.paging import Cursor, encode
+
+    if len(runs) != limit:
+        return None
+    last = runs[-1]
+    return encode(Cursor(tenant_id=cursor_tenant, created_at=last.created_at, run_id=last.run_id))
 
 
 def _unknown_run(run_id: str) -> JSONResponse:
@@ -1550,10 +1734,6 @@ def _router() -> APIRouter:
         """
         from uuid import UUID
 
-        from docdoc.kernel import Document
-        from docdoc.pipeline.stages import Stage, spec_for
-        from docdoc.runs.model import RunKind, RunStatus
-
         deployment = _deployment_of(request)
         if not deployment.has_runs:
             return _unknown_run(run_id)
@@ -1567,41 +1747,9 @@ def _router() -> APIRouter:
             stone = deployment.runs().tombstone(identity, principal.tenant_id)
             if stone is None:
                 return _unknown_run(run_id)
-            return JSONResponse(
-                status_code=410,
-                content={
-                    "error": "run_erased",
-                    "run_id": str(stone.run_id),
-                    "deleted_at": stone.deleted_at.isoformat(),
-                    "policy": stone.policy,
-                },
-            )
+            return _run_erased(stone)
 
-        if run.kind is not RunKind.OCR:
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "error": "not_an_ocr_run",
-                    "detail": "use GET /v1/jobs/{processing_id}/result",
-                },
-            )
-        if run.status is not RunStatus.SUCCEEDED or run.processing_id is None:
-            return JSONResponse(
-                status_code=409,
-                content={"error": "run_not_succeeded", "status": str(run.status)},
-            )
-
-        store, _ = _stores_of(request, principal)
-        document = store.get(
-            run.processing_id,
-            model=Document,
-            artifact_format_version=spec_for(Stage.PARSE).artifact_format_version,
-        )
-        if document is None:
-            # The run row outlived its content -- a sweep interrupted between
-            # its steps finishes on the next tick. Gone either way.
-            return JSONResponse(status_code=410, content={"error": "result_expired"})
-        return document.model_dump(mode="json")
+        return _ocr_document(request, principal.tenant_id, run)
 
     # A plain `def`, not `async def`: FastAPI runs a synchronous handler in its
     # worker thread pool, so the blocking health probes below -- one urlopen
@@ -1865,69 +2013,17 @@ def _router() -> APIRouter:
         identity, by its owner, through the route `specs/010` FR-011 defines —
         this listing is not a second way to learn that something was deleted.
         """
-        from docdoc.api.paging import Cursor, CursorError, decode, encode
-        from docdoc.runs.model import RunStatus
-
         deployment = _deployment_of(request)
         if not deployment.has_runs:
             # The same answer `GET /v1/runs/{run_id}` gives a deployment with no
             # database, in the same shape: this is a configuration a deployment
             # may have, not a fault, and an empty list would read as "nothing has
             # ever been submitted" (Edge Cases).
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "error": {
-                        "class": "RunStateUnavailableError",
-                        "message": "this deployment records no runs",
-                    }
-                },
-            )
+            return _no_runs()
 
-        if status is not None and status not in {member.value for member in RunStatus}:
-            # A `422` and not an empty page. The set is the five members
-            # `specs/009` closed it at, and a filter nobody can satisfy is a
-            # client bug the deployment should name rather than absorb.
-            return JSONResponse(
-                status_code=422,
-                content={
-                    "error": {
-                        "class": "InvalidRunStatus",
-                        "message": "status must be one of "
-                        + ", ".join(sorted(member.value for member in RunStatus)),
-                    }
-                },
-            )
-
-        if limit < 1 or limit > MAX_RUN_PAGE:
-            return JSONResponse(
-                status_code=422,
-                content={
-                    "error": {
-                        "class": "InvalidPageSize",
-                        "message": f"limit must be between 1 and {MAX_RUN_PAGE}",
-                    }
-                },
-            )
-
-        before: tuple[Any, Any] | None = None
-        if cursor is not None:
-            try:
-                position = decode(cursor, tenant_id=principal.tenant_id)
-            except CursorError:
-                # One answer for malformed and for another tenant's, because two
-                # would tell a caller which foreign cursors are well formed
-                # (FR-016).
-                return JSONResponse(
-                    status_code=400,
-                    content={
-                        "error": {
-                            "class": "InvalidCursor",
-                            "message": "this cursor cannot be read",
-                        }
-                    },
-                )
-            before = (position.created_at, position.run_id)
+        refusal, before = _page_request(status, limit, cursor, cursor_tenant=principal.tenant_id)
+        if refusal is not None:
+            return refusal
 
         runs = deployment.runs().page_runs(
             principal.tenant_id,
@@ -1936,38 +2032,10 @@ def _router() -> APIRouter:
             limit=limit,
         )
 
-        summaries = [
-            RunSummary(
-                run_id=str(run.run_id),
-                status=str(run.status),
-                created_at=run.created_at.isoformat(),
-                # `updated_at` is when a terminal run reached its terminal state.
-                # `None` while it has not: an absent field says "still going",
-                # and a timestamp that moved with every heartbeat would not.
-                finished_at=run.updated_at.isoformat() if run.is_terminal else None,
-                blob_id=run.blob_id,
-                schema_identity=run.schema_identity,
-                kind=str(run.kind),
-                processing_id=run.processing_id,
-            )
-            for run in runs
-        ]
-
-        # A full page means there may be more; a short one is the end. One extra
-        # round trip on the boundary case, against a `COUNT(*)` on every page.
-        next_cursor = (
-            encode(
-                Cursor(
-                    tenant_id=principal.tenant_id,
-                    created_at=runs[-1].created_at,
-                    run_id=runs[-1].run_id,
-                )
-            )
-            if len(runs) == limit
-            else None
+        return RunListResponse(
+            runs=tuple(RunSummary(**_summary_fields(run)) for run in runs),
+            next_cursor=_next_cursor(runs, limit, cursor_tenant=principal.tenant_id),
         )
-
-        return RunListResponse(runs=tuple(summaries), next_cursor=next_cursor)
 
     @router.get("/runs/{run_id}", response_model=RunStateResponse)
     async def run_state(request: Request, run_id: str, principal: Caller) -> Any:
@@ -2011,15 +2079,7 @@ def _router() -> APIRouter:
             stone = deployment.runs().tombstone(identity, principal.tenant_id)
             if stone is None:
                 return _unknown_run(run_id)
-            return JSONResponse(
-                status_code=410,
-                content={
-                    "error": "run_erased",
-                    "run_id": str(stone.run_id),
-                    "deleted_at": stone.deleted_at.isoformat(),
-                    "policy": stone.policy,
-                },
-            )
+            return _run_erased(stone)
 
         body = run.dump_public()
         decision = _routing_for(request, run)
@@ -2140,15 +2200,7 @@ def _router() -> APIRouter:
             # something that is gone is uninterpretable, and a reviewer who typed
             # the right identifier should not be told they typed a wrong one
             # (FR-082).
-            return JSONResponse(
-                status_code=410,
-                content={
-                    "error": "run_erased",
-                    "run_id": str(stone.run_id),
-                    "deleted_at": stone.deleted_at.isoformat(),
-                    "policy": stone.policy,
-                },
-            )
+            return _run_erased(stone)
 
         if run.status is not RunStatus.SUCCEEDED:
             return JSONResponse(

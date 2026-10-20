@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Operations console for docdoc. Lists runs, issues and revokes credentials, and erases a tenant or a document \u2014 and holds the key only in memory.",
+  "description": "Operations console for docdoc. Sign in with a console account to list every tenant's runs and download results, issue and revoke credentials, and erase a tenant or a document.",
   "license": "Apache-2.0",
   "engines": {
     "node": ">=24"

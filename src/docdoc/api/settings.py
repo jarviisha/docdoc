@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "API_KEYS_FILE_ENV",
+    "CONSOLE_IDLE_ENV",
     "CONSOLE_ROOT_ENV",
     "CORRECTION_RETENTION_DAYS_ENV",
     "DEFAULT_MAX_REQUEST_BYTES",
@@ -142,6 +143,11 @@ LIMIT_RUNS_PER_PERIOD_ENV = "DOCDOC_LIMIT_RUNS_PER_PERIOD"
 LIMIT_TOKENS_ENV = "DOCDOC_LIMIT_TOKENS_PER_PERIOD"
 
 RUN_CREDENTIAL_TTL_ENV = _identity.CREDENTIAL_TTL_ENV
+#: ADR-0023 §1: how long a console session may sit idle before the server
+#: refuses it. Named here for the same reason the lease pair is: `identity`
+#: owns the default and the precedence, and the console is part of the HTTP
+#: layer's own configuration vocabulary.
+CONSOLE_IDLE_ENV = _identity.CONSOLE_IDLE_ENV
 RUN_RETENTION_DAYS_ENV = _identity.RETENTION_DAYS_ENV
 #: 014 (ADR-0022): the two OCR caps. Both are **on with no configuration**:
 #: how many OCR runs one tenant may have queued or running, and how many the

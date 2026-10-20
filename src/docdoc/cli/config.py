@@ -366,6 +366,15 @@ ENVIRONMENT_ONLY: dict[str, str] = {
         "configuration (FR-042), and a deployment's set of endpoints must agree "
         "across every process rather than vary by invocation"
     ),
+    # ADR-0023. Read by `GET`/`POST /v1/console/*` when it resolves a session
+    # cookie, and nowhere else: the command line opens no session and reads no
+    # cookie in any configuration, so a flag would name a bound nothing it runs
+    # enforces.
+    "DOCDOC_CONSOLE_IDLE_SECONDS": (
+        "how long a console session may sit idle before the server refuses it; "
+        "enforced on every request that resolves the session cookie, and the "
+        "command line resolves none"
+    ),
 }
 
 

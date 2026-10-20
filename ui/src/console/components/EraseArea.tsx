@@ -43,6 +43,8 @@ interface Props {
 export function EraseArea({ request, onFailure }: Props) {
   const [kind, setKind] = useState<Target["kind"]>("tenant");
   const [identifier, setIdentifier] = useState("");
+  // A document is erased within its tenant; the route names both.
+  const [documentTenant, setDocumentTenant] = useState("");
   const [intent, setIntent] = useState<ErasureIntent | null>(null);
   const [outcome, setOutcome] = useState<string | null>(null);
 
@@ -78,6 +80,17 @@ export function EraseArea({ request, onFailure }: Props) {
             />
           </HStack>
 
+          {kind === "document" ? (
+            <Field label="Tenant" inputID="erase-document-tenant">
+              <input
+                id="erase-document-tenant"
+                type="text"
+                value={documentTenant}
+                onChange={(event) => setDocumentTenant(event.target.value)}
+              />
+            </Field>
+          ) : null}
+
           <Field
             label={kind === "tenant" ? "Tenant identifier" : "Document identifier"}
             inputID="erase-target"
@@ -93,10 +106,18 @@ export function EraseArea({ request, onFailure }: Props) {
           <Button
             label="Continue"
             variant="secondary"
-            isDisabled={identifier.trim() === ""}
+            isDisabled={
+              identifier.trim() === "" || (kind === "document" && documentTenant.trim() === "")
+            }
             onClick={() => {
               setOutcome(null);
-              setIntent(intendedFor({ kind, id: identifier.trim() }));
+              setIntent(
+                intendedFor(
+                  kind === "tenant"
+                    ? { kind, id: identifier.trim() }
+                    : { kind, id: identifier.trim(), tenantId: documentTenant.trim() },
+                ),
+              );
             }}
           />
         </Stack>
@@ -129,7 +150,7 @@ export function EraseArea({ request, onFailure }: Props) {
                 void request(
                   target.kind === "tenant"
                     ? { type: "erase-tenant", tenantId: target.id }
-                    : { type: "erase-document", blobId: target.id },
+                    : { type: "erase-document", tenantId: target.tenantId, blobId: target.id },
                 ).then((answer) => {
                   if (!answer.ok) {
                     onFailure(answer.failure);

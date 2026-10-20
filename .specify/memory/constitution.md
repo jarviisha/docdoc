@@ -506,6 +506,49 @@ is unchanged for every caller who names nothing.
 
 Templates: no changes required — the plan-template gate table references
 Principles IV and V by number and remains accurate.
+
+---
+AMENDMENT 1.11.0 → 1.12.0 (2026-10-20)
+Bump rationale: MINOR — the console paragraph's permitted list is materially
+widened. No principle is added, removed, or redefined, and nothing previously
+compliant becomes non-compliant: a console that still pastes a key and renders
+no result is simply a console that has not adopted the parts this amendment
+permits.
+
+Principles affected: XI (MVP Discipline and Scale Through Boundaries), via the
+MVP Scope Constraints "Deferred technology" paragraph and the console paragraph
+beneath it. Principle IX is engaged and left unedited — the five-noun fence it
+is drawn around is unchanged by this amendment.
+
+  - **The console paragraph's permitted list gains four items (ADR-0023).** A
+    console may now authenticate an operator by username and password instead
+    of a pasted key; cross-tenant listing and inspection replace the single
+    tenant a pasted key resolved to; the console may render a run's result,
+    including an OCR run's page images with boxes; and the routes those three
+    need exist under a session-only route family that a tenant's Bearer key
+    must never reach. ADR-0019 §3's "no server-side concept" and §4's "pasted,
+    never persisted" are both narrowed by ADR-0023, and the paragraph is
+    rewritten rather than read around, for the reason v1.6.0, v1.8.0, and
+    v1.9.0 each recorded about themselves: a spec that reinterprets the
+    constitution's wording to fit what it wants to build has made the
+    constitution the junior document.
+
+  - Unchanged: the five-noun fence (reviewer assignment, review queue, workload,
+    review state beyond the closed run status set, disposition beyond
+    ADR-0017's two outcomes), and the rule that a console surface is defined by
+    who it serves. Accounts remain the CLI's alone; the console gains no
+    account-management screen.
+
+Sections amended: MVP Scope Constraints (Deferred technology, console
+paragraph). No decision moved; the open list stays empty.
+
+Migration note: no artifact is invalidated. A deployment that has not upgraded
+its console keeps working exactly as before — the pasted-key, single-tenant,
+no-result console remains a compliant reading of the amended paragraph, which
+widens what is permitted rather than retiring what is.
+
+Templates: no changes required — the plan-template gate table references
+Principle XI by number and remains accurate.
 -->
 
 # docdoc Constitution
@@ -901,11 +944,15 @@ The line is drawn here rather than left to a reviewer because a per-tenant token
 under the plainest reading of the sentence above, and `specs/010` would otherwise have had to argue
 that it is not — which is the reinterpretation Governance's precedence rule exists to prevent.
 
-"A full review UI" above forbids a **review platform**, not an **operations console** (ADR-0019).
-From Milestone 11 the project may ship a browser surface that serves the person who *runs the
-deployment*: it may list and inspect runs, show routing outcomes and delivery records, issue and
+"A full review UI" above forbids a **review platform**, not an **operations console** (ADR-0019,
+ADR-0023). From Milestone 11 the project may ship a browser surface that serves the person who *runs
+the deployment*: it may list and inspect runs, show routing outcomes and delivery records, issue and
 revoke credentials, and trigger tenant and document erasure — all of it through routes Milestone 10
-already ships, plus one tenant-scoped read that lets the surface enumerate at all. What stays
+already ships, plus one tenant-scoped read that lets the surface enumerate at all. From ADR-0023 it
+may also authenticate an operator by username and password in place of a pasted key, list and
+inspect every tenant's runs rather than the one a pasted key resolves to, and render a run's result —
+an OCR document, an extraction result, and an OCR run's page images with boxes — all through a
+session-only route family under `/v1/console` that a tenant's Bearer key must never reach. What stays
 deferred is every surface that serves the person who *checks documents*: reviewer assignment, review
 queues, workload, review states beyond the closed run status set, and any disposition beyond
 ADR-0017's two routing outcomes. Principle IX's own sentence — supporting corrections "MUST NOT turn
@@ -1019,4 +1066,4 @@ insufficient. Unjustified violations are rejected regardless of the code's quali
 **Precedence for unresolved items.** Where an "Open Constitutional Decision" is unresolved,
 implementers MUST NOT resolve it silently in code. Raise it, decide it, record it.
 
-**Version**: 1.11.0 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-10-20
+**Version**: 1.12.0 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-10-20

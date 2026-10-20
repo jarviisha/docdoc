@@ -20,6 +20,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
     "BlobMetadata",
+    "ConsoleRunListResponse",
+    "ConsoleRunSummary",
     "ErrorBody",
     "ErrorDetail",
     "JobStatus",
@@ -348,6 +350,25 @@ class RunListResponse(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     runs: tuple[RunSummary, ...]
+    next_cursor: str | None = None
+
+
+class ConsoleRunSummary(RunSummary):
+    """One row of ``GET /v1/console/runs``: a `RunSummary` that names its tenant.
+
+    A separate model, for the reason `RunSummary` gives: the tenant route's rows
+    must never gain this field, and a shared model would hand it to them.
+    """
+
+    tenant_id: str
+
+
+class ConsoleRunListResponse(BaseModel):
+    """What ``GET /v1/console/runs`` returns (ADR-0023 §3)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    runs: tuple[ConsoleRunSummary, ...]
     next_cursor: str | None = None
 
 

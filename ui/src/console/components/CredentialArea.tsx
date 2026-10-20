@@ -1,13 +1,13 @@
 /**
- * Issue, list, revoke — through Milestone 10's routes and no others.
+ * Issue, list, revoke — through `/v1/console/credentials` (ADR-0023 §3).
  *
  * The key appears once, with the sentence saying so, and is gone on
- * acknowledgement (FR-024). No row in the listing carries one (FR-025). The
- * warning before the first revocation is general, because this console does not
- * know which credential is its own and is not going to find out (FR-026a).
+ * acknowledgement (FR-024). No row in the listing carries one (FR-025). A
+ * revocation is confirmed in its own row before it is sent, because it
+ * cannot be undone and the button sits beside every active key.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   Badge,
   Banner,
@@ -30,13 +30,17 @@ import {
   acknowledged,
   disclosureFrom,
   initialCredentials,
+  issueBody,
   isActive,
+  listedFor,
+  listFailedFor,
+  listingNote,
   needsWarning,
   scopesOf,
+  showing,
   toRecords,
   warned,
   withDisclosure,
-  withRecords,
 } from "../model/credentials.ts";
 import type { CredentialRecord } from "../model/credentials.ts";
 import type { Failure } from "../model/failure.ts";
@@ -55,25 +59,27 @@ interface Props {
 export function CredentialArea({ request, onFailure }: Props) {
   const [state, setState] = useState(initialCredentials);
   const [tenant, setTenant] = useState("");
-  const [scope, setScope] = useState("");
-  const [administrative, setAdministrative] = useState(false);
+  const [label, setLabel] = useState("");
 
-  // Which tenant's credentials are listed. The route requires it and the console
-  // has no way to learn its own tenant — no route reports one, and adding one
-  // would be the second new read SC-003 forbids. An operator issuing a key
-  // already knows the tenant they are issuing it for.
+  // Which tenant's credentials to list: typed, then shown on Show — the route
+  // requires one, and listing on every keystroke asks about tenants nobody meant.
   const [listing, setListing] = useState("");
+  const shown = state.shown;
+  // The row awaiting "Revoke this key?", by credential id.
+  const [confirming, setConfirming] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
-    if (listing.trim() === "") return;
-    const answer = await request({ type: "list-credentials", tenant: listing.trim() });
-    if (answer.ok) setState((previous) => withRecords(previous, toRecords(answer.body)));
-    else onFailure(answer.failure);
-  }, [request, onFailure, listing]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  const load = useCallback(
+    async (which: string) => {
+      if (which === "") return;
+      const answer = await request({ type: "list-credentials", tenant: which });
+      if (answer.ok) setState((previous) => listedFor(previous, which, toRecords(answer.body)));
+      else {
+        setState((previous) => listFailedFor(previous, which));
+        onFailure(answer.failure);
+      }
+    },
+    [request, onFailure],
+  );
 
   return (
     <Stack direction="vertical" gap={3}>
@@ -101,36 +107,20 @@ export function CredentialArea({ request, onFailure }: Props) {
           <input id="issue-tenant" type="text" value={tenant} onChange={(e) => setTenant(e.target.value)} />
         </Field>
         <Field label="Label (what it is for)" inputID="issue-label">
-          <input id="issue-label" type="text" value={scope} onChange={(e) => setScope(e.target.value)} />
-        </Field>
-        <Field label="Grant the administrative scope" inputID="issue-admin">
-          <input
-            id="issue-admin"
-            type="checkbox"
-            checked={administrative}
-            onChange={(event) => setAdministrative(event.target.checked)}
-          />
+          <input id="issue-label" type="text" value={label} onChange={(e) => setLabel(e.target.value)} />
         </Field>
         <Button
           label="Issue"
           variant="primary"
           isDisabled={tenant.trim() === ""}
           onClick={() => {
-            void request(
-              { type: "issue-credential", tenant: tenant.trim(), scope: scope.trim() },
-              // The route takes `tenant_id`, an optional `label`, and `admin`
-              // as a boolean — the administrative scope is the only one there
-              // is, and `--admin` is how the command line grants it too.
-              JSON.stringify({
-                tenant_id: tenant.trim(),
-                ...(scope.trim() === "" ? {} : { label: scope.trim() }),
-                admin: administrative,
-              }),
-            ).then((answer) => {
-              if (!answer.ok) return onFailure(answer.failure);
-              setState((previous) => withDisclosure(previous, disclosureFrom(answer.body)));
-              void refresh();
-            });
+            void request({ type: "issue-credential" }, issueBody(tenant.trim(), label)).then(
+              (answer) => {
+                if (!answer.ok) return onFailure(answer.failure);
+                setState((previous) => withDisclosure(previous, disclosureFrom(answer.body)));
+                void load(shown);
+              },
+            );
           }}
         />
       </Stack>
@@ -140,23 +130,32 @@ export function CredentialArea({ request, onFailure }: Props) {
           Credentials
         </Text>
 
-        <Field label="List credentials for tenant" inputID="list-tenant">
-          <input
-            id="list-tenant"
-            type="text"
-            value={listing}
-            onChange={(event) => setListing(event.target.value)}
+        <HStack gap={2} align="end">
+          <Field label="List credentials for tenant" inputID="list-tenant">
+            <input
+              id="list-tenant"
+              type="text"
+              value={listing}
+              onChange={(event) => setListing(event.target.value)}
+            />
+          </Field>
+          <Button
+            label="Show"
+            variant="secondary"
+            isDisabled={listing.trim() === ""}
+            onClick={() => {
+              const which = listing.trim();
+              setConfirming(null);
+              setState((previous) => showing(previous, which));
+              void load(which);
+            }}
           />
-        </Field>
+        </HStack>
 
         {needsWarning(state) ? <Banner status="info" title={SELF_REVOCATION_WARNING} /> : null}
 
-        {state.records.length === 0 ? (
-          <Text size="sm">
-            {listing.trim() === ""
-              ? "Name a tenant to list its credentials."
-              : "This tenant holds no credentials."}
-          </Text>
+        {listingNote(state) !== null ? (
+          <Text size="sm">{listingNote(state)}</Text>
         ) : (
           <Card>
             <Table
@@ -209,30 +208,50 @@ export function CredentialArea({ request, onFailure }: Props) {
                 {
                   key: "revoke",
                   header: "",
-                  width: pixel(110),
+                  width: pixel(300),
                   resizable: false,
                   renderCell: (row) => {
                     const record = row as unknown as CredentialRecord;
+                    if (confirming !== record.credential_id) {
+                      return (
+                        <Button
+                          label="Revoke"
+                          variant="destructive"
+                          size="sm"
+                          isDisabled={!isActive(record)}
+                          onClick={() => setConfirming(record.credential_id)}
+                        />
+                      );
+                    }
                     return (
-                      <Button
-                        label="Revoke"
-                        variant="destructive"
-                        size="sm"
-                        isDisabled={!isActive(record)}
-                        onClick={() => {
-                          // The warning is shown once per session, before the
-                          // first revocation, and the action still proceeds: a
-                          // leaked key is very often the one in your hand.
-                          setState(warned);
-                          void request({
-                            type: "revoke-credential",
-                            credentialId: record.credential_id,
-                          }).then((answer) => {
-                            if (!answer.ok) onFailure(answer.failure);
-                            void refresh();
-                          });
-                        }}
-                      />
+                      <HStack gap={2} align="center">
+                        <Text size="sm">Revoke this key?</Text>
+                        <Button
+                          label="Confirm"
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => {
+                            // The warning shows before the first revocation
+                            // and the action still proceeds: a leaked key is
+                            // very often the one somebody is still using.
+                            setState(warned);
+                            setConfirming(null);
+                            void request({
+                              type: "revoke-credential",
+                              credentialId: record.credential_id,
+                            }).then((answer) => {
+                              if (!answer.ok) onFailure(answer.failure);
+                              void load(shown);
+                            });
+                          }}
+                        />
+                        <Button
+                          label="Cancel"
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => setConfirming(null)}
+                        />
+                      </HStack>
                     );
                   },
                 },

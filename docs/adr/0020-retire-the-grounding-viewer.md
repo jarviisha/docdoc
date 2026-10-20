@@ -1,6 +1,6 @@
 # ADR-0020: Retire the Grounding Viewer; `ui/` Builds the Operations Console Only
 
-- **Status**: Accepted
+- **Status**: Accepted; partly superseded by ADR-0023
 - **Date**: 2026-09-15
 - **Supersedes**: the browser surface of `specs/008-grounding-viewer` (its view-model boundary, no-persistence rule, and asset-location machinery are kept and now serve the console)
 - **Relates to**: [ADR-0012](0012-storeless-extraction-over-http.md) (the storeless route the viewer used, which is unchanged), [ADR-0019](0019-operations-console-boundary.md) (the console this leaves behind, and §5's re-pointing of the read-only guard)

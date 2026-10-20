@@ -294,8 +294,31 @@ class PostgresRunQueue:
         # run_id)` if a tenant ever files enough runs in one microsecond for that
         # to be measurable.
         """
-        conditions = ["tenant_id = %(tenant_id)s"]
-        parameters: dict[str, Any] = {"tenant_id": tenant_id, "limit": limit}
+        return self.page_all_runs(tenant_id=tenant_id, status=status, before=before, limit=limit)
+
+    def page_all_runs(
+        self,
+        *,
+        tenant_id: str | None,
+        status: str | None,
+        before: tuple[datetime, UUID] | None,
+        limit: int,
+    ) -> tuple[Run, ...]:
+        """`page_runs`, with the tenant predicate dropped when `tenant_id` is `None`.
+
+        The console's cross-tenant read (ADR-0023 §3). Keyset paging is the
+        same, so a walk still sees every run exactly once.
+
+        # ponytail: no `(created_at, run_id)` index across tenants, so an
+        # unfiltered page sorts the table. Add one if the console's first page
+        # becomes slow.
+        """
+        conditions: list[str] = []
+        parameters: dict[str, Any] = {"limit": limit}
+
+        if tenant_id is not None:
+            conditions.append("tenant_id = %(tenant_id)s")
+            parameters["tenant_id"] = tenant_id
 
         if status is not None:
             conditions.append("status = %(status)s")
@@ -313,7 +336,7 @@ class PostgresRunQueue:
         rows = self._execute(
             f"""
             SELECT {_COLUMNS} FROM runs
-             WHERE {" AND ".join(conditions)}
+             WHERE {" AND ".join(conditions) or "TRUE"}
              ORDER BY created_at DESC, run_id DESC
              LIMIT %(limit)s
             """,
@@ -331,6 +354,16 @@ class PostgresRunQueue:
             fetch="one",
         )
         return Tombstone.model_validate(dict(row)) if row else None
+
+    def owner_of(self, run_id: UUID) -> str | None:
+        """The owning tenant, from `runs` and then `run_tombstones`."""
+        row = self._execute(
+            "SELECT tenant_id FROM runs WHERE run_id = %(id)s "
+            "UNION ALL SELECT tenant_id FROM run_tombstones WHERE run_id = %(id)s LIMIT 1",
+            {"id": run_id},
+            fetch="one",
+        )
+        return None if row is None else str(row["tenant_id"])
 
     # -- reading -----------------------------------------------------------
 

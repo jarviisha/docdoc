@@ -31,7 +31,15 @@ from datetime import datetime
 from typing import NamedTuple
 from uuid import UUID
 
-__all__ = ["Cursor", "CursorError", "decode", "encode"]
+__all__ = ["DEFAULT_RUN_PAGE", "MAX_RUN_PAGE", "Cursor", "CursorError", "decode", "encode"]
+
+#: The run listing's page size (Milestone 11 FR-015).
+#:
+#: A default and a maximum, both documented, and a request above the maximum is
+#: a `422` rather than a silent clamp: a clamped page is one a client pages
+#: through wrongly forever, having been told nothing.
+DEFAULT_RUN_PAGE = 50
+MAX_RUN_PAGE = 200
 
 
 class CursorError(ValueError):
