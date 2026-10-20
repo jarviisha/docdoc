@@ -8,15 +8,16 @@
  * good answer on screen and says so, rather than blanking the page.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Banner, Button, Card, Code, HStack, Stack, Table, Text, pixel, proportional } from "@astryxdesign/core";
 
 import type { Intent } from "../model/client.ts";
 import { describe, type Failure } from "../model/failure.ts";
 import { duration, shortId, when } from "../model/format.ts";
 import { cardTone, toOverview, type KindSplit, type Overview, type OverviewCards } from "../model/overview.ts";
-import { nextPoll, onVisible } from "../model/polling.ts";
+import { isNewer } from "../model/polling.ts";
 import { kindLabel, reasonLabel, timeline, type RunSummary } from "../model/runs.ts";
+import { usePolling } from "./usePolling.ts";
 
 type Request = (
   intent: Intent,
@@ -26,38 +27,6 @@ type Request = (
 interface Props {
   request: Request;
   onOpenRun: (runId: string) => void;
-}
-
-/**
- * Call `refresh` every `nextPoll` while `enabled` and the tab is visible, and
- * at once when the tab becomes visible again. Shared with the run list.
- */
-export function usePolling(refresh: () => void, enabled: boolean) {
-  useEffect(() => {
-    if (!enabled) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let wasHidden = document.hidden;
-    const schedule = () => {
-      clearTimeout(timer);
-      const delay = nextPoll(document.hidden);
-      if (delay === null) return;
-      timer = setTimeout(() => {
-        refresh();
-        schedule();
-      }, delay);
-    };
-    const visibilityChanged = () => {
-      if (onVisible(wasHidden, document.hidden)) refresh();
-      wasHidden = document.hidden;
-      schedule();
-    };
-    document.addEventListener("visibilitychange", visibilityChanged);
-    schedule();
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener("visibilitychange", visibilityChanged);
-    };
-  }, [refresh, enabled]);
 }
 
 const CARDS: { name: keyof OverviewCards; label: string }[] = [
@@ -74,23 +43,32 @@ export function OverviewArea({ request, onOpenRun }: Props) {
   const [refreshedAt, setRefreshedAt] = useState<number | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
 
-  const refresh = useCallback(() => {
-    void request({ type: "overview" }).then((answer) => {
-      if (!answer.ok) {
-        setProblem(describe(answer.failure));
-        return;
-      }
-      try {
-        setOverview(toOverview(answer.body));
-        setRefreshedAt(Date.now());
-        setProblem(null);
-      } catch (error) {
-        setProblem(error instanceof Error ? error.message : String(error));
-      }
-    });
+  // Requests are numbered as they are sent; only an answer newer than the one
+  // shown is applied, so a slow answer arriving late cannot put older data back.
+  const sent = useRef(0);
+  const shown = useRef<number | null>(null);
+
+  const refresh = useCallback(async () => {
+    const number = ++sent.current;
+    const answer = await request({ type: "overview" });
+    if (!isNewer(number, shown.current)) return;
+    if (!answer.ok) {
+      setProblem(describe(answer.failure));
+      return;
+    }
+    try {
+      setOverview(toOverview(answer.body));
+      shown.current = number;
+      setRefreshedAt(Date.now());
+      setProblem(null);
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : String(error));
+    }
   }, [request]);
 
-  useEffect(refresh, [refresh]);
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
   usePolling(refresh, true);
 
   const openButton = (row: Record<string, unknown>) => (

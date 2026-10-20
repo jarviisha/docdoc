@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { nextPoll, onVisible, POLL_MS } from "../../src/console/model/polling.ts";
+import { isNewer, nextPoll, onVisible, POLL_MS, startsNow } from "../../src/console/model/polling.ts";
 
 test("polling pauses while hidden", () => {
   assert.equal(nextPoll(true), null);
@@ -27,4 +27,16 @@ test("staying visible, or staying hidden, asks for nothing extra", () => {
   assert.equal(onVisible(false, false), false);
   assert.equal(onVisible(true, true), false);
   assert.equal(onVisible(false, true), false);
+});
+
+test("a poll starts only when none is in flight", () => {
+  assert.equal(startsNow(false), true);
+  assert.equal(startsNow(true), false, "a slow request is never overlapped by a second");
+});
+
+test("only an answer newer than the shown one is applied", () => {
+  assert.equal(isNewer(1, null), true, "the first answer always lands");
+  assert.equal(isNewer(3, 2), true);
+  assert.equal(isNewer(2, 3), false, "an answer that arrives late, out of order, is dropped");
+  assert.equal(isNewer(3, 3), false);
 });

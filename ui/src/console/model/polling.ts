@@ -25,3 +25,21 @@ export function nextPoll(hidden: boolean): number | null {
 export function onVisible(wasHidden: boolean, hidden: boolean): boolean {
   return wasHidden && !hidden;
 }
+
+/**
+ * Whether a poll may start now. Never while one is in flight: a request
+ * slower than the interval would otherwise be overlapped by the next, and
+ * the next, piling up against a deployment that is already slow.
+ */
+export function startsNow(inFlight: boolean): boolean {
+  return !inFlight;
+}
+
+/**
+ * Whether an answer, numbered by when its request was sent, is newer than
+ * the one on screen (`null` before any). Answers can arrive out of order;
+ * a late one would put older data — and a wrong "last refreshed" — back up.
+ */
+export function isNewer(sent: number, shown: number | null): boolean {
+  return shown === null || sent > shown;
+}

@@ -32,7 +32,7 @@ import { describe, type Failure } from "../model/failure.ts";
 import { toDelivery, type Delivery } from "../model/delivery.ts";
 import { duration, shortId, when } from "../model/format.ts";
 import { DeliveryRecord } from "./DeliveryRecord.tsx";
-import { usePolling } from "./OverviewArea.tsx";
+import { usePolling } from "./usePolling.ts";
 import {
   autoRefreshes,
   back,
@@ -110,6 +110,9 @@ export function RunArea({ request, onFailure, openRunId, onOpenRun }: Props) {
   // What is typed, apart from what is applied: the list reloads on Enter or
   // Apply, not on every keystroke.
   const [tenantInput, setTenantInput] = useState("");
+  // A failed background refresh, said here and cleared by the next success:
+  // a notice in the shell would outlive the failure it reports.
+  const [pollProblem, setPollProblem] = useState<string | null>(null);
 
   const cursor = currentCursor(state);
   const { status, tenant, kind } = state;
@@ -136,14 +139,17 @@ export function RunArea({ request, onFailure, openRunId, onOpenRun }: Props) {
 
   // A background refresh replaces page one in place, without the loading
   // state, so rows are never blanked under the reader. A failed one keeps the
-  // rows and reports, as the overview does.
-  const poll = useCallback(() => {
+  // rows and says so locally, as the overview does.
+  const poll = useCallback(async () => {
     const askedFor = state;
-    void request(listIntent(askedFor, currentCursor(askedFor))).then((answer) => {
-      if (answer.ok) setState((previous) => polled(previous, askedFor, toPage(answer.body)));
-      else onFailure(answer.failure);
-    });
-  }, [request, onFailure, state]);
+    const answer = await request(listIntent(askedFor, currentCursor(askedFor)));
+    if (answer.ok) {
+      setState((previous) => polled(previous, askedFor, toPage(answer.body)));
+      setPollProblem(null);
+    } else {
+      setPollProblem(describe(answer.failure));
+    }
+  }, [request, state]);
   usePolling(poll, autoRefreshes(state) && openRunId === null);
 
   if (openRunId !== null) {
@@ -233,6 +239,10 @@ export function RunArea({ request, onFailure, openRunId, onOpenRun }: Props) {
         ) : null}
 
         {isEmpty(state) ? <Banner status="info" title={emptyNotice(state)} /> : null}
+
+        {pollProblem === null ? null : (
+          <Banner status="warning" title="The run list could not be refreshed" description={pollProblem} />
+        )}
       </div>
 
       {rows.length > 0 ? (
@@ -337,6 +347,7 @@ function RunDetail({
   const [removed, setRemoved] = useState<{ deletedAt: string; policy: string } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [cancelProblem, setCancelProblem] = useState<string | null>(null);
 
   /**
@@ -407,7 +418,9 @@ function RunDetail({
 
   /** The answer is the run as it now stands, and replaces the one shown; a `409` says why not. */
   const cancel = async () => {
+    setCancelling(true);
     const answer = await request({ type: "cancel-run", runId });
+    setCancelling(false);
     setConfirming(false);
     if (answer.ok) {
       setRun(toRecord(answer.body));
@@ -512,8 +525,19 @@ function RunDetail({
             confirming ? (
               <HStack gap={2} align="center">
                 <Text size="sm">Cancel this run?</Text>
-                <Button label="Confirm" variant="primary" onClick={() => void cancel()} />
-                <Button label="Keep running" variant="secondary" onClick={() => setConfirming(false)} />
+                <Button
+                  label="Confirm"
+                  variant="primary"
+                  isLoading={cancelling}
+                  isDisabled={cancelling}
+                  onClick={() => void cancel()}
+                />
+                <Button
+                  label="Keep running"
+                  variant="secondary"
+                  isDisabled={cancelling}
+                  onClick={() => setConfirming(false)}
+                />
               </HStack>
             ) : (
               <HStack gap={2}>
