@@ -57,31 +57,50 @@ export class TransportError extends Error {}
 /**
  * What a caller supplies beyond the plan.
  *
- * `credential` arrives from the operations console, which holds an API key in
- * memory for the life of a page (Milestone 11 FR-006, FR-007). It is a
- * parameter and never a module-level variable: this file decides nothing, and a
- * credential it could reach on its own would be a credential it could attach to
- * a request nobody asked it to.
- *
- * It becomes a header, never a query parameter — FR-008, and the reason is that
- * a URL lands in browser history, proxy logs, and referrer headers.
+ * There is no credential here (ADR-0023 §1). The console authenticates with
+ * `docdoc_console`, an `HttpOnly` cookie the browser attaches to every
+ * same-origin request on its own — this file never reads it and never could
+ * (`check-no-persistence.mjs` forbids `document.cookie` under `src/`
+ * regardless). `body` is the only thing a caller still supplies.
  */
 export interface Options {
   body?: BodyInit;
-  credential?: string;
 }
 
+/**
+ * The header every non-`GET`/`HEAD` console request must carry (ADR-0023 §1).
+ *
+ * `SameSite=Strict` already stops a cross-site browser from attaching the
+ * session cookie; this closes the remaining gap — a plain cross-site form
+ * post cannot set a header — so a write cannot be forged from another site by
+ * either mechanism failing alone. Sent on every request rather than only
+ * those that write: a `GET` carrying it is harmless, and the alternative is a
+ * second code path to keep in step with `plan.method`.
+ */
+const CONSOLE_HEADER = "X-Docdoc-Console";
+
 export async function send(plan: RequestPlan, options: Options = {}): Promise<Response> {
-  const { body, credential } = options;
+  const { body } = options;
   const response = await fetch(toUrl(plan), {
     method: plan.method,
-    ...(credential === undefined ? {} : { headers: { Authorization: `Bearer ${credential}` } }),
+    headers: {
+      [CONSOLE_HEADER]: "1",
+      ...(plan.hasBody && body !== undefined ? { "Content-Type": "application/json" } : {}),
+    },
     ...(plan.hasBody && body !== undefined ? { body } : {}),
   });
 
   // `401` is not an error to this layer — it is an answer, and a well-formed
-  // one. The console's session model is what decides that a credential was
+  // one. The console's session model is what decides that a session was
   // refused; reporting it here would put that decision where no test reaches it.
+  //
+  // `204` has no body to read at all — `sign-out` and `revoke-credential`
+  // both answer this way — and calling `.json()` on one throws the same
+  // `SyntaxError` a truncated proxy response would, for a request that
+  // completed exactly as asked.
+  if (response.status === 204) {
+    return { ok: response.ok, status: response.status, body: null };
+  }
   try {
     return { ok: response.ok, status: response.status, body: await response.json() };
   } catch {

@@ -1,87 +1,100 @@
 /**
- * T020 — every intent addresses an allowed path, and none carries a credential.
+ * T102 (ADR-0023 §3) — every intent addresses `/v1/console`, and nothing else.
  *
- * The console's whole write surface is routes Milestone 10 already ships, and
- * this is where that is checked without a deployment: the allow-list is nine
- * path shapes, and a tenth appearing here is a defect rather than a feature.
+ * The console used to speak to `/v1/runs`, `/v1/admin/credentials`, and
+ * `/v1/admin/tenants` with a Bearer key resolving each call to one tenant.
+ * ADR-0023 §3 replaces that with its own route family, answering only to the
+ * session cookie: every intent now lives under `/v1/console`, and a tenant is
+ * a parameter rather than something a key resolves to.
  */
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import {
-  allIntents,
-  isAllowed,
-  requestFor,
-  resultHref,
-  writes,
-  type Intent,
-} from "../../src/console/model/client.ts";
+import { allIntents, isAllowed, requestFor } from "../../src/console/model/client.ts";
 
-test("every intent addresses an allowed path", () => {
+test("every intent addresses the console API and nothing else", () => {
   for (const intent of allIntents()) {
     const plan = requestFor(intent);
-    assert.ok(isAllowed(plan), `${intent.type} addresses ${plan.path}, which is not allowed`);
+    assert.ok(plan.path.startsWith("/v1/console/"), plan.path);
+    assert.ok(isAllowed(plan));
   }
+});
+
+test("sign-in is a POST with a body; who-am-i a GET; sign-out a DELETE", () => {
+  assert.deepEqual(requestFor({ type: "sign-in" }), {
+    method: "POST",
+    path: "/v1/console/session",
+    query: {},
+    hasBody: true,
+  });
+  assert.equal(requestFor({ type: "who-am-i" }).method, "GET");
+  assert.equal(requestFor({ type: "sign-out" }).method, "DELETE");
+});
+
+test("document erasure names its tenant in the path", () => {
+  assert.equal(
+    requestFor({ type: "erase-document", tenantId: "acme", blobId: "sha256:x" }).path,
+    "/v1/console/tenants/acme/documents/sha256%3Ax",
+  );
+});
+
+test("the run list carries the tenant filter only when set", () => {
+  assert.deepEqual(requestFor({ type: "list-runs" }).query, {});
+  assert.deepEqual(requestFor({ type: "list-runs", tenant: "acme" }).query, { tenant: "acme" });
 });
 
 test("an unknown path is not allowed", () => {
   assert.equal(isAllowed({ method: "GET", path: "/v1/anything", query: {}, hasBody: false }), false);
-  // The result endpoint is linked to and never requested (FR-022a). It is not on
-  // the allow-list, which is what makes that a property rather than a habit.
-  assert.equal(
-    isAllowed({ method: "GET", path: "/v1/jobs/x/result", query: {}, hasBody: false }),
-    false,
-  );
+  assert.equal(isAllowed({ method: "GET", path: "/v1/runs", query: {}, hasBody: false }), false);
 });
 
-test("no intent puts the credential anywhere in the request it constructs", () => {
-  // FR-008. The credential is a header supplied to `send`; nothing in a plan can
-  // carry it, and this fails if an intent ever grows a `key` or `token` query.
-  //
-  // The **query** and not the path: `/v1/admin/credentials` is a route whose
-  // name contains the word, which is the first thing this assertion caught about
-  // itself.
-  for (const intent of allIntents()) {
-    const query = new URLSearchParams(requestFor(intent).query).toString();
-    assert.doesNotMatch(query, /bearer|token|key|credential|secret/i);
-  }
+test("the run listing carries every filter that was set", () => {
+  const plan = requestFor({
+    type: "list-runs",
+    tenant: "acme",
+    status: "failed",
+    limit: 50,
+    cursor: "abc",
+  });
+  assert.deepEqual(plan.query, { tenant: "acme", status: "failed", limit: "50", cursor: "abc" });
 });
 
-test("the writes are exactly the four Milestone 10 routes", () => {
-  const written = allIntents()
-    .map(requestFor)
-    .filter(writes)
-    .map((plan) => `${plan.method} ${plan.path}`)
-    .sort();
-
-  assert.deepEqual(written, [
-    "DELETE /v1/admin/credentials/c",
-    "DELETE /v1/admin/documents/b",
-    "DELETE /v1/admin/tenants/t",
-    "POST /v1/admin/credentials",
-  ]);
+test("run reads are scoped by run id, not by tenant", () => {
+  assert.equal(requestFor({ type: "run-detail", runId: "r" }).path, "/v1/console/runs/r");
+  assert.equal(requestFor({ type: "run-delivery", runId: "r" }).path, "/v1/console/runs/r/delivery");
+  assert.equal(requestFor({ type: "run-result", runId: "r" }).path, "/v1/console/runs/r/result");
 });
 
-test("the run listing omits a filter nobody set", () => {
-  const plan = requestFor({ type: "list-runs" });
-  assert.deepEqual(plan.query, {});
+test("credential listing carries the tenant as a query parameter", () => {
+  assert.deepEqual(requestFor({ type: "list-credentials", tenant: "acme" }).query, {
+    tenant: "acme",
+  });
+});
 
-  const filtered = requestFor({ type: "list-runs", status: "failed", limit: 50, cursor: "abc" });
-  assert.deepEqual(filtered.query, { status: "failed", limit: "50", cursor: "abc" });
+test("tenant erasure names the tenant in the path", () => {
+  assert.equal(requestFor({ type: "erase-tenant", tenantId: "acme" }).path, "/v1/console/tenants/acme");
 });
 
 test("an identifier with a slash in it cannot escape its path segment", () => {
   const plan = requestFor({ type: "erase-tenant", tenantId: "a/../b" });
-  assert.equal(plan.path, "/v1/admin/tenants/a%2F..%2Fb");
+  assert.equal(plan.path, "/v1/console/tenants/a%2F..%2Fb");
   assert.ok(isAllowed(plan));
 });
 
-test("the result link is a link and nothing this client fetches", () => {
-  assert.equal(resultHref("p1"), "/v1/jobs/p1/result");
-  const intents: Intent["type"][] = allIntents().map((intent) => intent.type);
-  assert.equal(
-    intents.some((type) => type.includes("result")),
-    false,
-  );
+test("the writes are exactly the session, credential, and erasure actions", () => {
+  const written = allIntents()
+    .map(requestFor)
+    .filter((plan) => plan.method !== "GET")
+    .map((plan) => `${plan.method} ${plan.path}`)
+    .sort();
+
+  assert.deepEqual(written, [
+    "DELETE /v1/console/credentials/c",
+    "DELETE /v1/console/session",
+    "DELETE /v1/console/tenants/t",
+    "DELETE /v1/console/tenants/t/documents/b",
+    "POST /v1/console/credentials",
+    "POST /v1/console/session",
+  ]);
 });

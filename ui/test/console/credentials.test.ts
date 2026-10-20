@@ -1,6 +1,12 @@
 /**
- * T047 — the key is shown once, the listing never carries one, and the console
- * does not know which credential is its own.
+ * T102 (ADR-0023 §2) — the key is shown once, the listing never carries one,
+ * and issuing a credential sends no scope at all.
+ *
+ * `scope` used to be something the operator chose (an admin-scoped key stays
+ * CLI-only). ADR-0023 §2 drops the choice along with the field: a console
+ * session issues a plain tenant credential, and the body sent for it is
+ * `{tenant_id, label?}` with no `scopes` key at all — the server refuses any
+ * request that carries one, even an empty list.
  */
 
 import assert from "node:assert/strict";
@@ -13,6 +19,7 @@ import {
   disclosureFrom,
   initialCredentials,
   isActive,
+  issueBody,
   needsWarning,
   scopesOf,
   toRecords,
@@ -20,6 +27,11 @@ import {
   withDisclosure,
   withRecords,
 } from "../../src/console/model/credentials.ts";
+
+test("issuing a credential sends no scope", () => {
+  assert.deepEqual(JSON.parse(issueBody("acme", "")), { tenant_id: "acme" });
+  assert.deepEqual(JSON.parse(issueBody("acme", "ci")), { tenant_id: "acme", label: "ci" });
+});
 
 test("an issued key is held once and dropped on acknowledgement", () => {
   const disclosure = disclosureFrom({ key: "sk-live-1", credential_id: "c1" });
@@ -48,7 +60,7 @@ test("no listing row carries a key or a fragment of one", () => {
         credential_id: "c1",
         tenant_id: "acme",
         label: null,
-        scopes: ["admin"],
+        scopes: [],
         created_at: "2026-09-11T00:00:00Z",
         last_used_at: null,
         revoked_at: null,
@@ -75,12 +87,9 @@ test("active is derived from the fact the deployment records", () => {
   assert.equal(isActive({ ...base, revoked_at: "2026-09-11T01:00:00Z" }), false);
 });
 
-test("the self-revocation warning is general and shown once per session", () => {
-  // FR-026a. Identifying the console's own credential needs a route returning
-  // the caller's identity — a second new read, which SC-003 forbids. So the
-  // warning names the possibility rather than the row.
+test("the revocation warning is general and shown once per session", () => {
   assert.doesNotMatch(SELF_REVOCATION_WARNING, /this credential|that row|your key is/i);
-  assert.match(SELF_REVOCATION_WARNING, /may include/);
+  assert.match(SELF_REVOCATION_WARNING, /immediately/);
 
   const state = initialCredentials();
   assert.equal(needsWarning(state), true);
