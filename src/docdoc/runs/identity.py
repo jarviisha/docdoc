@@ -36,6 +36,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 __all__ = [
+    "CONSOLE_IDLE_ENV",
     "CORRECTION_RETENTION_DAYS_ENV",
     "CREDENTIAL_TTL_ENV",
     "DEFAULT_CREDENTIAL_TTL_SECONDS",
@@ -60,6 +61,7 @@ __all__ = [
     "LEASE_SECONDS_ENV",
     "LIMIT_RETENTION",
     "LIMIT_WINDOWS",
+    "LOCKOUT",
     "MAINTENANCE_BUDGET_ENV",
     "MAINTENANCE_INTERVAL_ENV",
     "MAX_ATTEMPTS_ENV",
@@ -69,6 +71,7 @@ __all__ = [
     "SWEEP_BATCH_ENV",
     "RunId",
     "backoff",
+    "configured_console_idle",
     "configured_correction_retention",
     "configured_credential_ttl",
     "configured_delivery_attempts",
@@ -85,11 +88,13 @@ __all__ = [
     "deadline",
     "delivery_allows_private",
     "monotonic_ms",
+    "new_console_token",
     "new_correction_id",
     "new_credential_id",
     "new_delivery_id",
     "new_erasure_id",
     "new_key_secret",
+    "new_password_salt",
     "new_run_id",
     "now",
     "window_start",
@@ -652,3 +657,56 @@ LIMIT_WINDOWS = {
 #: a `timedelta`, and this is the only module in the package permitted to import
 #: the name (FR-096a).
 LIMIT_RETENTION = max(LIMIT_WINDOWS.values()) * 2
+
+
+#: -- Console accounts (ADR-0023 §1) ------------------------------------------
+
+#: How long a console session may sit idle before it is refused server-side —
+#: the clock is the server's, not the cookie's claimed age. 900 seconds: long
+#: enough that reading one run does not cost a re-login, short enough that a
+#: laptop left open does not stay signed in for the day.
+DEFAULT_CONSOLE_IDLE_SECONDS = 900
+CONSOLE_IDLE_ENV = "DOCDOC_CONSOLE_IDLE_SECONDS"
+
+
+def configured_console_idle(explicit: int | None = None) -> timedelta:
+    """The idle bound: explicit argument, then environment, then 900 seconds.
+
+    Same precedence as `configured_lease`, and the same reasoning: an explicit
+    value is validated because an operator typing a flag is present to see the
+    refusal, and an unreadable environment value falls back rather than
+    refusing to start.
+    """
+    if explicit is not None:
+        return timedelta(seconds=_demand_positive(explicit, "--console-idle-seconds"))
+    seconds = _positive_int(os.environ.get(CONSOLE_IDLE_ENV, ""))
+    return (
+        timedelta(seconds=DEFAULT_CONSOLE_IDLE_SECONDS)
+        if seconds is None
+        else timedelta(seconds=seconds)
+    )
+
+
+def new_console_token() -> str:
+    """A fresh console session token, in plaintext, handed back exactly once.
+
+    The cookie carries this; the store never does. `sha256(token)`
+    (`docdoc.runs.principal.digest_of`) is what gets written, so a dumped
+    sessions table does not hand over a usable session.
+    """
+    return secrets.token_urlsafe(32)
+
+
+def new_password_salt() -> bytes:
+    """Sixteen fresh bytes for `docdoc.runs.console_accounts.hash_password`."""
+    return secrets.token_bytes(16)
+
+
+#: How long five consecutive failed logins lock a username, counted against the
+#: username regardless of where the attempts came from (ADR-0023 §1). A
+#: `timedelta`, so — exactly as `LIMIT_WINDOWS` is here rather than in
+#: `limits.py` — it lives with the clock rather than in `console_accounts.py`,
+#: which `tests/unit/test_runs_clock_confinement.py` does not permit to import
+#: the name (FR-096a). `console_accounts` imports the value rather than
+#: constructing it.
+LOCKOUT = timedelta(minutes=5)
