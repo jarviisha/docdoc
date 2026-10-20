@@ -533,3 +533,36 @@ def test_console_user_disable_is_idempotent(
     assert first_code == second_code == 0
     assert first["was_active"] is True
     assert "already disabled" in second_out
+
+
+def test_console_user_disable_of_an_unknown_user_fails(
+    dsn: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A typo in the username must not read as "already disabled"."""
+    from docdoc.cli import main
+
+    code = main(["console-user", "disable", "nobody-here", "--run-database-url", dsn])
+    captured = capsys.readouterr()
+
+    assert code != 0
+    assert "already disabled" not in captured.out
+    assert "nobody-here" in captured.err
+
+
+def test_console_user_password_stdin_trims_a_windows_line_ending(
+    dsn: str, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A password piped from a CRLF file must not keep the `\\r`."""
+    from datetime import UTC, datetime
+
+    from docdoc.cli.commands.console_user import _execute
+    from docdoc.runs.console_accounts import PostgresConsoleAccounts
+
+    monkeypatch.setattr("sys.stdin", io.StringIO("long enough pass\r\n"))
+    code, _ = run(
+        capsys, "console-user", "add", "dave", "--password-stdin", "--run-database-url", dsn
+    )
+    assert code == 0
+
+    accounts = PostgresConsoleAccounts(execute=_execute(dsn))
+    assert accounts.login("dave", "long enough pass", token="t", now=datetime.now(UTC))

@@ -296,6 +296,8 @@ def console_router() -> APIRouter:
         """
         from docdoc.api.app import _next_cursor, _no_runs, _page_request, _summary_fields
 
+        if tenant is not None and not TENANT_PATTERN.match(tenant):
+            return JSONResponse(status_code=422, content={"error": "invalid_tenant_id"})
         deployment = request.app.state.deployment
         if not deployment.has_runs:
             return _no_runs()

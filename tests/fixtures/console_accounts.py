@@ -23,6 +23,7 @@ from docdoc.runs.console_accounts import (
     ConsoleAccountError,
     after_failure,
     alive,
+    disabled_account_message,
     hash_password,
     locked,
     normalise_username,
@@ -65,24 +66,37 @@ class InMemoryConsoleAccounts:
     def add(self, username: str, password: str, *, salt: bytes, now: datetime) -> ConsoleAccount:
         validate_username(username)
         validate_password(password)
-        if username in self._users:
+        existing = self._users.get(username)
+        if existing is None:
+            self._users[username] = _User(
+                password_hash=hash_password(password, salt=salt), created_at=now
+            )
+            return ConsoleAccount(username=username, created_at=now, disabled_at=None)
+        if existing.disabled_at is None:
             raise ConsoleAccountError(f"a console account named {username!r} already exists")
-        self._users[username] = _User(
-            password_hash=hash_password(password, salt=salt), created_at=now
-        )
-        return ConsoleAccount(username=username, created_at=now, disabled_at=None)
+        existing.password_hash = hash_password(password, salt=salt)
+        existing.disabled_at = None
+        existing.failed_logins = 0
+        existing.locked_until = None
+        return ConsoleAccount(username=username, created_at=existing.created_at, disabled_at=None)
 
     def set_password(self, username: str, password: str, *, salt: bytes, now: datetime) -> None:
         validate_password(password)
         user = self._users.get(username)
         if user is None:
             raise ConsoleAccountError(f"no console account named {username!r}")
+        if user.disabled_at is not None:
+            raise ConsoleAccountError(disabled_account_message(username))
         user.password_hash = hash_password(password, salt=salt)
+        user.failed_logins = 0
+        user.locked_until = None
         self._drop_sessions_for(username)
 
     def disable(self, username: str, *, now: datetime) -> bool:
         user = self._users.get(username)
-        if user is None or user.disabled_at is not None:
+        if user is None:
+            raise ConsoleAccountError(f"no console account named {username!r}")
+        if user.disabled_at is not None:
             return False
         user.disabled_at = now
         self._drop_sessions_for(username)

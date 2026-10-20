@@ -133,8 +133,8 @@ itself has no account-management screen (§1).
 | `username` | `text` primary key | matches `^[a-z0-9_.-]{1,64}$`; compared as given — `login` lower-cases and trims what it is handed, `add` does not |
 | `password_hash` | `text` not null | `hashlib.scrypt`, self-describing: `scrypt$16384$8$1$<salt>$<key>`. **Never the password itself** |
 | `created_at` | `timestamptz` not null | |
-| `disabled_at` | `timestamptz`, nullable | set once by `disable`; there is no "enable" — a disabled account is re-created |
-| `failed_logins` | `int` not null, default `0` | consecutive failures; reset to `0` either on a successful login or by the same failure that sets `locked_until` (§1) |
+| `disabled_at` | `timestamptz`, nullable | set by `disable`; there is no "enable" — a disabled account is re-created by `console-user add`, which writes the new password and clears `disabled_at`, `failed_logins`, and `locked_until` on the same row. `passwd` refuses a disabled account and names `add` |
+| `failed_logins` | `int` not null, default `0` | consecutive failures; reset to `0` on a successful login, by the same failure that sets `locked_until` (§1), or by `passwd`/`add` (which also clear `locked_until`) |
 | `locked_until` | `timestamptz`, nullable | past this instant the account is no longer locked; the comparison is against the server's clock, never a value the client supplies |
 
 ### `console_sessions`

@@ -30,15 +30,19 @@ from tests.unit.test_console_accounts import (  # noqa: F401
     test_a_failure_during_a_lock_neither_clears_nor_extends_it,
     test_activity_extends_the_session,
     test_add_refuses_bad_usernames_short_passwords_and_duplicates,
+    test_add_revives_a_disabled_account_with_the_new_password,
     test_an_idle_session_is_refused_and_removed,
     test_disable_and_passwd_end_live_sessions,
-    test_disable_is_false_for_an_unknown_or_already_disabled_account,
+    test_disable_raises_for_an_unknown_user_and_is_false_when_already_disabled,
     test_five_failures_lock_for_five_minutes,
     test_lock_expiry_resets_the_counter_so_one_more_failure_does_not_relock,
     test_login_then_resolve_names_the_operator,
     test_logout_ends_a_session,
     test_logout_of_an_unknown_token_is_a_no_op,
+    test_set_password_clears_a_lock,
+    test_set_password_on_a_disabled_account_raises_naming_add,
     test_set_password_on_an_unknown_user_raises,
+    test_set_password_resets_the_failure_counter,
 )
 
 from docdoc.runs import migrations

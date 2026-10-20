@@ -64,6 +64,7 @@ __all__ = [
     "PostgresConsoleAccounts",
     "after_failure",
     "alive",
+    "disabled_account_message",
     "hash_password",
     "locked",
     "normalise_username",
@@ -186,6 +187,14 @@ def verify_dummy_password(password: str) -> None:
     verify_password(password, _DUMMY_HASH)
 
 
+def disabled_account_message(username: str) -> str:
+    """Why `set_password` refuses a disabled account, and the way back."""
+    return (
+        f"console account {username!r} is disabled; restore it with "
+        f"`docdoc console-user add {username}`, which sets a new password"
+    )
+
+
 def validate_username(username: str) -> None:
     """Raise `ConsoleAccountError` unless `username` matches `USERNAME_PATTERN`.
 
@@ -279,17 +288,20 @@ class ConsoleAccounts(Protocol):
     """
 
     def add(self, username: str, password: str, *, salt: bytes, now: datetime) -> ConsoleAccount:
-        """A new account. Raises on a bad username, a short password, or a
-        duplicate."""
+        """A new account, or a disabled one revived with this password (its
+        lock and failure counter cleared). Raises on a bad username, a short
+        password, or an active duplicate."""
         ...
 
     def set_password(self, username: str, password: str, *, salt: bytes, now: datetime) -> None:
-        """Replace an account's password. Raises on an unknown user; deletes
-        that user's sessions."""
+        """Replace an account's password and clear its lock and failure
+        counter. Raises on an unknown or disabled user; deletes that user's
+        sessions."""
         ...
 
     def disable(self, username: str, *, now: datetime) -> bool:
-        """`True` if the account was active. Deletes that user's sessions."""
+        """`True` if the account was active, `False` if already disabled.
+        Raises on an unknown user. Deletes that user's sessions."""
         ...
 
     def accounts(self) -> tuple[ConsoleAccount, ...]:
@@ -335,7 +347,10 @@ class PostgresConsoleAccounts:
         row = self.execute(
             "INSERT INTO console_users (username, password_hash, created_at) "
             "VALUES (%s, %s, %s) "
-            "ON CONFLICT (username) DO NOTHING "
+            "ON CONFLICT (username) DO UPDATE SET "
+            "password_hash = EXCLUDED.password_hash, disabled_at = NULL, "
+            "failed_logins = 0, locked_until = NULL "
+            "WHERE console_users.disabled_at IS NOT NULL "
             "RETURNING username, created_at, disabled_at",
             (username, hash_password(password, salt=salt), now),
             fetch="one",
@@ -349,12 +364,15 @@ class PostgresConsoleAccounts:
     def set_password(self, username: str, password: str, *, salt: bytes, now: datetime) -> None:
         validate_password(password)
         rows = self.execute(
-            "UPDATE console_users SET password_hash = %s WHERE username = %s RETURNING username",
+            "UPDATE console_users SET password_hash = %s, failed_logins = 0, locked_until = NULL "
+            "WHERE username = %s AND disabled_at IS NULL RETURNING username",
             (hash_password(password, salt=salt), username),
             fetch="all",
         )
         if not rows:
-            raise ConsoleAccountError(f"no console account named {username!r}")
+            if not self._exists(username):
+                raise ConsoleAccountError(f"no console account named {username!r}")
+            raise ConsoleAccountError(disabled_account_message(username))
         self.execute("DELETE FROM console_sessions WHERE username = %s", (username,))
 
     def disable(self, username: str, *, now: datetime) -> bool:
@@ -366,9 +384,19 @@ class PostgresConsoleAccounts:
             fetch="all",
         )
         if not rows:
+            if not self._exists(username):
+                raise ConsoleAccountError(f"no console account named {username!r}")
             return False
         self.execute("DELETE FROM console_sessions WHERE username = %s", (username,))
         return True
+
+    def _exists(self, username: str) -> bool:
+        return (
+            self.execute(
+                "SELECT 1 FROM console_users WHERE username = %s", (username,), fetch="one"
+            )
+            is not None
+        )
 
     def accounts(self) -> tuple[ConsoleAccount, ...]:
         rows = self.execute(

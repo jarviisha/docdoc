@@ -62,6 +62,7 @@ def run(args: argparse.Namespace, settings: Settings) -> Rendering:
 
 
 def _add(args: argparse.Namespace, accounts: PostgresConsoleAccounts) -> Rendering:
+    """Create an account, or restore a disabled one with a new password."""
     password = _read_password(args)
     account = accounts.add(args.username, password, salt=new_password_salt(), now=clock())
     return Rendering(
@@ -82,7 +83,11 @@ def _passwd(args: argparse.Namespace, accounts: PostgresConsoleAccounts) -> Rend
 
 
 def _disable(args: argparse.Namespace, accounts: PostgresConsoleAccounts) -> Rendering:
-    """Idempotent: disabling a disabled account succeeds and changes nothing."""
+    """Idempotent: disabling a disabled account succeeds and changes nothing.
+
+    An unknown username is an error (`ConsoleAccountError`, non-zero exit),
+    so a typo never reads as "already disabled".
+    """
     was_active = accounts.disable(args.username, now=clock())
     return Rendering(
         code=0,
@@ -122,15 +127,15 @@ def _list(accounts: PostgresConsoleAccounts) -> Rendering:
 def _read_password(args: argparse.Namespace) -> str:
     """The new password, from stdin for a script or a matched double prompt.
 
-    ``--password-stdin`` reads exactly one line and trims only the newline —
-    a password is whatever the line held, including any leading or trailing
-    space somebody meant to type. Without it, ``getpass.getpass`` is run
-    twice and the two must agree, which is what catches a typo before an
-    account is created or changed rather than after, when the only sign of
-    one is a login that no longer works.
+    ``--password-stdin`` reads exactly one line and trims only its line
+    ending (``\\n`` or ``\\r\\n``) — a password is whatever the line held,
+    including any leading or trailing space somebody meant to type. Without
+    it, ``getpass.getpass`` is run twice and the two must agree, which is
+    what catches a typo before an account is created or changed rather than
+    after, when the only sign of one is a login that no longer works.
     """
     if getattr(args, "password_stdin", False):
-        return sys.stdin.readline().rstrip("\n")
+        return sys.stdin.readline().rstrip("\r\n")
 
     first = getpass.getpass("New password: ")
     second = getpass.getpass("Confirm new password: ")

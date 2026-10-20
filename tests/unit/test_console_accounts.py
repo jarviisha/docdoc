@@ -128,11 +128,53 @@ def test_logout_of_an_unknown_token_is_a_no_op(accounts):
     accounts.logout("never issued")  # does not raise
 
 
-def test_disable_is_false_for_an_unknown_or_already_disabled_account(accounts):
-    assert accounts.disable("nobody", now=NOW) is False
+def test_disable_raises_for_an_unknown_user_and_is_false_when_already_disabled(accounts):
+    with pytest.raises(ConsoleAccountError):
+        accounts.disable("nobody", now=NOW)
     accounts.add("alice", "long enough pass", salt=SALT, now=NOW)
     assert accounts.disable("alice", now=NOW) is True
     assert accounts.disable("alice", now=NOW) is False
+
+
+def test_add_revives_a_disabled_account_with_the_new_password(accounts):
+    """Migration 0009 promises a disabled account is re-created by `add`."""
+    accounts.add("alice", "long enough pass", salt=SALT, now=NOW)
+    for _ in range(3):
+        accounts.login("alice", "wrong password!", token="x", now=NOW)
+    accounts.disable("alice", now=NOW)
+    revived = accounts.add("alice", "a brand new pass", salt=SALT, now=NOW)
+    assert revived.username == "alice"
+    assert revived.disabled_at is None
+    assert [a.disabled_at for a in accounts.accounts()] == [None]
+    assert not accounts.login("alice", "long enough pass", token="old", now=NOW)
+    # The failure counter was reset: three more failures (six in all) do not lock.
+    for _ in range(3):
+        accounts.login("alice", "wrong password!", token="x", now=NOW)
+    assert accounts.login("alice", "a brand new pass", token="t", now=NOW)
+
+
+def test_set_password_on_a_disabled_account_raises_naming_add(accounts):
+    accounts.add("alice", "long enough pass", salt=SALT, now=NOW)
+    accounts.disable("alice", now=NOW)
+    with pytest.raises(ConsoleAccountError, match="console-user add"):
+        accounts.set_password("alice", "another long pass", salt=SALT, now=NOW)
+
+
+def test_set_password_clears_a_lock(accounts):
+    accounts.add("alice", "long enough pass", salt=SALT, now=NOW)
+    for _ in range(5):
+        accounts.login("alice", "wrong password!", token="x", now=NOW)
+    accounts.set_password("alice", "another long pass", salt=SALT, now=NOW)
+    assert accounts.login("alice", "another long pass", token="t", now=NOW)
+
+
+def test_set_password_resets_the_failure_counter(accounts):
+    accounts.add("alice", "long enough pass", salt=SALT, now=NOW)
+    for _ in range(4):
+        accounts.login("alice", "wrong password!", token="x", now=NOW)
+    accounts.set_password("alice", "another long pass", salt=SALT, now=NOW)
+    accounts.login("alice", "wrong password!", token="x", now=NOW)
+    assert accounts.login("alice", "another long pass", token="t", now=NOW)
 
 
 def test_set_password_on_an_unknown_user_raises(accounts):

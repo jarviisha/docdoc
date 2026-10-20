@@ -286,6 +286,7 @@ def test_an_invalid_tenant_id_is_refused_on_every_tenant_route(
     bad = "Not Valid!"
 
     for response in (
+        client.get("/v1/console/runs", params={"tenant": bad}, headers=cookie),
         client.get("/v1/console/credentials", params={"tenant": bad}, headers=cookie),
         client.post("/v1/console/credentials", json={"tenant_id": bad}, headers=_headers(cookie)),
         client.delete(f"/v1/console/tenants/{bad}", headers=_headers(cookie)),
@@ -294,6 +295,7 @@ def test_an_invalid_tenant_id_is_refused_on_every_tenant_route(
         ),
     ):
         assert response.status_code == 422, response.text
+        assert response.json() == {"error": "invalid_tenant_id"}
 
 
 def test_admin_actions_are_audited_with_the_operator(

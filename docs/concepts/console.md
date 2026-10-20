@@ -36,7 +36,7 @@ by the person it would have warned.
    it from the next request, then returns to the form with "Your session ended. Sign in again."
 4. **No accessibility conformance level is claimed.** What is guaranteed is narrower and actually
    kept: every control carries an accessible name and is operable by keyboard alone — the erasure
-   confirmation and the credential entry included — and state changes reach assistive technology
+   confirmation and the sign-in form included — and state changes reach assistive technology
    rather than only the eye. A standard nothing here verifies would be a claim, not a guarantee.
 5. **Behind a TLS-terminating proxy, run `uvicorn --proxy-headers`.** The session cookie carries
    `Secure` only when the request the application sees is `https`; behind a proxy that is true only
@@ -61,8 +61,8 @@ the form; every request the page then makes goes to `/v1/console`.
 
 **The session** is a cookie named `docdoc_console` — `HttpOnly`, `SameSite=Strict`,
 `Path=/v1/console`, and `Secure` over `https`. The server stores only a hash of it. Every request
-under `/v1/console` that is not a `GET` must also carry `X-Docdoc-Console: 1`, or it is refused with
-`403`; the page sends it on every request.
+under `/v1/console` that is not a `GET` or `HEAD` must also carry `X-Docdoc-Console: 1`, or it is
+refused with `403`; the page sends it on every request.
 
 **A refused sign-in** says so in one sentence, the same for a wrong username, a wrong password, a
 locked account, and a disabled one. Five failures in a row lock an account for five minutes.
