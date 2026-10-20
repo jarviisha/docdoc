@@ -110,6 +110,9 @@ def test_a_run_carries_the_six_fields_a_list_may_show(
             "finished_at": run.updated_at.isoformat(),
             "blob_id": run.blob_id,
             "schema_identity": "invoice@1",
+            # 014 (ADR-0022): which kind of run this row is, so a list mixing
+            # OCR and extraction runs can say which is which.
+            "kind": "extraction",
             "processing_id": run.processing_id,
         }
     ]
