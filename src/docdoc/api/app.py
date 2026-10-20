@@ -214,6 +214,11 @@ class _Deployment:
         )
         self._corrections = corrections
         self._console = console
+        #: The console's idle bound (ADR-0023 §1), read once like every other
+        #: configuration value here rather than per gated request.
+        from docdoc.runs.identity import configured_console_idle
+
+        self.console_idle = configured_console_idle()
         self._routing = routing
         #: Distinguishes "not read yet" from "read, and there is none". Without
         #: it a deployment with no policy would re-read the environment on every
@@ -727,7 +732,10 @@ def _require_credential_everywhere_else(app: FastAPI) -> None:
         if request.url.path in _UNAUTHENTICATED or _is_console_asset(request.url.path):
             return await call_next(request)  # type: ignore[no-any-return]
         if is_console_api(request.url.path):
-            refused = console_gate(request, _deployment_of(request).console_accounts())
+            deployment = _deployment_of(request)
+            refused = console_gate(
+                request, deployment.console_accounts(), idle=deployment.console_idle
+            )
             if refused is not None:
                 return refused
             return await call_next(request)  # type: ignore[no-any-return]

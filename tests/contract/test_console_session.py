@@ -66,14 +66,22 @@ def client(tmp_path: Path, accounts: InMemoryConsoleAccounts) -> TestClient:
 
 
 @pytest.fixture
-def signed_in(client: TestClient) -> TestClient:
+def signed_in(client: TestClient) -> tuple[TestClient, dict[str, str]]:
+    """The client after a login, and the session cookie as an explicit header.
+
+    The header is what makes the two tests below assert the *server*: the
+    client's cookie jar honours `Path=/v1/console` and `Max-Age=0`, so relying
+    on it would pass even if the server opened `/v1/runs` to a session or kept
+    a logged-out one alive.
+    """
     r = client.post(
         "/v1/console/session",
         json={"username": "alice", "password": "long enough pass"},
         headers=H,
     )
     assert r.status_code == 200
-    return client
+    token = r.cookies["docdoc_console"]
+    return client, {"Cookie": f"docdoc_console={token}"}
 
 
 def test_login_sets_an_httponly_strict_cookie(client: TestClient) -> None:
@@ -142,15 +150,28 @@ def test_a_bearer_key_never_opens_the_console_api(client: TestClient) -> None:
         assert "www-authenticate" not in r.headers
 
 
-def test_a_console_session_never_opens_the_rest_of_v1(signed_in: TestClient) -> None:
-    assert signed_in.get("/v1/runs").status_code == 401
+def test_a_console_session_never_opens_the_rest_of_v1(
+    signed_in: tuple[TestClient, dict[str, str]],
+) -> None:
+    client, cookie = signed_in
+    assert client.get("/v1/console/session", headers=cookie).status_code == 200
+    assert client.get("/v1/runs", headers=cookie).status_code == 401
 
 
-def test_logout_ends_the_session(signed_in: TestClient) -> None:
-    r = signed_in.delete("/v1/console/session", headers=H)
+def test_logout_ends_the_session(signed_in: tuple[TestClient, dict[str, str]]) -> None:
+    client, cookie = signed_in
+    r = client.delete("/v1/console/session", headers={**H, **cookie})
     assert r.status_code == 204
     assert "max-age=0" in r.headers["set-cookie"].lower()
-    assert signed_in.get("/v1/console/session").status_code == 401
+    # The old token, replayed: the server must have ended it, not just the jar.
+    assert client.get("/v1/console/session", headers=cookie).status_code == 401
+
+
+def test_an_overlong_password_is_refused_before_hashing(client: TestClient) -> None:
+    r = client.post(
+        "/v1/console/session", json={"username": "alice", "password": "x" * 1025}, headers=H
+    )
+    assert r.status_code == 422
 
 
 def test_without_a_run_database_the_console_says_so(tmp_path: Path) -> None:

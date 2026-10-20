@@ -20,13 +20,16 @@ This module does not import `docdoc.api.app`: the deployment is read off
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from docdoc.runs import identity
+
+if TYPE_CHECKING:
+    from datetime import timedelta
 
 __all__ = [
     "CONSOLE_API_PREFIX",
@@ -63,7 +66,7 @@ def is_console_api(path: str) -> bool:
     return path == CONSOLE_API_PREFIX or path.startswith(f"{CONSOLE_API_PREFIX}/")
 
 
-def console_gate(request: Request, accounts: Any) -> JSONResponse | None:
+def console_gate(request: Request, accounts: Any, *, idle: timedelta) -> JSONResponse | None:
     """The console's credential check, in ADR-0023's order; `None` lets it through.
 
     1. No accounts store means no run-state database: 503, naming the fix.
@@ -75,6 +78,8 @@ def console_gate(request: Request, accounts: Any) -> JSONResponse | None:
        would not answer it.
 
     On success sets `request.state.operator` to the signed-in username.
+    `idle` is the deployment's bound, read once at startup rather than per
+    request (`_Deployment.console_idle`).
     """
     if accounts is None:
         return _refusal(
@@ -92,11 +97,7 @@ def console_gate(request: Request, accounts: Any) -> JSONResponse | None:
     if request.method == "POST" and request.url.path == _SESSION_PATH:
         return None
     token = request.cookies.get(CONSOLE_COOKIE)
-    username = (
-        accounts.resolve(token, now=identity.now(), idle=identity.configured_console_idle())
-        if token
-        else None
-    )
+    username = accounts.resolve(token, now=identity.now(), idle=idle) if token else None
     if username is None:
         return _refusal(401, "ConsoleSessionRequired", "sign in to the console")
     request.state.operator = username
@@ -125,8 +126,10 @@ Operator = Annotated[str, Depends(operator_of)]
 
 
 class _Login(BaseModel):
-    username: str
-    password: str
+    #: Bounded so an unauthenticated caller cannot hand scrypt an arbitrarily
+    #: large input; nobody's password or username is near either bound.
+    username: str = Field(max_length=256)
+    password: str = Field(max_length=1024)
 
 
 def _accounts(request: Request) -> Any:
@@ -137,8 +140,11 @@ def console_router() -> APIRouter:
     """`/v1/console`: sign in, who am I, sign out (ADR-0023 §1)."""
     router = APIRouter(prefix=CONSOLE_API_PREFIX)
 
+    # Plain `def`, not `async def`: `login` runs scrypt and a blocking database
+    # call, and FastAPI runs a sync handler in its threadpool. On the event loop
+    # an unauthenticated caller posting logins would stall every other request.
     @router.post("/session")
-    async def sign_in(request: Request, body: _Login) -> Any:
+    def sign_in(request: Request, body: _Login) -> Any:
         """Open a session, or the one refusal every failure shares.
 
         Wrong username, wrong password, locked, and disabled all get the same
@@ -173,7 +179,7 @@ def console_router() -> APIRouter:
         return {"username": operator}
 
     @router.delete("/session", status_code=204)
-    async def sign_out(request: Request, operator: Operator) -> Response:
+    def sign_out(request: Request, operator: Operator) -> Response:
         _accounts(request).logout(request.cookies[CONSOLE_COOKIE])
         response = Response(status_code=204)
         response.delete_cookie(
