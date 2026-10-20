@@ -173,7 +173,10 @@ def _policy_from(entry: Any, path: Any, where: str) -> LimitPolicy:
     # second source of truth this module has otherwise avoided. It is read by the
     # HTTP layer, which is the only thing that grants a priority; accepted here so
     # a file carrying one is not rejected as a typo (FR-087b).
-    unknown = set(entry) - counted - {"priority_ceiling"}
+    #
+    # `ocr_queue` (014, ADR-0022) is read the same way and for the same reason:
+    # the HTTP layer counts OCR runs at submission, and this limiter never does.
+    unknown = set(entry) - counted - {"priority_ceiling", "ocr_queue"}
     if unknown:
         # A misspelled limit is a limit that is not applied, and silence about it
         # is how a deployment believes it is protected and is not.
@@ -374,8 +377,11 @@ class PostgresLimiter:
         """Counted from `runs`, never stored (module docstring)."""
         del now
         row = self.execute(
+            # Extraction runs only: OCR runs are bounded by their own caps, and
+            # an OCR backlog must not refuse a tenant's extraction (ADR-0022).
             "SELECT count(*) AS active FROM runs "
-            "WHERE tenant_id = %s AND status IN ('queued', 'running')",
+            "WHERE tenant_id = %s AND status IN ('queued', 'running') "
+            "AND kind = 'extraction'",
             (tenant_id,),
             fetch="one",
         )

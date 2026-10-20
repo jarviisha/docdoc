@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     from datetime import datetime
     from uuid import UUID
 
-    from docdoc.runs.model import Run
+    from docdoc.runs.model import Run, RunKind
     from docdoc.runs.queue import RunQueue
 
 __all__ = [
@@ -165,6 +165,7 @@ def sweep(
     batch: int,
     corrections: CorrectionStore | None = None,
     policy: str = POLICY_RETENTION,
+    kind: RunKind | None = None,
 ) -> SweepReport:
     """Remove one batch of expired runs and the content only they held.
 
@@ -174,6 +175,12 @@ def sweep(
     Bounded by ``batch`` (FR-015) and idempotent (FR-002): a second call over the
     same state removes nothing, and a call interrupted at any step is completed
     by the next one.
+
+    ``kind``, when given, sweeps only runs of that kind. The worker passes
+    ``ocr`` when run retention is off, so OCR results age out on their own
+    schedule without touching an extraction run (ADR-0022). Survivorship is
+    still computed over **every** surviving run of the tenant, whatever its
+    kind: a blob an extraction run names outlives the OCR run that shared it.
     """
     # Two passes, and the second is what keeps a batch from stalling.
     #
@@ -183,14 +190,14 @@ def sweep(
     # pinned set is fed back through `exclude` and a second, equally bounded
     # question is asked -- which is what that parameter is for.
     pinner = corrections or NullCorrectionStore()
-    first = queue.expiring(now=now, limit=batch)
+    first = queue.expiring(now=now, limit=batch, kind=kind)
     if not first:
         return SweepReport()
 
     pinned = pinner.pinned_runs([run.run_id for run in first], at=now)
     removable = [run for run in first if run.run_id not in pinned]
     if pinned and len(removable) < batch:
-        refill = queue.expiring(now=now, limit=batch - len(removable), exclude=pinned)
+        refill = queue.expiring(now=now, limit=batch - len(removable), exclude=pinned, kind=kind)
         still_pinned = pinner.pinned_runs([run.run_id for run in refill], at=now)
         removable += [run for run in refill if run.run_id not in still_pinned]
 

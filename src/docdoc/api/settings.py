@@ -26,6 +26,8 @@ __all__ = [
     "CONSOLE_ROOT_ENV",
     "CORRECTION_RETENTION_DAYS_ENV",
     "DEFAULT_MAX_REQUEST_BYTES",
+    "DEFAULT_OCR_QUEUE_PER_TENANT",
+    "DEFAULT_OCR_QUEUE_TOTAL",
     "DELIVERY_ALLOW_PRIVATE_ENV",
     "DELIVERY_ATTEMPTS_ENV",
     "DELIVERY_BACKOFF_ENV",
@@ -39,6 +41,9 @@ __all__ = [
     "LIMIT_TOKENS_ENV",
     "MAINTENANCE_BUDGET_ENV",
     "MAINTENANCE_INTERVAL_ENV",
+    "OCR_QUEUE_PER_TENANT_ENV",
+    "OCR_QUEUE_TOTAL_ENV",
+    "OCR_RETENTION_HOURS_ENV",
     "OTLP_ENDPOINT_ENV",
     "OTLP_HEADERS_ENV",
     "PRIORITY_CEILING_ENV",
@@ -138,6 +143,17 @@ LIMIT_TOKENS_ENV = "DOCDOC_LIMIT_TOKENS_PER_PERIOD"
 
 RUN_CREDENTIAL_TTL_ENV = _identity.CREDENTIAL_TTL_ENV
 RUN_RETENTION_DAYS_ENV = _identity.RETENTION_DAYS_ENV
+#: 014 (ADR-0022): the two OCR caps. Both are **on with no configuration**:
+#: how many OCR runs one tenant may have queued or running, and how many the
+#: deployment holds in total. Over the first is 429 ("your share is full"), over
+#: the second is 503 ("docdoc is overloaded"), each with `Retry-After`. A
+#: tenant's own cap can be raised or lowered with `ocr_queue` in the limits file.
+OCR_QUEUE_PER_TENANT_ENV = "DOCDOC_OCR_QUEUE_PER_TENANT"
+DEFAULT_OCR_QUEUE_PER_TENANT = 100
+OCR_QUEUE_TOTAL_ENV = "DOCDOC_OCR_QUEUE_TOTAL"
+DEFAULT_OCR_QUEUE_TOTAL = 500
+#: 014 (ADR-0022): OCR results, in hours from finishing, **on by default**.
+OCR_RETENTION_HOURS_ENV = _identity.OCR_RETENTION_HOURS_ENV
 RUN_STARVATION_SECONDS_ENV = _identity.STARVATION_SECONDS_ENV
 RUN_SWEEP_BATCH_ENV = _identity.SWEEP_BATCH_ENV
 

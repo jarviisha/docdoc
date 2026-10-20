@@ -67,6 +67,13 @@ class _Store:
     def __init__(self, *, ungrounded: bool) -> None:
         self._ungrounded = ungrounded
 
+    def envelope(self, artifact_id: str):
+        """014: `_terminal` asks which stage wrote an id before reading it as a job."""
+        from types import SimpleNamespace
+
+        stage = "ground" if artifact_id.startswith("sha256:g") else "validate"
+        return SimpleNamespace(stage=stage)
+
     def get(self, artifact_id: str, *, model=None, artifact_format_version=None):
         if artifact_id.startswith("sha256:g"):
             status = "ungrounded" if self._ungrounded else "exact"

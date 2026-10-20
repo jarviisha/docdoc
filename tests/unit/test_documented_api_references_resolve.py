@@ -261,6 +261,9 @@ CONFIG_MODULES = {
         # Milestone 9's lease pair is.
         "RUN_CREDENTIAL_TTL_ENV",
         "RUN_RETENTION_DAYS_ENV",
+        "OCR_RETENTION_HOURS_ENV",
+        "OCR_QUEUE_PER_TENANT_ENV",
+        "OCR_QUEUE_TOTAL_ENV",
         "RUN_SWEEP_BATCH_ENV",
         "RUN_STARVATION_SECONDS_ENV",
         # The four limits and the per-tenant override file.
@@ -389,6 +392,11 @@ CONFIG_DOCUMENTS = (
     # added in Task 2).
     "docs/superpowers/specs/2026-10-19-ocr-gateway-design.md",
     "docs/superpowers/plans/2026-10-19-ocr-gateway.md",
+    # 014's design and plan name the three OCR settings (DOCDOC_OCR_QUEUE_*,
+    # DOCDOC_OCR_RETENTION_HOURS) defined in `docdoc.api.settings`.
+    "docs/superpowers/specs/2026-10-19-async-ocr-queue-design.md",
+    "docs/superpowers/plans/2026-10-20-async-ocr-queue.md",
+    "docs/adr/0022-asynchronous-ocr-through-a-bounded-queue.md",
     # ADR-0021 named only the `DOCDOC_*_FILE` wildcard idiom until the 012
     # review (Finding 10) replaced it with the literal variable name, so it
     # no longer qualifies for that exemption -- a decision record that names

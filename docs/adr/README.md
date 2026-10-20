@@ -27,6 +27,7 @@ it would be decided explicitly rather than settled by whichever code landed firs
 | [0019](0019-operations-console-boundary.md) | An operations console is permitted; a review platform stays deferred | Accepted; requires constitution v1.9.0 | — (Milestone 11 design) |
 | [0020](0020-retire-the-grounding-viewer.md) | The grounding viewer is retired; `ui/` builds the console only | Accepted; retires `specs/011` FR-022b, FR-040, SC-012 | — |
 | [0021](0021-caller-named-parsers-and-ocr-endpoints.md) | A request may name a configured parser; OCR endpoints are configured, not coded | Accepted; requires constitution v1.10.0 | — |
+| [0022](0022-asynchronous-ocr-through-a-bounded-queue.md) | OCR is a run kind, accepted into a bounded queue | Accepted; requires constitution v1.11.0; amends 0021 | — |
 
 ## Conventions
 

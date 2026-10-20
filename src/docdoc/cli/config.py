@@ -255,6 +255,17 @@ ENVIRONMENT_ONLY: dict[str, str] = {
         "submits nothing and the worker enforces nothing (FR-045)"
     ),
     "DOCDOC_LIMIT_CONCURRENT_RUNS": "the same, and counted from the runs table",
+    # 014 (ADR-0022). All three are read by `POST /v1/ocr` and by nothing the
+    # command line runs: the caps are counted at HTTP submission, and an OCR
+    # run's retention is stamped there too.
+    "DOCDOC_OCR_QUEUE_PER_TENANT": (
+        "a per-tenant OCR cap enforced at HTTP submission; the command line submits no OCR run"
+    ),
+    "DOCDOC_OCR_QUEUE_TOTAL": "the same, summed over every tenant",
+    "DOCDOC_OCR_RETENTION_HOURS": (
+        "stamped on an OCR run when `POST /v1/ocr` accepts it; the command line "
+        "accepts none, and the sweep reads the deadline already on the row"
+    ),
     "DOCDOC_LIMIT_RUNS_PER_PERIOD": "the same",
     "DOCDOC_LIMIT_TOKENS_PER_PERIOD": "the same",
     "DOCDOC_LIMITS_FILE": (

@@ -434,6 +434,32 @@ Templates: no changes required — the plan-template gate table references
 Principle XI by number and remains accurate.
 
 ---
+AMENDMENT 1.10.0 → 1.11.0 (2026-10-20)
+Bump rationale: MINOR — guidance is materially widened. A composition the literal
+Development Compose sentence excluded is now permitted. Nothing previously
+compliant becomes non-compliant: a composition with one `worker` service still
+satisfies it.
+
+Principles affected: XI (MVP Discipline and Scale Through Boundaries), via the
+MVP Scope Constraints "Deferred technology" paragraph.
+
+  - **The worker process type may appear as more than one service (ADR-0022).**
+    014 makes OCR a run kind and lets a worker claim only one kind
+    (`docdoc worker --kind ocr|extraction`), so an OCR backlog cannot delay
+    extraction. Demonstrating that needs two worker services in the
+    composition, which "contains only api, worker, postgres, and object
+    storage" forbids under a literal reading. Each is the docdoc image at the
+    worker entry point -- no new dependency, no new process type -- which is
+    the same argument v1.6.0 accepted for `worker` itself, and recorded the
+    same way: as an amendment, not as a reading of the old sentence.
+
+  - Still forbidden: any service that is not api, a worker, postgres, or object
+    storage. A worker service distinguished by anything other than the run kind
+    it claims is not covered by this amendment.
+
+Templates: no changes required.
+
+---
 AMENDMENT 1.9.0 → 1.10.0 (2026-10-19)
 Bump rationale: MINOR — guidance is materially widened in two principles. Nothing
 previously compliant becomes non-compliant: no request names a parser today, so
@@ -856,7 +882,8 @@ ADR-0005, and the **kernel** alone depends on `pydantic` only.
 appear in the MVP without an approved amendment: Kafka, Temporal, Kubernetes, multi-region
 deployment, distributed DAG engines, vector databases, RAG infrastructure, workflow/BPM engines,
 semantic chunking, EditMap-style normalization, automatic model training, multi-tenant billing,
-and a full review UI. Development Compose contains only api, worker, postgres, and object storage.
+and a full review UI. Development Compose contains only api, worker, postgres, and object storage;
+the worker may appear as one service per run kind it claims (`docdoc worker --kind`, v1.11.0).
 
 "Multi-tenant billing" above forbids **billing**, not tenant isolation. Scoping runs, blobs, and
 artifacts to a tenant so that one customer cannot read another's is permitted and, from Milestone 9,
@@ -992,4 +1019,4 @@ insufficient. Unjustified violations are rejected regardless of the code's quali
 **Precedence for unresolved items.** Where an "Open Constitutional Decision" is unresolved,
 implementers MUST NOT resolve it silently in code. Raise it, decide it, record it.
 
-**Version**: 1.10.0 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-10-19
+**Version**: 1.11.0 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-10-20

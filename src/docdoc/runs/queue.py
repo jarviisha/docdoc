@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from datetime import datetime, timedelta
     from uuid import UUID
 
-    from docdoc.runs.model import Run, RunOutcome, RunStatus, Tombstone
+    from docdoc.runs.model import Run, RunKind, RunOutcome, RunStatus, Tombstone
 
 __all__ = ["RunQueue", "RunSpec"]
 
@@ -46,7 +46,7 @@ class RunSpec(Protocol):
 
     tenant_id: str
     blob_id: str
-    schema_identity: str
+    schema_identity: str | None
     request_id: str | None
     idempotency_key: str | None
 
@@ -61,6 +61,11 @@ class RunSpec(Protocol):
     #: used to escalate past another tenant's queue (FR-087b).
     priority: int
     callback_id: UUID | None
+    #: 014, read with `getattr` on the same terms: a spec that names no kind is
+    #: an extraction run, and only an OCR spec carries a parser and a language.
+    kind: str
+    ocr_parser: str | None
+    ocr_language: str | None
 
 
 class RunQueue(Protocol):
@@ -95,8 +100,15 @@ class RunQueue(Protocol):
         lease: timedelta,
         max_attempts: int,
         starvation: timedelta | None = None,
+        kind: RunKind | None = None,
     ) -> Run | None:
         """Take the oldest eligible run, or `None`.
+
+        `kind`, when given, claims only runs of that kind -- how an OCR worker
+        and an extraction worker share one table without either delaying the
+        other (ADR-0022). `None` claims any kind, which is every worker before
+        014. The abandonment half stays kind-agnostic: a run out of attempts is
+        finished whichever worker notices.
 
         Eligible means queued, or running with a lapsed lease — expiry is a
         clause in the claim rather than a reaper process to deploy and have fail
@@ -109,6 +121,15 @@ class RunQueue(Protocol):
         permitted time is finished as abandoned rather than handed to another
         worker, so a document that terminates workers stops after that many
         rather than after all of them.
+        """
+        ...
+
+    def count_active(self, *, kind: RunKind, tenant_id: str | None = None) -> int:
+        """Runs of `kind` that are queued or running; one tenant's, or everyone's.
+
+        What the OCR caps count on every submission (ADR-0022). Counted live,
+        never stored, for the reason `concurrent_runs` is: a counter beside the
+        table is a second source of truth that a crash leaves wrong.
         """
         ...
 
@@ -164,6 +185,11 @@ class RunQueue(Protocol):
         so, and this is what makes the saying true. Callers that are not workers
         omit it.
 
+        **An OCR run's deadline moves to count from here** (ADR-0022): the
+        period it was submitted with (`expires_at - created_at`) is re-applied
+        from `now`, so a deep queue cannot sweep a result before anybody could
+        fetch it. An extraction run's deadline is untouched.
+
         `only_from`, when given, requires that prior state exactly. `cancel` uses
         it so that stopping a queued run cannot stop one that was claimed a
         microsecond earlier.
@@ -203,8 +229,13 @@ class RunQueue(Protocol):
         now: datetime,
         limit: int,
         exclude: Collection[UUID] = (),
+        kind: RunKind | None = None,
     ) -> tuple[Run, ...]:
         """Terminal runs past their retention deadline, oldest first.
+
+        `kind`, when given, returns only runs of that kind: the OCR sweep runs
+        when run retention is off and must not reach an extraction run
+        (ADR-0022).
 
         Never returns a run that is queued, running, or holding an unexpired
         lease (FR-003): a retention policy that can delete work in flight is a

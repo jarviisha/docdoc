@@ -31,7 +31,10 @@ class RunQueue(Protocol):
                expires_at: datetime) -> Run: ...
     def claim(self, *, worker_id: str, now: datetime, lease: timedelta,
               max_attempts: int,
-              starvation: timedelta | None = None) -> Run | None: ...
+              starvation: timedelta | None = None,
+              kind: RunKind | None = None) -> Run | None: ...
+    def count_active(self, *, kind: RunKind,
+                     tenant_id: str | None = None) -> int: ...
     def heartbeat(self, run_id: UUID, *, now: datetime, lease: timedelta,
                   worker_id: str | None = None) -> bool: ...
     def release(self, run_id: UUID, *, now: datetime,
@@ -46,7 +49,8 @@ class RunQueue(Protocol):
 
     # Milestone 10 (specs/010). Retention, erasure, and the tombstone lookup.
     def expiring(self, *, now: datetime, limit: int,
-                 exclude: Collection[UUID] = ()) -> tuple[Run, ...]: ...
+                 exclude: Collection[UUID] = (),
+                 kind: RunKind | None = None) -> tuple[Run, ...]: ...
     def retained_ids_for(self, tenant_id: str, *, excluding: Collection[UUID]
                          ) -> tuple[frozenset[str], frozenset[str]]: ...
     def entomb(self, runs: Collection[Run], *, now: datetime,
@@ -273,7 +277,7 @@ for existing callers" on 2026-08-28.
 
 ```bash
 docdoc worker  [--run-database-url URL] [--lease-seconds 90] [--max-attempts 3]
-               [--health-port PORT]
+               [--health-port PORT] [--kind ocr|extraction]
 docdoc migrate [--run-database-url URL] [--check] [--default-tenant TENANT]
 ```
 
@@ -283,6 +287,7 @@ docdoc migrate [--run-database-url URL] [--check] [--default-tenant TENANT]
 | `--lease-seconds` | `worker` | Claim duration; the heartbeat fires at a third of it, so a live worker misses two ticks before losing a run it still holds |
 | `--max-attempts` | `worker` | Claims before a run is abandoned (FR-021). A non-positive value is refused with exit `64` rather than accepted: the claim requires `attempts < max_attempts` while the sweep abandons at `>=`, so `-1` would abandon the entire queued backlog on the first cycle |
 | `--health-port` | `worker` | Serve `/healthz` and `/readyz`, which is how FR-053's "both process types" is reached on a process that has no FastAPI. **Off unless given** — a worker behind no load balancer has nobody to answer, and binding a port nobody asked for is how a host network collides |
+| `--kind` | `worker` | Claim only runs of this kind (014, ADR-0022). **Any kind when absent**, which is every worker before 014. The composition runs one worker service per kind, so an OCR backlog never delays extraction |
 | `--check` | `migrate` | Report pending migrations and apply nothing; non-zero when any are outstanding, which is what a deployment pipeline gates on |
 | `--default-tenant` | `migrate` | The explicit step FR-089 requires: records which tenant owns the unprefixed store root, and **refuses to change it afterwards**, because moving it once content exists strands that content and the symptom is not an error but correct answers plus a silent re-payment for every parse |
 

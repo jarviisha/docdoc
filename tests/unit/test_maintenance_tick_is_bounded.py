@@ -60,7 +60,9 @@ class _Deliverer:
 class _Queue:
     """Enough of a queue for a sweep that finds nothing."""
 
-    def expiring(self, *, now: datetime, limit: int, tenant_id: str | None = None):
+    def expiring(
+        self, *, now: datetime, limit: int, tenant_id: str | None = None, kind: Any = None
+    ):
         return ()
 
     def retained_ids_for(self, *args: Any, **kwargs: Any):
@@ -218,7 +220,9 @@ def test_a_sweep_that_fails_leaves_the_deliveries_it_already_did(
     """
 
     class _Broken(_Queue):
-        def expiring(self, *, now: datetime, limit: int, tenant_id: str | None = None):
+        def expiring(
+            self, *, now: datetime, limit: int, tenant_id: str | None = None, kind: Any = None
+        ):
             raise RunStateUnavailableError("gone")
 
     with caplog.at_level("WARNING", logger="docdoc.runs"):
@@ -350,7 +354,9 @@ def test_a_tick_that_raises_does_not_stop_the_claim_loop(
     """
 
     class _Exploding(_Queue):
-        def expiring(self, *, now: datetime, limit: int, tenant_id: str | None = None):
+        def expiring(
+            self, *, now: datetime, limit: int, tenant_id: str | None = None, kind: Any = None
+        ):
             raise TypeError("something nobody anticipated")
 
     worker = _worker(queue=_Exploding(), retention_period=timedelta(days=30))

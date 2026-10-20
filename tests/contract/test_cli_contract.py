@@ -160,6 +160,18 @@ def test_a_bad_invocation_exits_sixty_four(capsys: pytest.CaptureFixture[str]) -
     assert code == EXIT_BAD_INVOCATION
 
 
+def test_worker_refuses_an_unknown_kind(capsys: pytest.CaptureFixture[str]) -> None:
+    """014: `--kind` is `ocr` or `extraction`; argparse refuses anything else (exit 2)."""
+    with pytest.raises(SystemExit) as refused:
+        build_parser().parse_args(["worker", "--kind", "bogus"])
+    assert refused.value.code == 2
+
+
+def test_worker_parses_a_kind() -> None:
+    args = build_parser().parse_args(["worker", "--kind", "ocr"])
+    assert args.kind == "ocr"
+
+
 def test_no_subcommand_exits_sixty_four(capsys: pytest.CaptureFixture[str]) -> None:
     code, out, _ = run([], capsys)
     assert code == EXIT_BAD_INVOCATION

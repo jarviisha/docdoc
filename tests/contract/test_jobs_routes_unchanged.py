@@ -188,6 +188,9 @@ def test_the_storeless_route_has_no_asynchronous_variant(client: TestClient) -> 
         # reachable only through an identity the submission route issued.
         "/v1/runs/{run_id}/delivery",
         "/v1/runs/{run_id}/corrections",
+        # 014 (ADR-0022): an OCR run's `Document`. A read of a run that exists,
+        # on the same terms as the two above.
+        "/v1/runs/{run_id}/result",
     }, (
         f"an unexpected run route exists: {sorted(run_routes)}. Every asynchronous "
         f"route is anchored to a stored blob, because a run nobody is waiting for "

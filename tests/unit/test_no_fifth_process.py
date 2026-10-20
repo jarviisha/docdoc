@@ -61,7 +61,10 @@ def test_the_composition_has_exactly_four_services() -> None:
     it to. That is the constitutional scope constraint holding: the composition
     demonstrates docdoc, and a collector is somebody else's infrastructure.
     """
-    assert _services() == {"api", "worker", "postgres", "seaweedfs"}, (
+    # 014 (constitution v1.11.0): the worker process type appears once per run
+    # kind it claims. Still four process types -- `ocr-worker` is the same image
+    # at the same entry point -- and still nothing else.
+    assert _services() == {"api", "worker", "ocr-worker", "postgres", "seaweedfs"}, (
         f"the composition has {sorted(_services())}. SC-025 asserts four, and "
         f"every capability this milestone added was built into a loop that "
         f"already runs rather than into a process to deploy and monitor"
@@ -85,7 +88,8 @@ def test_the_two_docdoc_services_run_the_two_commands() -> None:
     """`docdoc-api` and `docdoc worker`, from one image. Not a third entry point."""
     text = COMPOSE.read_text(encoding="utf-8")
 
-    assert 'command: ["docdoc", "worker"' in text
+    assert 'command: ["docdoc", "worker", "--kind", "extraction"' in text
+    assert 'command: ["docdoc", "worker", "--kind", "ocr"' in text
     assert "docdoc sweep" not in text, (
         "the sweep runs inside the worker's tick. A compose service for it would "
         "be the fifth process type FR-116 forbids, wearing a different name"
@@ -146,11 +150,17 @@ class _EndlessQueue:
 
     def __init__(self) -> None:
         self.calls = 0
+        self.kinds: list[object] = []
 
-    def expiring(self, *, now, limit, exclude=()):
-        from docdoc.runs.model import Run, RunStatus
+    def expiring(self, *, now, limit, exclude=(), kind=None):
+        from docdoc.runs.model import Run, RunKind, RunStatus
 
         self.calls += 1
+        self.kinds.append(kind)
+        # Every run here is an extraction run, so a sweep narrowed to OCR
+        # (ADR-0022) finds none -- as the real `expiring` would.
+        if kind is RunKind.OCR:
+            return ()
         return tuple(
             Run(
                 run_id=__import__("uuid").uuid4(),
@@ -208,7 +218,14 @@ def test_a_tick_stops_at_its_budget() -> None:
 
 
 def test_a_tick_with_nothing_configured_does_nothing() -> None:
-    """The default. No retention period, no deliverer, no limiter."""
+    """The default. No retention period, no deliverer, no limiter.
+
+    014 (ADR-0022): "nothing" now means nothing but the OCR sweep, which is on
+    by default. The tick asks for expired **OCR** runs once and touches no
+    extraction run, however many of those have passed their deadline.
+    """
+    from docdoc.runs.model import RunKind
+
     queue = _EndlessQueue()
 
     report = maintenance.tick(
@@ -221,7 +238,7 @@ def test_a_tick_with_nothing_configured_does_nothing() -> None:
         batch=10,
     )
 
-    assert queue.calls == 0
+    assert queue.kinds == [RunKind.OCR]
     assert report.swept.runs == 0
     assert report.attempted == 0
 
@@ -252,7 +269,7 @@ def test_deliveries_are_attempted_before_the_sweep() -> None:
             return ()
 
     class _Queue(_EndlessQueue):
-        def expiring(self, *, now, limit, exclude=()):
+        def expiring(self, *, now, limit, exclude=(), kind=None):
             order.append("sweep")
             return ()
 
@@ -339,14 +356,14 @@ def test_a_limiter_with_no_expiry_is_not_an_error() -> None:
     )
 
 
-@pytest.mark.parametrize("name", ["api", "worker"])
+@pytest.mark.parametrize("name", ["api", "worker", "ocr-worker"])
 def test_both_docdoc_services_run_the_same_image(name: str) -> None:
     """One image, two entry points. A second image would be a second thing to
     version, and the two would eventually disagree about a schema."""
     text = COMPOSE.read_text(encoding="utf-8")
 
     assert f"  {name}:" in text
-    assert text.count("build: &docdoc_build") + text.count("build: *docdoc_build") >= 2
+    assert text.count("build: &docdoc_build") + text.count("build: *docdoc_build") >= 3
 
 
 # -- T183: SC-024's second half -----------------------------------------------

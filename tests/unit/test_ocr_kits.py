@@ -129,4 +129,13 @@ def test_main_compose_has_no_model_service() -> None:
     assert services_block is not None
     service_names = re.findall(r"^  (\w[\w-]*):\n", services_block.group(1), re.M)
 
-    assert set(service_names) == {"api", "worker", "postgres", "seaweedfs", "createbucket"}
+    # `ocr-worker` is a docdoc worker claiming OCR runs (ADR-0022), not a model:
+    # it reaches the OCR hosts over HTTP exactly as `worker` does.
+    assert set(service_names) == {
+        "api",
+        "worker",
+        "ocr-worker",
+        "postgres",
+        "seaweedfs",
+        "createbucket",
+    }

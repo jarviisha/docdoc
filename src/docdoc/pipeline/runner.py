@@ -63,6 +63,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from docdoc.artifacts import ArtifactStore
+    from docdoc.ingest.registry import ParserRegistry
     from docdoc.ingest.source import Limits, SourceFile
 
 __all__ = ["run"]
@@ -317,36 +318,13 @@ def _run(
     try:
         _boundary(Stage.PARSE)
         if parsed is None:
-            clock = _Clock()
             # `run` has already refused the both-absent case, so a source exists
             # wherever there is no document to reuse.
             assert source is not None
-            # Routing and parser selection happen here; the parser does not.
-            # That gap is what makes a cached parse skip the billable half while
-            # still computing the text-layer verdict on every run (FR-061).
-            plan = _plan_parse(source, limits=limits, options=options)
-            document_id = plan.document_id
-
-            cached = reuse.get(document_id, Document, _format(Stage.PARSE))
-            if cached is not None:
-                parsed = cached
-                outcomes.append(_reused(Stage.PARSE, document_id, clock))
-            else:
-                parsed = _execute_parse(plan)
-                reuse.put(
-                    document_id,
-                    parsed,
-                    stage=Stage.PARSE.value,
-                    # The source blob, which is what makes the chain walk back
-                    # to a document rather than stopping at the first parse
-                    # (FR-022, FR-024).
-                    input_artifact_id=plan.file.blob_id,
-                    processor_id=plan.parser.id,
-                    processor_version=plan.parser.version,
-                    options_hash=plan.options_hash,
-                    artifact_format_version=_format(Stage.PARSE),
-                )
-                outcomes.append(_executed(Stage.PARSE, parsed, clock))
+            parsed, parse_outcome = _parse_stage(
+                source, reuse=reuse, limits=limits, options=options
+            )
+            outcomes.append(parse_outcome)
         else:
             # Supplied rather than produced. Recorded as reused because that is
             # what it is from this run's point of view: work this run did not do.
@@ -755,10 +733,85 @@ def _plan_parse(
     limits: Limits | None,
     options: Mapping[str, Any] | None,
     parser: str | None = None,
+    registry: ParserRegistry | None = None,
 ) -> Any:
     from docdoc.ingest.parse import plan_parse
 
-    return plan_parse(source, limits=limits, options=options, parser=parser)
+    return plan_parse(source, limits=limits, options=options, parser=parser, registry=registry)
+
+
+def _parse_stage(
+    source: SourceFile | bytes,
+    *,
+    reuse: _Reuse,
+    limits: Limits | None,
+    options: Mapping[str, Any] | None,
+    parser: str | None = None,
+    registry: ParserRegistry | None = None,
+) -> tuple[Document, StageOutcome]:
+    """Plan, reuse or execute, and file the parse. The one parse-and-cache path.
+
+    Shared by `run` and `parse_only`, so an OCR run and an extraction run over
+    the same document, parser, and options name the same artifact and either
+    one's parse is the other's cache hit.
+    """
+    clock = _Clock()
+    # Routing and parser selection happen here; the parser does not. That gap is
+    # what makes a cached parse skip the billable half while still computing the
+    # text-layer verdict on every run (FR-061).
+    plan = _plan_parse(source, limits=limits, options=options, parser=parser, registry=registry)
+    document_id = plan.document_id
+
+    cached = reuse.get(document_id, Document, _format(Stage.PARSE))
+    if cached is not None:
+        return cached, _reused(Stage.PARSE, document_id, clock)
+
+    parsed = _execute_parse(plan)
+    reuse.put(
+        document_id,
+        parsed,
+        stage=Stage.PARSE.value,
+        # The source blob, which is what makes the chain walk back to a document
+        # rather than stopping at the first parse (FR-022, FR-024).
+        input_artifact_id=plan.file.blob_id,
+        processor_id=plan.parser.id,
+        processor_version=plan.parser.version,
+        options_hash=plan.options_hash,
+        artifact_format_version=_format(Stage.PARSE),
+    )
+    return parsed, _executed(Stage.PARSE, parsed, clock)
+
+
+def parse_only(
+    source: SourceFile | bytes,
+    *,
+    store: ArtifactStore | None,
+    limits: Limits | None = None,
+    options: Mapping[str, Any] | None = None,
+    parser: str | None = None,
+    registry: ParserRegistry | None = None,
+    request_id: str | None = None,
+) -> tuple[Document, StageOutcome]:
+    """The parse stage alone, filed exactly as the pipeline files it (ADR-0022).
+
+    What an OCR run executes: no schema, no extraction, no grounding, no
+    validation. The document is stored under its own id as the parse-stage
+    artifact, so the run's ``processing_id`` resolves through the same store,
+    retention, and reuse rules every other artifact follows.
+
+    Raises the parse's own typed errors (`ParserCapabilityError`,
+    `ProviderError`, ...) rather than reducing them to an outcome: the caller --
+    the worker -- is the one that decides what a failed run records. A store
+    that cannot be reached degrades exactly as it does in `run` (FR-063).
+    """
+    from docdoc.artifacts import NullArtifactStore
+    from docdoc.pipeline.observe import correlation
+
+    reuse = _Reuse(store or NullArtifactStore(), verify=False)
+    with correlation(request_id=request_id):
+        return _parse_stage(
+            source, reuse=reuse, limits=limits, options=options, parser=parser, registry=registry
+        )
 
 
 def _execute_parse(plan: Any) -> Document:

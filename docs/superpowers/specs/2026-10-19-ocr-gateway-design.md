@@ -78,6 +78,8 @@ through configuration. To make the open-source engines easy to stand up, docdoc 
   see the credentials of any.
 - **No async OCR in this project.** The raw OCR route is synchronous, within the existing size and
   page limits. Async OCR-only runs come later, if the sync route proves too slow.
+  *(Superseded 2026-10-20: async OCR is
+  `docs/superpowers/specs/2026-10-19-async-ocr-queue-design.md`, ADR-0022.)*
 - **No third-party plugin mechanism** (entry points and similar). The PaddleX-protocol adapter
   with configured endpoints covers the stated need. Add plugins when someone needs a provider
   that cannot speak that protocol.

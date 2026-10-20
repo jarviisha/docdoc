@@ -1,6 +1,7 @@
 # ADR-0021: A Request May Name a Configured Parser; OCR Endpoints Are Configured, Not Coded
 
-- **Status**: Accepted
+- **Status**: Accepted; amended by [ADR-0022](0022-asynchronous-ocr-through-a-bounded-queue.md)
+  (`POST /v1/ocr` now queues an OCR run instead of answering in the request)
 - **Date**: 2026-10-19
 - **Amends**: the constitution, Principle IV (Provider-Agnostic Adapters) and Principle V
   (Text-First Document Processing) — see the Sync Impact Report for v1.9.0 → v1.10.0

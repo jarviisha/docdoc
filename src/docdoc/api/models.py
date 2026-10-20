@@ -329,8 +329,10 @@ class RunSummary(BaseModel):
     #: than a missing value.
     finished_at: str | None = None
     blob_id: str
-    #: The identity ``name@version``. Never the schema's contents.
-    schema_identity: str
+    #: The identity ``name@version``. Never the schema's contents. ``None`` for
+    #: an OCR run, which names no schema (ADR-0022); ``kind`` says which.
+    schema_identity: str | None
+    kind: str = "extraction"
     processing_id: str | None = None
 
 
@@ -370,7 +372,12 @@ class RunStateResponse(BaseModel):
     #: a run is only readable under the tenant that owns it, so returning what
     #: was submitted discloses nothing the submitter did not send.
     blob_id: str
-    schema_identity: str
+    #: ``None`` for an OCR run, which names a parser rather than a schema
+    #: (ADR-0022). ``kind`` says which of the two this is.
+    schema_identity: str | None
+    kind: str = "extraction"
+    ocr_parser: str | None = None
+    ocr_language: str | None = None
     attempts: int = Field(ge=0)
     created_at: str
     updated_at: str

@@ -35,7 +35,7 @@ from docdoc.pipeline.result import (
     StageOutcome,
     StageStatus,
 )
-from docdoc.pipeline.runner import run
+from docdoc.pipeline.runner import parse_only, run
 from docdoc.pipeline.stages import (
     PIPELINE_ID,
     PIPELINE_VERSION,
@@ -56,5 +56,6 @@ __all__ = [
     "StageSpec",
     "StageStatus",
     "observe",
+    "parse_only",
     "run",
 ]
