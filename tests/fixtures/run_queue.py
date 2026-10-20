@@ -25,7 +25,7 @@ from docdoc.runs.errors import (
     RunStateUnavailableError,
 )
 from docdoc.runs.identity import DEFAULT_FAIRNESS_WINDOW, DEFAULT_STARVATION
-from docdoc.runs.model import Run, RunOutcome, RunStatus, Tombstone
+from docdoc.runs.model import Run, RunKind, RunOutcome, RunStatus, Tombstone
 
 # `reason_for` is imported rather than reimplemented, so the fake cannot
 # describe a transition differently from the real queue -- which is the whole
@@ -76,13 +76,17 @@ class InMemoryRunQueue:
         now: datetime,
         limit: int,
         exclude: Collection[UUID] = (),
+        kind: RunKind | None = None,
     ) -> tuple[Run, ...]:
         self._check_reachable()
         excluded = set(exclude)
         candidates = [
             run
             for run in self._runs.values()
-            if run.is_terminal and run.expires_at <= now and run.run_id not in excluded
+            if run.is_terminal
+            and run.expires_at <= now
+            and run.run_id not in excluded
+            and (kind is None or run.kind == kind)
         ]
         candidates.sort(key=lambda run: run.expires_at)
         return tuple(candidates[:limit])
@@ -267,6 +271,7 @@ class InMemoryRunQueue:
         lease: timedelta,
         max_attempts: int,
         starvation: timedelta | None = None,
+        kind: RunKind | None = None,
     ) -> Run | None:
         # **First, abandon what has run out of attempts** — every one of them,
         # not just the oldest. `PostgresRunQueue.claim` does this as a separate
@@ -304,6 +309,7 @@ class InMemoryRunQueue:
             for run in self._runs.values()
             if (run.status is RunStatus.QUEUED or run.lease_expired_at(now))
             and run.attempts < max_attempts
+            and (kind is None or run.kind == kind)
         ]
         if not eligible:
             return None
@@ -358,6 +364,16 @@ class InMemoryRunQueue:
             reason="redelivered" if run.status is RunStatus.RUNNING else "claimed",
         )
         return claimed
+
+    def count_active(self, *, kind: RunKind, tenant_id: str | None = None) -> int:
+        self._check_reachable()
+        return sum(
+            1
+            for run in self._runs.values()
+            if run.kind == kind
+            and run.status in (RunStatus.QUEUED, RunStatus.RUNNING)
+            and (tenant_id is None or run.tenant_id == tenant_id)
+        )
 
     def heartbeat(
         self, run_id: UUID, *, now: datetime, lease: timedelta, worker_id: str | None = None
@@ -440,6 +456,13 @@ class InMemoryRunQueue:
                 "worker_id": None,
                 "lease_until": None,
                 "updated_at": now,
+                # An OCR run's period counts from finishing, as the real
+                # statement's CASE does (ADR-0022).
+                "expires_at": (
+                    now + (run.expires_at - run.created_at)
+                    if run.kind is RunKind.OCR
+                    else run.expires_at
+                ),
             }
         )
         log_transition(

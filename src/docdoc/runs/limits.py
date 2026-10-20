@@ -374,8 +374,11 @@ class PostgresLimiter:
         """Counted from `runs`, never stored (module docstring)."""
         del now
         row = self.execute(
+            # Extraction runs only: OCR runs are bounded by their own caps, and
+            # an OCR backlog must not refuse a tenant's extraction (ADR-0022).
             "SELECT count(*) AS active FROM runs "
-            "WHERE tenant_id = %s AND status IN ('queued', 'running')",
+            "WHERE tenant_id = %s AND status IN ('queued', 'running') "
+            "AND kind = 'extraction'",
             (tenant_id,),
             fetch="one",
         )

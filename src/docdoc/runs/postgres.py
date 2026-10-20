@@ -37,7 +37,7 @@ from docdoc.runs.identity import (
     DEFAULT_STARVATION,
     new_delivery_id,
 )
-from docdoc.runs.model import Run, RunOutcome, RunStatus, Tombstone
+from docdoc.runs.model import Run, RunKind, RunOutcome, RunStatus, Tombstone
 from docdoc.runs.observe import log_transition, reason_for
 
 if TYPE_CHECKING:
@@ -138,6 +138,7 @@ class PostgresRunQueue:
         now: datetime,
         limit: int,
         exclude: Collection[UUID] = (),
+        kind: RunKind | None = None,
     ) -> tuple[Run, ...]:
         """Terminal runs past their deadline, oldest first, bounded."""
         rows = self._execute(
@@ -146,10 +147,16 @@ class PostgresRunQueue:
              WHERE status IN ('succeeded', 'failed', 'cancelled')
                AND expires_at <= %(now)s
                AND (%(exclude)s::uuid[] IS NULL OR NOT (run_id = ANY(%(exclude)s::uuid[])))
+               AND (%(kind)s::text IS NULL OR kind = %(kind)s::text)
              ORDER BY expires_at
              LIMIT %(limit)s
             """,
-            {"now": now, "limit": limit, "exclude": list(exclude) or None},
+            {
+                "now": now,
+                "limit": limit,
+                "exclude": list(exclude) or None,
+                "kind": None if kind is None else str(kind),
+            },
             fetch="all",
         )
         return tuple(_row_to_run(row) for row in rows or ())
@@ -450,6 +457,7 @@ class PostgresRunQueue:
         lease: timedelta,
         max_attempts: int,
         starvation: timedelta | None = None,
+        kind: RunKind | None = None,
     ) -> Run | None:
         """Take the next eligible run, or ``None``.
 
@@ -629,6 +637,9 @@ class PostgresRunQueue:
                  WHERE (runs.status = 'queued'
                         OR (runs.status = 'running' AND runs.lease_until < %(now)s))
                    AND runs.attempts < %(max_attempts)s
+                   -- 014: a worker restricted to one kind (ADR-0022). On this
+                   -- scan for the reason the two conditions above are.
+                   AND (%(kind)s::text IS NULL OR runs.kind = %(kind)s::text)
                  -- With one tenant, `recent` is the same for every candidate and
                  -- drops out; with no priorities and nothing starved, the whole
                  -- order collapses to `created_at`, which is Milestone 9's
@@ -661,6 +672,7 @@ class PostgresRunQueue:
                 "max_attempts": max_attempts,
                 "starvation": bound,
                 "fairness_window": DEFAULT_FAIRNESS_WINDOW,
+                "kind": None if kind is None else str(kind),
             },
             fetch="one",
         )
@@ -681,6 +693,17 @@ class PostgresRunQueue:
             reason="redelivered" if row["from_state"] == RunStatus.RUNNING else "claimed",
         )
         return claimed
+
+    def count_active(self, *, kind: RunKind, tenant_id: str | None = None) -> int:
+        """Queued or running runs of `kind`. Served by ``runs_active_by_kind``."""
+        row = self._execute(
+            "SELECT count(*) AS active FROM runs"
+            " WHERE status IN ('queued', 'running') AND kind = %(kind)s"
+            " AND (%(tenant)s::text IS NULL OR tenant_id = %(tenant)s::text)",
+            {"kind": str(kind), "tenant": tenant_id},
+            fetch="one",
+        )
+        return int(row["active"]) if row else 0
 
     def heartbeat(
         self, run_id: UUID, *, now: datetime, lease: timedelta, worker_id: str | None = None
@@ -855,7 +878,11 @@ class PostgresRunQueue:
                        stage_outcomes = %(stage_outcomes)s::jsonb,
                        worker_id = NULL,
                        lease_until = NULL,
-                       updated_at = %(now)s
+                       updated_at = %(now)s,
+                       -- An OCR run's period counts from finishing (ADR-0022).
+                       expires_at = CASE WHEN runs.kind = 'ocr'
+                                         THEN %(now)s + (runs.expires_at - runs.created_at)
+                                         ELSE runs.expires_at END
                   FROM prior
                  WHERE runs.run_id = prior.run_id
                    AND {
