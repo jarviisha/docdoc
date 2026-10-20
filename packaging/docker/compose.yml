@@ -157,10 +157,16 @@ services:
       # the claim this composition is the first place to check.
       #
       # NO FIFTH SERVICE is added below for any of this. The composition still
-      # contains api, worker, postgres, and object storage, which is what the
-      # constitution's scope constraint permits and what SC-025 asserts. The OTLP
-      # collector, if you run one, is yours.
+      # contains api, worker(s), postgres, and object storage, which is what the
+      # constitution's scope constraint permits (v1.11.0: one worker service per
+      # run kind) and what SC-025 asserts. The OTLP collector, if you run one, is
+      # yours.
       DOCDOC_RUN_RETENTION_DAYS: ${DOCDOC_RUN_RETENTION_DAYS:-}
+      # 014 (ADR-0022). Empty means the default, and all three have one: 100 OCR
+      # runs per consumer, 500 in total, results kept 24 h after finishing.
+      DOCDOC_OCR_QUEUE_PER_TENANT: ${DOCDOC_OCR_QUEUE_PER_TENANT:-}
+      DOCDOC_OCR_QUEUE_TOTAL: ${DOCDOC_OCR_QUEUE_TOTAL:-}
+      DOCDOC_OCR_RETENTION_HOURS: ${DOCDOC_OCR_RETENTION_HOURS:-}
       DOCDOC_RUN_SWEEP_BATCH: ${DOCDOC_RUN_SWEEP_BATCH:-}
       DOCDOC_RUN_CREDENTIAL_TTL_SECONDS: ${DOCDOC_RUN_CREDENTIAL_TTL_SECONDS:-}
       DOCDOC_LIMIT_SUBMISSIONS_PER_MINUTE: ${DOCDOC_LIMIT_SUBMISSIONS_PER_MINUTE:-}
