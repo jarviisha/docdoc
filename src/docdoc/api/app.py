@@ -1261,8 +1261,13 @@ def _router() -> APIRouter:
             media_type=None if data is None else detect_media_type(data),
         )
 
+    # A plain `def`, not `async def`: there is no body to `await`, and FastAPI
+    # runs a synchronous handler in its worker thread pool. The store reads, the
+    # parse, the provider call and the writes all block, and on the event loop
+    # one slow document would stall every other request on this process,
+    # health probes included (#18).
     @router.post("/documents/{blob_id}/extract")
-    async def extract(
+    def extract(
         request: Request,
         blob_id: str,
         schema: str,
@@ -1323,6 +1328,8 @@ def _router() -> APIRouter:
         configured, when it is a property of the endpoint the caller chose. A
         deployment *with* a store gets the same nothing written as one without.
         """
+        from fastapi.concurrency import run_in_threadpool
+
         from docdoc.artifacts import NullArtifactStore
         from docdoc.ingest.source import SourceFile
         from docdoc.pipeline import run as run_pipeline
@@ -1331,34 +1338,41 @@ def _router() -> APIRouter:
 
         # No `has_store` check: this route is the one that needs none, which is
         # its entire reason for existing.
+        # The body still has to be read with `await` -- `_read_capped` drives
+        # `request.stream()`, an async generator.
         data = await _read_capped(request, deployment.max_request_bytes)
 
-        # The submission path's limits, reused rather than restated, so FR-005
-        # holds by calling the same code. From the bytes, never from a
-        # client-declared `Content-Type`.
-        file = SourceFile.from_bytes(data, limits=deployment.limits)
-        file.check_limits(deployment.limits or _default_limits())
+        # Everything below blocks -- the parse, the provider call -- and on the
+        # loop it would stall every other request, health probes included (#18).
+        def _run() -> Any:
+            # The submission path's limits, reused rather than restated, so FR-005
+            # holds by calling the same code. From the bytes, never from a
+            # client-declared `Content-Type`.
+            file = SourceFile.from_bytes(data, limits=deployment.limits)
+            file.check_limits(deployment.limits or _default_limits())
 
-        result = run_pipeline(
-            data,
-            schema=schema,
-            registry=deployment.registry(),
-            adapter=deployment.adapter(),
-            store=NullArtifactStore(),
-            limits=deployment.limits,
-            request_id=request.headers.get("x-request-id"),
-        )
-
-        if result.failed_stage is not None:
-            # Same body, same statuses, same partial results as the store-backed
-            # route (FR-006). A storeless run fails identically or the two paths
-            # are not the same pipeline.
-            return JSONResponse(
-                status_code=api_errors.status_for_failed_run(result),
-                content=api_errors.body_for_failed_run(result).model_dump(mode="json"),
+            result = run_pipeline(
+                data,
+                schema=schema,
+                registry=deployment.registry(),
+                adapter=deployment.adapter(),
+                store=NullArtifactStore(),
+                limits=deployment.limits,
+                request_id=request.headers.get("x-request-id"),
             )
 
-        return _storeless_run_response(result)
+            if result.failed_stage is not None:
+                # Same body, same statuses, same partial results as the store-backed
+                # route (FR-006). A storeless run fails identically or the two paths
+                # are not the same pipeline.
+                return JSONResponse(
+                    status_code=api_errors.status_for_failed_run(result),
+                    content=api_errors.body_for_failed_run(result).model_dump(mode="json"),
+                )
+
+            return _storeless_run_response(result)
+
+        return await run_in_threadpool(_run)
 
     @router.post("/ocr", status_code=202)
     async def ocr(

@@ -197,7 +197,8 @@ tests/
 │   └── test_artifact_store_properties.py   # put/get round-trip, hash stability
 ├── contract/
 │   ├── test_cli_contract.py          # contracts/cli.md
-│   └── test_http_contract.py         # contracts/http-api.md
+│   ├── test_http_contract.py         # contracts/http-api.md
+│   └── test_extract_off_loop.py      # #18, both extract routes run the pipeline off the event loop
 └── integration/
     ├── test_store_concurrency.py     # ADR-0010 §5, no lock required
     ├── test_pipeline_failures.py     # SC-012, real failures rather than injected ones
