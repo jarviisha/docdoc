@@ -506,6 +506,12 @@ FLAGS_WITHOUT_A_SETTING: dict[str, str] = {
         "which port a process listens on is a property of how it was started, "
         "like uvicorn's --port, and not a setting docdoc reads from anywhere"
     ),
+    "--kind": (
+        "which run kind one worker process claims is a property of how that "
+        "process was started -- the composition runs one service per kind "
+        "(ADR-0022) -- so an environment variable would make every replica of "
+        "every worker service agree, which is exactly what the flag is for not doing"
+    ),
     "--help": "argparse's",
     "-h": "argparse's",
 }
