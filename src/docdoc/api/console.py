@@ -28,8 +28,20 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from docdoc.api.admin import _audit, _erase
+from docdoc.api.deps import _iso, _unknown_run
+from docdoc.api.documents import _stored_result, _terminal
 from docdoc.api.models import ConsoleRunListResponse, ConsoleRunSummary, RunStateResponse
+from docdoc.api.ocr import _ocr_document
 from docdoc.api.paging import DEFAULT_RUN_PAGE
+from docdoc.api.runs import (
+    _next_cursor,
+    _no_runs,
+    _page_request,
+    _routing_for,
+    _run_erased,
+    _summary_fields,
+)
 from docdoc.artifacts.paths import root_tenant
 from docdoc.runs import identity
 from docdoc.runs.principal import TENANT_PATTERN
@@ -191,8 +203,6 @@ def _owner(request: Request, run_id: str) -> tuple[JSONResponse | None, str, Any
     """
     from uuid import UUID
 
-    from docdoc.api.app import _no_runs, _unknown_run
-
     deployment = request.app.state.deployment
     if not deployment.has_runs:
         return _no_runs(), "", None
@@ -208,7 +218,6 @@ def _owner(request: Request, run_id: str) -> tuple[JSONResponse | None, str, Any
 
 def _run(request: Request, run_id: str) -> tuple[JSONResponse | None, str, Any]:
     """`(refusal, owner, run)`: `_owner`, then the run, or its owner's 410."""
-    from docdoc.api.app import _run_erased, _unknown_run
 
     refusal, owner, identity = _owner(request, run_id)
     if refusal is not None:
@@ -294,7 +303,6 @@ def console_router() -> APIRouter:
         bound to the filter that produced it: to `tenant`, or to `"*"` when
         there is none, which no tenant identifier can match.
         """
-        from docdoc.api.app import _next_cursor, _no_runs, _page_request, _summary_fields
 
         if tenant is not None and not TENANT_PATTERN.match(tenant):
             return JSONResponse(status_code=422, content={"error": "invalid_tenant_id"})
@@ -318,7 +326,6 @@ def console_router() -> APIRouter:
     @router.get("/runs/{run_id}")
     def run_state(request: Request, run_id: str, operator: Operator) -> Any:
         """`GET /v1/runs/{run_id}`'s body, plus the run's `tenant_id`."""
-        from docdoc.api.app import _routing_for
 
         refusal, owner, run = _run(request, run_id)
         if refusal is not None:
@@ -335,7 +342,6 @@ def console_router() -> APIRouter:
     @router.get("/runs/{run_id}/delivery")
     def run_delivery(request: Request, run_id: str, operator: Operator) -> Any:
         """`GET /v1/runs/{run_id}/delivery`, looked up under the run's owner."""
-        from docdoc.api.app import _iso, _unknown_run
 
         refusal, owner, identity = _owner(request, run_id)
         if refusal is not None:
@@ -363,7 +369,6 @@ def console_router() -> APIRouter:
         extraction run's stored result, as `GET /v1/jobs/{id}/result` does. One
         route because the console holds a run, not a `processing_id`.
         """
-        from docdoc.api.app import _ocr_document, _stored_result, _terminal
         from docdoc.runs.model import RunKind, RunStatus
 
         refusal, owner, run = _run(request, run_id)
@@ -390,7 +395,6 @@ def console_router() -> APIRouter:
     @router.get("/credentials")
     def list_credentials(request: Request, operator: Operator, tenant: str) -> Any:
         """`GET /v1/admin/credentials`'s body, over the console's own query name."""
-        from docdoc.api.app import _iso
 
         if not TENANT_PATTERN.match(tenant):
             return JSONResponse(status_code=422, content={"error": "invalid_tenant_id"})
@@ -421,7 +425,6 @@ def console_router() -> APIRouter:
         but `admin`" -- the admin route is reached with a key that already
         carries the scope; this one is reached with a browser session.
         """
-        from docdoc.api.app import _audit
 
         if "scopes" in body.model_fields_set:
             return JSONResponse(status_code=422, content={"error": "scopes_not_accepted"})
@@ -450,8 +453,6 @@ def console_router() -> APIRouter:
         """Revoke, idempotently, as `DELETE /v1/admin/credentials/{id}` does."""
         from uuid import UUID
 
-        from docdoc.api.app import _audit
-
         try:
             identity_ = UUID(credential_id)
         except ValueError:
@@ -470,7 +471,6 @@ def console_router() -> APIRouter:
         namespace is the store root, so erasing it would remove content no run
         ever produced.
         """
-        from docdoc.api.app import _erase, _unknown_run
 
         if not TENANT_PATTERN.match(tenant_id):
             return JSONResponse(status_code=422, content={"error": "invalid_tenant_id"})
@@ -506,7 +506,6 @@ def console_router() -> APIRouter:
         own tenant; the console names the tenant in the path instead, since an
         operator's session carries no tenant of its own (ADR-0023 §3).
         """
-        from docdoc.api.app import _erase
 
         if not TENANT_PATTERN.match(tenant_id):
             return JSONResponse(status_code=422, content={"error": "invalid_tenant_id"})

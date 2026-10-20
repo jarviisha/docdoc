@@ -41,7 +41,7 @@ def _forget_ceilings():
     by a startup helper has leaked into later tests in this project, and the
     first two took a CI-only failure each to find.
     """
-    from docdoc.api.app import _CEILINGS
+    from docdoc.api.deps import _CEILINGS
 
     before = dict(_CEILINGS)
     yield
@@ -249,7 +249,7 @@ def test_an_unreadable_limits_file_is_refused_once_and_by_the_limits_reader(
     is asserted directly because the loud refusal above means no request can
     reach it.
     """
-    from docdoc.api.app import _CEILINGS, _load_ceilings
+    from docdoc.api.deps import _CEILINGS, _load_ceilings
 
     limits = tmp_path / "limits.json"
     limits.write_text("{not json", encoding="utf-8")

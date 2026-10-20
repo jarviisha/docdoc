@@ -19,7 +19,8 @@ import pytest
 
 pytest.importorskip("fastapi", reason="the HTTP interface lives behind the docdoc[api] extra")
 
-from docdoc.api.app import _UNKNOWN_CALLBACK, _Deployment, _requested_callback
+from docdoc.api.app import _Deployment
+from docdoc.api.runs import _UNKNOWN_CALLBACK, _requested_callback
 
 
 class _Deliverer:
