@@ -136,3 +136,26 @@ def test_ocr_expiry_counts_from_finish() -> None:
 
 def test_expiring_kind_filter() -> None:
     case_expiring_kind_filter(InMemoryRunQueue())
+
+
+def case_abandoned_ocr_expiry_counts_from_abandonment(queue: Any) -> None:
+    """Review finding 7: an OCR run abandoned after a long wait is not swept unseen."""
+    job = submit(queue, ocr())
+    late = NOW + timedelta(hours=30)
+    for attempt in range(3):
+        at = late + timedelta(minutes=10 * attempt)
+        assert claim(queue, at=at, kind=RunKind.OCR) is not None
+    abandoned_at = late + timedelta(hours=1)
+    assert claim(queue, at=abandoned_at, kind=RunKind.OCR) is None
+
+    run = queue.get(job.run_id, "default")
+    assert run.status is RunStatus.FAILED
+    assert run.error_class == "RunAbandonedError"
+    assert run.expires_at == abandoned_at + DAY
+
+
+CASES = (*CASES, case_abandoned_ocr_expiry_counts_from_abandonment)
+
+
+def test_abandoned_ocr_expiry_counts_from_abandonment() -> None:
+    case_abandoned_ocr_expiry_counts_from_abandonment(InMemoryRunQueue())

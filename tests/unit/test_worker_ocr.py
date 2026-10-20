@@ -135,3 +135,51 @@ def test_worker_kind_filter(tmp_path: Path) -> None:
     assert queue.kinds == [RunKind.EXTRACTION]
     assert queue.count_active(kind=RunKind.OCR) == 1
     assert queue.get(next(iter(queue._runs)), "default").status is RunStatus.QUEUED
+
+
+def _claimed_with(tmp_path: Path) -> tuple[InMemoryRunQueue, BlobStore, Any]:
+    queue = InMemoryRunQueue()
+    blobs = BlobStore(tmp_path)
+    return queue, blobs, _claimed(queue, blobs.put(IMAGE))
+
+
+def test_ocr_run_cancelled_before_the_parse_calls_nobody(tmp_path: Path) -> None:
+    """Review finding 4: a cancel requested while claimed is honoured at the one boundary."""
+    queue, blobs, run = _claimed_with(tmp_path)
+    queue.cancel(run.run_id, "default", now=NOW)
+    post = CountingPost()
+
+    execute_one(
+        run,
+        queue=queue,
+        blobs=blobs,
+        store=FileArtifactStore(tmp_path),
+        registry=None,
+        adapter=None,
+        parsers=paddle_registry(post),
+        now=NOW,
+    )
+
+    assert queue.get(run.run_id, "default").status is RunStatus.CANCELLED
+    assert post.calls == 0
+
+
+def test_ocr_run_released_when_the_worker_is_stopping(tmp_path: Path) -> None:
+    """Review finding 4: a signalled worker relinquishes rather than starting a parse."""
+    queue, blobs, run = _claimed_with(tmp_path)
+    post = CountingPost()
+
+    execute_one(
+        run,
+        queue=queue,
+        blobs=blobs,
+        store=FileArtifactStore(tmp_path),
+        registry=None,
+        adapter=None,
+        parsers=paddle_registry(post),
+        now=NOW,
+        stopping=lambda: True,
+    )
+
+    assert queue.get(run.run_id, "default").status is RunStatus.QUEUED
+    assert post.calls == 0

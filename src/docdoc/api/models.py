@@ -329,8 +329,10 @@ class RunSummary(BaseModel):
     #: than a missing value.
     finished_at: str | None = None
     blob_id: str
-    #: The identity ``name@version``. Never the schema's contents.
-    schema_identity: str
+    #: The identity ``name@version``. Never the schema's contents. ``None`` for
+    #: an OCR run, which names no schema (ADR-0022); ``kind`` says which.
+    schema_identity: str | None
+    kind: str = "extraction"
     processing_id: str | None = None
 
 

@@ -538,7 +538,13 @@ class PostgresRunQueue:
                    error_class = 'RunAbandonedError',
                    worker_id = NULL,
                    lease_until = NULL,
-                   updated_at = %(now)s
+                   updated_at = %(now)s,
+                   -- An OCR run's period counts from its terminal state here
+                   -- as in `finish` (ADR-0022): abandoned after a long wait,
+                   -- it must not be swept before anybody saw it fail.
+                   expires_at = CASE WHEN runs.kind = 'ocr'
+                                     THEN %(now)s + (runs.expires_at - runs.created_at)
+                                     ELSE runs.expires_at END
               FROM doomed
              WHERE runs.run_id = doomed.run_id
             RETURNING runs.run_id, runs.tenant_id, runs.attempts,

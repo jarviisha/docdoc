@@ -254,3 +254,98 @@ def test_limits_file_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     client = _client(_deployment(tmp_path, CountingPost(), per_tenant=2, total=100))
     assert [_ocr(client, "bulk-key").status_code for _ in range(6)] == [202] * 5 + [429]
     assert [_ocr(client, "a-key").status_code for _ in range(3)] == [202, 202, 429]
+
+
+# -- final review fixes --------------------------------------------------------
+
+
+def test_run_listing_includes_ocr_runs(tmp_path: Path) -> None:
+    """Review finding 1: a page with an OCR run on it is a page, not a 500."""
+    client = _client(_deployment(tmp_path, CountingPost()))
+    run_id = _ocr(client).json()["run_id"]
+
+    listing = client.get("/v1/runs")
+
+    assert listing.status_code == 200
+    (entry,) = listing.json()["runs"]
+    assert entry["run_id"] == run_id
+    assert entry["kind"] == "ocr"
+    assert entry["schema_identity"] is None
+
+
+def test_an_ocr_processing_id_is_not_a_job(tmp_path: Path) -> None:
+    """Review finding 2: the jobs routes answer about validation results only."""
+    post = CountingPost()
+    queue = InMemoryRunQueue()
+    client = _client(_deployment(tmp_path, post, runs=queue))
+    run_id = _ocr(client).json()["run_id"]
+    _work(queue, tmp_path, post)
+    processing_id = client.get(f"/v1/runs/{run_id}").json()["processing_id"]
+
+    assert client.get(f"/v1/jobs/{processing_id}").json()["status"] == "unavailable"
+    result = client.get(f"/v1/jobs/{processing_id}/result")
+    assert result.status_code != 500
+
+
+def test_a_routing_policy_does_not_break_reading_an_ocr_run(tmp_path: Path) -> None:
+    """Review finding 2: routing decides about validation results, and an OCR run has none."""
+    from docdoc.runs.routing import RoutingPolicy
+
+    post = CountingPost()
+    queue = InMemoryRunQueue()
+    policy = RoutingPolicy(version="default@1", required_fields=frozenset({"total"}))
+    client = _client(_deployment(tmp_path, post, runs=queue, routing=policy))
+    run_id = _ocr(client).json()["run_id"]
+    _work(queue, tmp_path, post)
+
+    state = client.get(f"/v1/runs/{run_id}")
+
+    assert state.status_code == 200
+    assert state.json()["status"] == "succeeded"
+    assert "routing" not in state.json()
+
+
+def test_limits_file_default_ocr_queue(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review finding 5: `default.ocr_queue` caps every tenant without its own entry."""
+    _with_keys(
+        tmp_path,
+        monkeypatch,
+        limits={"default": {"ocr_queue": 1}, "tenants": {"bulk": {"ocr_queue": 3}}},
+    )
+    client = _client(_deployment(tmp_path, CountingPost(), per_tenant=50, total=100))
+    assert [_ocr(client, "a-key").status_code for _ in range(2)] == [202, 429]
+    assert [_ocr(client, "bulk-key").status_code for _ in range(4)] == [202] * 3 + [429]
+
+
+def test_limits_file_refuses_a_malformed_ocr_queue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review finding 5: a cap that is not a positive integer is refused, not ignored."""
+    _with_keys(tmp_path, monkeypatch, limits={"tenants": {"bulk": {"ocr_queue": "50"}}})
+    with pytest.raises(ValueError, match="ocr_queue"):
+        _load_ceilings()
+
+
+class _LoopSpyQueue(InMemoryRunQueue):
+    """Records whether the cap count ran on the event loop's thread."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.on_loop: list[bool] = []
+
+    def count_active(self, **kwargs: Any) -> int:
+        import asyncio
+
+        try:
+            asyncio.get_running_loop()
+            self.on_loop.append(True)
+        except RuntimeError:
+            self.on_loop.append(False)
+        return super().count_active(**kwargs)
+
+
+def test_submission_does_its_blocking_work_off_the_event_loop(tmp_path: Path) -> None:
+    """Review finding 3: parse planning, the counts, and the S3 put are blocking."""
+    queue = _LoopSpyQueue()
+    assert _ocr(_client(_deployment(tmp_path, CountingPost(), runs=queue))).status_code == 202
+    assert queue.on_loop and not any(queue.on_loop)

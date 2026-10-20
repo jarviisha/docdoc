@@ -113,7 +113,14 @@ def execute_one(
     # provider tokens to count, one stage and no boundary to stop at.
     if run.kind is RunKind.OCR:
         _execute_ocr(
-            run, queue=queue, blobs=blobs, store=store, parsers=parsers, limits=limits, now=now
+            run,
+            queue=queue,
+            blobs=blobs,
+            store=store,
+            parsers=parsers,
+            limits=limits,
+            now=now,
+            stopping=stopping,
         )
         return None
 
@@ -232,6 +239,7 @@ def _execute_ocr(
     parsers: ParserRegistry | None,
     limits: Any,
     now: datetime,
+    stopping: Callable[[], bool] | None = None,
 ) -> None:
     """Parse one OCR run's document and record what happened (ADR-0022).
 
@@ -256,6 +264,17 @@ def _execute_ocr(
             RunOutcome(status=RunStatus.FAILED, failed_stage=None, error_class="UnknownBlob"),
             now=now,
         )
+        return
+
+    # **The one stage boundary an OCR run has**, consulted exactly as
+    # extraction consults its own: shutdown first (a flag, free), then a
+    # caller's cancellation (a round trip). A parse already in flight runs to
+    # completion and is billed, as a provider call in extraction does (FR-029).
+    if stopping is not None and stopping():
+        queue.release(run.run_id, now=now, worker_id=run.worker_id)
+        return
+    if _cancellation_requested(queue, run):
+        _finish(queue, run, RunOutcome(status=RunStatus.CANCELLED), now=now)
         return
 
     options = {} if run.ocr_language is None else {"language": run.ocr_language}
