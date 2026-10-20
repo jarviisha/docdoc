@@ -216,6 +216,16 @@ def locked(failed_logins: int, locked_until: datetime | None, now: datetime) -> 
     `failed_logins` is accepted for symmetry with `after_failure` and is not
     read: the lock is `locked_until` alone, which is what lets a lock outlive
     the counter that produced it — nothing here resets `locked_until` early.
+
+    **This is the gate `after_failure` must never run past.** A caller must
+    check `locked(...)` before recording a failure, and a failure that arrives
+    while it is `True` must change neither the counter nor the lock — not
+    extend it (a sixth, seventh, ... wrong guess buying no extra minutes) and
+    not clear it either. Clearing is the one `PostgresConsoleAccounts` cannot
+    take for granted: a *concurrent* failure can read the row before the fifth
+    one's lock commits and only reach its own write after, so the write has to
+    re-check this condition itself rather than trust the read that preceded
+    it — see `_record_failure`.
     """
     return locked_until is not None and now < locked_until
 
@@ -232,13 +242,16 @@ def after_failure(failed_logins: int, now: datetime) -> tuple[int, datetime | No
     minutes". Resetting to zero is what makes five *fresh* failures the
     requirement again once the lock expires.
 
-    A caller that is already locked does not reach here at all (`login`
-    returns before counting one), so a correct password offered while locked
-    neither resets nor extends the five minutes.
-
-    `PostgresConsoleAccounts._record_failure` encodes this exact rule in SQL,
-    because a database statement cannot call this function — keep the two in
-    sync if this policy ever changes.
+    **Callers must not call this while `locked(...)` is already `True`.** A
+    caller that is already locked does not reach here at all in the
+    single-request case (`login` returns before counting one), so a correct
+    *or* a wrong password offered while locked neither resets nor extends the
+    five minutes — the lock is simply untouched. Under concurrency that
+    invariant cannot be enforced by the caller checking first and writing
+    second, because another request can lock the account in between; see
+    `PostgresConsoleAccounts._record_failure`, which re-checks `locked(...)`
+    atomically inside the write rather than trusting an earlier read. Keep the
+    two in sync if this policy ever changes.
     """
     count = failed_logins + 1
     if count >= MAX_FAILED_LOGINS:
@@ -462,8 +475,24 @@ class PostgresConsoleAccounts:
         value `login` read earlier in the request. That is what makes N
         concurrent wrong passwords serialize into 1, 2, 3, ... N rather than
         all reading the same stale count and all writing 1, which is the
-        lockout-bypass this method exists to close. Keep this in sync with
-        `after_failure` if that policy changes.
+        lockout-bypass this method exists to close.
+
+        **The `WHERE` also re-checks `locked(...)`, not just `username`.**
+        `login` already checks `locked(...)` before ever reaching this method
+        — but it checks it against the row it read a statement ago, and a
+        concurrent sibling can have locked the account in the gap since then.
+        Without this second check, that sibling's failure (the one that set
+        the lock) commits first, and *this* failure then runs against the
+        now-locked row, recomputes `failed_logins + 1` as a small number, and
+        writes `locked_until = NULL` — clearing the lock the sibling just set.
+        Twelve concurrent wrong passwords would then lock and immediately
+        unlock the account, in batches of `MAX_FAILED_LOGINS`, forever. Adding
+        `locked_until IS NULL OR locked_until <= now` to the `WHERE` makes the
+        statement match zero rows whenever the account is, *right now*,
+        locked — so a failure arriving during an active lock changes neither
+        the counter nor the lock, exactly as `after_failure`'s docstring
+        requires. Keep this in sync with `after_failure` and `locked` if that
+        policy changes.
         """
         self.execute(
             "UPDATE console_users SET "
@@ -471,8 +500,14 @@ class PostgresConsoleAccounts:
             "ELSE failed_logins + 1 END, "
             "locked_until = CASE WHEN failed_logins + 1 >= %(max)s THEN %(locked_until)s "
             "ELSE NULL END "
-            "WHERE username = %(username)s",
-            {"max": MAX_FAILED_LOGINS, "locked_until": now + LOCKOUT, "username": username},
+            "WHERE username = %(username)s "
+            "AND (locked_until IS NULL OR locked_until <= %(now)s)",
+            {
+                "max": MAX_FAILED_LOGINS,
+                "locked_until": now + LOCKOUT,
+                "username": username,
+                "now": now,
+            },
         )
 
     def resolve(self, token: str, *, now: datetime, idle: timedelta) -> str | None:

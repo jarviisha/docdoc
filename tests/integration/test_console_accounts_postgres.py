@@ -5,11 +5,18 @@ re-runs it against `PostgresConsoleAccounts` through the same `accounts`
 fixture name those functions already take as a parameter — pytest resolves
 the fixture from *this* module, so the bodies are identical and the backend
 is the only thing that changed.
+
+One test lives only here: `test_concurrent_wrong_passwords_still_lock_the_account`
+fires real concurrent requests on real connections, which the in-memory fake
+cannot do meaningfully (it has no connection to race) and which is the one
+thing `tests/unit/test_console_accounts.py`'s sequential tests structurally
+cannot exercise.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import threading
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from tests.infra import require_database
@@ -18,6 +25,9 @@ from tests.infra import require_database
 # is omitted: it exercises `hash_password`/`verify_password` directly and
 # takes no `accounts` fixture, so importing it here would just run it twice.
 from tests.unit.test_console_accounts import (  # noqa: F401
+    NOW,
+    SALT,
+    test_a_failure_during_a_lock_neither_clears_nor_extends_it,
     test_activity_extends_the_session,
     test_add_refuses_bad_usernames_short_passwords_and_duplicates,
     test_an_idle_session_is_refused_and_removed,
@@ -47,3 +57,48 @@ def accounts() -> PostgresConsoleAccounts:
         connection.execute("TRUNCATE console_sessions, console_users")
     queue = PostgresRunQueue(lambda: psycopg.connect(dsn))
     return PostgresConsoleAccounts(execute=queue._execute)
+
+
+def test_concurrent_wrong_passwords_still_lock_the_account(
+    accounts: PostgresConsoleAccounts,
+) -> None:
+    """The lockout-bypass this fix round closes, exercised for real.
+
+    Each `accounts.login(...)` call opens its own connection
+    (`PostgresRunQueue._execute`), so firing several from separate threads is
+    several genuinely concurrent requests against the same row — the shape
+    the stale-read race needed and that a single Python process calling the
+    same object sequentially cannot produce.
+
+    More attempts than `MAX_FAILED_LOGINS` (12, not 5): the bug this guards
+    against was exactly a batch running *past* the fifth failure clearing the
+    lock the fifth one set, so stopping at 5 would not have caught it.
+    """
+    accounts.add("carol", "long enough pass", salt=SALT, now=NOW)
+
+    results: list[bool] = []
+    lock = threading.Lock()
+
+    def attempt(index: int) -> None:
+        result = accounts.login("carol", "wrong password!", token=f"concurrent-{index}", now=NOW)
+        with lock:
+            results.append(result)
+
+    threads = [threading.Thread(target=attempt, args=(i,)) for i in range(12)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(results) == 12
+    assert not any(results), "a wrong password must never succeed"
+
+    # The account must now be locked: the correct password, at the same
+    # instant, is refused -- not merely one more wrong-password failure.
+    assert not accounts.login("carol", "long enough pass", token="correct-while-locked", now=NOW)
+
+    # And it recovers once the lock lapses, which confirms the account was
+    # locked for the right reason rather than left in some other broken state.
+    assert accounts.login(
+        "carol", "long enough pass", token="correct-after-lock", now=NOW + timedelta(minutes=5)
+    )

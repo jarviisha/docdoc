@@ -96,6 +96,27 @@ def test_lock_expiry_resets_the_counter_so_one_more_failure_does_not_relock(acco
     assert accounts.login("alice", "long enough pass", token="t", now=later)
 
 
+def test_a_failure_during_a_lock_neither_clears_nor_extends_it(accounts):
+    """A wrong password offered while already locked must change nothing.
+
+    Not reset the lock early (which is the lockout-bypass: enough concurrent
+    wrong passwords landing after the lock is set would otherwise clear it
+    again and again, for unlimited guesses) and not extend it either. The
+    refusal lasts exactly the original five minutes — no more, no less.
+    """
+    accounts.add("alice", "long enough pass", salt=SALT, now=NOW)
+    for _ in range(5):
+        assert not accounts.login("alice", "wrong password!", token="x", now=NOW)
+    # One more wrong password, offered while still inside the original lock.
+    assert not accounts.login("alice", "wrong password!", token="y", now=NOW + timedelta(minutes=4))
+    # The lock is still exactly the original five minutes from NOW: refused
+    # right up to it, and the correct password succeeds exactly at it.
+    assert not accounts.login(
+        "alice", "long enough pass", token="t1", now=NOW + timedelta(minutes=4, seconds=59)
+    )
+    assert accounts.login("alice", "long enough pass", token="t2", now=NOW + timedelta(minutes=5))
+
+
 def test_logout_ends_a_session(accounts):
     accounts.add("alice", "long enough pass", salt=SALT, now=NOW)
     accounts.login("alice", "long enough pass", token="t1", now=NOW)
