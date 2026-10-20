@@ -348,4 +348,5 @@ def test_submission_does_its_blocking_work_off_the_event_loop(tmp_path: Path) ->
     """Review finding 3: parse planning, the counts, and the S3 put are blocking."""
     queue = _LoopSpyQueue()
     assert _ocr(_client(_deployment(tmp_path, CountingPost(), runs=queue))).status_code == 202
-    assert queue.on_loop and not any(queue.on_loop)
+    assert queue.on_loop
+    assert not any(queue.on_loop)
