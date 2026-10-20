@@ -12,6 +12,8 @@ scope too.
 
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -89,6 +91,26 @@ def _headers(cookie: dict[str, str]) -> dict[str, str]:
     return {**cookie, **H}
 
 
+def _erasure_events(caplog: pytest.LogCaptureFixture) -> list[dict]:
+    """Every `console.erasure` event, parsed from its own log line.
+
+    Unlike `_audit`'s `credential.operation` (passed through `extra={"docdoc":
+    ...}}`), `console.erasure` is logged in the "the message is the JSON"
+    style `console.assets` and `runs.driver_missing` already use on
+    `docdoc.api` -- the message itself is `json.dumps(...)`, so a plain
+    `record.getMessage()` is parsed rather than read off `record.docdoc`.
+    """
+    events = []
+    for record in caplog.records:
+        try:
+            payload = json.loads(record.getMessage())
+        except ValueError:
+            continue
+        if isinstance(payload, dict) and payload.get("event") == "console.erasure":
+            events.append(payload)
+    return events
+
+
 def test_issue_returns_the_key_once_and_list_omits_it(
     signed_in: tuple[TestClient, dict[str, str]],
 ) -> None:
@@ -114,6 +136,28 @@ def test_issue_returns_the_key_once_and_list_omits_it(
     assert row["credential_id"] == body["credential_id"]
     assert "key" not in row
     assert "digest" not in row
+
+
+def test_a_whitespace_label_is_stored_as_none(
+    signed_in: tuple[TestClient, dict[str, str]],
+) -> None:
+    """Mirrors the admin route's `label=(body.get("label") or None)`."""
+    client, cookie = signed_in
+
+    issued = client.post(
+        "/v1/console/credentials",
+        json={"tenant_id": "acme", "label": "   "},
+        headers=_headers(cookie),
+    )
+
+    assert issued.status_code == 201, issued.text
+    listing = client.get(
+        "/v1/console/credentials", params={"tenant": "acme"}, headers=cookie
+    ).json()
+    row = next(
+        r for r in listing["credentials"] if r["credential_id"] == issued.json()["credential_id"]
+    )
+    assert row["label"] is None
 
 
 def test_issue_refuses_any_scopes_field(
@@ -178,6 +222,61 @@ def test_document_erasure_names_its_tenant(
     assert "runs" in body
     assert "artifacts" in body
     assert "blobs" in body
+
+
+def test_tenant_erasure_logs_the_operator(
+    signed_in: tuple[TestClient, dict[str, str]], caplog: pytest.LogCaptureFixture
+) -> None:
+    """`_erase`/`retention.erase` name no actor; the console route names one."""
+    client, cookie = signed_in
+
+    with caplog.at_level(logging.INFO, logger="docdoc.api"):
+        response = client.delete("/v1/console/tenants/acme", headers=_headers(cookie))
+
+    assert response.status_code == 200, response.text
+    events = _erasure_events(caplog)
+    assert len(events) == 1
+    assert events[0]["actor"] == "console:alice"
+    assert events[0]["tenant_id"] == "acme"
+    assert events[0]["blob_id"] is None
+    assert events[0]["status"] == 200
+
+
+def test_document_erasure_logs_the_operator(
+    signed_in: tuple[TestClient, dict[str, str]], caplog: pytest.LogCaptureFixture
+) -> None:
+    client, cookie = signed_in
+    blob_id = "sha256:" + "a" * 64
+
+    with caplog.at_level(logging.INFO, logger="docdoc.api"):
+        response = client.delete(
+            f"/v1/console/tenants/acme/documents/{blob_id}", headers=_headers(cookie)
+        )
+
+    assert response.status_code == 200, response.text
+    events = _erasure_events(caplog)
+    assert len(events) == 1
+    assert events[0]["actor"] == "console:alice"
+    assert events[0]["tenant_id"] == "acme"
+    assert events[0]["blob_id"] == blob_id
+    assert events[0]["status"] == 200
+
+
+def test_a_refused_erasure_is_still_attributed(
+    signed_in: tuple[TestClient, dict[str, str]], caplog: pytest.LogCaptureFixture
+) -> None:
+    """A refused destructive attempt is still an attempt worth attributing."""
+    client, cookie = signed_in
+
+    with caplog.at_level(logging.INFO, logger="docdoc.api"):
+        response = client.delete("/v1/console/tenants/default", headers=_headers(cookie))
+
+    assert response.status_code == 409
+    events = _erasure_events(caplog)
+    assert len(events) == 1
+    assert events[0]["actor"] == "console:alice"
+    assert events[0]["tenant_id"] == "default"
+    assert events[0]["status"] == 409
 
 
 def test_an_invalid_tenant_id_is_refused_on_every_tenant_route(

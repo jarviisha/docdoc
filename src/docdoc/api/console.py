@@ -20,6 +20,8 @@ This module does not import `docdoc.api.app`: the deployment is read off
 
 from __future__ import annotations
 
+import json
+import logging
 from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -154,6 +156,30 @@ class _ConsoleCredentialRequest(BaseModel):
 
 def _accounts(request: Request) -> Any:
     return request.app.state.deployment.console_accounts()
+
+
+def _log_erasure(operator: str, *, tenant_id: str, blob_id: str | None, status: int) -> None:
+    """One structured event per console erasure attempt, attributed.
+
+    `_erase` and `retention.erase` are shared with the admin routes and log no
+    actor there (the admin routes have no operator identity to name), so the
+    attribution this global constraint requires is the console's own to add.
+    Logged for a refusal too -- a refused destructive attempt is still an
+    attempt worth being able to find later -- in the same "the message is the
+    JSON" style `console.assets` and `runs.driver_missing` already use on this
+    logger.
+    """
+    logging.getLogger("docdoc.api").info(
+        json.dumps(
+            {
+                "event": "console.erasure",
+                "actor": f"console:{operator}",
+                "tenant_id": tenant_id,
+                "blob_id": blob_id,
+                "status": status,
+            }
+        )
+    )
 
 
 def _owner(request: Request, run_id: str) -> tuple[JSONResponse | None, str, Any]:
@@ -401,9 +427,10 @@ def console_router() -> APIRouter:
         if not TENANT_PATTERN.match(tenant_id):
             return JSONResponse(status_code=422, content={"error": "invalid_tenant_id"})
 
+        label = (body.label or "").strip() or None
         deployment = request.app.state.deployment
         secret, credential = deployment.keys.issue(
-            tenant_id=tenant_id, scopes=frozenset(), label=body.label, now=identity.now()
+            tenant_id=tenant_id, scopes=frozenset(), label=label, now=identity.now()
         )
         _audit(actor=f"console:{operator}", operation="issue", credential=credential)
         return JSONResponse(
@@ -451,6 +478,7 @@ def console_router() -> APIRouter:
             return _unknown_run(tenant_id)
 
         if tenant_id == root_tenant():
+            _log_erasure(operator, tenant_id=tenant_id, blob_id=None, status=409)
             return JSONResponse(
                 status_code=409,
                 content={
@@ -464,7 +492,9 @@ def console_router() -> APIRouter:
                 },
             )
 
-        return _erase(request, tenant_id=tenant_id, blob_id=None)
+        response = _erase(request, tenant_id=tenant_id, blob_id=None)
+        _log_erasure(operator, tenant_id=tenant_id, blob_id=None, status=response.status_code)
+        return response
 
     @router.delete("/tenants/{tenant_id}/documents/{blob_id}")
     def erase_document(request: Request, tenant_id: str, blob_id: str, operator: Operator) -> Any:
@@ -479,6 +509,8 @@ def console_router() -> APIRouter:
         if not TENANT_PATTERN.match(tenant_id):
             return JSONResponse(status_code=422, content={"error": "invalid_tenant_id"})
 
-        return _erase(request, tenant_id=tenant_id, blob_id=blob_id)
+        response = _erase(request, tenant_id=tenant_id, blob_id=blob_id)
+        _log_erasure(operator, tenant_id=tenant_id, blob_id=blob_id, status=response.status_code)
+        return response
 
     return router
