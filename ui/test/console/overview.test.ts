@@ -54,17 +54,19 @@ test("done counts succeeded only; cancelled is not a card", () => {
   assert.equal(total, 3, "the cancelled row must not land in any card");
 });
 
-test("recentFailures and running pass through as rows", () => {
+test("recentFailures and running pass through as rows, kind included", () => {
   const body = {
     window_minutes: 60,
     counts: [],
-    recent_failures: [{ run_id: "r1" }],
-    running: [{ run_id: "r2" }],
+    recent_failures: [{ run_id: "r1", kind: "ocr" }],
+    running: [{ run_id: "r2", kind: "extraction" }],
   };
   const overview = toOverview(body);
 
   assert.equal(overview.recentFailures.length, 1);
+  assert.equal(overview.recentFailures[0]?.kind, "ocr");
   assert.equal(overview.running.length, 1);
+  assert.equal(overview.running[0]?.kind, "extraction");
 });
 
 test("a body without a counts array is refused rather than read as empty", () => {

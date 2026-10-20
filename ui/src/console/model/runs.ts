@@ -24,6 +24,7 @@ export interface RunSummary {
   /** Which tenant owns the run: the console lists every tenant's (ADR-0023 §3). */
   tenant_id: string;
   status: RunStatus;
+  kind: RunKind;
   created_at: string;
   /** The most recent claim, or `null` before one happens. */
   started_at: string | null;

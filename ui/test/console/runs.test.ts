@@ -122,6 +122,11 @@ test("a malformed body becomes an empty page rather than a crash", () => {
   assert.deepEqual(toPage({ runs: [], next_cursor: "c" }), { runs: [], next_cursor: "c" });
 });
 
+test("a parsed page keeps each row's kind", () => {
+  const page = toPage({ runs: [{ run_id: "r1", kind: "extraction" }], next_cursor: null });
+  assert.equal(page.runs[0]?.kind, "extraction");
+});
+
 // -- why a run failed ---------------------------------------------------------
 //
 // The detail view read one field of the detail body — `routing` — and showed a
