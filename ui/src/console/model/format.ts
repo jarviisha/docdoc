@@ -56,3 +56,26 @@ export function shortDigest(digest: string): string {
   if (value === undefined || value.length <= 16) return digest;
   return `${algorithm}:${value.slice(0, 8)}…${value.slice(-8)}`;
 }
+
+/**
+ * A run's wait or run time, in the coarsest unit that still tells two rows
+ * apart: milliseconds under a second, seconds under a minute, minutes and
+ * seconds under an hour, hours and minutes above it. `null` — a run never
+ * started, or never claimed — reads as a dash rather than an empty cell, the
+ * same convention `when` uses for an absent timestamp.
+ */
+export function duration(ms: number | null): string {
+  if (ms === null) return "—";
+  if (ms < 1000) return `${ms} ms`;
+
+  const totalSeconds = Math.round(ms / 1000);
+  if (totalSeconds < 60) return `${totalSeconds} s`;
+
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (totalMinutes < 60) return `${totalMinutes} min ${seconds} s`;
+
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${hours} h ${minutes} min`;
+}

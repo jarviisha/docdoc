@@ -7,6 +7,7 @@ import { test } from "node:test";
 
 import {
   back,
+  byKind,
   canGoBack,
   canGoForward,
   currentCursor,
@@ -18,7 +19,9 @@ import {
   initialListing,
   isEmpty,
   loaded,
+  reasonLabel,
   reloaded,
+  timeline,
   toFailure,
   toPage,
 } from "../../src/console/model/runs.ts";
@@ -146,4 +149,88 @@ test("a malformed or empty body reports no failure rather than an empty label", 
   assert.equal(toFailure("nope"), null);
   assert.equal(toFailure({ error_class: "" }), null);
   assert.equal(toFailure({ error_class: 7 }), null);
+});
+
+// -- the kind filter ----------------------------------------------------------
+
+test("a kind filter returns to page one and keeps the other filters", () => {
+  const deep = forward(loaded(filtered(initialListing(), "failed"), PAGE));
+  const narrowed = byKind(deep, "ocr");
+
+  assert.equal(narrowed.kind, "ocr");
+  assert.equal(narrowed.status, "failed");
+  assert.deepEqual(narrowed.stack, []);
+  assert.equal(narrowed.listing.state, "loading");
+});
+
+test("a fresh listing has no kind filter", () => {
+  assert.equal(initialListing().kind, null);
+});
+
+// -- timeline -------------------------------------------------------------
+//
+// waitMs and runMs are durations a card and a detail view both read from the
+// same four timestamps, rather than each computing its own.
+
+const T0 = "2026-10-20T00:00:00.000Z";
+const T0_PLUS_6S = "2026-10-20T00:00:06.000Z";
+const T1 = "2026-10-20T00:01:00.000Z";
+
+test("a run never started has no wait or run time", () => {
+  assert.deepEqual(timeline({ created_at: T0, started_at: null, finished_at: T1 }, Date.parse(T1)), {
+    waitMs: null,
+    runMs: null,
+  });
+});
+
+test("a running run's run time grows with now", () => {
+  const now = Date.parse(T0) + 20_000;
+  const result = timeline({ created_at: T0, started_at: T0_PLUS_6S, finished_at: null }, now);
+  assert.equal(result.runMs, 14_000);
+});
+
+test("wait time runs from creation to the claim", () => {
+  const result = timeline(
+    { created_at: T0, started_at: T0_PLUS_6S, finished_at: null },
+    Date.parse(T0_PLUS_6S),
+  );
+  assert.equal(result.waitMs, 6_000);
+});
+
+test("a finished run's run time stops at finish, not at now", () => {
+  const result = timeline(
+    { created_at: T0, started_at: T0_PLUS_6S, finished_at: T1 },
+    Date.parse(T1) + 999_999,
+  );
+  assert.equal(result.runMs, Date.parse(T1) - Date.parse(T0_PLUS_6S));
+});
+
+test("a negative duration clamps to zero", () => {
+  // Clock skew between a claim and its own creation record should never read
+  // as a negative wait or run time.
+  const result = timeline({ created_at: T1, started_at: T0, finished_at: T0 }, Date.parse(T0));
+  assert.equal(result.waitMs, 0);
+  assert.equal(result.runMs, 0);
+});
+
+// -- reasonLabel ------------------------------------------------------------
+
+test("a known reason carries its fixed copy", () => {
+  assert.equal(reasonLabel("timeout", "ProviderError"), "The OCR host timed out");
+  assert.equal(reasonLabel("mime_type", null), "This file type is not supported");
+});
+
+test("the three document-shape reasons share one label", () => {
+  assert.equal(reasonLabel("invalid_order", null), "The parser produced an invalid document");
+  assert.equal(reasonLabel("wrong_document", null), "The parser produced an invalid document");
+  assert.equal(reasonLabel("internal", null), "The parser produced an invalid document");
+});
+
+test("an unknown reason falls back to the class, or to itself", () => {
+  assert.equal(reasonLabel(null, "ProviderError"), "ProviderError");
+  assert.equal(reasonLabel("brand_new", "X"), "brand_new");
+});
+
+test("no reason and no class is nothing to report", () => {
+  assert.equal(reasonLabel(null, null), null);
 });

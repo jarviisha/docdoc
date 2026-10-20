@@ -44,6 +44,29 @@ test("the run list carries the tenant filter only when set", () => {
   assert.deepEqual(requestFor({ type: "list-runs", tenant: "acme" }).query, { tenant: "acme" });
 });
 
+test("the run list carries the kind filter only when set", () => {
+  assert.deepEqual(requestFor({ type: "list-runs" }).query, {});
+  assert.deepEqual(requestFor({ type: "list-runs", kind: "ocr" }).query, { kind: "ocr" });
+});
+
+test("overview is a GET under the console API", () => {
+  assert.deepEqual(requestFor({ type: "overview" }), {
+    method: "GET",
+    path: "/v1/console/overview",
+    query: {},
+    hasBody: false,
+  });
+});
+
+test("cancel-run is a DELETE under the console API", () => {
+  assert.deepEqual(requestFor({ type: "cancel-run", runId: "r 1" }), {
+    method: "DELETE",
+    path: "/v1/console/runs/r%201",
+    query: {},
+    hasBody: false,
+  });
+});
+
 test("an unknown path is not allowed", () => {
   assert.equal(isAllowed({ method: "GET", path: "/v1/anything", query: {}, hasBody: false }), false);
   assert.equal(isAllowed({ method: "GET", path: "/v1/runs", query: {}, hasBody: false }), false);
@@ -54,10 +77,17 @@ test("the run listing carries every filter that was set", () => {
     type: "list-runs",
     tenant: "acme",
     status: "failed",
+    kind: "ocr",
     limit: 50,
     cursor: "abc",
   });
-  assert.deepEqual(plan.query, { tenant: "acme", status: "failed", limit: "50", cursor: "abc" });
+  assert.deepEqual(plan.query, {
+    tenant: "acme",
+    status: "failed",
+    kind: "ocr",
+    limit: "50",
+    cursor: "abc",
+  });
 });
 
 test("run reads are scoped by run id, not by tenant", () => {
@@ -82,7 +112,7 @@ test("an identifier with a slash in it cannot escape its path segment", () => {
   assert.ok(isAllowed(plan));
 });
 
-test("the writes are exactly the session, credential, and erasure actions", () => {
+test("the writes are exactly the session, run, credential, and erasure actions", () => {
   const written = allIntents()
     .map(requestFor)
     .filter((plan) => plan.method !== "GET")
@@ -91,6 +121,7 @@ test("the writes are exactly the session, credential, and erasure actions", () =
 
   assert.deepEqual(written, [
     "DELETE /v1/console/credentials/c",
+    "DELETE /v1/console/runs/r",
     "DELETE /v1/console/session",
     "DELETE /v1/console/tenants/t",
     "DELETE /v1/console/tenants/t/documents/b",

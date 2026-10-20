@@ -15,6 +15,9 @@
 import type { RunStatus } from "./client.ts";
 import type { Failure } from "./failure.ts";
 
+/** The two things a run can be. ADR-0023 §7 splits the console's cards by it. */
+export type RunKind = "ocr" | "extraction";
+
 /** One row. The projection FR-019 fixes, and nothing from a result. */
 export interface RunSummary {
   run_id: string;
@@ -22,10 +25,18 @@ export interface RunSummary {
   tenant_id: string;
   status: RunStatus;
   created_at: string;
+  /** The most recent claim, or `null` before one happens. */
+  started_at: string | null;
   finished_at: string | null;
   blob_id: string;
   schema_identity: string;
   processing_id: string | null;
+  /** The OCR parser that claimed the run, or `null` before one does. */
+  ocr_parser: string | null;
+  /** The typed error's class name, never a message (FR-039). */
+  error_class: string | null;
+  /** A member of that error class's own `REASONS`, never free text (ADR-0023 §7). */
+  error_reason: string | null;
 }
 
 export interface RunPage {
@@ -42,13 +53,14 @@ export interface ListingState {
   /** One tenant's runs, or `null` for every tenant's. */
   tenant: string | null;
   status: RunStatus | null;
+  kind: RunKind | null;
   /** Cursors already used, so "back" is a pop. The first page has none. */
   stack: string[];
   listing: Listing;
 }
 
 export function initialListing(): ListingState {
-  return { tenant: null, status: null, stack: [], listing: { state: "loading" } };
+  return { tenant: null, status: null, kind: null, stack: [], listing: { state: "loading" } };
 }
 
 /** Whether there is a previous page to return to. */
@@ -88,6 +100,15 @@ export function back(state: ListingState): ListingState {
  */
 export function filtered(state: ListingState, status: RunStatus | null): ListingState {
   return { ...state, status, stack: [], listing: { state: "loading" } };
+}
+
+/**
+ * Narrow to one kind, or widen back to both with `null` — the cursor stack
+ * resets for the same reason `filtered` resets it: a kind change is a
+ * different ordering, and the cursor is bound to the one it was issued for.
+ */
+export function byKind(state: ListingState, kind: RunKind | null): ListingState {
+  return { ...state, kind, stack: [], listing: { state: "loading" } };
 }
 
 /**
@@ -193,4 +214,66 @@ export function toPage(body: unknown): RunPage {
     runs: Array.isArray(runs) ? (runs as RunSummary[]) : [],
     next_cursor: typeof cursor === "string" ? cursor : null,
   };
+}
+
+/**
+ * How long a run waited, and how long it has run, from its own four
+ * timestamps and the clock reading `now`.
+ *
+ * `now` arrives as a parameter rather than being read here: a running run's
+ * duration only grows because the caller re-renders it, and what grows it is
+ * the caller's own clock, not one this module would otherwise have to read
+ * each call.
+ *
+ * Either figure is `null` before a claim happens — there is no wait to report
+ * and no run to be timing — and negative, which a clock skewed against the
+ * deployment's own can otherwise produce, is clamped to zero rather than
+ * shown as a run that finished before it began.
+ */
+export function timeline(
+  run: { created_at: string; started_at: string | null; finished_at: string | null },
+  now: number,
+): { waitMs: number | null; runMs: number | null } {
+  if (run.started_at === null) return { waitMs: null, runMs: null };
+  const created = Date.parse(run.created_at);
+  const started = Date.parse(run.started_at);
+  const finished = run.finished_at === null ? now : Date.parse(run.finished_at);
+  return {
+    waitMs: Math.max(0, started - created),
+    runMs: Math.max(0, finished - started),
+  };
+}
+
+/**
+ * Fixed copy for a run's `error_reason`, the member of an error class's own
+ * `REASONS` the contract carries (never a message, ADR-0023 §7).
+ *
+ * An unknown reason — one a newer deployment added before this console's copy
+ * caught up — shows as the raw reason string rather than nothing at all. A
+ * `null` reason falls back to the error class, which is still more than an
+ * operator had before T075; both null is genuinely nothing to report.
+ */
+const REASON_LABELS: Record<string, string> = {
+  timeout: "The OCR host timed out",
+  deadline: "The run ran out of time",
+  rate_limit: "The host rate-limited the request",
+  auth: "The host refused docdoc's credentials",
+  transport: "docdoc could not reach the host",
+  service: "The host reported an error",
+  incomplete: "The host returned fewer pages than it was sent",
+  mime_type: "This file type is not supported",
+  size_limit: "The file is too large",
+  page_limit: "The file has too many pages",
+  encrypted: "The file is encrypted",
+  corrupt: "The file is corrupt",
+  empty_result: "The parser found no text",
+  capability_mismatch: "The parser cannot handle this input",
+  invalid_order: "The parser produced an invalid document",
+  wrong_document: "The parser produced an invalid document",
+  internal: "The parser produced an invalid document",
+};
+
+export function reasonLabel(reason: string | null, errorClass: string | null): string | null {
+  if (reason === null) return errorClass;
+  return REASON_LABELS[reason] ?? reason;
 }
