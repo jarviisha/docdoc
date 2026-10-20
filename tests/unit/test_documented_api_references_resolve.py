@@ -396,6 +396,7 @@ CONFIG_DOCUMENTS = (
     # DOCDOC_OCR_RETENTION_HOURS) defined in `docdoc.api.settings`.
     "docs/superpowers/specs/2026-10-19-async-ocr-queue-design.md",
     "docs/superpowers/plans/2026-10-20-async-ocr-queue.md",
+    "docs/adr/0022-asynchronous-ocr-through-a-bounded-queue.md",
     # ADR-0021 named only the `DOCDOC_*_FILE` wildcard idiom until the 012
     # review (Finding 10) replaced it with the literal variable name, so it
     # no longer qualifies for that exemption -- a decision record that names

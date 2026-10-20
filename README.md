@@ -193,7 +193,8 @@ POST /v1/documents/{blob_id}/extract      → the job identity, and the result
 POST /v1/extract                          → the result, storing nothing
 GET  /v1/jobs/{job_id}                    → succeeded | unavailable | unknown
 GET  /v1/jobs/{job_id}/result             → the stored result
-POST /v1/ocr                              → the raw Document, storing nothing
+POST /v1/ocr                              → 202 and a run_id; OCR happens on a worker
+GET  /v1/runs/{run_id}/result             → that OCR run's Document, once it has succeeded
 GET  /v1/parsers                          → the parsers this deployment has configured
 ```
 
@@ -205,6 +206,22 @@ is the document, `?parser=<id>` names a configured parser instead of leaving sel
 matching, and `?language=<code>` becomes a parse option. `GET /v1/parsers` lists them, each with its
 capabilities, media types, and (for a parser with a health probe) whether it currently answers —
 never a URL or a header (ADR-0021 §3).
+
+**OCR is queued** (ADR-0022), so it needs the run database and a store. `POST /v1/ocr` checks the
+body, the parser, and the language, stores the document, and answers `202` with a run before any
+OCR happens; a worker started with `--kind ocr` (the composition's `ocr-worker`) performs it. Poll
+`GET /v1/runs/{run_id}` or pass `?callback_id=`, then read the `Document` from
+`GET /v1/runs/{run_id}/result`. The queue is bounded twice, and both refusals carry `Retry-After`:
+
+```bash
+export DOCDOC_OCR_QUEUE_PER_TENANT=100   # one consumer's OCR runs queued or running → else 429
+export DOCDOC_OCR_QUEUE_TOTAL=500        # every consumer's together → else 503, "overloaded"
+export DOCDOC_OCR_RETENTION_HOURS=24     # how long a result is kept after its run finishes
+```
+
+All three are on with no configuration. A consumer's own cap can be set with `ocr_queue` in the
+limits file. OCR results are swept even when `DOCDOC_RUN_RETENTION_DAYS` is unset; extraction runs
+are not.
 
 Three more accept work without holding the connection open, and need a database:
 

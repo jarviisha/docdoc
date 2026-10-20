@@ -47,6 +47,16 @@ curl -s "localhost:8000/v1/jobs/$(…processing_id…)/result"
 The result is not served on the run resource. A succeeded run names its `processing_id` and the job
 route returns the result — one result representation, reachable one way.
 
+## Two kinds of run
+
+A run is `extraction` — the four stages against a schema — or `ocr`: the parse stage alone, with
+the caller's parser and language instead of a schema (ADR-0022). `POST /v1/ocr` creates the second
+kind, bounded by two caps (one per consumer, one per deployment) and refused with `429` or `503`
+and `Retry-After` when either is full. An OCR run's `processing_id` is its `Document`'s id, served
+by `GET /v1/runs/{run_id}/result`, and the result is swept a day after the run finishes unless
+`DOCDOC_OCR_RETENTION_HOURS` says otherwise. `docdoc worker --kind ocr|extraction` claims one kind;
+without `--kind` a worker claims both, as every worker did before.
+
 ## The lifecycle
 
 Five states, and the set is closed.
