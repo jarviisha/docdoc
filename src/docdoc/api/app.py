@@ -50,6 +50,7 @@ from docdoc.api.auth import (
     Principal,
     bearer_of,
 )
+from docdoc.api.console import console_gate, console_router, is_console_api
 from docdoc.api.models import (
     BlobMetadata,
     JobStatus,
@@ -135,6 +136,11 @@ _UNAUTHENTICATED = frozenset({LIVENESS_PATH, READINESS_PATH})
 #: assets. It is checked with `startswith` against this exact string plus the
 #: bare path, so a route named `/consoleroom` later would not be exempted by
 #: accident.
+#:
+#: **Not to be confused with `/v1/console`** (ADR-0023 §3), the console's own API.
+#: That is not exempt: it skips the Bearer check only to face its own session
+#: gate, `docdoc.api.console.console_gate`. Since ADR-0023 the shell no longer
+#: takes a pasted key — it signs in there.
 _CONSOLE_PREFIX = "/console"
 
 
@@ -187,6 +193,9 @@ class _Deployment:
         deliverer: Any = None,
         corrections: Any = None,
         routing: Any = None,
+        #: The console accounts store (ADR-0023 §1). `None` builds one from the
+        #: run-state database, see `console_accounts`.
+        console: Any = None,
         #: The two OCR caps (ADR-0022). `None` reads the environment, then the
         #: default -- both are on with no configuration.
         ocr_queue_per_tenant: int | None = None,
@@ -204,6 +213,7 @@ class _Deployment:
             else _configured_cap(OCR_QUEUE_TOTAL_ENV, DEFAULT_OCR_QUEUE_TOTAL)
         )
         self._corrections = corrections
+        self._console = console
         self._routing = routing
         #: Distinguishes "not read yet" from "read, and there is none". Without
         #: it a deployment with no policy would re-read the environment on every
@@ -333,6 +343,23 @@ class _Deployment:
 
         self._corrections = PostgresCorrectionStore(execute=execute)
         return self._corrections
+
+    def console_accounts(self) -> Any:
+        """The console accounts store, or ``None``, built once (ADR-0023 §1).
+
+        ``None`` whenever there is no run-state database — the same condition
+        as `corrections` — and the console gate answers 503 naming the fix.
+        """
+        if self._console is not None:
+            return self._console
+        execute = getattr(self._runs, "_execute", None)
+        if execute is None:
+            return None
+
+        from docdoc.runs.console_accounts import PostgresConsoleAccounts
+
+        self._console = PostgresConsoleAccounts(execute=execute)
+        return self._console
 
     def routing_policy(self) -> Any:
         """The configured routing policy, or ``None``. Read once, at startup.
@@ -649,6 +676,7 @@ def build_app(deployment: _Deployment | None = None) -> FastAPI:
     app.state.deployment = resolved
     _require_credential_everywhere_else(app)
     app.include_router(_router())
+    app.include_router(console_router())
     # Before the versioned router is irrelevant to routing and relevant to
     # reading: the health routes are not part of the document API and are
     # registered on the application rather than on it (FR-058).
@@ -678,6 +706,13 @@ def _require_credential_everywhere_else(app: FastAPI) -> None:
     exists, because that is where the operator types one. See `_CONSOLE_PREFIX`
     for what is exempt and what it is worth to an unauthenticated reader.
 
+    **ADR-0023 §3 moved `/v1/console` off the Bearer check, not out from behind
+    a credential.** That route family answers only to a console session, so its
+    paths go to `docdoc.api.console.console_gate` *instead of* the branch below:
+    a Bearer key is never consulted there, and a missing session is refused
+    there. The rest of `/v1` is unchanged, and a console session opens none of
+    it.
+
     **Before routing**, which means an unknown path answers 401 rather than 404
     on an authenticated deployment. That is the better answer: a 404 would say
     which paths exist to someone who cannot use any of them.
@@ -690,6 +725,11 @@ def _require_credential_everywhere_else(app: FastAPI) -> None:
     @app.middleware("http")
     async def _credential(request: Request, call_next: Any) -> Response:
         if request.url.path in _UNAUTHENTICATED or _is_console_asset(request.url.path):
+            return await call_next(request)  # type: ignore[no-any-return]
+        if is_console_api(request.url.path):
+            refused = console_gate(request, _deployment_of(request).console_accounts())
+            if refused is not None:
+                return refused
             return await call_next(request)  # type: ignore[no-any-return]
         try:
             _deployment_of(request).keys.principal_for(

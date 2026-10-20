@@ -124,6 +124,11 @@ ROUTES = {
     ("POST", "/v1/ocr"),
     ("GET", "/v1/parsers"),
     ("GET", "/v1/runs/{run_id}/result"),
+    # The console's own route family (ADR-0023 §3), answering only to a console
+    # session: sign in, who is signed in, sign out.
+    ("POST", "/v1/console/session"),
+    ("GET", "/v1/console/session"),
+    ("DELETE", "/v1/console/session"),
 }
 
 
