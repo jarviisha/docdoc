@@ -30,11 +30,15 @@ def _pixels(image: Any) -> list[Any]:
     return [image.getpixel((x, y)) for y in range(height) for x in range(width)]
 
 
-def _pdf(pages: int) -> bytes:
+#: Enough of a JPEG for `detect_media_type`; passthrough never decodes it.
+JPEG = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00" + b"\x00" * 16
+
+
+def _pdf(pages: int, size: tuple[float, float] = (612, 792)) -> bytes:
     pdfium = pytest.importorskip("pypdfium2")
     document = pdfium.PdfDocument.new()
     for _ in range(pages):
-        document.new_page(612, 792)
+        document.new_page(*size)
     out = io.BytesIO()
     document.save(out)
     return out.getvalue()
@@ -77,10 +81,30 @@ def test_render_pdf_page_caps_the_long_edge() -> None:
         render_pdf_page(data, -1)
 
 
+@pytest.mark.parametrize("size", [(742.5, 742), (612, 763), (595.28, 763), (612, 792)])
+def test_render_pdf_page_never_rounds_past_the_cap(size: tuple[float, float]) -> None:
+    """pdfium ceils `size * scale`; a scale landing a hair above the cap must not add a pixel."""
+    decoded = _decode(render_pdf_page(_pdf(1, size), 0))
+
+    assert max(decoded.size) <= 2000
+
+
+def test_render_pdf_page_refuses_a_corrupt_pdf() -> None:
+    pytest.importorskip("pypdfium2")
+    with pytest.raises(ValueError, match="unreadable PDF"):
+        render_pdf_page(b"%PDF-1.4 not really", 0)
+
+
 def test_page_image_passes_png_through() -> None:
     assert page_image(IMAGE, 0) == (IMAGE, "image/png")
     with pytest.raises(IndexError):
         page_image(IMAGE, 1)
+
+
+def test_page_image_passes_jpeg_through() -> None:
+    assert page_image(JPEG, 0) == (JPEG, "image/jpeg")
+    with pytest.raises(IndexError):
+        page_image(JPEG, 1)
 
 
 def test_page_image_renders_a_pdf_page() -> None:

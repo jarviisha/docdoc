@@ -92,6 +92,38 @@ def test_console_page_of_a_png_run(
     assert client.get(f"/v1/console/runs/{run.run_id}/pages/1", headers=cookie).status_code == 404
 
 
+def test_console_page_of_a_jpeg_run(
+    signed_in: tuple[TestClient, dict[str, str]],
+    queue: InMemoryRunQueue,
+    deployment: _Deployment,
+) -> None:
+    client, cookie = signed_in
+    jpeg = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00" + b"\x00" * 16
+    run = _run(queue, _stored(deployment, jpeg))
+
+    r = client.get(f"/v1/console/runs/{run.run_id}/pages/0", headers=cookie)
+
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/jpeg"
+    assert r.headers["cache-control"] == "private, max-age=300"
+    assert r.content == jpeg
+
+
+def test_console_page_of_a_corrupt_pdf_is_404(
+    signed_in: tuple[TestClient, dict[str, str]],
+    queue: InMemoryRunQueue,
+    deployment: _Deployment,
+) -> None:
+    pytest.importorskip("pypdfium2")
+    client, cookie = signed_in
+    run = _run(queue, _stored(deployment, b"%PDF-1.4 not really"))
+
+    r = client.get(f"/v1/console/runs/{run.run_id}/pages/0", headers=cookie)
+
+    assert r.status_code == 404
+    assert r.json()["error"]["class"] == "RunNotFoundError"
+
+
 def test_console_page_of_a_pdf_run(
     signed_in: tuple[TestClient, dict[str, str]],
     queue: InMemoryRunQueue,

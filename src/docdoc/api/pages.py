@@ -54,32 +54,45 @@ def render_pdf_page(data: bytes, page: int, *, max_edge: int = MAX_EDGE) -> byte
     """Page `page` (0-based) of a PDF as a PNG whose longer edge is at most `max_edge`.
 
     The scale is `min(max_edge / longer edge in points, 200 / 72)`. Raises
-    `IndexError` for a page out of range, and `RuntimeError("pypdfium2")` when
-    the `docdoc[ocr]` extra is not installed.
+    `IndexError` for a page out of range, `ValueError` for a PDF pdfium cannot
+    open, and `RuntimeError("pypdfium2")` when the `docdoc[ocr]` extra is not
+    installed.
     """
     try:
         import pypdfium2
     except ImportError as exc:
         raise RuntimeError("pypdfium2") from exc
 
-    document = pypdfium2.PdfDocument(data)
+    try:
+        document = pypdfium2.PdfDocument(data)
+    except pypdfium2.PdfiumError as exc:
+        # A `RuntimeError` subclass; not the missing extra, just a bad file.
+        raise ValueError("unreadable PDF") from exc
     try:
         if not 0 <= page < len(document):
             raise IndexError(page)
         pdf_page = document[page]
-        width, height = pdf_page.get_size()
-        scale = min(max_edge / max(width, height), _MAX_DPI / 72)
-        bitmap = pdf_page.render(scale=scale)
-        if bitmap.mode not in ("RGB", "RGBA", "BGR", "BGRA"):
-            raise RuntimeError(f"unexpected bitmap mode {bitmap.mode!r}")
-        return encode_png(
-            bitmap.width,
-            bitmap.height,
-            bitmap.stride,
-            bitmap.n_channels,
-            bytes(bitmap.buffer),
-            bgr=bitmap.mode.startswith("BGR"),
-        )
+        try:
+            width, height = pdf_page.get_size()
+            # pdfium ceils `size * scale`, and `max_edge / edge * edge` can land
+            # a hair above `max_edge`: shaved so the ceiling is never one past it.
+            scale = min(max_edge / max(width, height), _MAX_DPI / 72) * (1 - 1e-9)
+            bitmap = pdf_page.render(scale=scale)
+            try:
+                if bitmap.mode not in ("RGB", "RGBA", "BGR", "BGRA"):
+                    raise RuntimeError(f"unexpected bitmap mode {bitmap.mode!r}")
+                return encode_png(
+                    bitmap.width,
+                    bitmap.height,
+                    bitmap.stride,
+                    bitmap.n_channels,
+                    bytes(bitmap.buffer),
+                    bgr=bitmap.mode.startswith("BGR"),
+                )
+            finally:
+                bitmap.close()
+        finally:
+            pdf_page.close()
     finally:
         document.close()
 
