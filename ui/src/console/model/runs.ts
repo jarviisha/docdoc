@@ -30,7 +30,8 @@ export interface RunSummary {
   started_at: string | null;
   finished_at: string | null;
   blob_id: string;
-  schema_identity: string;
+  /** The extraction schema, or `null` for an OCR run, which has none. */
+  schema_identity: string | null;
   processing_id: string | null;
   /** The OCR parser that claimed the run, or `null` before one does. */
   ocr_parser: string | null;
