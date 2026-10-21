@@ -46,6 +46,9 @@ export type Intent =
   | { type: "erase-document"; tenantId: string; blobId: string }
   | { type: "list-tenants" }
   | { type: "list-parsers" }
+  | { type: "list-callbacks"; tenantId: string }
+  | { type: "register-callback"; tenantId: string }
+  | { type: "revoke-callback"; tenantId: string; callbackId: string }
   | {
       type: "submit-ocr";
       tenantId: string;
@@ -77,6 +80,8 @@ const ALLOWED = [
   /^\/v1\/console\/tenants\/[^/]+\/documents\/[^/]+$/,
   /^\/v1\/console\/tenants\/[^/]+\/ocr$/,
   /^\/v1\/console\/parsers$/,
+  /^\/v1\/console\/tenants\/[^/]+\/callbacks$/,
+  /^\/v1\/console\/tenants\/[^/]+\/callbacks\/[^/]+$/,
 ];
 
 export function isAllowed(plan: RequestPlan): boolean {
@@ -192,6 +197,32 @@ export function requestFor(intent: Intent): RequestPlan {
     case "list-parsers":
       return { method: "GET", path: "/v1/console/parsers", query: {}, hasBody: false };
 
+    case "list-callbacks":
+      return {
+        method: "GET",
+        path: `/v1/console/tenants/${encodeURIComponent(intent.tenantId)}/callbacks`,
+        query: {},
+        hasBody: false,
+      };
+
+    case "register-callback":
+      return {
+        method: "POST",
+        path: `/v1/console/tenants/${encodeURIComponent(intent.tenantId)}/callbacks`,
+        query: {},
+        hasBody: true,
+      };
+
+    case "revoke-callback":
+      return {
+        method: "DELETE",
+        path:
+          `/v1/console/tenants/${encodeURIComponent(intent.tenantId)}` +
+          `/callbacks/${encodeURIComponent(intent.callbackId)}`,
+        query: {},
+        hasBody: false,
+      };
+
     case "submit-ocr": {
       // Absent rather than empty, as `list-runs` already does: a `parser=`
       // with nothing after it is a choice nobody made, and the route would
@@ -240,6 +271,9 @@ export function allIntents(): Intent[] {
     { type: "erase-document", tenantId: "t", blobId: "b" },
     { type: "list-tenants" },
     { type: "list-parsers" },
+    { type: "list-callbacks", tenantId: "acme" },
+    { type: "register-callback", tenantId: "acme" },
+    { type: "revoke-callback", tenantId: "acme", callbackId: "c" },
     { type: "submit-ocr", tenantId: "t" },
   ];
 }

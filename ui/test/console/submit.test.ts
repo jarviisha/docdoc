@@ -9,15 +9,20 @@ import { test } from "node:test";
 import { requestFor } from "../../src/console/model/client.ts";
 import {
   AUTOMATIC,
+  PARSERS_POLL,
   canSubmit,
   chooseFile,
   languageChoices,
   parserChoices,
+  parserStatus,
+  parsersRefreshLabel,
   submitIntent,
   submittedRunId,
   toParsers,
   toTenants,
 } from "../../src/console/model/submit.ts";
+
+const NO_CAPABILITIES = { text: false, geometry: false, tables: false, handwriting: false };
 
 test("tenants are read from the body's own list", () => {
   assert.deepEqual(toTenants({ tenants: ["acme", "mmerp"] }), ["acme", "mmerp"]);
@@ -28,12 +33,17 @@ test("tenants are read from the body's own list", () => {
 test("parsers default their absent optional fields rather than reading undefined", () => {
   const parsers = toParsers({
     parsers: [
-      { id: "paddle-vl", available: true, capabilities: [], media_types: ["image/png"] },
+      {
+        id: "paddle-vl",
+        available: true,
+        capabilities: { text: true, geometry: true, tables: false, handwriting: false },
+        media_types: ["image/png"],
+      },
       {
         id: "tesseract",
         available: false,
         unavailable_reason: "disabled",
-        capabilities: [],
+        capabilities: { text: true, geometry: false, tables: false, handwriting: false },
         media_types: ["image/png"],
         languages: ["en"],
         healthy: false,
@@ -41,15 +51,54 @@ test("parsers default their absent optional fields rather than reading undefined
     ],
   });
   assert.deepEqual(parsers, [
-    { id: "paddle-vl", available: true, healthy: null, languages: [], mediaTypes: ["image/png"] },
+    {
+      id: "paddle-vl",
+      available: true,
+      healthy: null,
+      languages: [],
+      mediaTypes: ["image/png"],
+      unavailableReason: null,
+      capabilities: { text: true, geometry: true, tables: false, handwriting: false },
+    },
     {
       id: "tesseract",
       available: false,
       healthy: false,
       languages: ["en"],
       mediaTypes: ["image/png"],
+      unavailableReason: "disabled",
+      capabilities: { text: true, geometry: false, tables: false, handwriting: false },
     },
   ]);
+});
+
+test("a parser with no capabilities reported reads as none, not undefined", () => {
+  const parsers = toParsers({
+    parsers: [{ id: "x", available: true, media_types: [] }],
+  });
+  assert.deepEqual(parsers[0]?.capabilities, NO_CAPABILITIES);
+  assert.equal(parsers[0]?.unavailableReason, null);
+});
+
+test("parser status order: unavailable beats unhealthy; healthy; otherwise unknown", () => {
+  const base = {
+    id: "x",
+    available: true,
+    healthy: null as boolean | null,
+    languages: [],
+    mediaTypes: [],
+    unavailableReason: null,
+    capabilities: NO_CAPABILITIES,
+  };
+  assert.equal(parserStatus({ ...base, available: false, healthy: true }), "unavailable");
+  assert.equal(parserStatus({ ...base, healthy: false }), "not responding");
+  assert.equal(parserStatus({ ...base, healthy: true }), "healthy");
+  assert.equal(parserStatus({ ...base, healthy: null }), "unknown");
+});
+
+test("parsers never poll", () => {
+  assert.equal(PARSERS_POLL, false);
+  assert.equal(parsersRefreshLabel, "Refresh");
 });
 
 test("a row missing its id or available flag is dropped, not guessed at", () => {
@@ -59,7 +108,15 @@ test("a row missing its id or available flag is dropped, not guessed at", () => 
 
 test("language choices follow the parser", () => {
   const ps = [
-    { id: "paddle-vl", available: true, healthy: true, languages: ["vi", "en"], mediaTypes: [] },
+    {
+      id: "paddle-vl",
+      available: true,
+      healthy: true,
+      languages: ["vi", "en"],
+      mediaTypes: [],
+      unavailableReason: null,
+      capabilities: NO_CAPABILITIES,
+    },
   ];
   assert.deepEqual(languageChoices(ps, AUTOMATIC), [{ value: "", label: "Parser default" }]);
   assert.deepEqual(languageChoices(ps, "paddle-vl").map((c) => c.value), ["", "vi", "en"]);
@@ -71,9 +128,33 @@ test("a parser no longer in the list offers only the default language", () => {
 
 test("parser choices mark unavailable and unhealthy", () => {
   const ps = [
-    { id: "paddle-vl", available: true, healthy: true, languages: [], mediaTypes: [] },
-    { id: "slow", available: true, healthy: false, languages: [], mediaTypes: [] },
-    { id: "off", available: false, healthy: null, languages: [], mediaTypes: [] },
+    {
+      id: "paddle-vl",
+      available: true,
+      healthy: true,
+      languages: [],
+      mediaTypes: [],
+      unavailableReason: null,
+      capabilities: NO_CAPABILITIES,
+    },
+    {
+      id: "slow",
+      available: true,
+      healthy: false,
+      languages: [],
+      mediaTypes: [],
+      unavailableReason: null,
+      capabilities: NO_CAPABILITIES,
+    },
+    {
+      id: "off",
+      available: false,
+      healthy: null,
+      languages: [],
+      mediaTypes: [],
+      unavailableReason: "disabled",
+      capabilities: NO_CAPABILITIES,
+    },
   ];
   assert.deepEqual(parserChoices(ps), [
     { value: AUTOMATIC, label: "Automatic", disabled: false },

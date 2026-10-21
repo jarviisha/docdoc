@@ -121,7 +121,7 @@ test("an identifier with a slash in it cannot escape its path segment", () => {
   assert.ok(isAllowed(plan));
 });
 
-test("the writes are exactly the session, run, credential, erasure, and OCR submission actions", () => {
+test("the writes are exactly the session, run, credential, callback, erasure, and OCR submission actions", () => {
   const written = allIntents()
     .map(requestFor)
     .filter((plan) => plan.method !== "GET")
@@ -132,12 +132,38 @@ test("the writes are exactly the session, run, credential, erasure, and OCR subm
     "DELETE /v1/console/credentials/c",
     "DELETE /v1/console/runs/r",
     "DELETE /v1/console/session",
+    "DELETE /v1/console/tenants/acme/callbacks/c",
     "DELETE /v1/console/tenants/t",
     "DELETE /v1/console/tenants/t/documents/b",
     "POST /v1/console/credentials",
     "POST /v1/console/session",
+    "POST /v1/console/tenants/acme/callbacks",
     "POST /v1/console/tenants/t/ocr",
   ]);
+});
+
+test("callback intents address the tenant's callbacks", () => {
+  assert.deepEqual(requestFor({ type: "revoke-callback", tenantId: "acme", callbackId: "c 1" }), {
+    method: "DELETE",
+    path: "/v1/console/tenants/acme/callbacks/c%201",
+    query: {},
+    hasBody: false,
+  });
+});
+
+test("callbacks are listed and registered under the tenant's own path", () => {
+  assert.deepEqual(requestFor({ type: "list-callbacks", tenantId: "acme" }), {
+    method: "GET",
+    path: "/v1/console/tenants/acme/callbacks",
+    query: {},
+    hasBody: false,
+  });
+  assert.deepEqual(requestFor({ type: "register-callback", tenantId: "acme" }), {
+    method: "POST",
+    path: "/v1/console/tenants/acme/callbacks",
+    query: {},
+    hasBody: true,
+  });
 });
 
 test("the tenant and parser lists are GETs under the console API", () => {

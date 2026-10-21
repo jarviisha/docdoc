@@ -160,6 +160,31 @@ test("a 429 with no usable figures falls back to the bare code, not an invented 
   assert.equal(describe(failure), "limit_exceeded");
 });
 
+test("destination refused reads as a sentence", () => {
+  const failure = failureOf({
+    ok: false,
+    status: 422,
+    body: { error: "destination_refused", detail: "this callback targets a private address" },
+  });
+  assert.equal(failure.kind, "reported");
+  assert.equal(describe(failure), "this callback targets a private address");
+});
+
+test("unconfigured delivery is unavailable", () => {
+  const failure = failureOf({
+    ok: false,
+    status: 503,
+    body: {
+      error: {
+        class: "DeliveryError",
+        message: "this deployment delivers no callbacks; set …",
+      },
+    },
+  });
+  assert.equal(failure.kind, "unavailable");
+  assert.equal(describe(failure), "this deployment delivers no callbacks; set …");
+});
+
 test("overloaded shows the server's sentence", () => {
   const failure = failureOf({
     ok: false,

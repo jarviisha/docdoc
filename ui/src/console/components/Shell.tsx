@@ -25,6 +25,7 @@ import {
 import { send, sendForBlob } from "../../transport.ts";
 import { requestFor, type Intent } from "../model/client.ts";
 import { describe, failureOf, failureOfThrown, type Failure } from "../model/failure.ts";
+import type { Area } from "../model/navigation.ts";
 import {
   afterSignOut,
   emptySession,
@@ -39,8 +40,6 @@ import { CredentialArea } from "./CredentialArea.tsx";
 import { EraseArea } from "./EraseArea.tsx";
 import { OverviewArea } from "./OverviewArea.tsx";
 import { SubmitArea } from "./SubmitArea.tsx";
-
-type Area = "overview" | "runs" | "submit" | "credentials" | "erasure";
 
 const MONITORING: { name: Area; label: string }[] = [
   { name: "overview", label: "Overview" },
