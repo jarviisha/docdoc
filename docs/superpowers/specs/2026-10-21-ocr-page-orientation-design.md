@@ -1,6 +1,6 @@
 # OCR page orientation: keep PaddleX's turn so the result viewer lines up
 
-Status: draft, awaiting approval. Date: 2026-10-21.
+Status: approved. Date: 2026-10-21.
 
 ## Intent
 
