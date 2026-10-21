@@ -388,6 +388,24 @@ class PostgresRunQueue:
         )
         return tuple(_row_to_run(row) for row in rows or ())
 
+    def longest_running(self, *, limit: int) -> tuple[Run, ...]:
+        """`running` runs across tenants, earliest `started_at` first.
+
+        Not `updated_at`: every heartbeat rewrites it, so a stuck run would
+        sink below healthy ones. Same ponytail as `latest`: no index.
+        """
+        rows = self._execute(
+            f"""
+            SELECT {_COLUMNS} FROM runs
+             WHERE status = 'running'
+             ORDER BY started_at ASC NULLS LAST, run_id
+             LIMIT %(limit)s
+            """,
+            {"limit": limit},
+            fetch="all",
+        )
+        return tuple(_row_to_run(row) for row in rows or ())
+
     def tombstone(self, run_id: UUID, tenant_id: str) -> Tombstone | None:
         """Scoped in the query, exactly as `get` is (FR-011)."""
         row = self._execute(
@@ -877,6 +895,8 @@ class PostgresRunQueue:
                    -- claim; the check constraint would reject it and a shutdown
                    -- is the worst moment to discover that.
                    attempts = GREATEST(runs.attempts - 1, 0),
+                   -- The attempt is undone, so is its start: a queued run has none.
+                   started_at = NULL,
                    updated_at = %(now)s
               FROM prior
              WHERE runs.run_id = prior.run_id

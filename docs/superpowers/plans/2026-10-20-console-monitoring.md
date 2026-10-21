@@ -71,7 +71,7 @@ processing_id, tenant_id`, **plus**:
 - The statuses `succeeded`, `failed` and `cancelled` are counted only if `updated_at` is at or after
   `now − 60 min`.
 - `recent_failures` holds at most 10 rows with `status == "failed"`, newest `updated_at` first.
-- `running` holds at most 10 rows with `status == "running"`, newest `updated_at` first.
+- `running` holds at most 10 rows with `status == "running"`, longest-running first (`started_at` ascending, nulls last, then `run_id`). Not `updated_at`: heartbeats rewrite it, so a stuck run would sink.
 - When there is no run database, the answer is 503, the same as `/runs`.
 
 `DELETE /v1/console/runs/{id}` cancels a run.

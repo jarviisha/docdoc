@@ -118,6 +118,36 @@ def test_a_second_claim_moves_started_at() -> None:
     assert redelivered.started_at == after
 
 
+def test_release_clears_started_at() -> None:
+    """A released run is queued again; a stale `started_at` would keep its clock running."""
+    queue = InMemoryRunQueue()
+    run_id = _submit(queue, at=T0)
+    queue.claim(worker_id="w1", now=T0, lease=LEASE, max_attempts=3)
+
+    queue.release(run_id, now=T0 + timedelta(seconds=5))
+
+    released = queue.get(run_id, "default")
+    assert released is not None
+    assert released.status is RunStatus.QUEUED
+    assert released.started_at is None
+
+
+def test_longest_running_orders_by_started_at_not_heartbeat() -> None:
+    """The Overview's "Running now": a heartbeat must not reorder it."""
+    queue = InMemoryRunQueue()
+    first = _submit(queue, at=T0, blob_id="sha256:a")
+    second = _submit(queue, at=T0 + timedelta(seconds=1), blob_id="sha256:b")
+    claimed = queue.claim(worker_id="w1", now=T0, lease=LEASE, max_attempts=3)
+    assert claimed is not None
+    assert claimed.run_id == first
+    queue.claim(worker_id="w2", now=T0 + timedelta(seconds=2), lease=LEASE, max_attempts=3)
+    assert queue.heartbeat(first, now=T0 + timedelta(seconds=30), lease=LEASE, worker_id="w1")
+    _submit(queue, at=T0 + timedelta(seconds=3), blob_id="sha256:c")  # queued, so not listed
+
+    assert [run.run_id for run in queue.longest_running(limit=10)] == [first, second]
+    assert [run.run_id for run in queue.longest_running(limit=1)] == [first]
+
+
 def test_a_lease_one_second_from_lapsing_is_still_held() -> None:
     queue = InMemoryRunQueue()
     _submit(queue, at=T0)

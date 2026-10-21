@@ -79,6 +79,43 @@ def test_a_second_claim_moves_started_at(queue: PostgresRunQueue) -> None:
 
 
 @pytest.mark.postgres
+def test_release_clears_started_at(queue: PostgresRunQueue) -> None:
+    """A released run is queued again, so its clock must stop with it."""
+    t0 = datetime(2026, 10, 20, 9, 0, tzinfo=UTC)
+    submitted = _submit(queue, at=t0)
+    assert queue.claim(worker_id="w1", now=t0, lease=LEASE, max_attempts=3) is not None
+
+    queue.release(submitted.run_id, now=t0 + timedelta(seconds=5), worker_id="w1")
+
+    released = queue.get(submitted.run_id, DEFAULT_TENANT)
+    assert released is not None
+    assert released.status is RunStatus.QUEUED
+    assert released.started_at is None
+
+
+@pytest.mark.postgres
+def test_longest_running_orders_by_started_at_not_heartbeat(queue: PostgresRunQueue) -> None:
+    """The Overview's "Running now", against the real `ORDER BY`."""
+    t0 = datetime(2026, 10, 20, 9, 0, tzinfo=UTC)
+    first = _submit(queue, at=t0, blob_id="sha256:" + "a" * 64)
+    second = _submit(queue, at=t0 + timedelta(seconds=1), blob_id="sha256:" + "b" * 64)
+    claimed = queue.claim(worker_id="w1", now=t0, lease=LEASE, max_attempts=3)
+    assert claimed is not None
+    assert claimed.run_id == first.run_id
+    queue.claim(worker_id="w2", now=t0 + timedelta(seconds=2), lease=LEASE, max_attempts=3)
+    assert queue.heartbeat(
+        first.run_id, now=t0 + timedelta(seconds=30), lease=LEASE, worker_id="w1"
+    )
+    _submit(queue, at=t0 + timedelta(seconds=3), blob_id="sha256:" + "c" * 64)
+
+    assert [run.run_id for run in queue.longest_running(limit=10)] == [
+        first.run_id,
+        second.run_id,
+    ]
+    assert [run.run_id for run in queue.longest_running(limit=1)] == [first.run_id]
+
+
+@pytest.mark.postgres
 def test_finish_writes_error_reason(queue: PostgresRunQueue) -> None:
     """`error_reason` reaches the row the same way `error_class` always has."""
     now = datetime(2026, 10, 20, 9, 0, tzinfo=UTC)
@@ -137,7 +174,7 @@ def test_status_counts_and_latest_postgres(queue: PostgresRunQueue) -> None:
         t0 - timedelta(minutes=5),
         t0 - timedelta(minutes=10),
     ]
-    assert [run.run_id for run in queue.latest(status="running", limit=10)] == [running.run_id]
+    assert [run.run_id for run in queue.longest_running(limit=10)] == [running.run_id]
 
     def kinds(kind: str) -> int:
         return len(

@@ -3,7 +3,7 @@
 Console monitoring plan (``docs/superpowers/plans/2026-10-20-console-monitoring.md``),
 Task 2. Counts by kind and status -- `queued` and `running` at any age, the
 three terminal statuses only within the last hour -- plus the ten newest
-failures and the ten newest running runs, each a `ConsoleRunSummary`.
+failures and the ten longest-running runs, each a `ConsoleRunSummary`.
 """
 
 from __future__ import annotations
@@ -116,11 +116,15 @@ def test_overview_counts_active_always_and_terminal_within_the_hour(
     assert len(body["counts"]) == len(counts)
 
 
-def test_overview_lists_are_newest_first_and_capped_at_ten(
+def test_overview_lists_are_ordered_and_capped_at_ten(
     signed_in: tuple[TestClient, dict[str, str]], queue: InMemoryRunQueue
 ) -> None:
     failed = [_seed(queue, RunStatus.FAILED, minutes_ago=m) for m in range(12)]
-    running = [_seed(queue, RunStatus.RUNNING, minutes_ago=m) for m in range(12)]
+    # Started longest ago first; every heartbeat is fresh, which must not matter.
+    running = [
+        _seed(queue, RunStatus.RUNNING, minutes_ago=0, started_at=NOW - timedelta(minutes=m))
+        for m in range(12, 0, -1)
+    ]
     # Newer than every listed row, but in neither list's status.
     _seed(queue, RunStatus.SUCCEEDED, minutes_ago=0)
 
@@ -128,6 +132,23 @@ def test_overview_lists_are_newest_first_and_capped_at_ten(
 
     assert [r["run_id"] for r in body["recent_failures"]] == [str(r.run_id) for r in failed[:10]]
     assert [r["run_id"] for r in body["running"]] == [str(r.run_id) for r in running[:10]]
+
+
+def test_a_stuck_run_heads_running_now_however_fresh_its_heartbeat(
+    signed_in: tuple[TestClient, dict[str, str]], queue: InMemoryRunQueue
+) -> None:
+    """`updated_at` moves with every heartbeat; `started_at` does not."""
+    fresh = _seed(queue, RunStatus.RUNNING, minutes_ago=0, started_at=NOW - timedelta(minutes=5))
+    unstarted = _seed(queue, RunStatus.RUNNING, minutes_ago=30)
+    stuck = _seed(queue, RunStatus.RUNNING, minutes_ago=1, started_at=NOW - timedelta(hours=3))
+
+    body = _overview(signed_in)
+
+    assert [r["run_id"] for r in body["running"]] == [
+        str(stuck.run_id),
+        str(fresh.run_id),
+        str(unstarted.run_id),
+    ]
 
 
 def test_overview_rows_carry_the_new_fields(

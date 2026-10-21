@@ -225,6 +225,19 @@ def _summary(run: Any) -> ConsoleRunSummary:
     )
 
 
+def _detail(run: Any, owner: str) -> dict[str, Any]:
+    """The console's detail body: the tenant's, plus `tenant_id` and `finished_at`.
+
+    `finished_at` is the list row's rule (`_summary_fields`), so detail and row
+    agree. Not on `RunStateResponse`: the tenant contract stays as it is.
+    """
+    return {
+        **RunStateResponse(**run.dump_public()).model_dump(mode="json"),
+        "tenant_id": owner,
+        "finished_at": _summary_fields(run)["finished_at"],
+    }
+
+
 #: The Overview's window for terminal counts, and the length of each list.
 _OVERVIEW_WINDOW_MINUTES = 60
 _OVERVIEW_LIST = 10
@@ -370,7 +383,8 @@ def console_router() -> APIRouter:
         `queued` and `running` count at any age -- a run stuck there for hours
         is exactly what an operator needs to see. The terminal statuses count
         only within the window, so the tiles say what just happened rather
-        than everything that ever did.
+        than everything that ever did. `running` lists the longest-running
+        first, so a stuck run stays on top rather than sinking.
         """
         from datetime import timedelta
 
@@ -393,7 +407,7 @@ def console_router() -> APIRouter:
             ],
             "running": [
                 _summary(run).model_dump(mode="json")
-                for run in queue.latest(status=RunStatus.RUNNING.value, limit=_OVERVIEW_LIST)
+                for run in queue.longest_running(limit=_OVERVIEW_LIST)
             ],
         }
 
@@ -404,10 +418,7 @@ def console_router() -> APIRouter:
         refusal, owner, run = _run(request, run_id)
         if refusal is not None:
             return refusal
-        body = {
-            **RunStateResponse(**run.dump_public()).model_dump(mode="json"),
-            "tenant_id": owner,
-        }
+        body = _detail(run, owner)
         decision = _routing_for(request, run)
         if decision is not None:
             body["routing"] = decision.model_dump(mode="json")
@@ -446,12 +457,7 @@ def console_router() -> APIRouter:
                 },
             )
         else:
-            response = JSONResponse(
-                content={
-                    **RunStateResponse(**run.dump_public()).model_dump(mode="json"),
-                    "tenant_id": owner,
-                }
-            )
+            response = JSONResponse(content=_detail(run, owner))
         _log_cancel(operator, tenant_id=owner, run_id=run_id, status=response.status_code)
         return response
 

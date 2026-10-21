@@ -155,6 +155,8 @@ class RunQueue(Protocol):
         What a worker calls on `SIGTERM` instead of letting the lease time out,
         so a rolling restart costs no lease duration (FR-043).
 
+        Clears `started_at`: the attempt is undone, and a queued run has no start.
+
         **Gives the attempt back.** The claim being undone consumed one, and a
         graceful release is not the evidence `max_attempts` bounds — the worker
         is alive and the document proved nothing. See `PostgresRunQueue.release`.
@@ -376,6 +378,13 @@ class RunQueue(Protocol):
 
     def latest(self, *, status: str, limit: int) -> tuple[Run, ...]:
         """Up to `limit` runs in `status`, across tenants, newest `updated_at` first."""
+        ...
+
+    def longest_running(self, *, limit: int) -> tuple[Run, ...]:
+        """Up to `limit` `running` runs, across tenants, earliest `started_at` first.
+
+        Nulls last, then `run_id`. Not `updated_at`, which heartbeats rewrite.
+        """
         ...
 
     def owner_of(self, run_id: UUID) -> str | None:

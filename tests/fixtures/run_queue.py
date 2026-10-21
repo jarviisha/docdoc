@@ -216,6 +216,15 @@ class InMemoryRunQueue:
         found.sort(key=lambda run: (run.updated_at, run.run_id), reverse=True)
         return tuple(found[:limit])
 
+    def longest_running(self, *, limit: int) -> tuple[Run, ...]:
+        self._check_reachable()
+        found = [run for run in self._runs.values() if run.status is RunStatus.RUNNING]
+        # `ORDER BY started_at ASC NULLS LAST, run_id`.
+        found.sort(
+            key=lambda run: (run.started_at is None, run.started_at or run.created_at, run.run_id)
+        )
+        return tuple(found[:limit])
+
     def tombstone(self, run_id: UUID, tenant_id: str) -> Tombstone | None:
         self._check_reachable()
         found = self._tombstones.get(run_id)
@@ -448,6 +457,7 @@ class InMemoryRunQueue:
                 # `PostgresRunQueue.release` for why this is correctness rather
                 # than tidiness.
                 "attempts": max(run.attempts - 1, 0),
+                "started_at": None,
                 "updated_at": now,
             }
         )
