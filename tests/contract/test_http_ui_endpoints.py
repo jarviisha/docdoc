@@ -151,6 +151,13 @@ ROUTES = {
     ("POST", "/v1/console/tenants/{tenant_id}/ocr"),
     # 019 (console OCR result plan, Task 1): an OCR run's page images.
     ("GET", "/v1/console/runs/{run_id}/pages/{page}"),
+    # 021 (console admin screens plan, Task 1): callbacks, per tenant --
+    # register, revoke, and the one listing `/v1/callbacks` itself does not
+    # have (FR-066's other half; see `test_no_route_returns_a_signing_secret_
+    # after_registration` for that absence asserted on the tenant surface).
+    ("GET", "/v1/console/tenants/{tenant_id}/callbacks"),
+    ("POST", "/v1/console/tenants/{tenant_id}/callbacks"),
+    ("DELETE", "/v1/console/tenants/{tenant_id}/callbacks/{callback_id}"),
 }
 
 

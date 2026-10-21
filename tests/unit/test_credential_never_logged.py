@@ -272,12 +272,20 @@ def test_a_delivery_payload_carries_no_secret() -> None:
 
 
 def test_no_route_returns_a_signing_secret_after_registration() -> None:
-    """FR-066's other half, asserted as an **absence of a route**.
+    """FR-066's other half, asserted as an **absence of a route** — on the
+    tenant's own surface.
 
-    There is no callback *listing* route, so there is nowhere a stored secret
-    could be returned from — and the registration response carries the identity
-    and the URL and nothing else. Checked against the route table rather than by
-    trying a URL, because an absence needs an exhaustive check.
+    There is no callback *listing* route under `/v1/callbacks` itself, so there
+    is nowhere a stored secret could be returned from — and the registration
+    response carries the identity and the URL and nothing else. Checked against
+    the route table rather than by trying a URL, because an absence needs an
+    exhaustive check.
+
+    Scoped to `/v1/callbacks*` and not `/v1/console/*`: 021 (console admin
+    screens plan, Task 1) gives the console its own listing, behind a session
+    rather than that tenant's own key, and it holds the same guarantee — no
+    `secret` or `secret_digest` in the body — which `test_console_callbacks.py`
+    checks directly rather than by this absence.
     """
     pytest.importorskip("fastapi", reason="the HTTP interface lives behind the docdoc[api] extra")
     from fastapi.testclient import TestClient
@@ -291,7 +299,7 @@ def test_no_route_returns_a_signing_secret_after_registration() -> None:
         (method.upper(), path)
         for path, methods in paths.items()
         for method in methods
-        if "callback" in path
+        if "callback" in path and not path.startswith("/v1/console/")
     }
 
     assert callback_routes == {

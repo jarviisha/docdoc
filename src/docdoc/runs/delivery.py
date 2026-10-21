@@ -521,6 +521,24 @@ class PostgresDeliverer:
         row = self.execute(sql, params, fetch="one")
         return None if row is None else _row_to_callback(row)
 
+    def callbacks_for(self, tenant_id: str) -> tuple[Callback, ...]:
+        """A tenant's active callbacks, newest first (the console's listing only).
+
+        ``revoked_at IS NULL``, as `callback`'s own query is: a revoked
+        destination is gone from this list for the same reason it is no longer
+        attempted. Ordered by ``created_at DESC, callback_id DESC`` so two
+        registrations in the same instant still come out in one order rather
+        than whichever the database felt like that day.
+        """
+        rows = self.execute(
+            "SELECT callback_id, tenant_id, url, secret_digest, created_at, revoked_at "
+            "FROM callbacks WHERE tenant_id = %s AND revoked_at IS NULL "
+            "ORDER BY created_at DESC, callback_id DESC",
+            (tenant_id,),
+            fetch="all",
+        )
+        return tuple(_row_to_callback(row) for row in rows or ())
+
     def revoke(self, callback_id: UUID, *, tenant_id: str, at: datetime) -> bool:
         """An ``UPDATE``, for the reason credential revocation is one."""
         rows = self.execute(

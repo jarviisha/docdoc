@@ -86,6 +86,8 @@ interface Props {
   /** The run whose detail is shown, held by the shell so the overview can open one. */
   openRunId: string | null;
   onOpenRun: (runId: string | null) => void;
+  /** The tenant a jump from Tenants opened this area for, applied as the filter on mount. */
+  presetTenant: string | null;
 }
 
 /** The state's colour, and the word that must always be beside it. */
@@ -119,11 +121,18 @@ function listIntent(
   };
 }
 
-export function RunArea({ request, requestImage, onFailure, openRunId, onOpenRun }: Props) {
-  const [state, setState] = useState(initialListing);
+export function RunArea({
+  request,
+  requestImage,
+  onFailure,
+  openRunId,
+  onOpenRun,
+  presetTenant,
+}: Props) {
+  const [state, setState] = useState(() => forTenant(initialListing(), presetTenant ?? ""));
   // What is typed, apart from what is applied: the list reloads on Enter or
   // Apply, not on every keystroke.
-  const [tenantInput, setTenantInput] = useState("");
+  const [tenantInput, setTenantInput] = useState(presetTenant ?? "");
   // A failed background refresh, said here and cleared by the next success:
   // a notice in the shell would outlive the failure it reports.
   const [pollProblem, setPollProblem] = useState<string | null>(null);

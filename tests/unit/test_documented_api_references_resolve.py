@@ -414,6 +414,9 @@ CONFIG_DOCUMENTS = (
     "docs/superpowers/plans/2026-10-21-console-submit-ocr.md",
     "docs/superpowers/plans/2026-10-21-console-ocr-result.md",
     "docs/superpowers/plans/2026-10-21-ocr-page-orientation.md",
+    # The admin screens plan (021, Task 1) names `DOCDOC_DELIVERY_SECRETS_FILE`
+    # ahead of the console callback routes that need it configured.
+    "docs/superpowers/plans/2026-10-21-console-admin-screens.md",
 )
 
 #: Requires at least one character after the prefix, so the `DOCDOC_*` wildcard

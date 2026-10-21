@@ -25,6 +25,7 @@ import {
   outcomeNotice,
   removedFrom,
   retyped,
+  switchedToDocument,
   type ErasureIntent,
   type Target,
 } from "../model/erasure.ts";
@@ -38,11 +39,14 @@ type Request = (
 interface Props {
   request: Request;
   onFailure: (failure: Failure) => void;
+  /** The tenant a jump from Tenants opened this area for: prefilled, never confirmed for you. */
+  presetTenant: string | null;
 }
 
-export function EraseArea({ request, onFailure }: Props) {
+export function EraseArea({ request, onFailure, presetTenant }: Props) {
   const [kind, setKind] = useState<Target["kind"]>("tenant");
-  const [identifier, setIdentifier] = useState("");
+  // Prefilled only; Continue still asks for the identifier typed again.
+  const [identifier, setIdentifier] = useState(presetTenant ?? "");
   // A document is erased within its tenant; the route names both.
   const [documentTenant, setDocumentTenant] = useState("");
   const [intent, setIntent] = useState<ErasureIntent | null>(null);
@@ -76,7 +80,17 @@ export function EraseArea({ request, onFailure }: Props) {
             <Button
               label="Document"
               variant={kind === "document" ? "primary" : "secondary"}
-              onClick={() => setKind("document")}
+              onClick={() => {
+                if (kind === "tenant") {
+                  const next = switchedToDocument(presetTenant, {
+                    identifier,
+                    documentTenant,
+                  });
+                  setIdentifier(next.identifier);
+                  setDocumentTenant(next.documentTenant);
+                }
+                setKind("document");
+              }}
             />
           </HStack>
 

@@ -10,6 +10,15 @@
  */
 
 import type { Intent } from "./client.ts";
+import { joined } from "./format.ts";
+
+/** What a parser can read out of a page: text, its geometry, tables, handwriting. */
+export interface ParserCapabilities {
+  text: boolean;
+  geometry: boolean;
+  tables: boolean;
+  handwriting: boolean;
+}
 
 /** One parser as `GET /v1/console/parsers` describes it. */
 export interface ParserOption {
@@ -19,6 +28,9 @@ export interface ParserOption {
   healthy: boolean | null;
   languages: string[];
   mediaTypes: string[];
+  /** Why it is unavailable, or `null` when it is available or gave no reason. */
+  unavailableReason: string | null;
+  capabilities: ParserCapabilities;
 }
 
 /** Read the tenant list from a response body without trusting its shape. */
@@ -26,6 +38,18 @@ export function toTenants(body: unknown): string[] {
   if (typeof body !== "object" || body === null) return [];
   const tenants = (body as { tenants?: unknown }).tenants;
   return Array.isArray(tenants) ? (tenants as string[]) : [];
+}
+
+/** A capability row read without trusting its shape; an absent or malformed one reads as none. */
+function capabilitiesOf(value: unknown): ParserCapabilities {
+  const record =
+    typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+  return {
+    text: record.text === true,
+    geometry: record.geometry === true,
+    tables: record.tables === true,
+    handwriting: record.handwriting === true,
+  };
 }
 
 /**
@@ -50,6 +74,8 @@ export function toParsers(body: unknown): ParserOption[] {
       healthy?: unknown;
       languages?: unknown;
       media_types?: unknown;
+      unavailable_reason?: unknown;
+      capabilities?: unknown;
     };
     if (typeof record.id !== "string" || typeof record.available !== "boolean") continue;
     options.push({
@@ -58,9 +84,45 @@ export function toParsers(body: unknown): ParserOption[] {
       healthy: typeof record.healthy === "boolean" ? record.healthy : null,
       languages: Array.isArray(record.languages) ? (record.languages as string[]) : [],
       mediaTypes: Array.isArray(record.media_types) ? (record.media_types as string[]) : [],
+      unavailableReason:
+        typeof record.unavailable_reason === "string" ? record.unavailable_reason : null,
+      capabilities: capabilitiesOf(record.capabilities),
     });
   }
   return options;
+}
+
+/**
+ * A parser's status, in the order that decides it: not `available` beats
+ * everything else, an unhealthy one beats a healthy reading, and a parser
+ * the deployment said nothing about is `"unknown"` rather than guessed at.
+ */
+export function parserStatus(
+  parser: ParserOption,
+): "unavailable" | "not responding" | "healthy" | "unknown" {
+  if (!parser.available) return "unavailable";
+  if (parser.healthy === false) return "not responding";
+  if (parser.healthy === true) return "healthy";
+  return "unknown";
+}
+
+/**
+ * The parsers screen never polls for a fresher reading (plan 4): a health
+ * check live-probes every parser, and nobody asked for one on every render.
+ * `PARSERS_POLL` pins that decision so a future change has to touch this
+ * line rather than quietly wire a poll in `polling.ts` to this route.
+ */
+export const PARSERS_POLL = false;
+
+/** The parsers screen's own refresh action, since it does not poll. */
+export const parsersRefreshLabel = "Refresh";
+
+/** The parsers screen's capability column: the true ones, in the contract's order. */
+export function capabilityList(capabilities: ParserCapabilities): string {
+  const names = (Object.keys(capabilities) as (keyof ParserCapabilities)[]).filter(
+    (name) => capabilities[name],
+  );
+  return joined(names);
 }
 
 /** The parser value that means "let the deployment choose". */

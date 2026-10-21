@@ -104,6 +104,11 @@ CONSOLE_ADDED = {
     # 019 (console OCR result plan, Task 1): an OCR run's page images, so the
     # result view can draw token boxes over the page they came from.
     ("/v1/console/runs/{run_id}/pages/{page}", "GET"),
+    # 021 (console admin screens plan, Task 1): callbacks, per tenant --
+    # register, revoke, and the listing `/v1/callbacks` itself does not have.
+    ("/v1/console/tenants/{tenant_id}/callbacks", "GET"),
+    ("/v1/console/tenants/{tenant_id}/callbacks", "POST"),
+    ("/v1/console/tenants/{tenant_id}/callbacks/{callback_id}", "DELETE"),
 }
 
 #: Everything this interface has added over Milestone 10's own surface, as of

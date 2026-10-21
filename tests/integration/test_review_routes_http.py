@@ -321,6 +321,24 @@ def test_a_callback_without_a_url_or_a_secret_is_a_422(client: TestClient) -> No
         assert response.status_code == 422, body
 
 
+def test_a_callback_without_a_url_or_a_secret_names_the_error_exactly(
+    client: TestClient,
+) -> None:
+    """The body is pinned, not just the status (021 Task 1 review finding 1).
+
+    `/v1/*` routes are unchanged by that task: `POST /v1/callbacks` now
+    delegates its validation to a helper the console's own route shares, and
+    this is what keeps that delegation from silently changing the shape an
+    API-key caller (mmerp) already parses.
+    """
+    response = client.post("/v1/callbacks", json={}, headers=_headers())
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": {"error": "invalid_callback", "detail": "url and secret are required"}
+    }
+
+
 def test_a_refused_destination_does_not_report_what_it_resolved_to(
     client: TestClient,
 ) -> None:

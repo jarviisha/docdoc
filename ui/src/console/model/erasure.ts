@@ -32,6 +32,25 @@ export function retyped(intent: ErasureIntent, typed: string): ErasureIntent {
 }
 
 /**
+ * Switching from "Tenant" to "Document" with a jump's preset tenant still
+ * showing in the tenant identifier field: the preset moves into the
+ * document's own tenant field, and the identifier field clears — otherwise
+ * the preset tenant would be offered up as the document identifier instead,
+ * which is exactly the kind of mis-click the retype rule exists to catch
+ * later and would rather not need to.
+ *
+ * A no-op without a preset: there is nothing to move, so the fields are
+ * returned unchanged.
+ */
+export function switchedToDocument(
+  presetTenant: string | null,
+  fields: { identifier: string; documentTenant: string },
+): { identifier: string; documentTenant: string } {
+  if (presetTenant === null || presetTenant === "") return fields;
+  return { identifier: "", documentTenant: presetTenant };
+}
+
+/**
  * Whether the action may be offered at all.
  *
  * Exact, with no trimming and no case folding. A tenant identifier is

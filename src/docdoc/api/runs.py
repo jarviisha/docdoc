@@ -531,8 +531,16 @@ def routes() -> APIRouter:
         the second closes DNS rebinding; this one exists so an operator finds out
         about a refused destination while they are looking at the response rather
         than in a delivery that quietly never happens.
+
+        **`_register_callback` blocks**: `deliverer.register` resolves the
+        destination's address and inserts a row. Off the event loop, as the
+        synchronous OCR submission route already runs its own blocking work
+        (`fastapi.concurrency.run_in_threadpool`), so a slow DNS lookup here
+        stalls only this request's thread, not every request this process
+        serves.
         """
-        from docdoc.runs.delivery import DeliveryError
+        from fastapi.concurrency import run_in_threadpool
+
         from docdoc.runs.identity import new_credential_id, now
 
         deployment = _deployment_of(request)
@@ -543,63 +551,36 @@ def routes() -> APIRouter:
         body = await _read_json(request)
         url = str(body.get("url", "")).strip()
         secret = str(body.get("secret", "")).strip()
-        if not url or not secret:
-            raise HTTPException(
-                status_code=422,
-                detail={"error": "invalid_callback", "detail": "url and secret are required"},
-            )
-
-        try:
-            callback = deliverer.register(
-                tenant_id=principal.tenant_id,
-                url=url,
-                secret=secret,
-                at=now(),
-                # A callback identity is an identity like any other. `identity`
-                # is the only module permitted to allocate one, and reusing the
-                # credential allocator rather than adding a seventh function that
-                # calls `uuid4` is the whole of what that rule buys.
-                callback_id=new_credential_id(),
-            )
-        except DeliveryError as error:
-            # The class of refusal and **not the addresses it resolved to**. A
-            # 422 that reported them would make this route a name resolver for
-            # an authenticated caller, which is a capability nobody asked for.
-            return JSONResponse(
-                status_code=422,
-                content={"error": "destination_refused", "detail": str(error)},
-            )
-
-        return JSONResponse(
-            status_code=201,
-            content={
-                "callback_id": str(callback.callback_id),
-                "url": callback.url,
-                "created_at": _iso(callback.created_at),
-            },
+        return await run_in_threadpool(
+            _register_callback,
+            deliverer,
+            tenant_id=principal.tenant_id,
+            url=url,
+            secret=secret,
+            at=now(),
+            # A callback identity is an identity like any other. `identity` is
+            # the only module permitted to allocate one, and reusing the
+            # credential allocator rather than adding a seventh function that
+            # calls `uuid4` is the whole of what that rule buys.
+            callback_id=new_credential_id(),
         )
 
     @router.delete("/callbacks/{callback_id}", status_code=204, response_class=Response)
     async def revoke_callback(request: Request, callback_id: str, principal: Caller) -> Response:
-        """`204`, idempotent — the same shape credential revocation has."""
-        from uuid import UUID
+        """`204`, idempotent — the same shape credential revocation has.
 
+        Malformed and unknown are one answer here for the reason they are one on
+        every other route: a different one names which identifiers are
+        well-formed enough to exist. `_revoke_callback` tells the two apart only
+        for a caller — the console — that logs the difference; this route does
+        not need to.
+        """
         from docdoc.runs.identity import now
 
         deployment = _deployment_of(request)
         deliverer = deployment.deliverer()
-        if deliverer is None:
-            return Response(status_code=204)
-
-        try:
-            identity = UUID(callback_id)
-        except ValueError:
-            # Malformed and unknown are one answer here for the reason they are
-            # one on every other route: a different one names which identifiers
-            # are well-formed enough to exist.
-            return Response(status_code=204)
-
-        deliverer.revoke(identity, tenant_id=principal.tenant_id, at=now())
+        if deliverer is not None:
+            _revoke_callback(deliverer, callback_id, tenant_id=principal.tenant_id, at=now())
         return Response(status_code=204)
 
     @router.get("/runs/{run_id}/delivery")
@@ -935,6 +916,71 @@ def _next_cursor(runs: Any, limit: int, *, cursor_tenant: str) -> str | None:
         return None
     last = runs[-1]
     return encode(Cursor(tenant_id=cursor_tenant, created_at=last.created_at, run_id=last.run_id))
+
+
+def _register_callback(
+    deliverer: Any, *, tenant_id: str, url: str, secret: str, at: datetime, callback_id: Any
+) -> JSONResponse:
+    """Validate, register, and map the result — the one body `POST /v1/callbacks`
+    and the console's own registration both answer with.
+
+    Shared so the two 422s (a missing field, a refused destination) are written
+    once: a second copy drifting from this one is exactly how a console route
+    would end up reporting a refusal differently from the tenant route it
+    mirrors.
+
+    **Raises, rather than returns, for the missing-field case.** `/v1/*` routes
+    are unchanged by this task (a global constraint — `POST /v1/callbacks` has
+    an API-key caller, mmerp, that already parses its answer), so this keeps
+    the exact body that route always gave: FastAPI's default `HTTPException`
+    handler wraps `detail` as `{"detail": {...}}`, and a caller of this helper
+    that caught the exception and returned a flat body instead would be a
+    second, different shape for the same refusal.
+    """
+    from docdoc.runs.delivery import DeliveryError
+
+    if not url or not secret:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "invalid_callback", "detail": "url and secret are required"},
+        )
+    try:
+        callback = deliverer.register(
+            tenant_id=tenant_id, url=url, secret=secret, at=at, callback_id=callback_id
+        )
+    except DeliveryError as error:
+        # The class of refusal and **not the addresses it resolved to**. A 422
+        # that reported them would make this route a name resolver for an
+        # authenticated caller, which is a capability nobody asked for.
+        return JSONResponse(
+            status_code=422,
+            content={"error": "destination_refused", "detail": str(error)},
+        )
+    return JSONResponse(
+        status_code=201,
+        content={
+            "callback_id": str(callback.callback_id),
+            "url": callback.url,
+            "created_at": _iso(callback.created_at),
+        },
+    )
+
+
+def _revoke_callback(deliverer: Any, callback_id: str, *, tenant_id: str, at: datetime) -> bool:
+    """Revoke, and say whether anything was. `False` for a malformed identifier
+    too — there is nothing by that name to revoke either.
+
+    `DELETE /v1/callbacks/{id}` answers `204` either way and does not need the
+    distinction; the console logs `console.callback_revoke` only when it is
+    `True`, which is why this is a function and not inlined into that route.
+    """
+    from uuid import UUID
+
+    try:
+        identity = UUID(callback_id)
+    except ValueError:
+        return False
+    return bool(deliverer.revoke(identity, tenant_id=tenant_id, at=at))
 
 
 def _delivery_unconfigured() -> JSONResponse:

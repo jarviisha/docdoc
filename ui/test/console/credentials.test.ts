@@ -18,6 +18,7 @@ import {
   acknowledged,
   disclosureFrom,
   initialCredentials,
+  presetCredentials,
   isActive,
   issueBody,
   listedFor,
@@ -146,4 +147,13 @@ test("a late answer for a tenant no longer shown is ignored", () => {
   const current = listedFor(second, "globex", [{ credential_id: "g" } as never]);
   assert.equal(current.records.length, 1);
   assert.equal(listingNote(current), null);
+});
+
+test("a tenant jump opens the listing already pending for that tenant", () => {
+  assert.deepEqual(presetCredentials("acme"), showing(initialCredentials(), "acme"));
+  assert.equal(listingNote(presetCredentials("acme")), "Listing credentials…");
+});
+
+test("no preset leaves the listing as a fresh visit has it", () => {
+  assert.deepEqual(presetCredentials(null), initialCredentials());
 });
