@@ -196,6 +196,23 @@ def test_console_page_of_an_unknown_run_or_missing_blob_is_404(
         assert client.get(path, headers=cookie).status_code == 404, path
 
 
+def test_console_page_of_an_erased_run_is_410(
+    signed_in: tuple[TestClient, dict[str, str]],
+    queue: InMemoryRunQueue,
+    deployment: _Deployment,
+) -> None:
+    client, cookie = signed_in
+    run = _run(queue, _stored(deployment, IMAGE))
+    queue.entomb([run], now=NOW, policy="retention")
+
+    r = client.get(f"/v1/console/runs/{run.run_id}/pages/0", headers=cookie)
+
+    assert r.status_code == 410
+    # The same tombstone the sibling routes answer with.
+    assert r.json() == client.get(f"/v1/console/runs/{run.run_id}", headers=cookie).json()
+    assert r.json()["error"] == "run_erased"
+
+
 def test_console_page_refuses_a_bearer_key(
     signed_in: tuple[TestClient, dict[str, str]],
     queue: InMemoryRunQueue,

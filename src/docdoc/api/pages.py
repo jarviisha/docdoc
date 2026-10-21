@@ -9,6 +9,7 @@ encoder, so serving a page adds no dependency.
 from __future__ import annotations
 
 import struct
+import threading
 import zlib
 
 from docdoc.ingest.source import JPEG, PDF, PNG, detect_media_type
@@ -17,6 +18,9 @@ from docdoc.ingest.source import JPEG, PDF, PNG, detect_media_type
 MAX_EDGE = 2000
 #: Never render a small page above this resolution.
 _MAX_DPI = 200
+
+#: PDFium is not thread-safe (pypdfium2's docs): every call into it holds this.
+_PDFIUM = threading.Lock()
 
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 _COLOR_TYPE = {3: 2, 4: 6}  # channels -> PNG colour type: truecolour, truecolour + alpha
@@ -63,38 +67,39 @@ def render_pdf_page(data: bytes, page: int, *, max_edge: int = MAX_EDGE) -> byte
     except ImportError as exc:
         raise RuntimeError("pypdfium2") from exc
 
-    try:
-        document = pypdfium2.PdfDocument(data)
-    except pypdfium2.PdfiumError as exc:
-        # A `RuntimeError` subclass; not the missing extra, just a bad file.
-        raise ValueError("unreadable PDF") from exc
-    try:
-        if not 0 <= page < len(document):
-            raise IndexError(page)
-        pdf_page = document[page]
+    # PDFium is not thread-safe, and the route renders from the threadpool.
+    # ponytail: global pdfium lock -- serialises page renders; a render
+    # subprocess if throughput matters.
+    with _PDFIUM:
         try:
-            width, height = pdf_page.get_size()
-            # pdfium ceils `size * scale`, and `max_edge / edge * edge` can land
-            # a hair above `max_edge`: shaved so the ceiling is never one past it.
-            scale = min(max_edge / max(width, height), _MAX_DPI / 72) * (1 - 1e-9)
-            bitmap = pdf_page.render(scale=scale)
+            document = pypdfium2.PdfDocument(data)
+        except pypdfium2.PdfiumError as exc:
+            # A `RuntimeError` subclass; not the missing extra, just a bad file.
+            raise ValueError("unreadable PDF") from exc
+        try:
+            if not 0 <= page < len(document):
+                raise IndexError(page)
+            pdf_page = document[page]
             try:
-                if bitmap.mode not in ("RGB", "RGBA", "BGR", "BGRA"):
-                    raise RuntimeError(f"unexpected bitmap mode {bitmap.mode!r}")
-                return encode_png(
-                    bitmap.width,
-                    bitmap.height,
-                    bitmap.stride,
-                    bitmap.n_channels,
-                    bytes(bitmap.buffer),
-                    bgr=bitmap.mode.startswith("BGR"),
-                )
+                width, height = pdf_page.get_size()
+                # pdfium ceils `size * scale`, and `max_edge / edge * edge` can land
+                # a hair above `max_edge`: shaved so the ceiling is never one past it.
+                scale = min(max_edge / max(width, height), _MAX_DPI / 72) * (1 - 1e-9)
+                bitmap = pdf_page.render(scale=scale)
+                try:
+                    if bitmap.mode not in ("RGB", "RGBA", "BGR", "BGRA"):
+                        raise RuntimeError(f"unexpected bitmap mode {bitmap.mode!r}")
+                    shape = (bitmap.width, bitmap.height, bitmap.stride, bitmap.n_channels)
+                    buffer = bytes(bitmap.buffer)
+                    bgr = bitmap.mode.startswith("BGR")
+                finally:
+                    bitmap.close()
             finally:
-                bitmap.close()
+                pdf_page.close()
         finally:
-            pdf_page.close()
-    finally:
-        document.close()
+            document.close()
+    # Encoding touches no pdfium state, so it runs outside the lock.
+    return encode_png(*shape, buffer, bgr=bgr)
 
 
 def page_image(data: bytes, page: int) -> tuple[bytes, str]:

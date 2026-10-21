@@ -7,6 +7,7 @@ so the check is against an independent reader rather than against itself.
 from __future__ import annotations
 
 import io
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -93,6 +94,19 @@ def test_render_pdf_page_refuses_a_corrupt_pdf() -> None:
     pytest.importorskip("pypdfium2")
     with pytest.raises(ValueError, match="unreadable PDF"):
         render_pdf_page(b"%PDF-1.4 not really", 0)
+
+
+def test_render_pdf_page_is_safe_to_call_from_many_threads() -> None:
+    """The route renders from the threadpool; pdfium itself is not thread-safe."""
+    data = _pdf(3, (300, 400))
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        pngs = list(pool.map(lambda n: render_pdf_page(data, n % 3), range(24)))
+
+    for png in pngs:
+        decoded = _decode(png)
+        decoded.load()
+        assert decoded.size == _decode(pngs[0]).size
 
 
 def test_page_image_passes_png_through() -> None:
