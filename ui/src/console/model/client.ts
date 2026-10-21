@@ -36,6 +36,8 @@ export type Intent =
   | { type: "run-detail"; runId: string }
   | { type: "run-delivery"; runId: string }
   | { type: "run-result"; runId: string }
+  /** A page's rendered image, `page` 0-based (`GET …/pages/{page}`). */
+  | { type: "run-page"; runId: string; page: number }
   | { type: "cancel-run"; runId: string }
   | { type: "list-credentials"; tenant: string }
   | { type: "issue-credential" }
@@ -67,6 +69,7 @@ const ALLOWED = [
   /^\/v1\/console\/runs\/[^/]+$/,
   /^\/v1\/console\/runs\/[^/]+\/delivery$/,
   /^\/v1\/console\/runs\/[^/]+\/result$/,
+  /^\/v1\/console\/runs\/[^/]+\/pages\/\d+$/,
   /^\/v1\/console\/credentials$/,
   /^\/v1\/console\/credentials\/[^/]+$/,
   /^\/v1\/console\/tenants$/,
@@ -126,6 +129,14 @@ export function requestFor(intent: Intent): RequestPlan {
       return {
         method: "GET",
         path: `/v1/console/runs/${encodeURIComponent(intent.runId)}/result`,
+        query: {},
+        hasBody: false,
+      };
+
+    case "run-page":
+      return {
+        method: "GET",
+        path: `/v1/console/runs/${encodeURIComponent(intent.runId)}/pages/${intent.page}`,
         query: {},
         hasBody: false,
       };
@@ -220,6 +231,7 @@ export function allIntents(): Intent[] {
     { type: "run-detail", runId: "r" },
     { type: "run-delivery", runId: "r" },
     { type: "run-result", runId: "r" },
+    { type: "run-page", runId: "r", page: 0 },
     { type: "cancel-run", runId: "r" },
     { type: "list-credentials", tenant: "acme" },
     { type: "issue-credential" },

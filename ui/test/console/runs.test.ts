@@ -12,6 +12,7 @@ import {
   canGoForward,
   currentCursor,
   autoRefreshes,
+  detailPolls,
   emptyNotice,
   failed,
   filtered,
@@ -31,6 +32,7 @@ import {
   toFailure,
   toPage,
   toRecord,
+  type RunRecord,
   type RunSummary,
 } from "../../src/console/model/runs.ts";
 
@@ -336,6 +338,16 @@ test("a detail body without finished_at reads it as null, so the timeline is a n
   assert.equal(record?.finished_at, null);
   const times = timeline(record!, Date.parse("2026-10-20T10:01:06Z"));
   assert.deepEqual(times, { waitMs: 6_000, runMs: 60_000 });
+});
+
+test("the detail view polls only while a run is still active", () => {
+  assert.equal(detailPolls(null), false);
+  for (const status of ["queued", "running"] as const) {
+    assert.equal(detailPolls({ ...SUMMARY, status } as RunRecord), true);
+  }
+  for (const status of ["succeeded", "failed", "cancelled"] as const) {
+    assert.equal(detailPolls({ ...SUMMARY, status } as RunRecord), false);
+  }
 });
 
 test("timeline treats a missing finished_at as still running", () => {

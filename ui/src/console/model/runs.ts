@@ -222,6 +222,15 @@ export function toRecord(body: unknown): RunRecord | null {
 }
 
 /**
+ * Whether the detail view keeps polling: only while a run can still change —
+ * `queued` or `running` — and never for a `null` run, which has nothing to
+ * poll for yet.
+ */
+export function detailPolls(run: RunRecord | null): boolean {
+  return run !== null && (run.status === "queued" || run.status === "running");
+}
+
+/**
  * What the detail view says after a cancel the server accepted. A running run
  * still reads `running` until its worker reaches a stage boundary (FR-029), so
  * an unchanged badge alone would look like the click did nothing.

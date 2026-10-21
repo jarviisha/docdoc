@@ -120,3 +120,26 @@ export async function send(plan: RequestPlan, options: Options = {}): Promise<Re
     );
   }
 }
+
+/**
+ * `send`'s counterpart for a plan whose answer is bytes, not JSON —
+ * `run-page`'s rendered image. Never reads `.json()`: a 200 here is a page
+ * image, not a body this layer could parse as one.
+ *
+ * `blob` is `null` on a refusal (404, 409, 503) rather than the response
+ * body read as a blob anyway — a JSON error object has no business reaching
+ * the caller dressed as image bytes.
+ */
+export async function sendForBlob(
+  plan: RequestPlan,
+): Promise<{ ok: boolean; status: number; blob: Blob | null }> {
+  const response = await fetch(toUrl(plan), {
+    method: plan.method,
+    headers: { ...plan.headers, [CONSOLE_HEADER]: "1" },
+  });
+  return {
+    ok: response.ok,
+    status: response.status,
+    blob: response.ok ? await response.blob() : null,
+  };
+}

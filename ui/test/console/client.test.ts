@@ -96,6 +96,15 @@ test("run reads are scoped by run id, not by tenant", () => {
   assert.equal(requestFor({ type: "run-result", runId: "r" }).path, "/v1/console/runs/r/result");
 });
 
+test("run-page addresses the console page route", () => {
+  assert.deepEqual(requestFor({ type: "run-page", runId: "r1", page: 2 }), {
+    method: "GET",
+    path: "/v1/console/runs/r1/pages/2",
+    query: {},
+    hasBody: false,
+  });
+});
+
 test("credential listing carries the tenant as a query parameter", () => {
   assert.deepEqual(requestFor({ type: "list-credentials", tenant: "acme" }).query, {
     tenant: "acme",
