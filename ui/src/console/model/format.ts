@@ -79,3 +79,8 @@ export function duration(ms: number | null): string {
   const minutes = totalMinutes % 60;
   return `${hours} h ${minutes} min`;
 }
+
+/** A list column, comma-joined; an empty one is a dash, so a blank cell never reads as unloaded. */
+export function joined(items: string[]): string {
+  return items.length === 0 ? "—" : items.join(", ");
+}

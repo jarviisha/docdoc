@@ -104,6 +104,11 @@ export function initialCredentials(): CredentialState {
   return { records: [], disclosure: null, warned: false, shown: "", listing: "loaded" };
 }
 
+/** The area as a tenant jump opens it: that tenant's listing already on its way, or a fresh visit. */
+export function presetCredentials(tenant: string | null): CredentialState {
+  return tenant === null ? initialCredentials() : showing(initialCredentials(), tenant);
+}
+
 /** Show pressed: a new tenant's listing is on its way; the old rows go. */
 export function showing(state: CredentialState, tenant: string): CredentialState {
   return { ...state, shown: tenant, records: [], listing: "pending" };
