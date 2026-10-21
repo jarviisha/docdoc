@@ -15,7 +15,7 @@
  */
 
 import { useState } from "react";
-import { Banner, Button, Card, Field, HStack, Stack, Text } from "@astryxdesign/core";
+import { Banner, Button, Card, HStack, Stack, Text, TextInput } from "@astryxdesign/core";
 
 import type { Intent } from "../model/client.ts";
 import {
@@ -81,28 +81,16 @@ export function EraseArea({ request, onFailure }: Props) {
           </HStack>
 
           {kind === "document" ? (
-            <Field label="Tenant" inputID="erase-document-tenant">
-              <input
-                id="erase-document-tenant"
-                type="text"
-                value={documentTenant}
-                onChange={(event) => setDocumentTenant(event.target.value)}
-              />
-            </Field>
+            <TextInput label="Tenant" value={documentTenant} onChange={setDocumentTenant} />
           ) : null}
 
-          <Field
+          <TextInput
             label={kind === "tenant" ? "Tenant identifier" : "Document identifier"}
-            inputID="erase-target"
-          >
-            <input
-              id="erase-target"
-              type="text"
-              value={identifier}
-              onChange={(event) => setIdentifier(event.target.value)}
-            />
-          </Field>
+            value={identifier}
+            onChange={setIdentifier}
+          />
 
+          <HStack gap={2}>
           <Button
             label="Continue"
             variant="secondary"
@@ -120,23 +108,21 @@ export function EraseArea({ request, onFailure }: Props) {
               );
             }}
           />
+          </HStack>
         </Stack>
       ) : (
         <Card>
           <Stack direction="vertical" gap={2}>
           <Text size="sm">{confirmationPrompt(intent)}</Text>
 
-          <Field label="Type the identifier again" inputID="erase-confirm">
-            <input
-              id="erase-confirm"
-              type="text"
-              autoComplete="off"
-              value={intent.typed}
-              onChange={(event) =>
-                setIntent((current) => (current === null ? null : retyped(current, event.target.value)))
-              }
-            />
-          </Field>
+          <TextInput
+            label="Type the identifier again"
+            {...{ autoComplete: "off" }}
+            value={intent.typed}
+            onChange={(typed) =>
+              setIntent((current) => (current === null ? null : retyped(current, typed)))
+            }
+          />
 
           <HStack gap={2}>
             <Button

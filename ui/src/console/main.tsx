@@ -18,6 +18,8 @@ import "@astryxdesign/theme-neutral/theme.css";
 
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { Theme } from "@astryxdesign/core/theme";
+import { neutralTheme } from "@astryxdesign/theme-neutral/built";
 
 import { Shell } from "./components/Shell.tsx";
 
@@ -29,6 +31,11 @@ if (container === null) {
 
 createRoot(container).render(
   <StrictMode>
-    <Shell />
+    {/* The sheets above declare the tokens; `Theme` is what applies the body
+        font and text colour to the tree. Without it everything fell back to the
+        browser's serif default. */}
+    <Theme theme={neutralTheme}>
+      <Shell />
+    </Theme>
   </StrictMode>,
 );

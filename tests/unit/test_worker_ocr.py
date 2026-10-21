@@ -79,6 +79,21 @@ def test_ocr_run_provider_error_fails_at_parse(tmp_path: Path) -> None:
     assert run.processing_id is None
 
 
+def test_an_ocr_run_failure_stores_the_reason(tmp_path: Path) -> None:
+    """console monitoring plan, spec decision 7: `error_reason` on an OCR failure.
+
+    `_execute_ocr`'s `IngestError` branch sets it the same way `error_class` has
+    always been set, from `reason_of(exc)` rather than from the message.
+    """
+    post = CountingPost(
+        error=ProviderError("the host answered 503", reason="service", parser_id="paddle")
+    )
+    run, _ = _execute(tmp_path, post)
+    assert run.status is RunStatus.FAILED
+    assert run.error_class == "ProviderError"
+    assert run.error_reason == "service"
+
+
 def test_ocr_run_missing_blob(tmp_path: Path) -> None:
     run, _ = _execute(tmp_path, CountingPost(), blob=None)
     assert run.status is RunStatus.FAILED

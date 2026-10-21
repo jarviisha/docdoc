@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { shortDigest, shortId, when } from "../../src/console/model/format.ts";
+import { duration, shortDigest, shortId, when } from "../../src/console/model/format.ts";
 
 test("a timestamp loses its microseconds and keeps its second", () => {
   const rendered = when("2026-09-11T09:17:00.253693+00:00");
@@ -51,4 +51,12 @@ test("a digest shortens at both ends, keeping the half that differs", () => {
 test("a short digest is left alone", () => {
   assert.equal(shortDigest("sha256:abc"), "sha256:abc");
   assert.equal(shortDigest("not-a-digest"), "not-a-digest");
+});
+
+test("a duration reads in the coarsest unit that still tells rows apart", () => {
+  assert.equal(duration(null), "—");
+  assert.equal(duration(850), "850 ms");
+  assert.equal(duration(14000), "14 s");
+  assert.equal(duration(185000), "3 min 5 s");
+  assert.equal(duration(7440000), "2 h 4 min");
 });

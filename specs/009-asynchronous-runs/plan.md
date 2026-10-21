@@ -209,6 +209,7 @@ tests/
 │   ├── test_runs_clock_confinement.py  #   only identity.py reaches a stdlib clock (FR-072)
 │   ├── test_run_events_carry_no_content.py #  FR-092/FR-093, payload and coverage
 │   ├── test_error_class_is_a_class_name.py #  FR-037, on the projection rather than the string
+│   ├── test_failure_reason.py          #   console monitoring plan, Task 1: `reason_of`'s closed vocabulary
 │   ├── test_idempotency_scope.py       #   SC-016, one key under one tenant and under two
 │   ├── test_health_discloses_nothing.py #  FR-058 and FR-056, over both bodies
 │   ├── test_compose_forwards_every_credential.py # FR-077, the step an operator can take

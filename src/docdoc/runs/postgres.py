@@ -60,7 +60,10 @@ _COLUMNS = (
     # `_row_to_run` receives -- and adding these is exactly that migration.
     "priority, tokens_used, callback_id, "
     # 014 (ADR-0022): what a run executes, and an OCR run's own choices.
-    "kind, ocr_parser, ocr_language"
+    "kind, ocr_parser, ocr_language, "
+    # Console monitoring plan, Task 1: the most recent claim, and a
+    # content-free reason for a failure.
+    "started_at, error_reason"
 )
 
 #: The same list, qualified, for the statements that ``RETURNING`` out of a join.
@@ -303,6 +306,7 @@ class PostgresRunQueue:
         status: str | None,
         before: tuple[datetime, UUID] | None,
         limit: int,
+        kind: str | None = None,
     ) -> tuple[Run, ...]:
         """`page_runs`, with the tenant predicate dropped when `tenant_id` is `None`.
 
@@ -324,6 +328,10 @@ class PostgresRunQueue:
             conditions.append("status = %(status)s")
             parameters["status"] = status
 
+        if kind is not None:
+            conditions.append("kind = %(kind)s")
+            parameters["kind"] = kind
+
         if before is not None:
             # A row tuple comparison, so the database applies the same ordering
             # the `ORDER BY` does. Written as two columns rather than one because
@@ -341,6 +349,59 @@ class PostgresRunQueue:
              LIMIT %(limit)s
             """,
             parameters,
+            fetch="all",
+        )
+        return tuple(_row_to_run(row) for row in rows or ())
+
+    def status_counts(self, *, since: datetime) -> tuple[tuple[str, str, int], ...]:
+        """One `GROUP BY kind, status`; the terminal arm can use `runs_terminal_recent`."""
+        rows = self._execute(
+            """
+            SELECT kind, status, count(*) AS n FROM runs
+             WHERE status IN ('queued', 'running')
+                OR (status IN ('succeeded', 'failed', 'cancelled')
+                    AND updated_at >= %(since)s)
+             GROUP BY kind, status
+             ORDER BY kind, status
+            """,
+            {"since": since},
+            fetch="all",
+        )
+        return tuple((str(r["kind"]), str(r["status"]), int(r["n"])) for r in rows or ())
+
+    def latest(self, *, status: str, limit: int) -> tuple[Run, ...]:
+        """Newest `updated_at` first, across tenants.
+
+        # ponytail: no `(status, updated_at)` index, so this sorts every row in
+        # `status`. Bounded in practice by how many runs fail or run at once;
+        # add the index if the Overview becomes slow.
+        """
+        rows = self._execute(
+            f"""
+            SELECT {_COLUMNS} FROM runs
+             WHERE status = %(status)s
+             ORDER BY updated_at DESC, run_id DESC
+             LIMIT %(limit)s
+            """,
+            {"status": status, "limit": limit},
+            fetch="all",
+        )
+        return tuple(_row_to_run(row) for row in rows or ())
+
+    def longest_running(self, *, limit: int) -> tuple[Run, ...]:
+        """`running` runs across tenants, earliest `started_at` first.
+
+        Not `updated_at`: every heartbeat rewrites it, so a stuck run would
+        sink below healthy ones. Same ponytail as `latest`: no index.
+        """
+        rows = self._execute(
+            f"""
+            SELECT {_COLUMNS} FROM runs
+             WHERE status = 'running'
+             ORDER BY started_at ASC NULLS LAST, run_id
+             LIMIT %(limit)s
+            """,
+            {"limit": limit},
             fetch="all",
         )
         return tuple(_row_to_run(row) for row in rows or ())
@@ -699,7 +760,10 @@ class PostgresRunQueue:
                    attempts = runs.attempts + 1,
                    worker_id = %(worker_id)s,
                    lease_until = %(now)s + %(lease)s,
-                   updated_at = %(now)s
+                   updated_at = %(now)s,
+                   -- The most recent claim, not the first: a redelivery moves
+                   -- this forward too (console monitoring plan, Task 1).
+                   started_at = %(now)s
               FROM candidate
              WHERE runs.run_id = candidate.run_id
             RETURNING {_QUALIFIED}, candidate.from_state
@@ -831,6 +895,8 @@ class PostgresRunQueue:
                    -- claim; the check constraint would reject it and a shutdown
                    -- is the worst moment to discover that.
                    attempts = GREATEST(runs.attempts - 1, 0),
+                   -- The attempt is undone, so is its start: a queued run has none.
+                   started_at = NULL,
                    updated_at = %(now)s
               FROM prior
              WHERE runs.run_id = prior.run_id
@@ -914,6 +980,7 @@ class PostgresRunQueue:
                        processing_id = %(processing_id)s,
                        failed_stage = %(failed_stage)s,
                        error_class = %(error_class)s,
+                       error_reason = %(error_reason)s,
                        stage_outcomes = %(stage_outcomes)s::jsonb,
                        worker_id = NULL,
                        lease_until = NULL,
@@ -952,6 +1019,7 @@ class PostgresRunQueue:
                 "processing_id": outcome.processing_id,
                 "failed_stage": outcome.failed_stage,
                 "error_class": outcome.error_class,
+                "error_reason": outcome.error_reason,
                 "stage_outcomes": json.dumps(
                     [record.model_dump(mode="json") for record in outcome.stage_outcomes]
                 ),

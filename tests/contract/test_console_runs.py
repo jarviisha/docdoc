@@ -8,6 +8,8 @@ and malformed -- is the tenant route's, unchanged.
 
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -19,7 +21,7 @@ pytest.importorskip("fastapi", reason="the HTTP interface lives behind the docdo
 
 from fastapi.testclient import TestClient
 from tests.fixtures.run_queue import InMemoryRunQueue
-from tests.support.console import ADMIN_KEY, Ring, accounts_with_alice, sign_in
+from tests.support.console import ADMIN_KEY, H, Ring, accounts_with_alice, sign_in
 from tests.support.ocr import CountingPost, paddle_registry
 
 from docdoc.api.app import _Deployment, build_app
@@ -57,7 +59,7 @@ def _seed(queue: InMemoryRunQueue, tenant: str, *, age: int, **fields: object) -
         run_id=uuid4(),
         tenant_id=tenant,
         blob_id="sha256:" + "c" * 64,
-        schema_identity="invoice@1",
+        schema_identity=fields.pop("schema_identity", "invoice@1"),
         status=fields.pop("status", RunStatus.SUCCEEDED),
         processing_id=fields.pop("processing_id", "sha256:" + "d" * 64),
         created_at=NOW - timedelta(minutes=age),
@@ -130,6 +132,176 @@ def test_a_cursor_is_bound_to_its_tenant_filter(
         response = client.get("/v1/console/runs", params=params, headers=cookie)
         assert response.status_code == 400
         assert response.json()["error"]["class"] == "InvalidCursor"
+
+
+def _ocr(queue: InMemoryRunQueue, tenant: str, *, age: int, **fields: object) -> Run:
+    return _seed(
+        queue,
+        tenant,
+        age=age,
+        kind=RunKind.OCR,
+        schema_identity=None,
+        ocr_parser="paddle",
+        **fields,
+    )
+
+
+def test_a_kind_filter_returns_only_that_kind(
+    signed_in: tuple[TestClient, dict[str, str]], queue: InMemoryRunQueue
+) -> None:
+    client, cookie = signed_in
+    ocr = _ocr(queue, "acme", age=1)
+    extraction = _seed(queue, "globex", age=0)
+
+    def ids(kind: str) -> list[str]:
+        body = client.get("/v1/console/runs", params={"kind": kind}, headers=cookie).json()
+        return [row["run_id"] for row in body["runs"]]
+
+    assert ids("ocr") == [str(ocr.run_id)]
+    assert ids("extraction") == [str(extraction.run_id)]
+
+
+def test_an_unknown_kind_is_422(signed_in: tuple[TestClient, dict[str, str]]) -> None:
+    client, cookie = signed_in
+    response = client.get("/v1/console/runs", params={"kind": "bogus"}, headers=cookie)
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "error": {"class": "InvalidRunKind", "message": "kind must be one of extraction, ocr"}
+    }
+
+
+def test_list_rows_carry_the_timeline_and_failure_fields(
+    signed_in: tuple[TestClient, dict[str, str]], queue: InMemoryRunQueue
+) -> None:
+    client, cookie = signed_in
+    _ocr(
+        queue,
+        "acme",
+        age=0,
+        status=RunStatus.FAILED,
+        processing_id=None,
+        started_at=NOW,
+        failed_stage="parse",
+        error_class="ProviderError",
+        error_reason="timeout",
+    )
+
+    (row,) = client.get("/v1/console/runs", headers=cookie).json()["runs"]
+
+    assert row["started_at"] == NOW.isoformat()
+    assert row["ocr_parser"] == "paddle"
+    assert row["error_class"] == "ProviderError"
+    assert row["error_reason"] == "timeout"
+
+
+def test_cancel_a_queued_run(
+    signed_in: tuple[TestClient, dict[str, str]],
+    queue: InMemoryRunQueue,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client, cookie = signed_in
+    run = _seed(queue, "globex", age=0, status=RunStatus.QUEUED, processing_id=None)
+
+    with caplog.at_level(logging.INFO, logger="docdoc.api"):
+        response = client.delete(f"/v1/console/runs/{run.run_id}", headers={**cookie, **H})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
+    assert response.json()["tenant_id"] == "globex"
+    events = [
+        json.loads(record.getMessage())
+        for record in caplog.records
+        if record.name == "docdoc.api" and "console.cancel" in record.getMessage()
+    ]
+    assert events == [
+        {
+            "event": "console.cancel",
+            "actor": "console:alice",
+            "tenant_id": "globex",
+            "run_id": str(run.run_id),
+            "status": 200,
+        }
+    ]
+
+
+def test_cancel_a_running_run_is_200_and_still_running(
+    signed_in: tuple[TestClient, dict[str, str]], queue: InMemoryRunQueue
+) -> None:
+    """The request is recorded; the run stops at its next stage boundary (FR-029)."""
+    client, cookie = signed_in
+    run = _seed(queue, "globex", age=0, status=RunStatus.RUNNING, processing_id=None)
+
+    response = client.delete(f"/v1/console/runs/{run.run_id}", headers={**cookie, **H})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "running"
+    assert response.json()["finished_at"] is None
+
+
+def test_cancel_answers_with_finished_at(
+    signed_in: tuple[TestClient, dict[str, str]], queue: InMemoryRunQueue
+) -> None:
+    """A cancelled run's body carries when it finished, as a list row does."""
+    client, cookie = signed_in
+    run = _seed(queue, "globex", age=0, status=RunStatus.QUEUED, processing_id=None)
+
+    body = client.delete(f"/v1/console/runs/{run.run_id}", headers={**cookie, **H}).json()
+
+    assert body["status"] == "cancelled"
+    assert body["finished_at"] == queue._runs[run.run_id].updated_at.isoformat()
+
+
+def test_detail_carries_finished_at_for_a_terminal_run_and_null_while_running(
+    signed_in: tuple[TestClient, dict[str, str]], queue: InMemoryRunQueue
+) -> None:
+    client, cookie = signed_in
+    done = _seed(queue, "globex", age=5)
+    running = _seed(queue, "globex", age=1, status=RunStatus.RUNNING, processing_id=None)
+
+    done_body = client.get(f"/v1/console/runs/{done.run_id}", headers=cookie).json()
+    running_body = client.get(f"/v1/console/runs/{running.run_id}", headers=cookie).json()
+
+    assert done_body["finished_at"] == (NOW - timedelta(minutes=5)).isoformat()
+    assert running_body["finished_at"] is None
+
+
+def test_cancel_a_finished_run_is_409(
+    signed_in: tuple[TestClient, dict[str, str]], queue: InMemoryRunQueue
+) -> None:
+    client, cookie = signed_in
+    run = _seed(queue, "globex", age=0)
+
+    response = client.delete(f"/v1/console/runs/{run.run_id}", headers={**cookie, **H})
+
+    assert response.status_code == 409
+    error = response.json()["error"]
+    assert error["class"] == "RunNotCancellableError"
+    assert error["detail"] == {"status": "succeeded"}
+
+
+def test_cancel_an_unknown_run_is_the_one_404(
+    signed_in: tuple[TestClient, dict[str, str]],
+) -> None:
+    client, cookie = signed_in
+    unknown = client.delete(f"/v1/console/runs/{uuid4()}", headers={**cookie, **H})
+    detail = client.get(f"/v1/console/runs/{uuid4()}", headers=cookie)
+
+    assert unknown.status_code == 404
+    assert unknown.text == detail.text
+
+
+def test_cancel_needs_the_console_header(
+    signed_in: tuple[TestClient, dict[str, str]], queue: InMemoryRunQueue
+) -> None:
+    client, cookie = signed_in
+    run = _seed(queue, "globex", age=0, status=RunStatus.QUEUED, processing_id=None)
+
+    response = client.delete(f"/v1/console/runs/{run.run_id}", headers=cookie)
+
+    assert response.status_code == 403
+    assert response.json()["error"]["class"] == "ConsoleHeaderMissing"
+    assert queue._runs[run.run_id].status is RunStatus.QUEUED
 
 
 def test_detail_finds_a_run_without_knowing_its_tenant(
@@ -267,6 +439,10 @@ def test_the_console_run_routes_refuse_a_bearer_key(
         assert response.status_code == 401, path
         assert response.json()["error"]["class"] == "ConsoleSessionRequired"
 
+    cancel = client.delete(f"/v1/console/runs/{run.run_id}", headers={**bearer, **H})
+    assert cancel.status_code == 401
+    assert cancel.json()["error"]["class"] == "ConsoleSessionRequired"
+
 
 def test_without_a_run_database_the_console_run_routes_are_503(tmp_path: Path) -> None:
     """The same answer `GET /v1/runs` gives a deployment that records no runs."""
@@ -284,3 +460,13 @@ def test_without_a_run_database_the_console_run_routes_are_503(tmp_path: Path) -
         response = client.get(path, headers=cookie)
         assert response.status_code == 503, path
         assert response.json()["error"]["class"] == "RunStateUnavailableError"
+
+
+def test_without_a_run_database_console_cancel_is_503(tmp_path: Path) -> None:
+    client = TestClient(
+        build_app(_Deployment(store_root=tmp_path, console=accounts_with_alice(), keys=Ring()))
+    )
+    response = client.delete(f"/v1/console/runs/{uuid4()}", headers={**sign_in(client), **H})
+
+    assert response.status_code == 503
+    assert response.json()["error"]["class"] == "RunStateUnavailableError"

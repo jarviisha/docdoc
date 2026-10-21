@@ -14,11 +14,11 @@ import {
   Button,
   Card,
   Code,
-  Field,
   HStack,
   Stack,
   Table,
   Text,
+  TextInput,
   pixel,
   proportional,
 } from "@astryxdesign/core";
@@ -88,27 +88,24 @@ export function CredentialArea({ request, onFailure }: Props) {
           {/* FR-045b: the key is shown once. A reader who does not see the
               screen has exactly one chance to be told that. */}
           <Banner status="warning" title={DISCLOSURE_WARNING} />
-          <Field label="The issued key" inputID="issued-key">
-            <input id="issued-key" type="text" readOnly value={state.disclosure.key} />
-          </Field>
-          <Button
-            label="I have copied it"
-            variant="primary"
-            onClick={() => setState(acknowledged)}
-          />
+          <TextInput label="The issued key" isReadOnly value={state.disclosure.key} />
+          <HStack gap={2}>
+            <Button
+              label="I have copied it"
+              variant="primary"
+              onClick={() => setState(acknowledged)}
+            />
+          </HStack>
         </Stack>
       )}
 
-      <Stack direction="vertical" gap={2}>
+      <Stack direction="vertical" gap={2} maxWidth={480}>
         <Text size="sm" weight="bold">
           Issue a credential
         </Text>
-        <Field label="Tenant" inputID="issue-tenant">
-          <input id="issue-tenant" type="text" value={tenant} onChange={(e) => setTenant(e.target.value)} />
-        </Field>
-        <Field label="Label (what it is for)" inputID="issue-label">
-          <input id="issue-label" type="text" value={label} onChange={(e) => setLabel(e.target.value)} />
-        </Field>
+        <TextInput label="Tenant" value={tenant} onChange={setTenant} />
+        <TextInput label="Label (what it is for)" value={label} onChange={setLabel} />
+        <HStack gap={2}>
         <Button
           label="Issue"
           variant="primary"
@@ -123,6 +120,7 @@ export function CredentialArea({ request, onFailure }: Props) {
             );
           }}
         />
+        </HStack>
       </Stack>
 
       <Stack direction="vertical" gap={2}>
@@ -131,14 +129,12 @@ export function CredentialArea({ request, onFailure }: Props) {
         </Text>
 
         <HStack gap={2} align="end">
-          <Field label="List credentials for tenant" inputID="list-tenant">
-            <input
-              id="list-tenant"
-              type="text"
-              value={listing}
-              onChange={(event) => setListing(event.target.value)}
-            />
-          </Field>
+          <TextInput
+            label="List credentials for tenant"
+            width={280}
+            value={listing}
+            onChange={setListing}
+          />
           <Button
             label="Show"
             variant="secondary"

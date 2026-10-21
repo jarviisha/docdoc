@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from docdoc.runs.identity import new_run_id
-from docdoc.runs.model import RunStatus
+from docdoc.runs.model import RunOutcome, RunStatus
 from tests.fixtures.run_queue import InMemoryRunQueue
 
 T0 = datetime(2026, 8, 28, 9, 0, tzinfo=UTC)
@@ -94,6 +94,58 @@ def test_a_lapsed_lease_makes_a_run_claimable_again() -> None:
     assert redelivered.run_id == run_id
     assert redelivered.worker_id == "w2"
     assert redelivered.attempts == 2, "redelivery consumes an attempt"
+
+
+def test_a_second_claim_moves_started_at() -> None:
+    """`started_at` is the most recent claim, not the first (console monitoring plan).
+
+    A redelivery is a second claim of the same run, and it has to move the
+    timestamp rather than leave the original: an operator reading `started_at`
+    on a run that is still `running` wants to know when *this* attempt began,
+    which is the one that can still be stuck.
+    """
+    queue = InMemoryRunQueue()
+    run_id = _submit(queue, at=T0)
+    first = queue.claim(worker_id="w1", now=T0, lease=LEASE, max_attempts=3)
+    assert first is not None
+    assert first.started_at == T0
+
+    after = T0 + LEASE + timedelta(seconds=1)
+    redelivered = queue.claim(worker_id="w2", now=after, lease=LEASE, max_attempts=3)
+
+    assert redelivered is not None
+    assert redelivered.run_id == run_id
+    assert redelivered.started_at == after
+
+
+def test_release_clears_started_at() -> None:
+    """A released run is queued again; a stale `started_at` would keep its clock running."""
+    queue = InMemoryRunQueue()
+    run_id = _submit(queue, at=T0)
+    queue.claim(worker_id="w1", now=T0, lease=LEASE, max_attempts=3)
+
+    queue.release(run_id, now=T0 + timedelta(seconds=5))
+
+    released = queue.get(run_id, "default")
+    assert released is not None
+    assert released.status is RunStatus.QUEUED
+    assert released.started_at is None
+
+
+def test_longest_running_orders_by_started_at_not_heartbeat() -> None:
+    """The Overview's "Running now": a heartbeat must not reorder it."""
+    queue = InMemoryRunQueue()
+    first = _submit(queue, at=T0, blob_id="sha256:a")
+    second = _submit(queue, at=T0 + timedelta(seconds=1), blob_id="sha256:b")
+    claimed = queue.claim(worker_id="w1", now=T0, lease=LEASE, max_attempts=3)
+    assert claimed is not None
+    assert claimed.run_id == first
+    queue.claim(worker_id="w2", now=T0 + timedelta(seconds=2), lease=LEASE, max_attempts=3)
+    assert queue.heartbeat(first, now=T0 + timedelta(seconds=30), lease=LEASE, worker_id="w1")
+    _submit(queue, at=T0 + timedelta(seconds=3), blob_id="sha256:c")  # queued, so not listed
+
+    assert [run.run_id for run in queue.longest_running(limit=10)] == [first, second]
+    assert [run.run_id for run in queue.longest_running(limit=1)] == [first]
 
 
 def test_a_lease_one_second_from_lapsing_is_still_held() -> None:
@@ -198,3 +250,26 @@ def test_the_same_key_under_two_tenants_produces_two_runs() -> None:
     assert a != b
     assert queue.get(a, "acme") is not None
     assert queue.get(b, "other") is not None
+
+
+def test_finish_writes_error_reason() -> None:
+    """`error_reason` reaches the run row the same way `error_class` always has."""
+    queue = InMemoryRunQueue()
+    run_id = _submit(queue, at=T0)
+    queue.claim(worker_id="w1", now=T0, lease=LEASE, max_attempts=3)
+
+    queue.finish(
+        run_id,
+        RunOutcome(
+            status=RunStatus.FAILED,
+            failed_stage="parse",
+            error_class="ProviderError",
+            error_reason="timeout",
+        ),
+        now=T0,
+    )
+
+    run = queue.get(run_id, "default")
+    assert run is not None
+    assert run.status is RunStatus.FAILED
+    assert run.error_reason == "timeout"

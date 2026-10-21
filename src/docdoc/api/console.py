@@ -194,6 +194,55 @@ def _log_erasure(operator: str, *, tenant_id: str, blob_id: str | None, status: 
     )
 
 
+def _log_cancel(operator: str, *, tenant_id: str, run_id: str, status: int) -> None:
+    """One structured event per console cancel, attributed as `_log_erasure` is.
+
+    `DELETE /v1/runs/{id}` names no actor (its caller is the tenant itself); a
+    console cancel acts on someone else's run, so it says who did.
+    """
+    logging.getLogger("docdoc.api").info(
+        json.dumps(
+            {
+                "event": "console.cancel",
+                "actor": f"console:{operator}",
+                "tenant_id": tenant_id,
+                "run_id": run_id,
+                "status": status,
+            }
+        )
+    )
+
+
+def _summary(run: Any) -> ConsoleRunSummary:
+    """A run as a console row: the tenant row, plus its tenant and four monitoring fields."""
+    return ConsoleRunSummary(
+        **_summary_fields(run),
+        tenant_id=run.tenant_id,
+        started_at=_iso(run.started_at),
+        ocr_parser=run.ocr_parser,
+        error_class=run.error_class,
+        error_reason=run.error_reason,
+    )
+
+
+def _detail(run: Any, owner: str) -> dict[str, Any]:
+    """The console's detail body: the tenant's, plus `tenant_id` and `finished_at`.
+
+    `finished_at` is the list row's rule (`_summary_fields`), so detail and row
+    agree. Not on `RunStateResponse`: the tenant contract stays as it is.
+    """
+    return {
+        **RunStateResponse(**run.dump_public()).model_dump(mode="json"),
+        "tenant_id": owner,
+        "finished_at": _summary_fields(run)["finished_at"],
+    }
+
+
+#: The Overview's window for terminal counts, and the length of each list.
+_OVERVIEW_WINDOW_MINUTES = 60
+_OVERVIEW_LIST = 10
+
+
 def _owner(request: Request, run_id: str) -> tuple[JSONResponse | None, str, Any]:
     """`(refusal, owner, identity)` for a run named by identity alone.
 
@@ -294,6 +343,7 @@ def console_router() -> APIRouter:
         operator: Operator,
         tenant: str | None = None,
         status: str | None = None,
+        kind: str | None = None,
         limit: int = DEFAULT_RUN_PAGE,
         cursor: str | None = None,
     ) -> Any:
@@ -301,11 +351,16 @@ def console_router() -> APIRouter:
 
         `GET /v1/runs` with the tenant predicate made optional. A cursor is
         bound to the filter that produced it: to `tenant`, or to `"*"` when
-        there is none, which no tenant identifier can match.
+        there is none, which no tenant identifier can match. `kind` is not in
+        the binding, as `status` is not: changing either restarts paging.
         """
+        from docdoc.runs.model import RunKind
 
         if tenant is not None and not TENANT_PATTERN.match(tenant):
             return JSONResponse(status_code=422, content={"error": "invalid_tenant_id"})
+        kinds = sorted(member.value for member in RunKind)
+        if kind is not None and kind not in kinds:
+            return _refusal(422, "InvalidRunKind", "kind must be one of " + ", ".join(kinds))
         deployment = request.app.state.deployment
         if not deployment.has_runs:
             return _no_runs()
@@ -314,14 +369,47 @@ def console_router() -> APIRouter:
         if refusal is not None:
             return refusal
         runs = deployment.runs().page_all_runs(
-            tenant_id=tenant, status=status, before=before, limit=limit
+            tenant_id=tenant, status=status, kind=kind, before=before, limit=limit
         )
         return ConsoleRunListResponse(
-            runs=tuple(
-                ConsoleRunSummary(**_summary_fields(run), tenant_id=run.tenant_id) for run in runs
-            ),
+            runs=tuple(_summary(run) for run in runs),
             next_cursor=_next_cursor(runs, limit, cursor_tenant=bound),
         )
+
+    @router.get("/overview")
+    def overview(request: Request, operator: Operator) -> Any:
+        """Counts by kind and status, the newest failures, and what is running.
+
+        `queued` and `running` count at any age -- a run stuck there for hours
+        is exactly what an operator needs to see. The terminal statuses count
+        only within the window, so the tiles say what just happened rather
+        than everything that ever did. `running` lists the longest-running
+        first, so a stuck run stays on top rather than sinking.
+        """
+        from datetime import timedelta
+
+        from docdoc.runs.model import RunStatus
+
+        deployment = request.app.state.deployment
+        if not deployment.has_runs:
+            return _no_runs()
+        queue = deployment.runs()
+        since = identity.now() - timedelta(minutes=_OVERVIEW_WINDOW_MINUTES)
+        return {
+            "window_minutes": _OVERVIEW_WINDOW_MINUTES,
+            "counts": [
+                {"kind": kind, "status": status, "count": count}
+                for kind, status, count in queue.status_counts(since=since)
+            ],
+            "recent_failures": [
+                _summary(run).model_dump(mode="json")
+                for run in queue.latest(status=RunStatus.FAILED.value, limit=_OVERVIEW_LIST)
+            ],
+            "running": [
+                _summary(run).model_dump(mode="json")
+                for run in queue.longest_running(limit=_OVERVIEW_LIST)
+            ],
+        }
 
     @router.get("/runs/{run_id}")
     def run_state(request: Request, run_id: str, operator: Operator) -> Any:
@@ -330,14 +418,48 @@ def console_router() -> APIRouter:
         refusal, owner, run = _run(request, run_id)
         if refusal is not None:
             return refusal
-        body = {
-            **RunStateResponse(**run.dump_public()).model_dump(mode="json"),
-            "tenant_id": owner,
-        }
+        body = _detail(run, owner)
         decision = _routing_for(request, run)
         if decision is not None:
             body["routing"] = decision.model_dump(mode="json")
         return JSONResponse(content=body)
+
+    @router.delete("/runs/{run_id}")
+    def cancel_run(request: Request, run_id: str, operator: Operator) -> Any:
+        """`DELETE /v1/runs/{run_id}`, under the run's owner, plus its `tenant_id`.
+
+        The same three answers: 200 with the run (a running run still reads
+        `running` until its worker reaches a stage boundary, FR-029), 409 for a
+        finished one, and the one 404. Every attempt on a known run is logged
+        with its actor, a refusal included, as `_log_erasure` does.
+        """
+        from docdoc.runs.errors import RunNotCancellableError, RunNotFoundError
+
+        refusal, owner, run_identity = _owner(request, run_id)
+        if refusal is not None:
+            return refusal
+        response: JSONResponse
+        try:
+            run = request.app.state.deployment.runs().cancel(
+                run_identity, owner, now=identity.now()
+            )
+        except RunNotFoundError:
+            response = _unknown_run(run_id)
+        except RunNotCancellableError as exc:
+            response = JSONResponse(
+                status_code=409,
+                content={
+                    "error": {
+                        "class": type(exc).__name__,
+                        "message": str(exc),
+                        "detail": {"status": exc.state},
+                    }
+                },
+            )
+        else:
+            response = JSONResponse(content=_detail(run, owner))
+        _log_cancel(operator, tenant_id=owner, run_id=run_id, status=response.status_code)
+        return response
 
     @router.get("/runs/{run_id}/delivery")
     def run_delivery(request: Request, run_id: str, operator: Operator) -> Any:

@@ -155,6 +155,8 @@ class RunQueue(Protocol):
         What a worker calls on `SIGTERM` instead of letting the lease time out,
         so a rolling restart costs no lease duration (FR-043).
 
+        Clears `started_at`: the attempt is undone, and a queued run has no start.
+
         **Gives the attempt back.** The claim being undone consumed one, and a
         graceful release is not the evidence `max_attempts` bounds — the worker
         is alive and the document proved nothing. See `PostgresRunQueue.release`.
@@ -356,12 +358,32 @@ class RunQueue(Protocol):
         status: str | None,
         before: tuple[datetime, UUID] | None,
         limit: int,
+        kind: str | None = None,
     ) -> tuple[Run, ...]:
         """`page_runs` across tenants: the predicate is dropped when `tenant_id` is `None`.
 
         The console's read (ADR-0023 §3). Only a signed-in operator reaches it;
         a tenant's own listing stays `page_runs`, where the predicate is not
-        optional.
+        optional. `kind`, when given, is one more predicate.
+        """
+        ...
+
+    def status_counts(self, *, since: datetime) -> tuple[tuple[str, str, int], ...]:
+        """`(kind, status, count)` across tenants, non-zero rows only.
+
+        `queued` and `running` count at any age; the three terminal statuses
+        count only when `updated_at >= since`. The console Overview's tiles.
+        """
+        ...
+
+    def latest(self, *, status: str, limit: int) -> tuple[Run, ...]:
+        """Up to `limit` runs in `status`, across tenants, newest `updated_at` first."""
+        ...
+
+    def longest_running(self, *, limit: int) -> tuple[Run, ...]:
+        """Up to `limit` `running` runs, across tenants, earliest `started_at` first.
+
+        Nulls last, then `run_id`. Not `updated_at`, which heartbeats rewrite.
         """
         ...
 

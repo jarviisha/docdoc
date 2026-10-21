@@ -199,6 +199,9 @@ class RunOutcome(BaseModel):
     processing_id: str | None = None
     failed_stage: str | None = None
     error_class: str | None = None
+    #: The failing error's own reason word, from `docdoc.pipeline.result.reason_of`
+    #: — never a message (spec decision 7, console monitoring plan).
+    error_reason: str | None = None
     stage_outcomes: tuple[StageOutcomeRecord, ...] = ()
 
     @model_validator(mode="after")
@@ -252,14 +255,20 @@ class RunOutcome(BaseModel):
         # A run can also stop with no `failed_stage` and no `processing_id`: that
         # is what cancellation looks like from here, because stopping between
         # stages produces no terminal artifact and raises nothing (FR-033).
+        #
+        # Read off `result.outcomes` rather than the already-projected `outcomes`
+        # above: `StageOutcomeRecord` carries no `failure_reason` (it stays
+        # unchanged, FR-037's own field list), so the source of truth for it is
+        # the `StageOutcome` the pipeline actually produced.
         failing = next(
-            (o for o in outcomes if o.failure_class is not None),
+            (o for o in result.outcomes if o.failure_class is not None),
             None,
         )
         return cls(
             status=RunStatus.FAILED if result.failed_stage else RunStatus.CANCELLED,
             failed_stage=str(result.failed_stage) if result.failed_stage else None,
             error_class=failing.failure_class if failing else None,
+            error_reason=failing.failure_reason if failing else None,
             stage_outcomes=outcomes,
         )
 
@@ -294,9 +303,20 @@ class Run(BaseModel):
     worker_id: str | None = None
     lease_until: datetime | None = None
 
+    #: The most recent claim, not the first. A redelivery is a second claim of
+    #: the same run, and it moves this forward — an operator reading it on a run
+    #: that is still `running` wants to know when *this* attempt began, which is
+    #: the one that can still be stuck (console monitoring plan, Task 1). `None`
+    #: before the first claim.
+    started_at: datetime | None = None
+
     processing_id: str | None = None
     failed_stage: str | None = None
     error_class: str | None = None
+    #: A member of the failing error's own `REASONS` frozenset, never its
+    #: message (spec decision 7). `None` on a run that has not failed, or whose
+    #: error declared no reason the closed vocabulary can vouch for.
+    error_reason: str | None = None
     stage_outcomes: tuple[StageOutcomeRecord, ...] = ()
 
     request_id: str | None = None

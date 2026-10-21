@@ -17,6 +17,7 @@ Not thread-safe, and it does not need to be: a worker executes one run at a time
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import TYPE_CHECKING
 
 from docdoc.runs.errors import (
@@ -185,6 +186,7 @@ class InMemoryRunQueue:
         status: str | None,
         before: tuple[datetime, UUID] | None,
         limit: int,
+        kind: str | None = None,
     ) -> tuple[Run, ...]:
         self._check_reachable()
         found = [
@@ -192,10 +194,35 @@ class InMemoryRunQueue:
             for run in self._runs.values()
             if (tenant_id is None or run.tenant_id == tenant_id)
             and (status is None or str(run.status) == status)
+            and (kind is None or str(run.kind) == kind)
         ]
         found.sort(key=lambda run: (run.created_at, run.run_id), reverse=True)
         if before is not None:
             found = [run for run in found if (run.created_at, run.run_id) < before]
+        return tuple(found[:limit])
+
+    def status_counts(self, *, since: datetime) -> tuple[tuple[str, str, int], ...]:
+        self._check_reachable()
+        counts = Counter(
+            (str(run.kind), str(run.status))
+            for run in self._runs.values()
+            if not run.is_terminal or run.updated_at >= since
+        )
+        return tuple((kind, status, n) for (kind, status), n in sorted(counts.items()))
+
+    def latest(self, *, status: str, limit: int) -> tuple[Run, ...]:
+        self._check_reachable()
+        found = [run for run in self._runs.values() if str(run.status) == status]
+        found.sort(key=lambda run: (run.updated_at, run.run_id), reverse=True)
+        return tuple(found[:limit])
+
+    def longest_running(self, *, limit: int) -> tuple[Run, ...]:
+        self._check_reachable()
+        found = [run for run in self._runs.values() if run.status is RunStatus.RUNNING]
+        # `ORDER BY started_at ASC NULLS LAST, run_id`.
+        found.sort(
+            key=lambda run: (run.started_at is None, run.started_at or run.created_at, run.run_id)
+        )
         return tuple(found[:limit])
 
     def tombstone(self, run_id: UUID, tenant_id: str) -> Tombstone | None:
@@ -365,6 +392,10 @@ class InMemoryRunQueue:
                 "worker_id": worker_id,
                 "lease_until": now + lease,
                 "updated_at": now,
+                # The most recent claim, not the first: a redelivery moves this
+                # forward too (console monitoring plan, Task 1), matching
+                # `PostgresRunQueue.claim`'s `started_at = %(now)s`.
+                "started_at": now,
             }
         )
         self._runs[run.run_id] = claimed
@@ -426,6 +457,7 @@ class InMemoryRunQueue:
                 # `PostgresRunQueue.release` for why this is correctness rather
                 # than tidiness.
                 "attempts": max(run.attempts - 1, 0),
+                "started_at": None,
                 "updated_at": now,
             }
         )
@@ -468,6 +500,7 @@ class InMemoryRunQueue:
                 "processing_id": outcome.processing_id,
                 "failed_stage": outcome.failed_stage,
                 "error_class": outcome.error_class,
+                "error_reason": outcome.error_reason,
                 "stage_outcomes": outcome.stage_outcomes,
                 "worker_id": None,
                 "lease_until": None,

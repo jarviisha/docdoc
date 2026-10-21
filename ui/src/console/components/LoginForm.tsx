@@ -1,8 +1,8 @@
 /**
  * Where an operator signs in (ADR-0023 §1).
  *
- * A real `<form>`, so Enter submits it, with native inputs inside `Field`s so
- * each carries an accessible name and is operable by keyboard (FR-045a). The
+ * A real `<form>`, so Enter submits it, with labelled `TextInput`s so each
+ * carries an accessible name and is operable by keyboard (FR-045a). The
  * `autoComplete` values are the standard ones: a console account is a
  * username and a password, and a password manager remembering it is the
  * operator's choice — the session itself is an `HttpOnly` cookie this page
@@ -13,7 +13,7 @@
  */
 
 import { useState, type FormEvent } from "react";
-import { Banner, Button, Field, Stack, Text } from "@astryxdesign/core";
+import { Banner, Button, Card, Stack, Text, TextInput } from "@astryxdesign/core";
 
 interface Props {
   /** The refusal, the unavailable sentence, or the session-ended notice. */
@@ -33,8 +33,9 @@ export function LoginForm({ notice, onSubmit }: Props) {
   };
 
   return (
-    <form onSubmit={submit}>
-      <Stack direction="vertical" gap={3}>
+    <Card width="100%" maxWidth={400} padding={6}>
+      <form onSubmit={submit}>
+      <Stack direction="vertical" gap={4}>
         <Text size="lg" weight="bold">
           docdoc operations console
         </Text>
@@ -43,26 +44,22 @@ export function LoginForm({ notice, onSubmit }: Props) {
           {notice === null ? null : <Banner status="warning" title={notice} />}
         </div>
 
-        <Field label="Username" inputID="username">
-          <input
-            id="username"
-            type="text"
-            autoComplete="username"
-            spellCheck={false}
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-          />
-        </Field>
+        {/* `autoComplete` and `spellCheck` are not in TextInput's typed props,
+            but its rest props land on the `<input>`; spread to get past the type. */}
+        <TextInput
+          label="Username"
+          {...{ autoComplete: "username", spellCheck: false }}
+          value={username}
+          onChange={setUsername}
+        />
 
-        <Field label="Password" inputID="password">
-          <input
-            id="password"
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-          />
-        </Field>
+        <TextInput
+          label="Password"
+          type="password"
+          {...{ autoComplete: "current-password" }}
+          value={password}
+          onChange={setPassword}
+        />
 
         <Button
           type="submit"
@@ -71,6 +68,7 @@ export function LoginForm({ notice, onSubmit }: Props) {
           isDisabled={username.trim() === "" || password === ""}
         />
       </Stack>
-    </form>
+      </form>
+    </Card>
   );
 }
