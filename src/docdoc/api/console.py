@@ -41,10 +41,13 @@ from docdoc.api.models import (
 from docdoc.api.ocr import _ocr_document, ocr_unavailable, parser_listing, submit_ocr
 from docdoc.api.paging import DEFAULT_RUN_PAGE
 from docdoc.api.runs import (
+    _delivery_unconfigured,
     _finished_at,
     _next_cursor,
     _no_runs,
     _page_request,
+    _register_callback,
+    _revoke_callback,
     _routing_for,
     _run_erased,
     _summary_fields,
@@ -174,6 +177,13 @@ class _ConsoleCredentialRequest(BaseModel):
     scopes: Any = None
 
 
+class _CallbackRegistration(BaseModel):
+    """`POST /v1/console/tenants/{tenant_id}/callbacks`'s body, as the tenant's own."""
+
+    url: str = ""
+    secret: str = ""
+
+
 def _accounts(request: Request) -> Any:
     return request.app.state.deployment.console_accounts()
 
@@ -234,6 +244,43 @@ def _log_ocr_submit(operator: str, *, tenant_id: str, run_id: str, status: int) 
                 "actor": f"console:{operator}",
                 "tenant_id": tenant_id,
                 "run_id": run_id,
+                "status": status,
+            }
+        )
+    )
+
+
+def _log_callback_register(
+    operator: str, *, tenant_id: str, callback_id: str, url: str, status: int
+) -> None:
+    """One structured event per *successful* console registration, as
+    `_log_ocr_submit` is — there is nothing to attribute for a refusal, since
+    nothing was stored. The URL is logged and the secret is never a parameter
+    this function could log even by mistake.
+    """
+    logging.getLogger("docdoc.api").info(
+        json.dumps(
+            {
+                "event": "console.callback_register",
+                "actor": f"console:{operator}",
+                "tenant_id": tenant_id,
+                "callback_id": callback_id,
+                "url": url,
+                "status": status,
+            }
+        )
+    )
+
+
+def _log_callback_revoke(operator: str, *, tenant_id: str, callback_id: str, status: int) -> None:
+    """One structured event per console revoke that actually revoked something."""
+    logging.getLogger("docdoc.api").info(
+        json.dumps(
+            {
+                "event": "console.callback_revoke",
+                "actor": f"console:{operator}",
+                "tenant_id": tenant_id,
+                "callback_id": callback_id,
                 "status": status,
             }
         )
@@ -717,6 +764,93 @@ def console_router() -> APIRouter:
             operator, tenant_id=tenant_id, run_id=body["run_id"], status=response.status_code
         )
         return JSONResponse(status_code=response.status_code, content=body)
+
+    # -- callbacks, per tenant (ADR-0018, ADR-0023 §3) -----------------------
+    #
+    # Three routes over `PostgresDeliverer.register`/`revoke`/`callbacks_for`,
+    # on a named tenant's behalf. The 422s and the 503 are `_register_callback`'s
+    # and `_delivery_unconfigured`'s — the same bodies `POST /v1/callbacks`
+    # answers with, not a second copy of either (FR-066: the secret is never
+    # returned or logged, on this route or that one).
+
+    @router.get("/tenants/{tenant_id}/callbacks")
+    def list_tenant_callbacks(request: Request, tenant_id: str, operator: Operator) -> Any:
+        """A tenant's active callbacks, newest first. Never the secret or its digest.
+
+        There is no listing route under `/v1/callbacks` itself (FR-066's other
+        half) -- this is the console enumerating a tenant's destinations on
+        their behalf, behind a session rather than that tenant's own key.
+        """
+        if not TENANT_PATTERN.match(tenant_id):
+            return JSONResponse(status_code=422, content={"error": "invalid_tenant_id"})
+        deliverer = request.app.state.deployment.deliverer()
+        if deliverer is None:
+            return _delivery_unconfigured()
+        return {
+            "callbacks": [
+                {
+                    "callback_id": str(callback.callback_id),
+                    "tenant_id": callback.tenant_id,
+                    "url": callback.url,
+                    "created_at": _iso(callback.created_at),
+                }
+                for callback in deliverer.callbacks_for(tenant_id)
+            ]
+        }
+
+    @router.post("/tenants/{tenant_id}/callbacks", status_code=201)
+    def register_tenant_callback(
+        request: Request, tenant_id: str, operator: Operator, body: _CallbackRegistration
+    ) -> Any:
+        """`POST /v1/callbacks` for a named tenant, through the same `register`.
+
+        Logged only on success, as `submit_tenant_ocr` logs `console.ocr_submit`
+        only on success -- a refusal stored nothing, so there is no `callback_id`
+        to attribute it to.
+        """
+        if not TENANT_PATTERN.match(tenant_id):
+            return JSONResponse(status_code=422, content={"error": "invalid_tenant_id"})
+        deliverer = request.app.state.deployment.deliverer()
+        if deliverer is None:
+            return _delivery_unconfigured()
+
+        url = body.url.strip()
+        response = _register_callback(
+            deliverer,
+            tenant_id=tenant_id,
+            url=url,
+            secret=body.secret.strip(),
+            at=identity.now(),
+            callback_id=identity.new_credential_id(),
+        )
+        if response.status_code != 201:
+            return response
+        payload = {**json.loads(bytes(response.body)), "tenant_id": tenant_id}
+        _log_callback_register(
+            operator, tenant_id=tenant_id, callback_id=payload["callback_id"], url=url, status=201
+        )
+        return JSONResponse(status_code=201, content=payload)
+
+    @router.delete("/tenants/{tenant_id}/callbacks/{callback_id}", status_code=204)
+    def revoke_tenant_callback(
+        request: Request, tenant_id: str, callback_id: str, operator: Operator
+    ) -> Response:
+        """`DELETE /v1/callbacks/{id}` for a named tenant: `204`, idempotently.
+
+        Logged only when a callback was actually revoked -- the same "a no-op
+        is not an event" `_log_ocr_submit`'s success-only logging keeps, made
+        visible here because this acts on someone else's registration.
+        """
+        if not TENANT_PATTERN.match(tenant_id):
+            return JSONResponse(status_code=422, content={"error": "invalid_tenant_id"})
+        deliverer = request.app.state.deployment.deliverer()
+        if deliverer is None:
+            return Response(status_code=204)
+
+        revoked = _revoke_callback(deliverer, callback_id, tenant_id=tenant_id, at=identity.now())
+        if revoked:
+            _log_callback_revoke(operator, tenant_id=tenant_id, callback_id=callback_id, status=204)
+        return Response(status_code=204)
 
     @router.delete("/tenants/{tenant_id}")
     def erase_tenant(request: Request, tenant_id: str, operator: Operator) -> Any:

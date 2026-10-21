@@ -322,6 +322,59 @@ def test_a_run_with_no_callback_enqueues_nothing(queue: PostgresRunQueue) -> Non
     assert rows["n"] == 0
 
 
+# -- 021 Task 1: the console's listing ---------------------------------------
+
+
+def test_callbacks_for_lists_active_only_tenant_scoped_newest_first(
+    deliverer: PostgresDeliverer,
+) -> None:
+    """`callbacks_for` backs the console's listing (FR-066's other half, 021
+    Task 1): active only, one tenant, newest first."""
+    now = datetime.now(UTC)
+    first = deliverer.register(
+        tenant_id=TENANT,
+        url="https://localhost:9991/one",
+        secret=SECRET,
+        at=now,
+        callback_id=new_credential_id(),
+    )
+    second = deliverer.register(
+        tenant_id=TENANT,
+        url="https://localhost:9992/two",
+        secret=SECRET,
+        at=now + timedelta(seconds=1),
+        callback_id=new_credential_id(),
+    )
+    third = deliverer.register(
+        tenant_id=TENANT,
+        url="https://localhost:9993/three",
+        secret=SECRET,
+        at=now + timedelta(seconds=2),
+        callback_id=new_credential_id(),
+    )
+    deliverer.register(
+        tenant_id=OTHER,
+        url="https://localhost:9994/other",
+        secret=SECRET,
+        at=now,
+        callback_id=new_credential_id(),
+    )
+    deliverer.revoke(first.callback_id, tenant_id=TENANT, at=now + timedelta(seconds=3))
+
+    listed = deliverer.callbacks_for(TENANT)
+
+    assert [callback.callback_id for callback in listed] == [
+        third.callback_id,
+        second.callback_id,
+    ], "revoked is excluded, the other tenant's is excluded, and order is newest first"
+    assert all(callback.tenant_id == TENANT for callback in listed)
+    assert all(callback.secret_digest for callback in listed), "no row is missing its digest"
+
+
+def test_callbacks_for_a_tenant_with_none_is_empty(deliverer: PostgresDeliverer) -> None:
+    assert deliverer.callbacks_for("nobody-registered-here") == ()
+
+
 def test_a_registration_with_an_unconfigured_secret_is_refused(
     deliverer: PostgresDeliverer,
 ) -> None:
