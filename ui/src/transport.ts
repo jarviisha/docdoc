@@ -85,7 +85,12 @@ export async function send(plan: RequestPlan, options: Options = {}): Promise<Re
     method: plan.method,
     headers: {
       [CONSOLE_HEADER]: "1",
-      ...(plan.hasBody && body !== undefined ? { "Content-Type": "application/json" } : {}),
+      // Only a `string` body is this console's own JSON. A `Blob` or `File`
+      // body is an upload — `submit-ocr`'s raw file bytes — and setting no
+      // `Content-Type` lets the browser supply the file's own (or none) and
+      // the server's sniffing take it from there, rather than this layer
+      // mislabelling a file as `application/json`.
+      ...(plan.hasBody && typeof body === "string" ? { "Content-Type": "application/json" } : {}),
     },
     ...(plan.hasBody && body !== undefined ? { body } : {}),
   });
