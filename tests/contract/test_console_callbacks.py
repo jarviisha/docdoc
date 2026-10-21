@@ -181,6 +181,22 @@ def test_console_register_without_a_url_or_a_secret_names_the_error_exactly(
     assert _list(client, cookie) == []
 
 
+def test_console_register_never_echoes_a_malformed_body(
+    client: TestClient, cookie: dict[str, str]
+) -> None:
+    """Non-string fields get the tenant route's sentence, not a validation error
+    carrying the submitted input (the secret included) back in its body."""
+    marker = "whsec_must-not-come-back"
+    for body in ({"url": [CALLBACK_URL], "secret": {"s": marker}}, {"url": 5, "secret": [marker]}):
+        response = client.post(
+            f"/v1/console/tenants/{ACME}/callbacks", json=body, headers={**cookie, **H}
+        )
+
+        assert response.status_code == 422, body
+        assert marker not in response.text
+    assert _list(client, cookie) == []
+
+
 def test_console_register_refuses_an_unknown_secret(
     client: TestClient, cookie: dict[str, str]
 ) -> None:

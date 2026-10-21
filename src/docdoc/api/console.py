@@ -30,7 +30,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from docdoc.api.admin import _audit, _erase
-from docdoc.api.deps import _iso, _read_capped, _unknown_run
+from docdoc.api.deps import _iso, _read_capped, _read_json, _unknown_run
 from docdoc.api.documents import _stored_result, _terminal
 from docdoc.api.models import (
     ConsoleRunListResponse,
@@ -175,13 +175,6 @@ class _ConsoleCredentialRequest(BaseModel):
     tenant_id: str = Field(max_length=256)
     label: str | None = Field(default=None, max_length=256)
     scopes: Any = None
-
-
-class _CallbackRegistration(BaseModel):
-    """`POST /v1/console/tenants/{tenant_id}/callbacks`'s body, as the tenant's own."""
-
-    url: str = ""
-    secret: str = ""
 
 
 def _accounts(request: Request) -> Any:
@@ -799,27 +792,31 @@ def console_router() -> APIRouter:
         }
 
     @router.post("/tenants/{tenant_id}/callbacks", status_code=201)
-    def register_tenant_callback(
-        request: Request, tenant_id: str, operator: Operator, body: _CallbackRegistration
-    ) -> Any:
+    async def register_tenant_callback(request: Request, tenant_id: str, operator: Operator) -> Any:
         """`POST /v1/callbacks` for a named tenant, through the same `register`.
 
         Logged only on success, as `submit_tenant_ocr` logs `console.ocr_submit`
         only on success -- a refusal stored nothing, so there is no `callback_id`
-        to attribute it to.
+        to attribute it to. The body is read as `POST /v1/callbacks` reads it, so
+        a malformed field gets the same `invalid_callback` sentence rather than a
+        validation error echoing the input back -- the secret included.
         """
+        from fastapi.concurrency import run_in_threadpool
+
         if not TENANT_PATTERN.match(tenant_id):
             return JSONResponse(status_code=422, content={"error": "invalid_tenant_id"})
         deliverer = request.app.state.deployment.deliverer()
         if deliverer is None:
             return _delivery_unconfigured()
 
-        url = body.url.strip()
-        response = _register_callback(
+        body = await _read_json(request)
+        url = str(body.get("url", "")).strip()
+        response = await run_in_threadpool(
+            _register_callback,
             deliverer,
             tenant_id=tenant_id,
             url=url,
-            secret=body.secret.strip(),
+            secret=str(body.get("secret", "")).strip(),
             at=identity.now(),
             callback_id=identity.new_credential_id(),
         )

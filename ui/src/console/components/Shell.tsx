@@ -8,7 +8,7 @@
  * keeps no clock, and learns a session has ended from the next `401`.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import {
   AppShell,
   Banner,
@@ -101,8 +101,11 @@ export function Shell() {
   const [openRunId, setOpenRunId] = useState<string | null>(null);
   // The tenant a jump from Tenants opened the area for; a sidebar visit has none.
   const [presetTenant, setPresetTenant] = useState<string | null>(null);
+  // Bumped by every jump, so even a click on the area already open starts it afresh.
+  const [visit, setVisit] = useState(0);
 
   const jump = useCallback(({ area: to, tenant }: Jump) => {
+    setVisit((v) => v + 1);
     setOpenRunId(null);
     setPresetTenant(tenant);
     setArea(to);
@@ -228,6 +231,7 @@ export function Shell() {
           {notice === null ? null : <Banner status="warning" title={notice} />}
         </div>
 
+        <Fragment key={visit}>
         {area === "overview" ? (
           <OverviewArea
             request={request}
@@ -265,6 +269,7 @@ export function Shell() {
         {area === "erasure" ? (
           <EraseArea request={request} onFailure={handle} presetTenant={presetTenant} />
         ) : null}
+        </Fragment>
       </Stack>
     </AppShell>
   );
