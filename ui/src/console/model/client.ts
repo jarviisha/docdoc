@@ -44,7 +44,14 @@ export type Intent =
   | { type: "erase-document"; tenantId: string; blobId: string }
   | { type: "list-tenants" }
   | { type: "list-parsers" }
-  | { type: "submit-ocr"; tenantId: string; parser?: string; language?: string };
+  | {
+      type: "submit-ocr";
+      tenantId: string;
+      parser?: string;
+      language?: string;
+      /** Sent as `Idempotency-Key`, so a resend after a lost answer replays the run. */
+      idempotencyKey?: string;
+    };
 
 /**
  * Every path shape this console knows. Anything else is a defect, not a feature.
@@ -186,6 +193,9 @@ export function requestFor(intent: Intent): RequestPlan {
         path: `/v1/console/tenants/${encodeURIComponent(intent.tenantId)}/ocr`,
         query,
         hasBody: true,
+        ...(intent.idempotencyKey === undefined
+          ? {}
+          : { headers: { "Idempotency-Key": intent.idempotencyKey } }),
       };
     }
   }

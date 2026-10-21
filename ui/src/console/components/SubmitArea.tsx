@@ -17,6 +17,7 @@ import { describe, type Failure } from "../model/failure.ts";
 import {
   AUTOMATIC,
   canSubmit,
+  chooseFile,
   languageChoices,
   parserChoices,
   submitIntent,
@@ -47,6 +48,7 @@ export function SubmitArea({ request, onOpenRun }: Props) {
     parser: AUTOMATIC,
     language: "",
     file: null,
+    key: "",
     sending: false,
   });
 
@@ -121,7 +123,14 @@ export function SubmitArea({ request, onOpenRun }: Props) {
           label="Document"
           value={form.file}
           // Single-file (no `isMultiple`), so the value is a `File` or `null`.
-          onChange={(file) => setForm((f) => ({ ...f, file: file as File | null }))}
+          // `getRandomValues`, not `randomUUID`: the latter exists only in a
+          // secure context, and a console reached over plain http is not one.
+          onChange={(file) => {
+            const key = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
+              b.toString(16).padStart(2, "0"),
+            ).join("");
+            setForm((f) => chooseFile(f, file as File | null, key));
+          }}
         />
 
         <HStack gap={2}>

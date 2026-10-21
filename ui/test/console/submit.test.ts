@@ -10,6 +10,7 @@ import { requestFor } from "../../src/console/model/client.ts";
 import {
   AUTOMATIC,
   canSubmit,
+  chooseFile,
   languageChoices,
   parserChoices,
   submitIntent,
@@ -83,7 +84,7 @@ test("parser choices mark unavailable and unhealthy", () => {
 });
 
 test("cannot submit while sending", () => {
-  const f = { tenant: "acme", parser: "", language: "", file: new File(["x"], "a.png"), sending: true };
+  const f = { tenant: "acme", parser: "", language: "", file: new File(["x"], "a.png"), key: "k", sending: true };
   assert.equal(canSubmit(f), false);
   assert.equal(canSubmit({ ...f, sending: false }), true);
   assert.equal(canSubmit({ ...f, sending: false, file: null }), false);
@@ -92,12 +93,12 @@ test("cannot submit while sending", () => {
 
 test("submit intent omits empty parser and language", () => {
   assert.deepEqual(
-    requestFor(submitIntent({ tenant: "acme", parser: "", language: "", file: null, sending: false }))
+    requestFor(submitIntent({ tenant: "acme", parser: "", language: "", file: null, key: "", sending: false }))
       .query,
     {},
   );
   assert.deepEqual(
-    requestFor(submitIntent({ tenant: "acme", parser: "paddle-vl", language: "vi", file: null, sending: false })),
+    requestFor(submitIntent({ tenant: "acme", parser: "paddle-vl", language: "vi", file: null, key: "", sending: false })),
     { method: "POST", path: "/v1/console/tenants/acme/ocr", query: { parser: "paddle-vl", language: "vi" }, hasBody: true },
   );
 });
@@ -106,4 +107,21 @@ test("a submitted run's id is read from the console detail body", () => {
   assert.equal(submittedRunId({ run_id: "r1", tenant_id: "acme" }), "r1");
   assert.equal(submittedRunId({}), null);
   assert.equal(submittedRunId(null), null);
+});
+
+test("a newly chosen file gets a new key; the same file keeps its own", () => {
+  const empty = { tenant: "acme", parser: "", language: "", file: null, key: "", sending: false };
+  const a = new File(["a"], "a.png");
+  const b = new File(["b"], "b.png");
+
+  const first = chooseFile(empty, a, "k1");
+  assert.equal(first.key, "k1");
+  assert.equal(chooseFile(first, a, "k2").key, "k1");
+  assert.equal(chooseFile(first, b, "k2").key, "k2");
+  assert.deepEqual(chooseFile(first, null, "k2"), { ...first, file: null, key: "" });
+});
+
+test("a submission carries its file's key as Idempotency-Key", () => {
+  const form = { tenant: "acme", parser: "", language: "", file: new File(["a"], "a.png"), key: "k1", sending: false };
+  assert.deepEqual(requestFor(submitIntent(form)).headers, { "Idempotency-Key": "k1" });
 });

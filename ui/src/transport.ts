@@ -23,6 +23,8 @@ export interface RequestPlan {
   path: string;
   query: Record<string, string>;
   hasBody: boolean;
+  /** Request headers the plan itself names — `submit-ocr`'s `Idempotency-Key`. */
+  headers?: Record<string, string>;
 }
 
 /**
@@ -84,6 +86,7 @@ export async function send(plan: RequestPlan, options: Options = {}): Promise<Re
   const response = await fetch(toUrl(plan), {
     method: plan.method,
     headers: {
+      ...plan.headers,
       [CONSOLE_HEADER]: "1",
       // Only a `string` body is this console's own JSON. A `Blob` or `File`
       // body is an upload — `submit-ocr`'s raw file bytes — and setting no

@@ -113,7 +113,19 @@ export interface SubmitForm {
   parser: string;
   language: string;
   file: File | null;
+  /** The chosen file's `Idempotency-Key`; `""` with no file. */
+  key: string;
   sending: boolean;
+}
+
+/**
+ * Choose a file. A different file gets `key`, freshly made by the caller; the
+ * same file keeps the key it has, so pressing Submit again after an answer
+ * that never arrived replays that run rather than making a second.
+ */
+export function chooseFile(form: SubmitForm, file: File | null, key: string): SubmitForm {
+  if (file === form.file) return form;
+  return { ...form, file, key: file === null ? "" : key };
 }
 
 /** Whether Submit may be pressed: a tenant, a file, and no request already under way. */
@@ -132,6 +144,7 @@ export function submitIntent(form: SubmitForm): Intent {
     tenantId: form.tenant,
     ...(form.parser === "" ? {} : { parser: form.parser }),
     ...(form.language === "" ? {} : { language: form.language }),
+    ...(form.key === "" ? {} : { idempotencyKey: form.key }),
   };
 }
 

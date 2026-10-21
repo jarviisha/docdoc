@@ -40,3 +40,11 @@ test("a File body carries no Content-Type this layer invented", async () => {
   assert.equal(seen.length, 1);
   assert.equal(seen[0]?.get("Content-Type"), null);
 });
+
+test("a plan's headers are sent alongside the console header", async () => {
+  const seen: Headers[] = [];
+  stub(seen);
+  await send({ ...PLAN, headers: { "Idempotency-Key": "k1" } }, { body: "{}" });
+  assert.equal(seen[0]?.get("Idempotency-Key"), "k1");
+  assert.equal(seen[0]?.get("X-Docdoc-Console"), "1");
+});
