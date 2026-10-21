@@ -28,6 +28,7 @@ import {
   cancelNotice,
   reasonLabel,
   refetchAfterCancel,
+  resultNotice,
   reloaded,
   timeline,
   toFailure,
@@ -377,4 +378,16 @@ test("the detail view shows a result for a succeeded OCR run only", () => {
   for (const status of ["queued", "running", "failed", "cancelled"] as const) {
     assert.equal(showsResult({ ...SUMMARY, kind: "ocr", status } as RunRecord), false);
   }
+});
+
+test("resultNotice: an expired result is information, anything else an error", () => {
+  assert.deepEqual(
+    resultNotice({ kind: "reported", status: 410, message: "this run's result is no longer stored" }),
+    { status: "info", title: "This run's result is no longer stored." },
+  );
+  assert.deepEqual(resultNotice({ kind: "transport", message: "offline" }), {
+    status: "error",
+    title: "The result could not be shown",
+    description: "offline",
+  });
 });

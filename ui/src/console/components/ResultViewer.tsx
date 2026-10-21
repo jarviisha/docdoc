@@ -5,7 +5,8 @@
  * how a confidence reads — is `console/model/result.ts`'s.
  *
  * Page images are fetched as each page is first shown, held as blob URLs,
- * and all revoked when the viewer goes.
+ * and all revoked when the viewer goes. A page whose image failed can be
+ * asked for again.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -17,6 +18,7 @@ import {
   confidenceLabel,
   isTurned,
   pageAfter,
+  scrollToShow,
   TURNED_NOTICE,
   type ResultPage,
 } from "../model/result.ts";
@@ -40,8 +42,10 @@ export function ResultViewer({ runId, pages, request }: Props) {
   const [hovered, setHovered] = useState<number | null>(null);
   const urls = useRef<string[]>([]);
   const lineRefs = useRef(new Map<number, HTMLLIElement>());
+  const list = useRef<HTMLUListElement>(null);
 
   // Revoke every URL this viewer made, once, when it goes.
+  // ponytail: one blob URL per visited page is kept until unmount; an LRU if long PDFs make it bite.
   useEffect(
     () => () => {
       urls.current.forEach((url) => URL.revokeObjectURL(url));
@@ -90,8 +94,24 @@ export function ResultViewer({ runId, pages, request }: Props) {
 
   const hoverFromBox = (index: number) => {
     setHovered(index);
-    lineRefs.current.get(index)?.scrollIntoView({ block: "nearest" });
+    const line = lineRefs.current.get(index);
+    const box = list.current;
+    if (line === undefined || box === null) return;
+    box.scrollTop = scrollToShow(
+      line.offsetTop,
+      line.offsetTop + line.offsetHeight,
+      box.scrollTop,
+      box.clientHeight,
+    );
   };
+
+  // Forgetting the failure is what fetches the page again.
+  const retry = (index: number) =>
+    setImages((previous) => {
+      const next = new Map(previous);
+      next.delete(index);
+      return next;
+    });
 
   return (
     <Stack direction="vertical" gap={2}>
@@ -122,12 +142,17 @@ export function ResultViewer({ runId, pages, request }: Props) {
                 status="error"
                 title="The page image could not be read"
                 description={describe(image.failure)}
+                endContent={
+                  <Button label="Retry" variant="secondary" onClick={() => retry(page.index)} />
+                }
               />
             ) : null}
             {image === undefined ? <Text size="sm">Loading…</Text> : null}
           </div>
           {image !== undefined && "url" in image ? (
-            <div style={{ position: "relative" }}>
+            <div
+              style={{ position: "relative", border: "1px solid var(--color-border-emphasized)" }}
+            >
               <img
                 src={image.url}
                 alt={`Page ${shown + 1}`}
@@ -151,10 +176,10 @@ export function ResultViewer({ runId, pages, request }: Props) {
                       y={line.bbox[1]}
                       width={line.bbox[2] - line.bbox[0]}
                       height={line.bbox[3] - line.bbox[1]}
-                      fill={hovered === line.index ? "var(--color-accent)" : "transparent"}
+                      fill={hovered === line.index ? "var(--color-icon-blue)" : "transparent"}
                       fillOpacity={hovered === line.index ? 0.25 : 1}
-                      stroke="var(--color-accent)"
-                      strokeWidth={1.5}
+                      stroke="var(--color-icon-blue)"
+                      strokeWidth={hovered === line.index ? 2.5 : 1.5}
                       vectorEffect="non-scaling-stroke"
                       onMouseEnter={() => hoverFromBox(line.index)}
                       onMouseLeave={() => setHovered(null)}
@@ -169,8 +194,17 @@ export function ResultViewer({ runId, pages, request }: Props) {
         <div style={{ flex: "1 1 0", minWidth: 0 }}>
           <Card>
             <ul
+              ref={list}
               aria-label={`Recognised text, page ${shown + 1}`}
-              style={{ listStyle: "none", margin: 0, padding: 0, maxHeight: "70vh", overflowY: "auto" }}
+              style={{
+                listStyle: "none",
+                margin: 0,
+                padding: 0,
+                maxHeight: "70vh",
+                overflowY: "auto",
+                // The lines' `offsetTop` is measured from here.
+                position: "relative",
+              }}
             >
               {page.lines.map((line) => (
                 <li
@@ -187,7 +221,7 @@ export function ResultViewer({ runId, pages, request }: Props) {
                   style={{
                     padding: "6px 8px",
                     borderRadius: 4,
-                    background: hovered === line.index ? "var(--color-accent-muted)" : "transparent",
+                    background: hovered === line.index ? "var(--color-background-blue)" : "transparent",
                   }}
                 >
                   <HStack gap={2} align="center" justify="between">
@@ -198,6 +232,13 @@ export function ResultViewer({ runId, pages, request }: Props) {
                   </HStack>
                 </li>
               ))}
+              {page.lines.length === 0 ? (
+                <li style={{ padding: "6px 8px" }}>
+                  <Text size="sm" color="secondary">
+                    No text was recognised on this page.
+                  </Text>
+                </li>
+              ) : null}
             </ul>
           </Card>
         </div>

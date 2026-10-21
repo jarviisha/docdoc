@@ -63,6 +63,7 @@ import {
   toFailure,
   toPage,
   refetchAfterCancel,
+  resultNotice,
   showsResult,
   toRecord,
   type ListingState,
@@ -349,7 +350,7 @@ function RunDetail({
   const [cancelProblem, setCancelProblem] = useState<string | null>(null);
   const [cancelAccepted, setCancelAccepted] = useState(false);
   const [pages, setPages] = useState<ResultPage[] | null>(null);
-  const [resultProblem, setResultProblem] = useState<string | null>(null);
+  const [resultProblem, setResultProblem] = useState<ReturnType<typeof resultNotice> | null>(null);
   // Bumped to read the run again, e.g. after a `409` says the one shown is stale.
   const [reads, setReads] = useState(0);
 
@@ -424,13 +425,17 @@ function RunDetail({
     void request({ type: "run-result", runId }).then((answer) => {
       if (!current) return;
       if (!answer.ok) {
-        setResultProblem(describe(answer.failure));
+        setResultProblem(resultNotice(answer.failure));
         return;
       }
       try {
         setPages(toResultPages(answer.body));
       } catch (error) {
-        setResultProblem(error instanceof Error ? error.message : "the result could not be read");
+        setResultProblem({
+          status: "error",
+          title: "The result could not be shown",
+          description: error instanceof Error ? error.message : "the result could not be read",
+        });
       }
     });
     return () => {
@@ -497,7 +502,11 @@ function RunDetail({
         )}
         {pending === null ? null : <Banner status="info" title={pending} />}
         {resultProblem === null ? null : (
-          <Banner status="error" title="The result could not be shown" description={resultProblem} />
+          <Banner
+            status={resultProblem.status}
+            title={resultProblem.title}
+            description={resultProblem.description}
+          />
         )}
       </div>
 

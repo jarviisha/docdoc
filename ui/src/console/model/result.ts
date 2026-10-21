@@ -125,3 +125,16 @@ export function pageAfter(index: number, count: number, step: -1 | 1): number | 
   const next = index + step;
   return next >= 0 && next < count ? next : null;
 }
+
+/**
+ * The `scrollTop` that brings a line (`top`..`bottom`, in the list's own
+ * scroll coordinates) into a list `viewHeight` tall now scrolled to
+ * `scrollTop` — moving as little as possible, and not at all when the line
+ * is already in view. Only the list scrolls: `scrollIntoView` would move the
+ * page too, and the hovered box with it.
+ */
+export function scrollToShow(top: number, bottom: number, scrollTop: number, viewHeight: number): number {
+  if (top < scrollTop) return top;
+  if (bottom > scrollTop + viewHeight) return bottom - viewHeight;
+  return scrollTop;
+}

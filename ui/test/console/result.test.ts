@@ -10,6 +10,7 @@ import {
   confidenceLabel,
   isTurned,
   pageAfter,
+  scrollToShow,
   toResultPages,
   TURNED_NOTICE,
   type ResultPage,
@@ -109,4 +110,13 @@ test("the pager stops at either end", () => {
   assert.equal(pageAfter(2, 3, 1), null);
   assert.equal(pageAfter(2, 3, -1), 1);
   assert.equal(pageAfter(0, 1, 1), null);
+});
+
+test("scrollToShow moves the list only as far as the line needs", () => {
+  // In view: unchanged.
+  assert.equal(scrollToShow(120, 150, 100, 200), 100);
+  // Above the view: its top at the top.
+  assert.equal(scrollToShow(40, 70, 100, 200), 40);
+  // Below the view: its bottom at the bottom.
+  assert.equal(scrollToShow(320, 350, 100, 200), 150);
 });
