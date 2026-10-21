@@ -145,6 +145,10 @@ ROUTES = {
     # 017 (console monitoring plan, Task 2): the Overview read and a cancel.
     ("GET", "/v1/console/overview"),
     ("DELETE", "/v1/console/runs/{run_id}"),
+    # 018 (console submit OCR plan, Task 1): tenants, parsers, and OCR submission.
+    ("GET", "/v1/console/tenants"),
+    ("GET", "/v1/console/parsers"),
+    ("POST", "/v1/console/tenants/{tenant_id}/ocr"),
 }
 
 

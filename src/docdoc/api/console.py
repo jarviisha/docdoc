@@ -29,10 +29,15 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from docdoc.api.admin import _audit, _erase
-from docdoc.api.deps import _iso, _unknown_run
+from docdoc.api.deps import _iso, _read_capped, _unknown_run
 from docdoc.api.documents import _stored_result, _terminal
-from docdoc.api.models import ConsoleRunListResponse, ConsoleRunSummary, RunStateResponse
-from docdoc.api.ocr import _ocr_document
+from docdoc.api.models import (
+    ConsoleRunListResponse,
+    ConsoleRunSummary,
+    ParserListing,
+    RunStateResponse,
+)
+from docdoc.api.ocr import _ocr_document, ocr_unavailable, parser_listing, submit_ocr
 from docdoc.api.paging import DEFAULT_RUN_PAGE
 from docdoc.api.runs import (
     _next_cursor,
@@ -584,6 +589,65 @@ def console_router() -> APIRouter:
         deployment.keys.revoke(identity_, now=identity.now())
         _audit(actor=f"console:{operator}", operation="revoke", credential_id=identity_)
         return Response(status_code=204)
+
+    @router.get("/tenants")
+    def list_tenants(request: Request, operator: Operator) -> Any:
+        """Every tenant docdoc knows of, sorted: the union of four sources.
+
+        The root tenant, the key file's, the credentials table's, and every
+        tenant with a run. A source that is not configured adds nothing.
+        """
+        deployment = request.app.state.deployment
+        tenants = {root_tenant(), *deployment.keys.tenant_ids()}
+        if deployment.has_runs:
+            tenants.update(deployment.runs().tenant_ids())
+        return {"tenants": sorted(tenants)}
+
+    @router.get("/parsers", response_model=ParserListing, response_model_exclude_none=True)
+    def list_parsers(request: Request, operator: Operator) -> Any:
+        """`GET /v1/parsers`'s body, behind a session. Blocking: it probes."""
+        return parser_listing(request.app.state.deployment)
+
+    @router.post("/tenants/{tenant_id}/ocr", status_code=202)
+    async def submit_tenant_ocr(
+        request: Request,
+        tenant_id: str,
+        operator: Operator,
+        parser: str | None = None,
+        language: str | None = None,
+    ) -> Any:
+        """`POST /v1/ocr` for a named tenant, answering with the console's run detail.
+
+        The same `submit_ocr` the tenant route calls, so the caps, validation,
+        blob storage and idempotency are the tenant's own. `async` because the
+        body is read with `await`; `submit_ocr` moves the blocking work to the
+        threadpool.
+        """
+        from uuid import UUID
+
+        from fastapi.concurrency import run_in_threadpool
+
+        if not TENANT_PATTERN.match(tenant_id):
+            return JSONResponse(status_code=422, content={"error": "invalid_tenant_id"})
+        refusal = ocr_unavailable(request)
+        if refusal is not None:
+            return refusal
+        data = await _read_capped(request, request.app.state.deployment.max_request_bytes)
+        response = await submit_ocr(
+            request,
+            tenant_id=tenant_id,
+            data=data,
+            parser=parser,
+            language=language,
+            callback_id=None,
+        )
+        if response.status_code not in (200, 202):
+            return response
+        # Read back for `finished_at`, which an idempotent replay of a finished
+        # run has; off the event loop, as every database call here is.
+        run_id = UUID(json.loads(bytes(response.body))["run_id"])
+        run = await run_in_threadpool(request.app.state.deployment.runs().get, run_id, tenant_id)
+        return JSONResponse(status_code=response.status_code, content=_detail(run, tenant_id))
 
     @router.delete("/tenants/{tenant_id}")
     def erase_tenant(request: Request, tenant_id: str, operator: Operator) -> Any:

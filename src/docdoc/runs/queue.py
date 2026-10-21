@@ -387,6 +387,13 @@ class RunQueue(Protocol):
         """
         ...
 
+    def tenant_ids(self) -> tuple[str, ...]:
+        """Every tenant that has a run, once each, in no promised order.
+
+        One of the sources the console's tenant list is the union of.
+        """
+        ...
+
     def owner_of(self, run_id: UUID) -> str | None:
         """The tenant a run, or its tombstone, belongs to; `None` if neither exists.
 

@@ -172,6 +172,10 @@ class KeyRing:
     def enabled(self) -> bool:
         return self._enabled
 
+    def tenant_ids(self) -> frozenset[str]:
+        """Every tenant this file names; none when authentication is off."""
+        return frozenset(self._by_digest.values())
+
     def resolve(self, digest: str) -> Principal | None:
         """`KeyStore.resolve`, so this ring can head a `ChainedKeyStore`.
 
