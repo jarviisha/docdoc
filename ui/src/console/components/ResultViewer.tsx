@@ -82,6 +82,12 @@ export function ResultViewer({ runId, pages, request }: Props) {
   const previous = pageAfter(shown, pages.length, -1);
   const next = pageAfter(shown, pages.length, 1);
 
+  // A hover belongs to the page it was made on.
+  const turnTo = (index: number) => {
+    setShown(index);
+    setHovered(null);
+  };
+
   const hoverFromBox = (index: number) => {
     setHovered(index);
     lineRefs.current.get(index)?.scrollIntoView({ block: "nearest" });
@@ -94,7 +100,7 @@ export function ResultViewer({ runId, pages, request }: Props) {
           label="Previous"
           variant="secondary"
           isDisabled={previous === null}
-          onClick={() => previous !== null && setShown(previous)}
+          onClick={() => previous !== null && turnTo(previous)}
         />
         <Text size="sm">
           Page {shown + 1} of {pages.length}
@@ -103,7 +109,7 @@ export function ResultViewer({ runId, pages, request }: Props) {
           label="Next"
           variant="secondary"
           isDisabled={next === null}
-          onClick={() => next !== null && setShown(next)}
+          onClick={() => next !== null && turnTo(next)}
         />
       </HStack>
 
