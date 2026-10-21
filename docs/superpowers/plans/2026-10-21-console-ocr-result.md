@@ -220,10 +220,10 @@ def test_console_page_refuses_a_bearer_key(...)
 ```ts
 test("token text is sliced by code point", () => {
   const doc = { text: "😀 Hóa đơn: 1.250.000", pages: [{ index: 0, span: [0, 20], width: 100, height: 50, rotation: 0 }],
-    tokens: [[[2, 9], [0, [0.1, 0.1, 0.5, 0.2]], 0.9], [[10, 20], [0, [0.1, 0.3, 0.9, 0.4]], null]] };
+    tokens: [[[2, 9], [0, [0.1, 0.1, 0.5, 0.2]], 0.9], [[11, 20], [0, [0.1, 0.3, 0.9, 0.4]], null]] };
   const [p] = toResultPages(doc);
-  assert.equal(p.lines[0].text, "Hóa đơn");
-  assert.equal(p.lines[1].text, " 1.250.000".trim() === p.lines[1].text.trim() ? p.lines[1].text : "x"); // and assert exact slice
+  assert.equal(p.lines[0].text, "Hóa đơn");     // code points 2..9; a UTF-16 slice would be off by one after the emoji
+  assert.equal(p.lines[1].text, "1.250.000");
 });
 test("lines are grouped by page", () => { /* two pages, tokens with page_index 0/1 → each page gets only its own lines, order kept */ });
 test("tokens without geometry have no box", () => { /* geometry null → bbox null, placed by span */ });
@@ -242,9 +242,6 @@ test("run-page addresses the console page route", () => {
 test("confidence label", () => { assert.equal(confidenceLabel(null), "—"); assert.equal(confidenceLabel(0.936), "94 %"); });
 ```
 
-  Write the code-point test with exact expected strings. The placeholder line above only shows
-  intent; replace it with `assert.equal(p.lines[1].text, "1.250.000")`, adjusting the span so it
-  points exactly at that substring.
 - [ ] **Step 2: Run them and confirm they fail.** Run: `cd ui && npm test`.
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Run the frontend gates.** Expected: green.
