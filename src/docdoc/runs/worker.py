@@ -108,6 +108,7 @@ def execute_one(
     require starting a worker and waiting for it to notice.
     """
     from docdoc.pipeline import run as run_pipeline
+    from docdoc.pipeline.result import reason_of
 
     # An OCR run is the parse alone (ADR-0022): no schema to resolve, no
     # provider tokens to count, one stage and no boundary to stop at.
@@ -138,6 +139,7 @@ def execute_one(
                 status=RunStatus.FAILED,
                 failed_stage=None,
                 error_class=type(exc).__name__,
+                error_reason=reason_of(exc),
             ),
             now=now,
         )

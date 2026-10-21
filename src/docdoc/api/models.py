@@ -358,9 +358,17 @@ class ConsoleRunSummary(RunSummary):
 
     A separate model, for the reason `RunSummary` gives: the tenant route's rows
     must never gain this field, and a shared model would hand it to them.
+
+    The four after it are the console monitoring plan's (Task 2): what an
+    operator scanning a list needs without opening each run. `error_reason` is
+    a member of a closed `REASONS` set, never a message.
     """
 
     tenant_id: str
+    started_at: str | None = None
+    ocr_parser: str | None = None
+    error_class: str | None = None
+    error_reason: str | None = None
 
 
 class ConsoleRunListResponse(BaseModel):

@@ -1,5 +1,5 @@
 -- Run timeline: `started_at` and a content-free `error_reason`
--- (docs/superpowers/sdd/2026-10-20-console-monitoring plan, spec decision 7).
+-- (docs/superpowers/plans/2026-10-20-console-monitoring.md, spec decision 7).
 --
 -- `started_at` is the most recent claim, set every time a claim statement
 -- moves a run to `running` -- including a redelivery, which is why it is "most

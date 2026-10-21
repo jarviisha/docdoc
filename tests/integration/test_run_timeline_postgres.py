@@ -1,6 +1,6 @@
 """`started_at` and `error_reason`, against a real database and over HTTP.
 
-Console monitoring plan (``docs/superpowers/sdd/2026-10-20-console-monitoring``),
+Console monitoring plan (``docs/superpowers/plans/2026-10-20-console-monitoring.md``),
 Task 1: a run gains the instant of its most recent claim and a content-free
 reason for why it failed. `tests/unit/test_claim_policy.py` and
 `tests/unit/test_claim_order.py` already ask the claim policy's questions
@@ -102,6 +102,49 @@ def test_finish_writes_error_reason(queue: PostgresRunQueue) -> None:
     assert run is not None
     assert run.status is RunStatus.FAILED
     assert run.error_reason == "timeout"
+
+
+@pytest.mark.postgres
+def test_status_counts_and_latest_postgres(queue: PostgresRunQueue) -> None:
+    """The Overview's two reads against the real `GROUP BY` and `ORDER BY` (Task 2)."""
+    t0 = datetime(2026, 10, 20, 9, 0, tzinfo=UTC)
+    # Each failure is submitted, claimed and finished alone, so the claim
+    # takes the run just submitted.
+    for minutes_ago in (120, 10, 5):
+        at = t0 - timedelta(minutes=minutes_ago)
+        _submit(queue, at=at)
+        run = queue.claim(worker_id="w", now=at, lease=LEASE, max_attempts=3)
+        assert run is not None
+        queue.finish(
+            run.run_id,
+            RunOutcome(status=RunStatus.FAILED, failed_stage="parse", error_class="X"),
+            now=at,
+            worker_id="w",
+        )
+    _submit(queue, at=t0)
+    running = queue.claim(worker_id="w", now=t0, lease=LEASE, max_attempts=3)
+    assert running is not None
+    # Submitted last and never claimed: active, so counted at any age.
+    _submit(queue, at=t0 - timedelta(hours=3))
+
+    assert queue.status_counts(since=t0 - timedelta(minutes=60)) == (
+        ("extraction", "failed", 2),
+        ("extraction", "queued", 1),
+        ("extraction", "running", 1),
+    )
+    failed = queue.latest(status="failed", limit=2)
+    assert [run.updated_at for run in failed] == [
+        t0 - timedelta(minutes=5),
+        t0 - timedelta(minutes=10),
+    ]
+    assert [run.run_id for run in queue.latest(status="running", limit=10)] == [running.run_id]
+
+    def kinds(kind: str) -> int:
+        return len(
+            queue.page_all_runs(tenant_id=None, status=None, before=None, limit=10, kind=kind)
+        )
+
+    assert (kinds("extraction"), kinds("ocr")) == (5, 0)
 
 
 # -- over HTTP: the two fields actually reach a caller ------------------------

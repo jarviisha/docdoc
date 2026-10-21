@@ -91,6 +91,10 @@ CONSOLE_ADDED = {
     ("/v1/console/credentials/{credential_id}", "DELETE"),
     ("/v1/console/tenants/{tenant_id}", "DELETE"),
     ("/v1/console/tenants/{tenant_id}/documents/{blob_id}", "DELETE"),
+    # 017 (console monitoring plan, Task 2): the Overview read, and a cancel
+    # mirroring `DELETE /v1/runs/{run_id}` under the run's owner.
+    ("/v1/console/overview", "GET"),
+    ("/v1/console/runs/{run_id}", "DELETE"),
 }
 
 #: Everything this interface has added over Milestone 10's own surface, as of

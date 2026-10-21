@@ -97,15 +97,16 @@ def reason_of(error: BaseException) -> str | None:
     this exactly as leaky as a message. Checking it against the type's own
     closed vocabulary is what keeps it one of a fixed, named set of words.
 
-    Exact ``type(error)``, not ``isinstance`` — a subclass that narrows its own
-    ``REASONS`` (``ModelProviderError`` beside ``ProviderError``) must be judged
-    against its own set, not its parent's.
+    ``REASONS`` is looked up on ``type(error)``, so it follows the class's MRO:
+    a subclass that declares its own set is judged against it, and one that
+    declares none inherits its parent's. Only a ``str`` reason is considered,
+    so an unhashable or non-text attribute can neither raise nor slip through.
     """
     reasons = getattr(type(error), "REASONS", None)
     if not reasons:
         return None
     reason = getattr(error, "reason", None)
-    return reason if reason in reasons else None
+    return reason if isinstance(reason, str) and reason in reasons else None
 
 
 class RunProvenance(BaseModel):

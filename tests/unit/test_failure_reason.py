@@ -1,6 +1,6 @@
 """`reason_of`: a failed run's `error_reason`, drawn only from a closed vocabulary.
 
-Spec decision 7 (``docs/superpowers/sdd/2026-10-20-console-monitoring``): a
+Spec decision 7 (``docs/superpowers/plans/2026-10-20-console-monitoring.md``): a
 failed run names *why* a parser or provider refused, so an operator can tell a
 host timeout from a host 5xx from a rejected language -- but the no-content
 rule (FR-037) still applies, so the word has to come from the error's own

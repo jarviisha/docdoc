@@ -306,6 +306,7 @@ class PostgresRunQueue:
         status: str | None,
         before: tuple[datetime, UUID] | None,
         limit: int,
+        kind: str | None = None,
     ) -> tuple[Run, ...]:
         """`page_runs`, with the tenant predicate dropped when `tenant_id` is `None`.
 
@@ -327,6 +328,10 @@ class PostgresRunQueue:
             conditions.append("status = %(status)s")
             parameters["status"] = status
 
+        if kind is not None:
+            conditions.append("kind = %(kind)s")
+            parameters["kind"] = kind
+
         if before is not None:
             # A row tuple comparison, so the database applies the same ordering
             # the `ORDER BY` does. Written as two columns rather than one because
@@ -344,6 +349,41 @@ class PostgresRunQueue:
              LIMIT %(limit)s
             """,
             parameters,
+            fetch="all",
+        )
+        return tuple(_row_to_run(row) for row in rows or ())
+
+    def status_counts(self, *, since: datetime) -> tuple[tuple[str, str, int], ...]:
+        """One `GROUP BY kind, status`; the terminal arm can use `runs_terminal_recent`."""
+        rows = self._execute(
+            """
+            SELECT kind, status, count(*) AS n FROM runs
+             WHERE status IN ('queued', 'running')
+                OR (status IN ('succeeded', 'failed', 'cancelled')
+                    AND updated_at >= %(since)s)
+             GROUP BY kind, status
+             ORDER BY kind, status
+            """,
+            {"since": since},
+            fetch="all",
+        )
+        return tuple((str(r["kind"]), str(r["status"]), int(r["n"])) for r in rows or ())
+
+    def latest(self, *, status: str, limit: int) -> tuple[Run, ...]:
+        """Newest `updated_at` first, across tenants.
+
+        # ponytail: no `(status, updated_at)` index, so this sorts every row in
+        # `status`. Bounded in practice by how many runs fail or run at once;
+        # add the index if the Overview becomes slow.
+        """
+        rows = self._execute(
+            f"""
+            SELECT {_COLUMNS} FROM runs
+             WHERE status = %(status)s
+             ORDER BY updated_at DESC, run_id DESC
+             LIMIT %(limit)s
+            """,
+            {"status": status, "limit": limit},
             fetch="all",
         )
         return tuple(_row_to_run(row) for row in rows or ())

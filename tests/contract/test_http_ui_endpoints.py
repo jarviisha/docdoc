@@ -142,6 +142,9 @@ ROUTES = {
     ("DELETE", "/v1/console/credentials/{credential_id}"),
     ("DELETE", "/v1/console/tenants/{tenant_id}"),
     ("DELETE", "/v1/console/tenants/{tenant_id}/documents/{blob_id}"),
+    # 017 (console monitoring plan, Task 2): the Overview read and a cancel.
+    ("GET", "/v1/console/overview"),
+    ("DELETE", "/v1/console/runs/{run_id}"),
 }
 
 

@@ -356,13 +356,26 @@ class RunQueue(Protocol):
         status: str | None,
         before: tuple[datetime, UUID] | None,
         limit: int,
+        kind: str | None = None,
     ) -> tuple[Run, ...]:
         """`page_runs` across tenants: the predicate is dropped when `tenant_id` is `None`.
 
         The console's read (ADR-0023 §3). Only a signed-in operator reaches it;
         a tenant's own listing stays `page_runs`, where the predicate is not
-        optional.
+        optional. `kind`, when given, is one more predicate.
         """
+        ...
+
+    def status_counts(self, *, since: datetime) -> tuple[tuple[str, str, int], ...]:
+        """`(kind, status, count)` across tenants, non-zero rows only.
+
+        `queued` and `running` count at any age; the three terminal statuses
+        count only when `updated_at >= since`. The console Overview's tiles.
+        """
+        ...
+
+    def latest(self, *, status: str, limit: int) -> tuple[Run, ...]:
+        """Up to `limit` runs in `status`, across tenants, newest `updated_at` first."""
         ...
 
     def owner_of(self, run_id: UUID) -> str | None:
