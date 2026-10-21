@@ -10,20 +10,22 @@
  * filter that resets when you page.
  */
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Badge,
   Banner,
   Button,
   Card,
   Code,
-  Field,
   HStack,
+  Link,
   MetadataList,
   MetadataListItem,
   Stack,
+  Selector,
   Table,
   Text,
+  TextInput,
   pixel,
 } from "@astryxdesign/core";
 
@@ -87,6 +89,9 @@ const TONE: Record<RunStatus, "success" | "error" | "warning" | "neutral"> = {
   failed: "error",
   cancelled: "neutral",
 };
+
+/** The "no filter" option. Not a run kind or a state the model knows. */
+const ALL = "all";
 
 const KINDS: { value: RunKind; label: string }[] = [
   { value: "ocr", label: "OCR" },
@@ -160,62 +165,40 @@ export function RunArea({ request, onFailure, openRunId, onOpenRun }: Props) {
 
   const rows = state.listing.state === "loaded" ? state.listing.page.runs : [];
 
-  const applyTenant = (event: FormEvent) => {
-    event.preventDefault();
-    setState((previous) => forTenant(previous, tenantInput));
-  };
+  const applyTenant = () => setState((previous) => forTenant(previous, tenantInput));
 
   return (
     <Stack direction="vertical" gap={3}>
-      <HStack gap={2} align="end">
-        <form onSubmit={applyTenant}>
-          <HStack gap={2} align="end">
-            <Field label="Tenant" inputID="run-tenant">
-              <input
-                id="run-tenant"
-                type="text"
-                placeholder="Every tenant"
-                value={tenantInput}
-                onChange={(event) => setTenantInput(event.target.value)}
-              />
-            </Field>
-            <Button type="submit" label="Apply" variant="secondary" />
-          </HStack>
-        </form>
-        <Field label="Kind" inputID="run-kind">
-          <select
-            id="run-kind"
-            value={state.kind ?? ""}
-            onChange={(event) => {
-              const chosen = event.target.value;
-              setState((previous) => byKind(previous, chosen === "" ? null : (chosen as RunKind)));
-            }}
-          >
-            <option value="">All</option>
-            {KINDS.map(({ value, label }) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="State" inputID="run-state">
-          <select
-            id="run-state"
-            value={state.status ?? ""}
-            onChange={(event) => {
-              const chosen = event.target.value;
-              setState((previous) => filtered(previous, chosen === "" ? null : (chosen as RunStatus)));
-            }}
-          >
-            <option value="">All</option>
-            {RUN_STATUSES.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </Field>
+      {/* One row, bottom-aligned: every control is the same `md` height, so
+          the labels sit above and the boxes and buttons share a baseline. */}
+      <HStack gap={2} align="end" wrap="wrap">
+        <TextInput
+          label="Tenant"
+          placeholder="Every tenant"
+          width={220}
+          value={tenantInput}
+          onChange={setTenantInput}
+          onEnter={applyTenant}
+        />
+        <Button label="Apply" variant="secondary" onClick={applyTenant} />
+        <Selector
+          label="Kind"
+          width={160}
+          options={[{ value: ALL, label: "All" }, ...KINDS]}
+          value={state.kind ?? ALL}
+          onChange={(chosen) =>
+            setState((previous) => byKind(previous, chosen === ALL ? null : (chosen as RunKind)))
+          }
+        />
+        <Selector
+          label="State"
+          width={160}
+          options={[{ value: ALL, label: "All" }, ...RUN_STATUSES]}
+          value={state.status ?? ALL}
+          onChange={(chosen) =>
+            setState((previous) => filtered(previous, chosen === ALL ? null : (chosen as RunStatus)))
+          }
+        />
         <Button
           label="Refresh"
           variant="secondary"
@@ -301,12 +284,10 @@ export function RunArea({ request, onFailure, openRunId, onOpenRun }: Props) {
                 width: pixel(140),
                 resizable: false,
                 renderCell: (row) => (
-                  <Button
-                    label={shortId(row.run_id as string)}
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onOpenRun(row.run_id as string)}
-                  />
+                  // No `href`: a `<button>` styled as a link.
+                  <Link hasUnderline onClick={() => onOpenRun(row.run_id as string)}>
+                    {shortId(row.run_id as string)}
+                  </Link>
                 ),
               },
             ]}

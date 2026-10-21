@@ -9,7 +9,18 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Banner, Button, Stack, Text } from "@astryxdesign/core";
+import {
+  AppShell,
+  Banner,
+  Button,
+  Center,
+  SideNav,
+  SideNavHeading,
+  SideNavItem,
+  SideNavSection,
+  Stack,
+  Text,
+} from "@astryxdesign/core";
 
 import { send } from "../../transport.ts";
 import { requestFor, type Intent } from "../model/client.ts";
@@ -125,8 +136,8 @@ export function Shell() {
 
   if (!ready(session)) {
     return (
-      // `padding` because without it every control sits on the window's edge.
-      <Stack direction="vertical" gap={4} padding={4} maxWidth={520}>
+      <Center minHeight="100vh" padding={4}>
+        <Stack direction="vertical" gap={4} width="100%" maxWidth={400}>
         <div role="status" aria-live="polite">
           {!session.checked ? <Text size="sm">Loading…</Text> : null}
           {unavailable === null ? null : (
@@ -136,16 +147,17 @@ export function Shell() {
         {session.checked && unavailable === null ? (
           <LoginForm notice={notice} onSubmit={(u, p) => void signIn(u, p)} />
         ) : null}
-      </Stack>
+        </Stack>
+      </Center>
     );
   }
 
-  const navButton = ({ name, label }: { name: Area; label: string }) => (
-    <Button
+  const navItem = ({ name, label }: { name: Area; label: string }) => (
+    // `isSelected` sets `aria-current="page"`; no `href`, so each is a `<button>`.
+    <SideNavItem
       key={name}
       label={label}
-      variant={area === name ? "primary" : "ghost"}
-      aria-current={area === name ? "page" : undefined}
+      isSelected={area === name}
       onClick={() => {
         setArea(name);
         setOpenRunId(null);
@@ -154,54 +166,51 @@ export function Shell() {
   );
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh" }}>
-      {/* Plain buttons rather than a tab component: each a real control with a
-          real accessible name, and nothing here needs the roving-focus
-          behaviour a tab list brings with it. */}
-      <nav aria-label="Console" style={{ width: 200, flexShrink: 0, display: "flex" }}>
-        <Stack direction="vertical" gap={2} padding={4} justify="between" width="100%">
-          <Stack direction="vertical" gap={2}>
-            <Text weight="bold">docdoc console</Text>
-            {MONITORING.map(navButton)}
-            <Text size="sm" color="secondary">
-              Admin
-            </Text>
-            {ADMIN.map(navButton)}
-          </Stack>
-          <Stack direction="vertical" gap={2}>
-            <Text size="sm">Signed in as {session.username}</Text>
-            <Button label="Sign out" variant="secondary" size="sm" onClick={() => void signOut()} />
-          </Stack>
-        </Stack>
-      </nav>
+    <AppShell
+      contentPadding={4}
+      sideNav={
+        <SideNav
+          aria-label="Console"
+          header={<SideNavHeading heading="docdoc console" />}
+          footer={
+            <Stack direction="vertical" gap={2} padding={2}>
+              <Text size="sm" color="secondary">
+                Signed in as {session.username}
+              </Text>
+              <Button label="Sign out" variant="secondary" size="sm" onClick={() => void signOut()} />
+            </Stack>
+          }
+        >
+          <SideNavSection title="Monitoring" isHeaderHidden>{MONITORING.map(navItem)}</SideNavSection>
+          <SideNavSection title="Admin">{ADMIN.map(navItem)}</SideNavSection>
+        </SideNav>
+      }
+    >
+      <Stack direction="vertical" gap={4}>
+        <div role="status" aria-live="polite">
+          {notice === null ? null : <Banner status="warning" title={notice} />}
+        </div>
 
-      <main style={{ flex: 1, minWidth: 0 }}>
-        <Stack direction="vertical" gap={4} padding={4}>
-          <div role="status" aria-live="polite">
-            {notice === null ? null : <Banner status="warning" title={notice} />}
-          </div>
-
-          {area === "overview" ? (
-            <OverviewArea
-              request={request}
-              onOpenRun={(runId) => {
-                setOpenRunId(runId);
-                setArea("runs");
-              }}
-            />
-          ) : null}
-          {area === "runs" ? (
-            <RunArea
-              request={request}
-              onFailure={handle}
-              openRunId={openRunId}
-              onOpenRun={setOpenRunId}
-            />
-          ) : null}
-          {area === "credentials" ? <CredentialArea request={request} onFailure={handle} /> : null}
-          {area === "erasure" ? <EraseArea request={request} onFailure={handle} /> : null}
-        </Stack>
-      </main>
-    </div>
+        {area === "overview" ? (
+          <OverviewArea
+            request={request}
+            onOpenRun={(runId) => {
+              setOpenRunId(runId);
+              setArea("runs");
+            }}
+          />
+        ) : null}
+        {area === "runs" ? (
+          <RunArea
+            request={request}
+            onFailure={handle}
+            openRunId={openRunId}
+            onOpenRun={setOpenRunId}
+          />
+        ) : null}
+        {area === "credentials" ? <CredentialArea request={request} onFailure={handle} /> : null}
+        {area === "erasure" ? <EraseArea request={request} onFailure={handle} /> : null}
+      </Stack>
+    </AppShell>
   );
 }

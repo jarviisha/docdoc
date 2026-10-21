@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Banner, Button, Card, Code, HStack, Stack, Table, Text, pixel, proportional } from "@astryxdesign/core";
+import { Banner, Card, Code, HStack, Link, Stack, Table, Text, pixel, proportional } from "@astryxdesign/core";
 
 import type { Intent } from "../model/client.ts";
 import { describe, type Failure } from "../model/failure.ts";
@@ -71,13 +71,9 @@ export function OverviewArea({ request, onOpenRun }: Props) {
   }, [refresh]);
   usePolling(refresh, true);
 
+  // No `href`: a `<button>` styled as a link.
   const openButton = (row: Record<string, unknown>) => (
-    <Button
-      label={shortId(row.run_id as string)}
-      variant="ghost"
-      size="sm"
-      onClick={() => onOpenRun(row.run_id as string)}
-    />
+    <Link hasUnderline onClick={() => onOpenRun(row.run_id as string)}>{shortId(row.run_id as string)}</Link>
   );
 
   return (
