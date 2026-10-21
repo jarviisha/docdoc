@@ -16,10 +16,11 @@ import type { Intent } from "../model/client.ts";
 import { describe, type Failure } from "../model/failure.ts";
 import {
   confidenceLabel,
-  isTurned,
   pageAfter,
   scrollToShow,
+  showsTurnedWarning,
   TURNED_NOTICE,
+  viewFrame,
   type ResultPage,
 } from "../model/result.ts";
 
@@ -82,7 +83,12 @@ export function ResultViewer({ runId, pages, request }: Props) {
 
   const image = images.get(page.index);
   const size = sizes.get(page.index);
-  const turned = size !== undefined && isTurned(page, size.width, size.height);
+  const turned = size !== undefined && showsTurnedWarning(page, size.width, size.height);
+  // Until the image's own size is known, the box takes the page's aspect.
+  const frame =
+    size === undefined
+      ? { boxWidth: page.width, boxHeight: page.height, rotate: page.angle ?? 0 }
+      : viewFrame(page.angle, size.width, size.height);
   const previous = pageAfter(shown, pages.length, -1);
   const next = pageAfter(shown, pages.length, 1);
 
@@ -151,12 +157,27 @@ export function ResultViewer({ runId, pages, request }: Props) {
           </div>
           {image !== undefined && "url" in image ? (
             <div
-              style={{ position: "relative", border: "1px solid var(--color-border-emphasized)" }}
+              style={{
+                position: "relative",
+                width: "100%",
+                aspectRatio: `${frame.boxWidth} / ${frame.boxHeight}`,
+                border: "1px solid var(--color-border-emphasized)",
+              }}
             >
+              {/* The unturned image, centred and turned into the box. */}
               <img
                 src={image.url}
                 alt={`Page ${shown + 1}`}
-                style={{ display: "block", width: "100%", height: "auto" }}
+                style={{
+                  display: "block",
+                  position: "absolute",
+                  left: "50%",
+                  top: "50%",
+                  width: size === undefined ? "100%" : `${(size.width / frame.boxWidth) * 100}%`,
+                  height: size === undefined ? "100%" : `${(size.height / frame.boxHeight) * 100}%`,
+                  transform: `translate(-50%, -50%) rotate(${frame.rotate}deg)`,
+                  transformOrigin: "center",
+                }}
                 onLoad={(event) => {
                   const { naturalWidth: width, naturalHeight: height } = event.currentTarget;
                   setSizes((previous) => new Map(previous).set(page.index, { width, height }));

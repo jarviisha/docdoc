@@ -122,7 +122,8 @@ has its result read once and shown under **Download result**. Each page's image 
 thin box drawn over every recognised line. The lines are on the right, each with its confidence
 ("—" where the OCR host gave none). Hovering a line fills its box, and hovering a box highlights its
 line and scrolls the line into view. **Previous** and **Next** step through the pages, and each page's
-image is fetched the first time that page is shown. If the OCR host's own page dimensions disagree
+image is fetched the first time that page is shown. A turned page is shown upright, with its boxes
+lined up, when the OCR host reported the turn. Otherwise, if the OCR host's own page dimensions disagree
 with the image's orientation, a warning says the page was turned and the boxes may not line up. An
 image that cannot be fetched is replaced by an error, and its text still shows. A failed run requests
 no result, and an extraction run keeps **Download result** only.
