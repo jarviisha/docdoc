@@ -119,3 +119,9 @@ export function confidenceLabel(c: number | null): string {
   if (c === null) return "—";
   return `${Math.round(c * 100)} %`;
 }
+
+/** The page `step` away from `index` among `count`, or `null` past either end. */
+export function pageAfter(index: number, count: number, step: -1 | 1): number | null {
+  const next = index + step;
+  return next >= 0 && next < count ? next : null;
+}

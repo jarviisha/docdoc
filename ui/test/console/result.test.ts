@@ -9,6 +9,7 @@ import { test } from "node:test";
 import {
   confidenceLabel,
   isTurned,
+  pageAfter,
   toResultPages,
   TURNED_NOTICE,
   type ResultPage,
@@ -100,4 +101,12 @@ test("the turned notice is fixed copy", () => {
 test("confidence label", () => {
   assert.equal(confidenceLabel(null), "—");
   assert.equal(confidenceLabel(0.936), "94 %");
+});
+
+test("the pager stops at either end", () => {
+  assert.equal(pageAfter(0, 3, -1), null);
+  assert.equal(pageAfter(0, 3, 1), 1);
+  assert.equal(pageAfter(2, 3, 1), null);
+  assert.equal(pageAfter(2, 3, -1), 1);
+  assert.equal(pageAfter(0, 1, 1), null);
 });

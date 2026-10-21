@@ -231,6 +231,15 @@ export function detailPolls(run: RunRecord | null): boolean {
 }
 
 /**
+ * Whether the detail view reads and shows the run's result: a succeeded OCR
+ * run only. An extraction result has no page images to sit beside, and keeps
+ * only Download result.
+ */
+export function showsResult(run: RunRecord | null): boolean {
+  return run !== null && run.status === "succeeded" && run.kind === "ocr";
+}
+
+/**
  * What the detail view says after a cancel the server accepted. A running run
  * still reads `running` until its worker reaches a stage boundary (FR-029), so
  * an unchanged badge alone would look like the click did nothing.

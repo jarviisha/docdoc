@@ -13,6 +13,7 @@ import {
   currentCursor,
   autoRefreshes,
   detailPolls,
+  showsResult,
   emptyNotice,
   failed,
   filtered,
@@ -367,4 +368,13 @@ test("a 409 on cancel means the shown run is stale and is read again", () => {
   assert.equal(refetchAfterCancel({ kind: "reported", status: 409, message: "x" }), true);
   assert.equal(refetchAfterCancel({ kind: "reported", status: 500, message: "x" }), false);
   assert.equal(refetchAfterCancel({ kind: "transport", message: "x" }), false);
+});
+
+test("the detail view shows a result for a succeeded OCR run only", () => {
+  assert.equal(showsResult(null), false);
+  assert.equal(showsResult({ ...SUMMARY, kind: "ocr", status: "succeeded" } as RunRecord), true);
+  assert.equal(showsResult({ ...SUMMARY, kind: "extraction", status: "succeeded" } as RunRecord), false);
+  for (const status of ["queued", "running", "failed", "cancelled"] as const) {
+    assert.equal(showsResult({ ...SUMMARY, kind: "ocr", status } as RunRecord), false);
+  }
 });
