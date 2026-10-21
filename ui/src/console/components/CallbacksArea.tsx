@@ -58,9 +58,12 @@ export function CallbacksArea({ request, presetTenant }: Props) {
   const { tenant, callbacks } = listing;
   // A 503: this deployment delivers no callbacks, said in place of the table.
   const unavailable = unavailableNote(listing);
-  // The tenant list, a register or a revoke that failed; a list failure is `listProblem`.
+  // A register or a revoke that failed; a callback-list failure is `listProblem`.
   const [writeProblem, setWriteProblem] = useState<string | null>(null);
   const problem = writeProblem ?? listProblem(listing);
+  // The tenant list failed to load. Its own wording: it is not a callbacks
+  // request, and reusing that title would blame the wrong request.
+  const [tenantsProblem, setTenantsProblem] = useState<string | null>(null);
   const [url, setUrl] = useState("");
   const [secret, setSecret] = useState("");
   const [sending, setSending] = useState(false);
@@ -72,7 +75,7 @@ export function CallbacksArea({ request, presetTenant }: Props) {
     void request({ type: "list-tenants" }).then((answer) => {
       if (!current) return;
       if (answer.ok) setTenants(toTenants(answer.body));
-      else setWriteProblem(describe(answer.failure));
+      else setTenantsProblem(describe(answer.failure));
     });
     return () => {
       current = false;
@@ -137,6 +140,9 @@ export function CallbacksArea({ request, presetTenant }: Props) {
       />
 
       <div role="status" aria-live="polite">
+        {tenantsProblem === null ? null : (
+          <Banner status="error" title="Tenants could not be loaded" description={tenantsProblem} />
+        )}
         {problem === null ? null : (
           <Banner status="error" title="The callbacks request failed" description={problem} />
         )}
@@ -230,7 +236,7 @@ export function CallbacksArea({ request, presetTenant }: Props) {
             <TextInput
               label="Secret"
               type="password"
-              {...{ autoComplete: "off" }}
+              {...{ autoComplete: "new-password" }}
               value={secret}
               onChange={setSecret}
             />

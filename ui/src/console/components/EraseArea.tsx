@@ -25,6 +25,7 @@ import {
   outcomeNotice,
   removedFrom,
   retyped,
+  switchedToDocument,
   type ErasureIntent,
   type Target,
 } from "../model/erasure.ts";
@@ -79,7 +80,17 @@ export function EraseArea({ request, onFailure, presetTenant }: Props) {
             <Button
               label="Document"
               variant={kind === "document" ? "primary" : "secondary"}
-              onClick={() => setKind("document")}
+              onClick={() => {
+                if (kind === "tenant") {
+                  const next = switchedToDocument(presetTenant, {
+                    identifier,
+                    documentTenant,
+                  });
+                  setIdentifier(next.identifier);
+                  setDocumentTenant(next.documentTenant);
+                }
+                setKind("document");
+              }}
             />
           </HStack>
 

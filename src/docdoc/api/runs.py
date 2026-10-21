@@ -531,7 +531,16 @@ def routes() -> APIRouter:
         the second closes DNS rebinding; this one exists so an operator finds out
         about a refused destination while they are looking at the response rather
         than in a delivery that quietly never happens.
+
+        **`_register_callback` blocks**: `deliverer.register` resolves the
+        destination's address and inserts a row. Off the event loop, as the
+        synchronous OCR submission route already runs its own blocking work
+        (`fastapi.concurrency.run_in_threadpool`), so a slow DNS lookup here
+        stalls only this request's thread, not every request this process
+        serves.
         """
+        from fastapi.concurrency import run_in_threadpool
+
         from docdoc.runs.identity import new_credential_id, now
 
         deployment = _deployment_of(request)
@@ -542,7 +551,8 @@ def routes() -> APIRouter:
         body = await _read_json(request)
         url = str(body.get("url", "")).strip()
         secret = str(body.get("secret", "")).strip()
-        return _register_callback(
+        return await run_in_threadpool(
+            _register_callback,
             deliverer,
             tenant_id=principal.tenant_id,
             url=url,

@@ -16,6 +16,7 @@ import {
   outcomeNotice,
   removedFrom,
   retyped,
+  switchedToDocument,
 } from "../../src/console/model/erasure.ts";
 
 const TENANT = { kind: "tenant" as const, id: "acme" };
@@ -67,6 +68,21 @@ test("removing nothing is a success and says so", () => {
   assert.match(outcomeNotice({}), /succeeded/);
   assert.match(outcomeNotice({ blobs: 0, runs: 0 }), /Nothing was there to remove/);
   assert.match(outcomeNotice({ blobs: 3 }), /3 blobs/);
+});
+
+test("switching to Document moves a preset tenant into the document's tenant field", () => {
+  // The preset was showing in the tenant identifier field; it must not be
+  // offered up as the document identifier once the operator switches kind.
+  assert.deepEqual(switchedToDocument("acme", { identifier: "acme", documentTenant: "" }), {
+    identifier: "",
+    documentTenant: "acme",
+  });
+});
+
+test("switching to Document with no preset leaves the fields untouched", () => {
+  const fields = { identifier: "whatever-was-typed", documentTenant: "" };
+  assert.deepEqual(switchedToDocument(null, fields), fields);
+  assert.deepEqual(switchedToDocument("", fields), fields);
 });
 
 test("there is no bulk or multi-target erasure path at all", () => {
