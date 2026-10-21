@@ -46,6 +46,7 @@ import {
   forTenant,
   forward,
   initialListing,
+  cancelNotice,
   isCancellable,
   isEmpty,
   kindLabel,
@@ -56,6 +57,7 @@ import {
   timeline,
   toFailure,
   toPage,
+  refetchAfterCancel,
   toRecord,
   type ListingState,
   type RunFailure,
@@ -349,6 +351,9 @@ function RunDetail({
   const [confirming, setConfirming] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [cancelProblem, setCancelProblem] = useState<string | null>(null);
+  const [cancelAccepted, setCancelAccepted] = useState(false);
+  // Bumped to read the run again, e.g. after a `409` says the one shown is stale.
+  const [reads, setReads] = useState(0);
 
   /**
    * A failure worth saying out loud. `removed` has its own banner, and
@@ -394,7 +399,7 @@ function RunDetail({
     return () => {
       current = false;
     };
-  }, [request, runId]);
+  }, [request, runId, reads]);
 
   const download = async () => {
     const answer = await request({ type: "run-result", runId });
@@ -425,12 +430,16 @@ function RunDetail({
     if (answer.ok) {
       setRun(toRecord(answer.body));
       setCancelProblem(null);
+      setCancelAccepted(true);
     } else {
       setCancelProblem(describe(answer.failure));
+      setCancelAccepted(false);
+      if (refetchAfterCancel(answer.failure)) setReads((n) => n + 1);
     }
   };
 
   const times = run === null ? null : timeline(run, Date.now());
+  const pending = cancelAccepted && run !== null ? cancelNotice(run) : null;
 
   return (
     <Stack direction="vertical" gap={3}>
@@ -449,6 +458,7 @@ function RunDetail({
         {cancelProblem === null ? null : (
           <Banner status="error" title="The run could not be cancelled" description={cancelProblem} />
         )}
+        {pending === null ? null : <Banner status="info" title={pending} />}
       </div>
 
       {failure === null ? null : (

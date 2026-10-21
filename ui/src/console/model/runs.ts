@@ -214,7 +214,26 @@ export interface RunRecord extends RunSummary {
  */
 export function toRecord(body: unknown): RunRecord | null {
   if (typeof body !== "object" || body === null) return null;
-  return { ocr_language: null, worker_id: null, attempts: null, ...(body as RunSummary) };
+  const record = { ocr_language: null, worker_id: null, attempts: null, ...(body as RunSummary) };
+  // A deployment older than the console's `finished_at` sends none; `undefined`
+  // would reach `timeline` and parse as NaN.
+  return { ...record, finished_at: record.finished_at ?? null };
+}
+
+/**
+ * What the detail view says after a cancel the server accepted. A running run
+ * still reads `running` until its worker reaches a stage boundary (FR-029), so
+ * an unchanged badge alone would look like the click did nothing.
+ */
+export function cancelNotice(run: { status: RunStatus }): string | null {
+  return run.status === "running"
+    ? "Cancellation requested; the run stops at its next stage boundary."
+    : null;
+}
+
+/** Whether a refused cancel means the run shown is stale: a `409` says it already finished. */
+export function refetchAfterCancel(failure: Failure): boolean {
+  return failure.kind === "reported" && failure.status === 409;
 }
 
 /**
@@ -291,13 +310,14 @@ export function toPage(body: unknown): RunPage {
  * shown as a run that finished before it began.
  */
 export function timeline(
-  run: { created_at: string; started_at: string | null; finished_at: string | null },
+  run: { created_at: string; started_at: string | null; finished_at?: string | null },
   now: number,
 ): { waitMs: number | null; runMs: number | null } {
   if (run.started_at === null) return { waitMs: null, runMs: null };
   const created = Date.parse(run.created_at);
   const started = Date.parse(run.started_at);
-  const finished = run.finished_at === null ? now : Date.parse(run.finished_at);
+  // Missing reads as null: still going.
+  const finished = run.finished_at == null ? now : Date.parse(run.finished_at);
   return {
     waitMs: Math.max(0, started - created),
     runMs: Math.max(0, finished - started),
@@ -314,7 +334,8 @@ export function timeline(
  * operator had before T075; both null is genuinely nothing to report.
  */
 const REASON_LABELS: Record<string, string> = {
-  timeout: "The OCR host timed out",
+  // OCR and extraction (LLM) timeouts share this reason, so no host is named.
+  timeout: "The host timed out",
   deadline: "The run ran out of time",
   rate_limit: "The host rate-limited the request",
   auth: "The host refused docdoc's credentials",

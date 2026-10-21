@@ -110,7 +110,7 @@ export function OverviewArea({ request, onOpenRun }: Props) {
 
           <Text weight="bold">Recent failures</Text>
           {overview.recentFailures.length === 0 ? (
-            <Text size="sm">No failures in the last hour.</Text>
+            <Text size="sm">No failures.</Text>
           ) : (
             <Card>
               <Table

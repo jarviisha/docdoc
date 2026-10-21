@@ -23,7 +23,9 @@ import {
   kindLabel,
   loaded,
   polled,
+  cancelNotice,
   reasonLabel,
+  refetchAfterCancel,
   reloaded,
   timeline,
   toFailure,
@@ -230,7 +232,7 @@ test("a negative duration clamps to zero", () => {
 // -- reasonLabel ------------------------------------------------------------
 
 test("a known reason carries its fixed copy", () => {
-  assert.equal(reasonLabel("timeout", "ProviderError"), "The OCR host timed out");
+  assert.equal(reasonLabel("timeout", "ProviderError"), "The host timed out");
   assert.equal(reasonLabel("mime_type", null), "This file type is not supported");
 });
 
@@ -324,4 +326,33 @@ test("a record's detail-only fields default to null, and a non-object is none", 
   assert.equal(record?.ocr_language, null);
   assert.equal(toRecord(null), null);
   assert.equal(toRecord("nope"), null);
+});
+
+test("a detail body without finished_at reads it as null, so the timeline is a number", () => {
+  // The console detail body is `RunStateResponse` plus `tenant_id`; an older
+  // deployment sends no `finished_at` at all.
+  const { finished_at: _omitted, ...detail } = { ...SUMMARY, started_at: "2026-10-20T10:00:06Z" };
+  const record = toRecord(detail);
+  assert.equal(record?.finished_at, null);
+  const times = timeline(record!, Date.parse("2026-10-20T10:01:06Z"));
+  assert.deepEqual(times, { waitMs: 6_000, runMs: 60_000 });
+});
+
+test("timeline treats a missing finished_at as still running", () => {
+  const run = { created_at: "2026-10-20T10:00:00Z", started_at: "2026-10-20T10:00:06Z" } as never;
+  assert.deepEqual(timeline(run, Date.parse("2026-10-20T10:01:06Z")), { waitMs: 6_000, runMs: 60_000 });
+});
+
+test("a cancel answered with a run still running says the cancel is pending", () => {
+  assert.equal(
+    cancelNotice({ status: "running" }),
+    "Cancellation requested; the run stops at its next stage boundary.",
+  );
+  assert.equal(cancelNotice({ status: "cancelled" }), null);
+});
+
+test("a 409 on cancel means the shown run is stale and is read again", () => {
+  assert.equal(refetchAfterCancel({ kind: "reported", status: 409, message: "x" }), true);
+  assert.equal(refetchAfterCancel({ kind: "reported", status: 500, message: "x" }), false);
+  assert.equal(refetchAfterCancel({ kind: "transport", message: "x" }), false);
 });
