@@ -41,7 +41,17 @@ export type Intent =
   | { type: "issue-credential" }
   | { type: "revoke-credential"; credentialId: string }
   | { type: "erase-tenant"; tenantId: string }
-  | { type: "erase-document"; tenantId: string; blobId: string };
+  | { type: "erase-document"; tenantId: string; blobId: string }
+  | { type: "list-tenants" }
+  | { type: "list-parsers" }
+  | {
+      type: "submit-ocr";
+      tenantId: string;
+      parser?: string;
+      language?: string;
+      /** Sent as `Idempotency-Key`, so a resend after a lost answer replays the run. */
+      idempotencyKey?: string;
+    };
 
 /**
  * Every path shape this console knows. Anything else is a defect, not a feature.
@@ -59,8 +69,11 @@ const ALLOWED = [
   /^\/v1\/console\/runs\/[^/]+\/result$/,
   /^\/v1\/console\/credentials$/,
   /^\/v1\/console\/credentials\/[^/]+$/,
+  /^\/v1\/console\/tenants$/,
   /^\/v1\/console\/tenants\/[^/]+$/,
   /^\/v1\/console\/tenants\/[^/]+\/documents\/[^/]+$/,
+  /^\/v1\/console\/tenants\/[^/]+\/ocr$/,
+  /^\/v1\/console\/parsers$/,
 ];
 
 export function isAllowed(plan: RequestPlan): boolean {
@@ -161,6 +174,30 @@ export function requestFor(intent: Intent): RequestPlan {
         query: {},
         hasBody: false,
       };
+
+    case "list-tenants":
+      return { method: "GET", path: "/v1/console/tenants", query: {}, hasBody: false };
+
+    case "list-parsers":
+      return { method: "GET", path: "/v1/console/parsers", query: {}, hasBody: false };
+
+    case "submit-ocr": {
+      // Absent rather than empty, as `list-runs` already does: a `parser=`
+      // with nothing after it is a choice nobody made, and the route would
+      // have to decide what that means.
+      const query: Record<string, string> = {};
+      if (intent.parser !== undefined) query.parser = intent.parser;
+      if (intent.language !== undefined) query.language = intent.language;
+      return {
+        method: "POST",
+        path: `/v1/console/tenants/${encodeURIComponent(intent.tenantId)}/ocr`,
+        query,
+        hasBody: true,
+        ...(intent.idempotencyKey === undefined
+          ? {}
+          : { headers: { "Idempotency-Key": intent.idempotencyKey } }),
+      };
+    }
   }
 }
 
@@ -189,5 +226,8 @@ export function allIntents(): Intent[] {
     { type: "revoke-credential", credentialId: "c" },
     { type: "erase-tenant", tenantId: "t" },
     { type: "erase-document", tenantId: "t", blobId: "b" },
+    { type: "list-tenants" },
+    { type: "list-parsers" },
+    { type: "submit-ocr", tenantId: "t" },
   ];
 }

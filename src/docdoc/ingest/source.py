@@ -142,9 +142,13 @@ class SourceFile(BaseModel):
         media_type = detect_media_type(data)
 
         if media_type is None:
+            declared = (
+                ""
+                if declared_media_type is None
+                else f", not from the declared type {declared_media_type!r}"
+            )
             raise UnsupportedDocumentError(
-                "unrecognized file signature; docdoc decides the type from the bytes, "
-                f"not from the declared type {declared_media_type!r}",
+                f"unrecognized file signature; docdoc decides the type from the bytes{declared}",
                 reason="mime_type",
                 blob_id=blob_id,
                 media_type=declared_media_type,

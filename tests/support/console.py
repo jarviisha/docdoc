@@ -37,6 +37,9 @@ class Ring:
     def resolve(self, digest: str) -> Principal | None:
         return self._by_digest.get(digest)
 
+    def tenant_ids(self) -> frozenset[str]:
+        return frozenset(p.tenant_id for p in self._by_digest.values())
+
 
 def accounts_with_alice() -> InMemoryConsoleAccounts:
     store = InMemoryConsoleAccounts()

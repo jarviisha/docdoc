@@ -416,6 +416,10 @@ class PostgresRunQueue:
         )
         return Tombstone.model_validate(dict(row)) if row else None
 
+    def tenant_ids(self) -> tuple[str, ...]:
+        rows = self._execute("SELECT DISTINCT tenant_id FROM runs", fetch="all")
+        return tuple(str(row["tenant_id"]) for row in rows or ())
+
     def owner_of(self, run_id: UUID) -> str | None:
         """The owning tenant, from `runs` and then `run_tombstones`."""
         row = self._execute(

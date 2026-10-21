@@ -71,7 +71,7 @@ locked account, and a disabled one. Five failures in a row lock an account for f
 
 ## What it does
 
-The page is a left sidebar — **Overview**, **Runs**, then under "Admin" **Credentials** and
+The page is a left sidebar — **Overview**, **Runs**, **Submit OCR**, then under "Admin" **Credentials** and
 **Erasure**, with the username and **Sign out** at the bottom — and the chosen area on the right.
 It opens on the Overview.
 
@@ -115,6 +115,15 @@ reason in fixed copy ("The OCR host timed out" for `timeout`). Never a message: 
 because a provider's text may quote the document it choked on. A run that failed before any stage ran
 says that instead of naming one, which is a real distinction — an unresolvable schema fails a run
 with nothing having executed.
+
+**Submit OCR** sends one document for OCR on a tenant's behalf, through
+`POST /v1/console/tenants/{id}/ocr` — the same path, caps and validation as `POST /v1/ocr` with
+that tenant's key. Pick a tenant (from `GET /v1/console/tenants`), a parser (Automatic, or one from
+`GET /v1/console/parsers`; an unavailable parser is listed but cannot be chosen, one failing its
+health check is marked "not responding"), a language (the parser's default, or one of that parser's
+languages; changing the parser resets it), and the document. A refusal is shown in the form; an
+accepted document opens that run under Runs. If the tenant or parser list fails to load, the form
+says so and stays usable with whatever did load.
 
 **An erasure requires the target typed back**, character for character, and is unavailable until it
 matches. There is no bulk erasure and no multi-select: one named target per confirmation. The counts

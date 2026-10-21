@@ -129,6 +129,10 @@ class KeyStore(Protocol):
         """Every credential issued to a tenant, revoked ones included."""
         ...
 
+    def tenant_ids(self) -> frozenset[str]:
+        """Every tenant issued a credential here, revoked ones included."""
+        ...
+
 
 @dataclass
 class PostgresKeyStore:
@@ -183,6 +187,11 @@ class PostgresKeyStore:
             fetch="all",
         )
         return bool(rows)
+
+    def tenant_ids(self) -> frozenset[str]:
+        """Every tenant ever issued a credential, revoked ones included."""
+        rows = self.execute("SELECT DISTINCT tenant_id FROM credentials", fetch="all")
+        return frozenset(str(row["tenant_id"]) for row in rows or ())
 
     def list_for(self, tenant_id: str) -> tuple[Credential, ...]:
         rows = self.execute(
@@ -321,6 +330,9 @@ class CachedKeyStore:
     def list_for(self, tenant_id: str) -> tuple[Credential, ...]:
         return self.inner.list_for(tenant_id)
 
+    def tenant_ids(self) -> frozenset[str]:
+        return self.inner.tenant_ids()
+
 
 @dataclass
 class ChainedKeyStore:
@@ -400,6 +412,11 @@ class ChainedKeyStore:
 
     def list_for(self, tenant_id: str) -> tuple[Credential, ...]:
         return self._mutable().list_for(tenant_id)
+
+    def tenant_ids(self) -> frozenset[str]:
+        """The ring's tenants and the table's, when there is a table."""
+        found: frozenset[str] = self.ring.tenant_ids()
+        return found if self.store is None else found | self.store.tenant_ids()
 
 
 #: Re-exported so a caller checking a capability does not import two modules.

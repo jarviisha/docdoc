@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -29,12 +30,18 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from docdoc.api.admin import _audit, _erase
-from docdoc.api.deps import _iso, _unknown_run
+from docdoc.api.deps import _iso, _read_capped, _unknown_run
 from docdoc.api.documents import _stored_result, _terminal
-from docdoc.api.models import ConsoleRunListResponse, ConsoleRunSummary, RunStateResponse
-from docdoc.api.ocr import _ocr_document
+from docdoc.api.models import (
+    ConsoleRunListResponse,
+    ConsoleRunSummary,
+    ParserListing,
+    RunStateResponse,
+)
+from docdoc.api.ocr import _ocr_document, ocr_unavailable, parser_listing, submit_ocr
 from docdoc.api.paging import DEFAULT_RUN_PAGE
 from docdoc.api.runs import (
+    _finished_at,
     _next_cursor,
     _no_runs,
     _page_request,
@@ -213,6 +220,25 @@ def _log_cancel(operator: str, *, tenant_id: str, run_id: str, status: int) -> N
     )
 
 
+def _log_ocr_submit(operator: str, *, tenant_id: str, run_id: str, status: int) -> None:
+    """One structured event per accepted console OCR submission, as `_log_cancel` does.
+
+    `POST /v1/ocr`'s caller is the tenant itself; a console submission is made
+    on a tenant's behalf, so it says who made it.
+    """
+    logging.getLogger("docdoc.api").info(
+        json.dumps(
+            {
+                "event": "console.ocr_submit",
+                "actor": f"console:{operator}",
+                "tenant_id": tenant_id,
+                "run_id": run_id,
+                "status": status,
+            }
+        )
+    )
+
+
 def _summary(run: Any) -> ConsoleRunSummary:
     """A run as a console row: the tenant row, plus its tenant and four monitoring fields."""
     return ConsoleRunSummary(
@@ -226,16 +252,18 @@ def _summary(run: Any) -> ConsoleRunSummary:
 
 
 def _detail(run: Any, owner: str) -> dict[str, Any]:
-    """The console's detail body: the tenant's, plus `tenant_id` and `finished_at`.
+    """The console's detail body: the tenant's, plus `tenant_id` and `finished_at`."""
+    return _owned(RunStateResponse(**run.dump_public()).model_dump(mode="json"), owner)
 
-    `finished_at` is the list row's rule (`_summary_fields`), so detail and row
+
+def _owned(body: dict[str, Any], owner: str) -> dict[str, Any]:
+    """A tenant's run body (`RunStateResponse` as JSON) as the console's detail.
+
+    `finished_at` is the list row's rule (`_finished_at`), so detail and row
     agree. Not on `RunStateResponse`: the tenant contract stays as it is.
     """
-    return {
-        **RunStateResponse(**run.dump_public()).model_dump(mode="json"),
-        "tenant_id": owner,
-        "finished_at": _summary_fields(run)["finished_at"],
-    }
+    updated_at = datetime.fromisoformat(body["updated_at"])
+    return {**body, "tenant_id": owner, "finished_at": _finished_at(body["status"], updated_at)}
 
 
 #: The Overview's window for terminal counts, and the length of each list.
@@ -584,6 +612,64 @@ def console_router() -> APIRouter:
         deployment.keys.revoke(identity_, now=identity.now())
         _audit(actor=f"console:{operator}", operation="revoke", credential_id=identity_)
         return Response(status_code=204)
+
+    @router.get("/tenants")
+    def list_tenants(request: Request, operator: Operator) -> Any:
+        """Every tenant docdoc knows of, sorted: the union of four sources.
+
+        The root tenant, the key file's, the credentials table's, and every
+        tenant with a run. A source that is not configured adds nothing.
+        """
+        deployment = request.app.state.deployment
+        tenants = {root_tenant(), *deployment.keys.tenant_ids()}
+        if deployment.has_runs:
+            tenants.update(deployment.runs().tenant_ids())
+        return {"tenants": sorted(tenants)}
+
+    @router.get("/parsers", response_model=ParserListing, response_model_exclude_none=True)
+    def list_parsers(request: Request, operator: Operator) -> Any:
+        """`GET /v1/parsers`'s body, behind a session. Blocking: it probes."""
+        return parser_listing(request.app.state.deployment)
+
+    @router.post("/tenants/{tenant_id}/ocr", status_code=202)
+    async def submit_tenant_ocr(
+        request: Request,
+        tenant_id: str,
+        operator: Operator,
+        parser: str | None = None,
+        language: str | None = None,
+    ) -> Any:
+        """`POST /v1/ocr` for a named tenant, answering with the console's run detail.
+
+        The same `submit_ocr` the tenant route calls, so the caps, validation,
+        blob storage and idempotency are the tenant's own. `async` because the
+        body is read with `await`; `submit_ocr` moves the blocking work to the
+        threadpool.
+        """
+        if not TENANT_PATTERN.match(tenant_id):
+            return JSONResponse(status_code=422, content={"error": "invalid_tenant_id"})
+        refusal = ocr_unavailable(request)
+        if refusal is not None:
+            return refusal
+        data = await _read_capped(request, request.app.state.deployment.max_request_bytes)
+        response = await submit_ocr(
+            request,
+            tenant_id=tenant_id,
+            data=data,
+            parser=parser,
+            language=language,
+            callback_id=None,
+        )
+        if response.status_code not in (200, 202):
+            return response
+        # Built from the answer, not read back: the run exists now, and a read
+        # that failed would turn it into an error -- and the caller's retry
+        # into a second run.
+        body = _owned(json.loads(bytes(response.body)), tenant_id)
+        _log_ocr_submit(
+            operator, tenant_id=tenant_id, run_id=body["run_id"], status=response.status_code
+        )
+        return JSONResponse(status_code=response.status_code, content=body)
 
     @router.delete("/tenants/{tenant_id}")
     def erase_tenant(request: Request, tenant_id: str, operator: Operator) -> Any:

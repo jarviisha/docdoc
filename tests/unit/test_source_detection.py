@@ -48,6 +48,14 @@ class TestDeclaredTypeIsNotTrusted:
             SourceFile.from_bytes(b"junk", declared_media_type="application/pdf")
 
         assert caught.value.reason == "mime_type"
+        assert "not from the declared type 'application/pdf'" in str(caught.value)
+
+    def test_an_undeclared_type_is_not_named_in_the_refusal(self) -> None:
+        with pytest.raises(UnsupportedDocumentError) as caught:
+            SourceFile.from_bytes(b"junk")
+
+        assert "declared type" not in str(caught.value)
+        assert "docdoc decides the type from the bytes" in str(caught.value)
 
     def test_tiff_is_detected_so_it_can_be_rejected_by_name(self) -> None:
         # The useful error is "TIFF is not accepted", not "unrecognizable file".

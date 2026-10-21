@@ -230,6 +230,10 @@ class InMemoryRunQueue:
         found = self._tombstones.get(run_id)
         return found if found is not None and found.tenant_id == tenant_id else None
 
+    def tenant_ids(self) -> tuple[str, ...]:
+        self._check_reachable()
+        return tuple({run.tenant_id for run in self._runs.values()})
+
     def owner_of(self, run_id: UUID) -> str | None:
         self._check_reachable()
         found = self._runs.get(run_id) or self._tombstones.get(run_id)

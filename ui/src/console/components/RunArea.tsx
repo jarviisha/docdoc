@@ -500,9 +500,11 @@ function RunDetail({
               <MetadataListItem label="Failure reason">
                 {reasonLabel(run.error_reason, run.error_class) ?? "—"}
               </MetadataListItem>
-              <MetadataListItem label="Schema">
-                <Code>{run.schema_identity}</Code>
-              </MetadataListItem>
+              {run.schema_identity === null ? null : (
+                <MetadataListItem label="Schema">
+                  <Code>{run.schema_identity}</Code>
+                </MetadataListItem>
+              )}
               <MetadataListItem label="Document">
                 <Code>{run.blob_id}</Code>
               </MetadataListItem>

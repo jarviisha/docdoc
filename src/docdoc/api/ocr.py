@@ -13,7 +13,6 @@ from docdoc.api.deps import (
     _deployment_of,
     _no_store_configured,
     _read_capped,
-    _stores_of,
     _unknown_run,
 )
 from docdoc.api.models import ParserChoice, ParserListing, RunStateResponse
@@ -57,142 +56,20 @@ def routes() -> APIRouter:
         OCR this route used to perform is gone: every OCR goes through the
         queue, so nothing bypasses either cap.
         """
-        from fastapi.concurrency import run_in_threadpool
-
-        from docdoc.ingest.parse import plan_parse
-        from docdoc.ingest.source import SourceFile
-        from docdoc.runs.errors import RunStateUnavailableError
-        from docdoc.runs.identity import configured_ocr_retention, deadline, new_run_id, now
-        from docdoc.runs.model import RunKind
-
-        deployment = _deployment_of(request)
-        if not deployment.has_runs:
-            # Not retryable, exactly as `submit_run` says: nothing changes until
-            # an operator configures a database.
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "error": {
-                        "class": "RunStateUnavailableError",
-                        "message": (
-                            "this deployment accepts no OCR: OCR runs through the run "
-                            f"queue, so set {RUN_DATABASE_URL_ENV} and apply `docdoc migrate`"
-                        ),
-                    }
-                },
-            )
-        if not deployment.has_store:
-            raise _no_store_configured()
-
-        tenant = principal.tenant_id
+        refusal = ocr_unavailable(request)
+        if refusal is not None:
+            return refusal
         # The body still has to be read with `await` -- `_read_capped` drives
         # `request.stream()`, an async generator.
-        data = await _read_capped(request, deployment.max_request_bytes)
-
-        # **Everything below blocks**, and none of it may run on the event loop:
-        # planning the parse reads the endpoints file and a PDF's text layer,
-        # the caps are two database round trips, and the blob is an object
-        # store PUT of the whole body. Inline, each submission would stall every
-        # other request this process serves, health probes included -- the
-        # reason the synchronous route ran its parse in the threadpool too.
-        def _accept() -> Any:
-            file = SourceFile.from_bytes(data, limits=deployment.limits)
-            file.check_limits(deployment.limits or _default_limits())
-
-            # **Everything that can be refused without OCR is refused here**, before
-            # a slot is counted or a blob is written: an unknown or incapable parser
-            # and an undeclared language are both a 422 now, not a failed run later.
-            options = {} if language is None else {"language": language}
-            plan = plan_parse(
-                file,
-                options=options,
-                registry=deployment.parser_registry(),
-                parser=parser,
-                limits=deployment.limits,
-            )
-            check_options = getattr(plan.parser, "check_options", None)
-            if check_options is not None:
-                check_options(options, blob_id=file.blob_id)
-
-            requested_callback = _requested_callback(deployment, callback_id, tenant_id=tenant)
-            if requested_callback is _UNKNOWN_CALLBACK:
-                return JSONResponse(
-                    status_code=404,
-                    content={
-                        "error": {"class": "UnknownCallback", "message": "no such callback here"}
-                    },
-                )
-
-            # ponytail: count-then-insert, so N concurrent submissions can overshoot
-            # a cap by up to N-1; add an advisory lock if that margin ever matters.
-            queue = deployment.runs()
-            try:
-                total = queue.count_active(kind=RunKind.OCR)
-                if total >= deployment.ocr_queue_total:
-                    # The system's cap, not this tenant's: docdoc is full.
-                    return JSONResponse(
-                        status_code=503,
-                        headers={"Retry-After": str(_OCR_RETRY_AFTER_SECONDS)},
-                        content={
-                            "error": "system_overloaded",
-                            "limit": "ocr_queue_total",
-                            "retry_after_seconds": _OCR_RETRY_AFTER_SECONDS,
-                            "message": "the system is overloaded; please send again later",
-                        },
-                    )
-                cap = deployment.ocr_queue_for(tenant)
-                mine = queue.count_active(kind=RunKind.OCR, tenant_id=tenant)
-                if mine >= cap:
-                    # The same shape every other limit refusal has.
-                    return JSONResponse(
-                        status_code=429,
-                        headers={"Retry-After": str(_OCR_RETRY_AFTER_SECONDS)},
-                        content={
-                            "error": "limit_exceeded",
-                            "limit": "ocr_queue",
-                            "observed": mine,
-                            "allowed": cap,
-                            "retry_after_seconds": _OCR_RETRY_AFTER_SECONDS,
-                        },
-                    )
-
-                _, blobs = _stores_of(request, principal)
-                assert blobs is not None
-                blob_id = blobs.put(data)
-                started = now()
-                allocated = new_run_id()
-                run = queue.submit(
-                    _RunSpec(
-                        tenant_id=tenant,
-                        blob_id=blob_id,
-                        schema_identity=None,
-                        request_id=request.headers.get("x-request-id"),
-                        idempotency_key=request.headers.get("idempotency-key"),
-                        callback_id=requested_callback,
-                        kind=str(RunKind.OCR),
-                        ocr_parser=parser,
-                        ocr_language=language,
-                    ),
-                    run_id=allocated,
-                    now=started,
-                    # Re-anchored to the run's finish by `finish` (ADR-0022).
-                    expires_at=deadline(started, configured_ocr_retention()),
-                )
-            except RunStateUnavailableError as exc:
-                # Transient: the database is configured and unreachable. A count
-                # that failed is never read as zero -- that would admit everything.
-                return JSONResponse(
-                    status_code=503,
-                    content={"error": {"class": type(exc).__name__, "message": str(exc)}},
-                    headers={"Retry-After": "1"},
-                )
-
-            return JSONResponse(
-                status_code=200 if run.run_id != allocated else 202,
-                content=RunStateResponse(**run.dump_public()).model_dump(mode="json"),
-            )
-
-        return await run_in_threadpool(_accept)
+        data = await _read_capped(request, _deployment_of(request).max_request_bytes)
+        return await submit_ocr(
+            request,
+            tenant_id=principal.tenant_id,
+            data=data,
+            parser=parser,
+            language=language,
+            callback_id=callback_id,
+        )
 
     @router.get("/runs/{run_id}/result")
     async def run_result(request: Request, run_id: str, principal: Caller) -> Any:
@@ -237,25 +114,186 @@ def routes() -> APIRouter:
         `languages`, and `healthy` are absent rather than null when they do not
         apply, which `response_model_exclude_none` is what actually omits them.
         """
-        deployment = _deployment_of(request)
-        choices = []
-        for entry in deployment.parser_registry().candidates_all():
-            probe = getattr(entry.parser, "probe", None)
-            languages = tuple(getattr(entry.parser, "languages", ()) or ())
-            choices.append(
-                ParserChoice(
-                    id=entry.id,
-                    available=entry.available,
-                    unavailable_reason=entry.unavailable_reason,
-                    capabilities=entry.capabilities.to_kernel().model_dump(mode="json"),
-                    media_types=tuple(sorted(entry.capabilities.media_types)),
-                    languages=languages or None,
-                    healthy=probe() if callable(probe) else None,
-                )
-            )
-        return ParserListing(parsers=tuple(choices))
+        return parser_listing(_deployment_of(request))
 
     return router
+
+
+def ocr_unavailable(request: Request) -> JSONResponse | None:
+    """Why this deployment accepts no OCR at all, or `None` (ADR-0022).
+
+    Checked before the body is read, by every route that submits OCR.
+    """
+    deployment = _deployment_of(request)
+    if not deployment.has_runs:
+        # Not retryable, exactly as `submit_run` says: nothing changes until
+        # an operator configures a database.
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": {
+                    "class": "RunStateUnavailableError",
+                    "message": (
+                        "this deployment accepts no OCR: OCR runs through the run "
+                        f"queue, so set {RUN_DATABASE_URL_ENV} and apply `docdoc migrate`"
+                    ),
+                }
+            },
+        )
+    if not deployment.has_store:
+        raise _no_store_configured()
+    return None
+
+
+async def submit_ocr(
+    request: Request,
+    *,
+    tenant_id: str,
+    data: bytes,
+    parser: str | None,
+    language: str | None,
+    callback_id: str | None,
+) -> JSONResponse:
+    """Queue `data` as an OCR run for `tenant_id`, or refuse it (ADR-0022).
+
+    The one OCR submission path: `POST /v1/ocr` and the console's
+    `POST /v1/console/tenants/{tenant_id}/ocr` both call it, after
+    `ocr_unavailable`, so caps, validation, blob storage and idempotency are
+    never copied. `x-request-id` and `idempotency-key` are read off
+    `request.headers`.
+    """
+    from fastapi.concurrency import run_in_threadpool
+
+    from docdoc.ingest.parse import plan_parse
+    from docdoc.ingest.source import SourceFile
+    from docdoc.runs.errors import RunStateUnavailableError
+    from docdoc.runs.identity import configured_ocr_retention, deadline, new_run_id, now
+    from docdoc.runs.model import RunKind
+
+    deployment = _deployment_of(request)
+
+    # **Everything below blocks**, and none of it may run on the event loop:
+    # planning the parse reads the endpoints file and a PDF's text layer,
+    # the caps are two database round trips, and the blob is an object
+    # store PUT of the whole body. Inline, each submission would stall every
+    # other request this process serves, health probes included -- the
+    # reason the synchronous route ran its parse in the threadpool too.
+    def _accept() -> Any:
+        file = SourceFile.from_bytes(data, limits=deployment.limits)
+        file.check_limits(deployment.limits or _default_limits())
+
+        # **Everything that can be refused without OCR is refused here**, before
+        # a slot is counted or a blob is written: an unknown or incapable parser
+        # and an undeclared language are both a 422 now, not a failed run later.
+        options = {} if language is None else {"language": language}
+        plan = plan_parse(
+            file,
+            options=options,
+            registry=deployment.parser_registry(),
+            parser=parser,
+            limits=deployment.limits,
+        )
+        check_options = getattr(plan.parser, "check_options", None)
+        if check_options is not None:
+            check_options(options, blob_id=file.blob_id)
+
+        requested_callback = _requested_callback(deployment, callback_id, tenant_id=tenant_id)
+        if requested_callback is _UNKNOWN_CALLBACK:
+            return JSONResponse(
+                status_code=404,
+                content={"error": {"class": "UnknownCallback", "message": "no such callback here"}},
+            )
+
+        # ponytail: count-then-insert, so N concurrent submissions can overshoot
+        # a cap by up to N-1; add an advisory lock if that margin ever matters.
+        queue = deployment.runs()
+        try:
+            total = queue.count_active(kind=RunKind.OCR)
+            if total >= deployment.ocr_queue_total:
+                # The system's cap, not this tenant's: docdoc is full.
+                return JSONResponse(
+                    status_code=503,
+                    headers={"Retry-After": str(_OCR_RETRY_AFTER_SECONDS)},
+                    content={
+                        "error": "system_overloaded",
+                        "limit": "ocr_queue_total",
+                        "retry_after_seconds": _OCR_RETRY_AFTER_SECONDS,
+                        "message": "the system is overloaded; please send again later",
+                    },
+                )
+            cap = deployment.ocr_queue_for(tenant_id)
+            mine = queue.count_active(kind=RunKind.OCR, tenant_id=tenant_id)
+            if mine >= cap:
+                # The same shape every other limit refusal has.
+                return JSONResponse(
+                    status_code=429,
+                    headers={"Retry-After": str(_OCR_RETRY_AFTER_SECONDS)},
+                    content={
+                        "error": "limit_exceeded",
+                        "limit": "ocr_queue",
+                        "observed": mine,
+                        "allowed": cap,
+                        "retry_after_seconds": _OCR_RETRY_AFTER_SECONDS,
+                    },
+                )
+
+            _, blobs = deployment.stores_for(tenant_id)
+            assert blobs is not None
+            blob_id = blobs.put(data)
+            started = now()
+            allocated = new_run_id()
+            run = queue.submit(
+                _RunSpec(
+                    tenant_id=tenant_id,
+                    blob_id=blob_id,
+                    schema_identity=None,
+                    request_id=request.headers.get("x-request-id"),
+                    idempotency_key=request.headers.get("idempotency-key"),
+                    callback_id=requested_callback,
+                    kind=str(RunKind.OCR),
+                    ocr_parser=parser,
+                    ocr_language=language,
+                ),
+                run_id=allocated,
+                now=started,
+                # Re-anchored to the run's finish by `finish` (ADR-0022).
+                expires_at=deadline(started, configured_ocr_retention()),
+            )
+        except RunStateUnavailableError as exc:
+            # Transient: the database is configured and unreachable. A count
+            # that failed is never read as zero -- that would admit everything.
+            return JSONResponse(
+                status_code=503,
+                content={"error": {"class": type(exc).__name__, "message": str(exc)}},
+                headers={"Retry-After": "1"},
+            )
+
+        return JSONResponse(
+            status_code=200 if run.run_id != allocated else 202,
+            content=RunStateResponse(**run.dump_public()).model_dump(mode="json"),
+        )
+
+    return await run_in_threadpool(_accept)
+
+
+def parser_listing(deployment: Any) -> ParserListing:
+    """`GET /v1/parsers`'s body, which the console serves too. Blocking: it probes."""
+    choices = []
+    for entry in deployment.parser_registry().candidates_all():
+        probe = getattr(entry.parser, "probe", None)
+        languages = tuple(getattr(entry.parser, "languages", ()) or ())
+        choices.append(
+            ParserChoice(
+                id=entry.id,
+                available=entry.available,
+                unavailable_reason=entry.unavailable_reason,
+                capabilities=entry.capabilities.to_kernel().model_dump(mode="json"),
+                media_types=tuple(sorted(entry.capabilities.media_types)),
+                languages=languages or None,
+                healthy=probe() if callable(probe) else None,
+            )
+        )
+    return ParserListing(parsers=tuple(choices))
 
 
 def _ocr_document(request: Request, tenant_id: str, run: Any) -> Any:

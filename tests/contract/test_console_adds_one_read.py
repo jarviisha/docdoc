@@ -95,6 +95,12 @@ CONSOLE_ADDED = {
     # mirroring `DELETE /v1/runs/{run_id}` under the run's owner.
     ("/v1/console/overview", "GET"),
     ("/v1/console/runs/{run_id}", "DELETE"),
+    # 018 (console submit OCR plan, Task 1): the tenant and parser lists the
+    # submit form needs, and OCR submission for a named tenant through the
+    # same `submit_ocr` `POST /v1/ocr` calls.
+    ("/v1/console/tenants", "GET"),
+    ("/v1/console/parsers", "GET"),
+    ("/v1/console/tenants/{tenant_id}/ocr", "POST"),
 }
 
 #: Everything this interface has added over Milestone 10's own surface, as of

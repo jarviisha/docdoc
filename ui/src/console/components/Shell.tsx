@@ -38,12 +38,14 @@ import { RunArea } from "./RunArea.tsx";
 import { CredentialArea } from "./CredentialArea.tsx";
 import { EraseArea } from "./EraseArea.tsx";
 import { OverviewArea } from "./OverviewArea.tsx";
+import { SubmitArea } from "./SubmitArea.tsx";
 
-type Area = "overview" | "runs" | "credentials" | "erasure";
+type Area = "overview" | "runs" | "submit" | "credentials" | "erasure";
 
 const MONITORING: { name: Area; label: string }[] = [
   { name: "overview", label: "Overview" },
   { name: "runs", label: "Runs" },
+  { name: "submit", label: "Submit OCR" },
 ];
 
 const ADMIN: { name: Area; label: string }[] = [
@@ -206,6 +208,15 @@ export function Shell() {
             onFailure={handle}
             openRunId={openRunId}
             onOpenRun={setOpenRunId}
+          />
+        ) : null}
+        {area === "submit" ? (
+          <SubmitArea
+            request={request}
+            onOpenRun={(runId) => {
+              setOpenRunId(runId);
+              setArea("runs");
+            }}
           />
         ) : null}
         {area === "credentials" ? <CredentialArea request={request} onFailure={handle} /> : null}
