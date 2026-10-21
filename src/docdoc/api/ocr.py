@@ -18,6 +18,7 @@ from docdoc.api.deps import (
 from docdoc.api.models import ParserChoice, ParserListing, RunStateResponse
 from docdoc.api.runs import _UNKNOWN_CALLBACK, _requested_callback, _run_erased, _RunSpec
 from docdoc.api.settings import RUN_DATABASE_URL_ENV
+from docdoc.runs.model import Priority
 
 #: How long a refused OCR submission is told to wait (ADR-0022). Short, and
 #: for the reason `concurrent_runs` gives: what frees a slot is a run finishing,
@@ -153,6 +154,7 @@ async def submit_ocr(
     parser: str | None,
     language: str | None,
     callback_id: str | None,
+    priority: Priority = Priority.ORDINARY,
 ) -> JSONResponse:
     """Queue `data` as an OCR run for `tenant_id`, or refuse it (ADR-0022).
 
@@ -160,7 +162,8 @@ async def submit_ocr(
     `POST /v1/console/tenants/{tenant_id}/ocr` both call it, after
     `ocr_unavailable`, so caps, validation, blob storage and idempotency are
     never copied. `x-request-id` and `idempotency-key` are read off
-    `request.headers`.
+    `request.headers`. `priority` is the caller's to grant: `/v1/ocr` leaves it
+    ordinary, the console's operator-driven submissions are urgent (019).
     """
     from fastapi.concurrency import run_in_threadpool
 
@@ -253,6 +256,7 @@ async def submit_ocr(
                     kind=str(RunKind.OCR),
                     ocr_parser=parser,
                     ocr_language=language,
+                    priority=int(priority),
                 ),
                 run_id=allocated,
                 now=started,

@@ -306,3 +306,15 @@ def test_the_new_console_routes_refuse_a_bearer_key(
 
     assert r.status_code == 401
     assert queue.count_active(kind=RunKind.OCR) == 0
+
+
+def test_console_ocr_runs_are_urgent(signed_in: tuple[TestClient, dict[str, str]]) -> None:
+    """The operator is watching the console; a tenant's own submission stays ordinary (019)."""
+    client, cookie = signed_in
+
+    console = client.post(OCR, content=IMAGE, headers={**cookie, **H})
+    tenant = client.post("/v1/ocr", content=IMAGE, headers={"Authorization": f"Bearer {ADMIN_KEY}"})
+
+    assert (console.status_code, tenant.status_code) == (202, 202)
+    assert console.json()["priority"] == "urgent"
+    assert tenant.json()["priority"] == "ordinary"

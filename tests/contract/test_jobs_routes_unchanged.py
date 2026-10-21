@@ -197,6 +197,8 @@ def test_the_storeless_route_has_no_asynchronous_variant(client: TestClient) -> 
         "/v1/console/runs/{run_id}",
         "/v1/console/runs/{run_id}/delivery",
         "/v1/console/runs/{run_id}/result",
+        # 019: an OCR run's page images. A `GET` of a run that exists.
+        "/v1/console/runs/{run_id}/pages/{page}",
     }, (
         f"an unexpected run route exists: {sorted(run_routes)}. Every asynchronous "
         f"route is anchored to a stored blob, because a run nobody is waiting for "

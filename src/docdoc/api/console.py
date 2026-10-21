@@ -51,6 +51,7 @@ from docdoc.api.runs import (
 )
 from docdoc.artifacts.paths import root_tenant
 from docdoc.runs import identity
+from docdoc.runs.model import Priority
 from docdoc.runs.principal import TENANT_PATTERN
 
 if TYPE_CHECKING:
@@ -538,6 +539,50 @@ def console_router() -> APIRouter:
             return JSONResponse(status_code=410, content={"error": "result_expired"})
         return _stored_result(store, run.processing_id, validation)
 
+    @router.get("/runs/{run_id}/pages/{page}")
+    def run_page(request: Request, run_id: str, page: int, operator: Operator) -> Any:
+        """Page `page` (0-based) of an OCR run's source document, as an image (019).
+
+        PNG and JPEG are served as stored, page 0 only; a PDF page is rendered
+        to PNG, longer edge at most 2000 px. An out-of-range page and a missing
+        blob are the one 404 an unknown run gets. Plain `def`: rendering blocks.
+        """
+        from docdoc.api.pages import page_image
+        from docdoc.runs.model import RunKind
+
+        refusal, owner, run = _run(request, run_id)
+        if refusal is not None:
+            return refusal
+        if run.kind is not RunKind.OCR:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": "no_page_images",
+                    "detail": "page images are served for OCR runs only",
+                },
+            )
+        _, blobs = request.app.state.deployment.stores_for(owner)
+        data = None if blobs is None else blobs.get(run.blob_id)
+        if data is None:
+            return _unknown_run(run_id)
+        try:
+            image, media_type = page_image(data, page)
+        except (IndexError, ValueError):
+            return _unknown_run(run_id)
+        except RuntimeError as exc:
+            if exc.args != ("pypdfium2",):
+                raise
+            return _refusal(
+                503,
+                "PageRenderingUnavailable",
+                "rendering PDF pages needs the docdoc[ocr] extra (pypdfium2)",
+            )
+        return Response(
+            content=image,
+            media_type=media_type,
+            headers={"Cache-Control": "private, max-age=300"},
+        )
+
     # The three credential routes and the two erasure routes below are plain
     # `def`, for the reason every other handler in this file is: each makes a
     # blocking database call.
@@ -659,6 +704,8 @@ def console_router() -> APIRouter:
             parser=parser,
             language=language,
             callback_id=None,
+            # An operator submitting here is waiting at the screen (019).
+            priority=Priority.URGENT,
         )
         if response.status_code not in (200, 202):
             return response

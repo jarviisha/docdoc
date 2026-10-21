@@ -149,6 +149,8 @@ ROUTES = {
     ("GET", "/v1/console/tenants"),
     ("GET", "/v1/console/parsers"),
     ("POST", "/v1/console/tenants/{tenant_id}/ocr"),
+    # 019 (console OCR result plan, Task 1): an OCR run's page images.
+    ("GET", "/v1/console/runs/{run_id}/pages/{page}"),
 }
 
 
