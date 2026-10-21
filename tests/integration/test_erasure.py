@@ -65,6 +65,7 @@ def _run(
     blob_id: str,
     artifact_id: str,
     status: RunStatus = RunStatus.SUCCEEDED,
+    stage: str = "extract",
 ) -> Run:
     run = Run(
         run_id=uuid4(),
@@ -74,7 +75,7 @@ def _run(
         status=status,
         processing_id=artifact_id if status is RunStatus.SUCCEEDED else None,
         stage_outcomes=(
-            StageOutcomeRecord(stage="extract", status="executed", artifact_id=artifact_id),
+            StageOutcomeRecord(stage=stage, status="executed", artifact_id=artifact_id),
         ),
         created_at=NOW - timedelta(days=1),
         updated_at=NOW - timedelta(days=1),
@@ -281,14 +282,16 @@ class TestErasingOneDocument:
         for artifact in (doomed_artifact, kept_artifact):
             _seed_artifact(tmp_path, "acme", artifact)
             _seed_artifact(tmp_path, "acme", orientation_id_for(artifact))
-        _run(queue, tenant_id="acme", blob_id=doomed_blob, artifact_id=doomed_artifact)
-        _run(queue, tenant_id="acme", blob_id=kept_blob, artifact_id=kept_artifact)
+        _run(
+            queue, tenant_id="acme", blob_id=doomed_blob, artifact_id=doomed_artifact, stage="parse"
+        )
+        _run(queue, tenant_id="acme", blob_id=kept_blob, artifact_id=kept_artifact, stage="parse")
 
         report = retention.erase(
             queue, _stores(tmp_path, "acme"), tenant_id="acme", now=NOW, blob_id=doomed_blob
         )
 
-        assert report.artifacts == 2
+        assert report.artifacts == 1, "the sidecar goes, uncounted"
         assert not _exists(tmp_path, "acme", doomed_artifact)
         assert not _exists(tmp_path, "acme", orientation_id_for(doomed_artifact))
         assert _exists(tmp_path, "acme", kept_artifact)
@@ -302,8 +305,8 @@ class TestErasingOneDocument:
         shared = "sha256:" + "6a" * 32
         _seed_artifact(tmp_path, "acme", shared)
         _seed_artifact(tmp_path, "acme", orientation_id_for(shared))
-        _run(queue, tenant_id="acme", blob_id=doomed_blob, artifact_id=shared)
-        _run(queue, tenant_id="acme", blob_id=kept_blob, artifact_id=shared)
+        _run(queue, tenant_id="acme", blob_id=doomed_blob, artifact_id=shared, stage="parse")
+        _run(queue, tenant_id="acme", blob_id=kept_blob, artifact_id=shared, stage="parse")
 
         retention.erase(
             queue, _stores(tmp_path, "acme"), tenant_id="acme", now=NOW, blob_id=doomed_blob
@@ -311,6 +314,24 @@ class TestErasingOneDocument:
 
         assert _exists(tmp_path, "acme", shared)
         assert _exists(tmp_path, "acme", orientation_id_for(shared))
+
+    def test_only_a_parse_artifact_brings_a_sidecar(self, tmp_path: pathlib.Path) -> None:
+        """An extract artifact has no sidecar, so none is derived for it."""
+        queue = InMemoryRunQueue()
+        blob = BlobStore(tmp_path, tenant_id="acme").put(b"an extraction")
+        extracted = "sha256:" + "7a" * 32
+        _seed_artifact(tmp_path, "acme", extracted)
+        # Planted where a sidecar would be, to catch a derivation for every id.
+        _seed_artifact(tmp_path, "acme", orientation_id_for(extracted))
+        _run(queue, tenant_id="acme", blob_id=blob, artifact_id=extracted, stage="extract")
+
+        report = retention.erase(
+            queue, _stores(tmp_path, "acme"), tenant_id="acme", now=NOW, blob_id=blob
+        )
+
+        assert report.artifacts == 1
+        assert not _exists(tmp_path, "acme", extracted)
+        assert _exists(tmp_path, "acme", orientation_id_for(extracted))
 
     def test_the_policy_names_the_document(self, tmp_path: pathlib.Path) -> None:
         queue = InMemoryRunQueue()

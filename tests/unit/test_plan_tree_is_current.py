@@ -90,6 +90,10 @@ EXTRA_PLANS: tuple[pathlib.Path, ...] = (
     # they exercise. Registering the plan is what keeps the traceability rule
     # honest without teaching the heuristic a special case.
     pathlib.Path("specs/010-operations-and-corrections/plan.md"),
+    # 020. Its sidecar test drives an extraction `run()` to prove the shared
+    # parse path files the angles, so an import graph attributes it to
+    # `extraction`; the plan that introduced it is the one that traces it.
+    pathlib.Path("docs/superpowers/plans/2026-10-21-ocr-page-orientation.md"),
 )
 
 #: `docdoc.recording` is deliberately **not** listed, though it is a layer and it

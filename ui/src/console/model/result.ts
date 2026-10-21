@@ -153,6 +153,15 @@ export function viewFrame(
   };
 }
 
+/**
+ * The unturned image's size as the page implies it — its straightened size,
+ * swapped back for a quarter turn — so the frame is right before the image loads.
+ */
+export function expectedImageSize(page: ResultPage): { width: number; height: number } {
+  const { boxWidth, boxHeight } = viewFrame(page.angle, page.width, page.height);
+  return { width: boxWidth, height: boxHeight };
+}
+
 /** Fixed copy for `isTurned`'s page, so boxes that no longer line up say why. */
 export const TURNED_NOTICE = "This page was turned by the OCR host; boxes may not line up.";
 

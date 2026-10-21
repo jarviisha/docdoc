@@ -14,6 +14,7 @@ import {
   showsTurnedWarning,
   toResultPages,
   TURNED_NOTICE,
+  expectedImageSize,
   viewFrame,
   type ResultPage,
 } from "../../src/console/model/result.ts";
@@ -129,6 +130,17 @@ test("view frame for each angle", () => {
   assert.deepEqual(viewFrame(180, 1200, 520), { boxWidth: 1200, boxHeight: 520, rotate: 180 });
   assert.deepEqual(viewFrame(270, 520, 1200), { boxWidth: 1200, boxHeight: 520, rotate: 270 });
   assert.deepEqual(viewFrame(null, 520, 1200), { boxWidth: 520, boxHeight: 1200, rotate: 0 });
+});
+
+test("before load, the page implies the unturned image's size", () => {
+  const page = (angle: number | null): ResultPage => ({ index: 0, width: 1200, height: 520, lines: [], angle });
+  assert.deepEqual(expectedImageSize(page(90)), { width: 520, height: 1200 });
+  assert.deepEqual(expectedImageSize(page(270)), { width: 520, height: 1200 });
+  assert.deepEqual(expectedImageSize(page(180)), { width: 1200, height: 520 });
+  assert.deepEqual(expectedImageSize(page(null)), { width: 1200, height: 520 });
+  // So the frame it gives is the page's own: not squashed while loading.
+  const size = expectedImageSize(page(90));
+  assert.deepEqual(viewFrame(90, size.width, size.height), { boxWidth: 1200, boxHeight: 520, rotate: 90 });
 });
 
 test("page angles are read per page", () => {

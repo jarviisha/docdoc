@@ -124,7 +124,8 @@ thin box drawn over every recognised line. The lines are on the right, each with
 line and scrolls the line into view. **Previous** and **Next** step through the pages, and each page's
 image is fetched the first time that page is shown. A turned page is shown upright, with its boxes
 lined up, when the OCR host reported the turn. Otherwise, if the OCR host's own page dimensions disagree
-with the image's orientation, a warning says the page was turned and the boxes may not line up. An
+with the image's orientation, a warning says the page was turned and the boxes may not line up. A
+phone photo's EXIF orientation needs no turn of its own: PaddleX and the browser both apply it. An
 image that cannot be fetched is replaced by an error, and its text still shows. A failed run requests
 no result, and an extraction run keeps **Download result** only.
 

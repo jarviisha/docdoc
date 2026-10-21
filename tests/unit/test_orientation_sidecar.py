@@ -121,3 +121,68 @@ def test_the_sidecar_is_a_parse_stage_artifact_of_its_document(tmp_path: Path) -
     assert envelope.stage == "parse"
     assert envelope.input_artifact_id == document.id
     assert envelope.artifact_format_version == ORIENTATION_FORMAT_VERSION
+
+
+def test_a_sidecar_conflict_keeps_the_run_going(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    store = FileArtifactStore(tmp_path)
+    upright, _ = parse_only(
+        IMAGE, store=None, parser="paddle", registry=paddle_registry(CountingPost())
+    )
+    # A different turn already filed under the same sidecar id.
+    store.put(
+        orientation_id_for(upright.id),
+        PageOrientation(angles=(0,)),
+        stage="parse",
+        input_artifact_id=upright.id,
+        processor_id="paddle",
+        processor_version="1.0.0",
+        options_hash="x",
+        artifact_format_version=ORIENTATION_FORMAT_VERSION,
+    )
+
+    with caplog.at_level("WARNING", logger="docdoc.pipeline"):
+        document, outcome = parse_only(
+            IMAGE, store=store, parser="paddle", registry=paddle_registry(TurnedPost(raw_angle=180))
+        )
+
+    assert outcome.status is StageStatus.EXECUTED
+    assert store.get(document.id, model=Document, artifact_format_version=1) is not None
+    assert read_orientation(store, document.id) == (0,), "the first write stands"
+    assert any(
+        getattr(record, "event", None) == "pipeline.orientation_conflict"
+        for record in caplog.records
+    )
+
+
+def test_an_extraction_run_cache_miss_writes_the_sidecar(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from docdoc.extraction import SchemaRegistry
+    from docdoc.extraction.adapters.echo import EchoAdapter
+    from docdoc.pipeline import Stage, run, runner
+
+    real = runner._execute_parse
+
+    def turned(plan: Any) -> tuple[Document, tuple[int, ...] | None]:
+        document, _ = real(plan)
+        return document, tuple(90 for _ in document.pages)
+
+    monkeypatch.setattr(runner, "_execute_parse", turned)
+    store = FileArtifactStore(tmp_path)
+    root = Path(__file__).parent.parent.parent
+    result = run(
+        (root / "tests/fixtures/pdf/digital_invoice.pdf").read_bytes(),
+        schema="invoice@1",
+        registry=SchemaRegistry.from_paths([root / "schemas"]),
+        adapter=EchoAdapter.from_fixtures(str(root / "tests/fixtures/echo")),
+        store=store,
+    )
+
+    parse = next(o for o in result.outcomes if o.stage is Stage.PARSE)
+    assert parse.status is StageStatus.EXECUTED
+    assert parse.artifact_id is not None
+    angles = read_orientation(store, parse.artifact_id)
+    assert angles is not None
+    assert set(angles) == {90}

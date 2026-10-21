@@ -16,6 +16,7 @@ import type { Intent } from "../model/client.ts";
 import { describe, type Failure } from "../model/failure.ts";
 import {
   confidenceLabel,
+  expectedImageSize,
   pageAfter,
   scrollToShow,
   showsTurnedWarning,
@@ -84,11 +85,9 @@ export function ResultViewer({ runId, pages, request }: Props) {
   const image = images.get(page.index);
   const size = sizes.get(page.index);
   const turned = size !== undefined && showsTurnedWarning(page, size.width, size.height);
-  // Until the image's own size is known, the box takes the page's aspect.
-  const frame =
-    size === undefined
-      ? { boxWidth: page.width, boxHeight: page.height, rotate: page.angle ?? 0 }
-      : viewFrame(page.angle, size.width, size.height);
+  // Until the image's own size is known, the page implies it.
+  const natural = size ?? expectedImageSize(page);
+  const frame = viewFrame(page.angle, natural.width, natural.height);
   const previous = pageAfter(shown, pages.length, -1);
   const next = pageAfter(shown, pages.length, 1);
 
@@ -173,10 +172,12 @@ export function ResultViewer({ runId, pages, request }: Props) {
                   position: "absolute",
                   left: "50%",
                   top: "50%",
-                  width: size === undefined ? "100%" : `${(size.width / frame.boxWidth) * 100}%`,
-                  height: size === undefined ? "100%" : `${(size.height / frame.boxHeight) * 100}%`,
+                  width: `${(natural.width / frame.boxWidth) * 100}%`,
+                  height: `${(natural.height / frame.boxHeight) * 100}%`,
                   transform: `translate(-50%, -50%) rotate(${frame.rotate}deg)`,
                   transformOrigin: "center",
+                  // A photo's EXIF turn is applied here as PaddleX applies it: same frame.
+                  imageOrientation: "from-image",
                 }}
                 onLoad={(event) => {
                   const { naturalWidth: width, naturalHeight: height } = event.currentTarget;

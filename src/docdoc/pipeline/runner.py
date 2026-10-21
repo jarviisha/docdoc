@@ -789,16 +789,26 @@ def _parse_stage(
     if angles is not None:
         # Beside the Document, never in it: its bytes and identity stay as they
         # were, and a later cache hit finds the angles under the same id (020).
-        reuse.put(
-            orientation_id_for(document_id),
-            PageOrientation(angles=angles),
-            stage=Stage.PARSE.value,
-            input_artifact_id=document_id,
-            processor_id=plan.parser.id,
-            processor_version=plan.parser.version,
-            options_hash=plan.options_hash,
-            artifact_format_version=ORIENTATION_FORMAT_VERSION,
-        )
+        try:
+            reuse.put(
+                orientation_id_for(document_id),
+                PageOrientation(angles=angles),
+                stage=Stage.PARSE.value,
+                input_artifact_id=document_id,
+                processor_id=plan.parser.id,
+                processor_version=plan.parser.version,
+                options_hash=plan.options_hash,
+                artifact_format_version=ORIENTATION_FORMAT_VERSION,
+            )
+        except ArtifactError as error:
+            # Display-only: a conflicting sidecar costs the viewer its turn, never
+            # the run its result. The Document's own conflict above still raises.
+            if error.reason != "conflict":
+                raise
+            _logger.warning(
+                "page orientation conflict, run continues",
+                extra={"event": "pipeline.orientation_conflict", "document_id": document_id},
+            )
     return parsed, _executed(Stage.PARSE, parsed, clock)
 
 

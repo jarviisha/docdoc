@@ -339,11 +339,15 @@ def _remove(
     # The difference, both halves. A blob survives on exactly the terms an
     # artifact does: two runs over the same document share one, and that is the
     # most ordinary thing a tenant does.
-    artifact_ids = _artifact_ids(runs) - _with_sidecars(kept_artifacts)
+    artifact_ids = _artifact_ids(runs) - kept_artifacts
     blob_ids = frozenset(run.blob_id for run in runs) - kept_blobs
 
     try:
         artifacts = sum(stores.artifacts.delete(identity) for identity in artifact_ids)
+        # Each doomed parse's orientation sidecar (020) goes with it. Not counted:
+        # the report counts what runs named, and no run names a sidecar.
+        for identity in _sidecars(runs, artifact_ids):
+            stores.artifacts.delete(identity)
         blobs = sum(stores.blobs.delete(blob_id) for blob_id in blob_ids)
     except ArtifactError as error:
         # Nothing is entombed and no row is removed. The run row holds the
@@ -358,28 +362,31 @@ def _remove(
 
 
 def _artifact_ids(runs: Sequence[Run]) -> frozenset[str]:
-    """Read, not derived (ADR-0015 §2) -- plus each one's orientation sidecar."""
-    return _with_sidecars(
-        frozenset(
-            outcome.artifact_id
-            for run in runs
-            for outcome in run.stage_outcomes
-            if outcome.artifact_id is not None
-        )
+    """Read, not derived (ADR-0015 §2)."""
+    return frozenset(
+        outcome.artifact_id
+        for run in runs
+        for outcome in run.stage_outcomes
+        if outcome.artifact_id is not None
     )
 
 
-def _with_sidecars(artifact_ids: frozenset[str]) -> frozenset[str]:
-    """`artifact_ids` and the orientation sidecar each one may have (020).
+def _sidecars(runs: Sequence[Run], doomed: frozenset[str]) -> frozenset[str]:
+    """The orientation sidecar each doomed parse artifact may have (020).
 
     The one derivation here, and a pure one: the sidecar's id is a function of
-    its parse artifact's id alone, so it needs no parser or version. Listed for
-    every id rather than only parse ids, because deleting an absent one is a
-    harmless `False`.
+    its parse artifact's id alone, so it needs no parser or version. Only parse
+    artifacts can have one, and only those already in `doomed` -- so a parse a
+    surviving run still names keeps its sidecar too.
     """
     from docdoc.pipeline.orientation import orientation_id_for
 
-    return artifact_ids | {orientation_id_for(aid) for aid in artifact_ids}
+    return frozenset(
+        orientation_id_for(outcome.artifact_id)
+        for run in runs
+        for outcome in run.stage_outcomes
+        if outcome.stage == "parse" and outcome.artifact_id in doomed
+    )
 
 
 def _degraded(error: ArtifactError, tenant_id: str) -> SweepReport:
