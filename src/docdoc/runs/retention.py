@@ -344,6 +344,10 @@ def _remove(
 
     try:
         artifacts = sum(stores.artifacts.delete(identity) for identity in artifact_ids)
+        # Each doomed parse's orientation sidecar (020) goes with it. Not counted:
+        # the report counts what runs named, and no run names a sidecar.
+        for identity in _sidecars(runs, artifact_ids):
+            stores.artifacts.delete(identity)
         blobs = sum(stores.blobs.delete(blob_id) for blob_id in blob_ids)
     except ArtifactError as error:
         # Nothing is entombed and no row is removed. The run row holds the
@@ -364,6 +368,24 @@ def _artifact_ids(runs: Sequence[Run]) -> frozenset[str]:
         for run in runs
         for outcome in run.stage_outcomes
         if outcome.artifact_id is not None
+    )
+
+
+def _sidecars(runs: Sequence[Run], doomed: frozenset[str]) -> frozenset[str]:
+    """The orientation sidecar each doomed parse artifact may have (020).
+
+    The one derivation here, and a pure one: the sidecar's id is a function of
+    its parse artifact's id alone, so it needs no parser or version. Only parse
+    artifacts can have one, and only those already in `doomed` -- so a parse a
+    surviving run still names keeps its sidecar too.
+    """
+    from docdoc.pipeline.orientation import orientation_id_for
+
+    return frozenset(
+        orientation_id_for(outcome.artifact_id)
+        for run in runs
+        for outcome in run.stage_outcomes
+        if outcome.stage == "parse" and outcome.artifact_id in doomed
     )
 
 

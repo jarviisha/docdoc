@@ -327,6 +327,11 @@ class OcrPage(NamedTuple):
     width: float
     height: float
     lines: tuple[OcrLine, ...]
+    #: The clockwise turn, in degrees, a viewer applies to the page *as
+    #: rendered* to reach the frame `lines` are in -- see `_viewer_angle`.
+    #: Never enters the `Document`; `parse_with_orientation` hands it out
+    #: beside it.
+    angle: int = 0
 
 
 def _translated(error: Exception, *, parser_id: str, blob_id: str | None) -> ParserError:
@@ -423,7 +428,30 @@ def _oriented_size(size: tuple[float, float], pruned: Mapping[str, Any]) -> tupl
     return size
 
 
-def _page_of(pruned: Mapping[str, Any], *, width: float, height: float) -> OcrPage:
+def _viewer_angle(pruned: Mapping[str, Any]) -> int:
+    """The clockwise turn that straightens the rendered page: 0, 90, 180 or 270.
+
+    PaddleX's `doc_preprocessor_res.angle` is the document orientation
+    classifier's label -- how far the page's *content* is turned clockwise
+    from upright -- and the preprocessor undoes it by turning the image the
+    same amount counter-clockwise before OCR. A viewer therefore turns the
+    rendered page `(360 - angle) % 360` degrees clockwise.
+
+    Pinned by the recorded `rotated_90.pdf` response: that page is upright
+    content with `/Rotate 90` (displayed turned a quarter clockwise), PaddleX
+    reports `angle: 90`, and its boxes land where the upright invoice's do --
+    so the straightening turn is a quarter counter-clockwise, 270 here.
+
+    A missing or unrecognised value is 0, which is what the viewer assumed
+    before it knew the angle at all.
+    """
+    angle = (pruned.get("doc_preprocessor_res") or {}).get("angle")
+    if angle not in (0, 90, 180, 270):
+        return 0
+    return (360 - int(angle)) % 360
+
+
+def _page_of(pruned: Mapping[str, Any], *, width: float, height: float, angle: int = 0) -> OcrPage:
     """One page's `prunedResult` -> one `OcrPage`.
 
     `rec_scores` is optional (the Tesseract shim never sends it); when absent
@@ -445,7 +473,7 @@ def _page_of(pruned: Mapping[str, Any], *, width: float, height: float) -> OcrPa
         )
         for text, box, score in zip(texts, boxes, scores, strict=True)
     )
-    return OcrPage(width=width, height=height, lines=lines)
+    return OcrPage(width=width, height=height, lines=lines, angle=angle)
 
 
 def pages_of(response: Mapping[str, Any], *, parser_id: str, blob_id: str) -> list[OcrPage]:
@@ -476,7 +504,7 @@ def _pages_of(response: Mapping[str, Any], *, parser_id: str, blob_id: str) -> l
     pages = []
     for pruned, rendered_size in zip(pruned_results, rendered_sizes, strict=True):
         width, height = _oriented_size(rendered_size, pruned)
-        pages.append(_page_of(pruned, width=width, height=height))
+        pages.append(_page_of(pruned, width=width, height=height, angle=_viewer_angle(pruned)))
     return pages
 
 
@@ -868,6 +896,20 @@ class PaddleXParser:
         transport: TransportSettings,
         text_layer: TextLayerRecord | None = None,
     ) -> Document:
+        return self.parse_with_orientation(source, options, transport, text_layer)[0]
+
+    def parse_with_orientation(
+        self,
+        source: SourceFile,
+        options: Mapping[str, Any],
+        transport: TransportSettings,
+        text_layer: TextLayerRecord | None = None,
+    ) -> tuple[Document, tuple[int, ...]]:
+        """`parse`, plus each page's clockwise viewer turn (`_viewer_angle`).
+
+        The angles never enter the `Document`, so its bytes and identity are
+        exactly `parse`'s; the pipeline keeps them beside it instead.
+        """
         self.check_options(options, blob_id=source.blob_id)
         transport = self._effective_transport(transport)
 
@@ -888,7 +930,7 @@ class PaddleXParser:
                 deadline=deadline,
             )
 
-        return build_document(
+        document = build_document(
             pages,
             source=source,
             options=options,
@@ -897,6 +939,7 @@ class PaddleXParser:
             parser_version=self.version,
             capabilities=self.capabilities,
         )
+        return document, tuple(page.angle for page in pages)
 
     def check_options(self, options: Mapping[str, Any], *, blob_id: str | None = None) -> None:
         """Option checks first, and before any network call (ADR-0021 §3):

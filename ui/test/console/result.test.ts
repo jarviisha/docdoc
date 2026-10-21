@@ -11,8 +11,11 @@ import {
   isTurned,
   pageAfter,
   scrollToShow,
+  showsTurnedWarning,
   toResultPages,
   TURNED_NOTICE,
+  expectedImageSize,
+  viewFrame,
   type ResultPage,
 } from "../../src/console/model/result.ts";
 
@@ -89,7 +92,7 @@ test("a body without text, pages, or tokens arrays throws", () => {
 });
 
 test("turned page is flagged", () => {
-  const page: ResultPage = { index: 0, width: 800, height: 1100, lines: [] };
+  const page: ResultPage = { index: 0, width: 800, height: 1100, lines: [], angle: null };
   assert.equal(isTurned(page, 1100, 800), true);
   assert.equal(isTurned(page, 800, 1100), false);
   assert.equal(isTurned({ ...page, width: 1000, height: 1010 }, 1010, 1000), false);
@@ -119,4 +122,45 @@ test("scrollToShow moves the list only as far as the line needs", () => {
   assert.equal(scrollToShow(40, 70, 100, 200), 40);
   // Below the view: its bottom at the bottom.
   assert.equal(scrollToShow(320, 350, 100, 200), 150);
+});
+
+test("view frame for each angle", () => {
+  assert.deepEqual(viewFrame(0, 800, 1200), { boxWidth: 800, boxHeight: 1200, rotate: 0 });
+  assert.deepEqual(viewFrame(90, 520, 1200), { boxWidth: 1200, boxHeight: 520, rotate: 90 });
+  assert.deepEqual(viewFrame(180, 1200, 520), { boxWidth: 1200, boxHeight: 520, rotate: 180 });
+  assert.deepEqual(viewFrame(270, 520, 1200), { boxWidth: 1200, boxHeight: 520, rotate: 270 });
+  assert.deepEqual(viewFrame(null, 520, 1200), { boxWidth: 520, boxHeight: 1200, rotate: 0 });
+});
+
+test("before load, the page implies the unturned image's size", () => {
+  const page = (angle: number | null): ResultPage => ({ index: 0, width: 1200, height: 520, lines: [], angle });
+  assert.deepEqual(expectedImageSize(page(90)), { width: 520, height: 1200 });
+  assert.deepEqual(expectedImageSize(page(270)), { width: 520, height: 1200 });
+  assert.deepEqual(expectedImageSize(page(180)), { width: 1200, height: 520 });
+  assert.deepEqual(expectedImageSize(page(null)), { width: 1200, height: 520 });
+  // So the frame it gives is the page's own: not squashed while loading.
+  const size = expectedImageSize(page(90));
+  assert.deepEqual(viewFrame(90, size.width, size.height), { boxWidth: 1200, boxHeight: 520, rotate: 90 });
+});
+
+test("page angles are read per page", () => {
+  const doc = {
+    text: "ab cd",
+    pages: [
+      { index: 0, span: [0, 2], width: 100, height: 50, rotation: 0 },
+      { index: 1, span: [3, 5], width: 100, height: 50, rotation: 0 },
+    ],
+    tokens: [],
+  };
+  const [first, second] = toResultPages({ ...doc, page_angles: [0, 90] });
+  assert.equal(first?.angle, 0);
+  assert.equal(second?.angle, 90);
+  assert.equal(toResultPages(doc)[0]?.angle, null);
+  assert.equal(toResultPages({ ...doc, page_angles: null })[1]?.angle, null);
+});
+
+test("warning only when angle unknown", () => {
+  const p: ResultPage = { index: 0, width: 1200, height: 520, lines: [], angle: 90 };
+  assert.equal(showsTurnedWarning(p, 520, 1200), false);
+  assert.equal(showsTurnedWarning({ ...p, angle: null }, 520, 1200), true);
 });

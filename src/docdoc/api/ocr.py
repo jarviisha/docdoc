@@ -300,11 +300,13 @@ def parser_listing(deployment: Any) -> ParserListing:
     return ParserListing(parsers=tuple(choices))
 
 
-def _ocr_document(request: Request, tenant_id: str, run: Any) -> Any:
+def _ocr_document(request: Request, tenant_id: str, run: Any, *, with_angles: bool = False) -> Any:
     """An OCR run's `Document` from `tenant_id`'s store, or why not (ADR-0022).
 
     Shared by `GET /v1/runs/{run_id}/result` and its console twin, which reach
-    the run differently and must answer about it identically.
+    the run differently and must answer about it identically. `with_angles`
+    is the console's one addition (020): `page_angles`, each page's clockwise
+    viewer turn, or `null` when unknown. The tenant route never sets it.
     """
     from docdoc.kernel import Document
     from docdoc.pipeline.stages import Stage, spec_for
@@ -334,4 +336,10 @@ def _ocr_document(request: Request, tenant_id: str, run: Any) -> Any:
         # The run row outlived its content -- a sweep interrupted between
         # its steps finishes on the next tick. Gone either way.
         return JSONResponse(status_code=410, content={"error": "result_expired"})
-    return document.model_dump(mode="json")
+    body = document.model_dump(mode="json")
+    if not with_angles:
+        return body
+    from docdoc.pipeline.orientation import read_orientation
+
+    angles = read_orientation(store, run.processing_id)
+    return {**body, "page_angles": list(angles) if angles is not None else None}

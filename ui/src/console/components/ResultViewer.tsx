@@ -16,10 +16,12 @@ import type { Intent } from "../model/client.ts";
 import { describe, type Failure } from "../model/failure.ts";
 import {
   confidenceLabel,
-  isTurned,
+  expectedImageSize,
   pageAfter,
   scrollToShow,
+  showsTurnedWarning,
   TURNED_NOTICE,
+  viewFrame,
   type ResultPage,
 } from "../model/result.ts";
 
@@ -82,7 +84,10 @@ export function ResultViewer({ runId, pages, request }: Props) {
 
   const image = images.get(page.index);
   const size = sizes.get(page.index);
-  const turned = size !== undefined && isTurned(page, size.width, size.height);
+  const turned = size !== undefined && showsTurnedWarning(page, size.width, size.height);
+  // Until the image's own size is known, the page implies it.
+  const natural = size ?? expectedImageSize(page);
+  const frame = viewFrame(page.angle, natural.width, natural.height);
   const previous = pageAfter(shown, pages.length, -1);
   const next = pageAfter(shown, pages.length, 1);
 
@@ -151,12 +156,29 @@ export function ResultViewer({ runId, pages, request }: Props) {
           </div>
           {image !== undefined && "url" in image ? (
             <div
-              style={{ position: "relative", border: "1px solid var(--color-border-emphasized)" }}
+              style={{
+                position: "relative",
+                width: "100%",
+                aspectRatio: `${frame.boxWidth} / ${frame.boxHeight}`,
+                border: "1px solid var(--color-border-emphasized)",
+              }}
             >
+              {/* The unturned image, centred and turned into the box. */}
               <img
                 src={image.url}
                 alt={`Page ${shown + 1}`}
-                style={{ display: "block", width: "100%", height: "auto" }}
+                style={{
+                  display: "block",
+                  position: "absolute",
+                  left: "50%",
+                  top: "50%",
+                  width: `${(natural.width / frame.boxWidth) * 100}%`,
+                  height: `${(natural.height / frame.boxHeight) * 100}%`,
+                  transform: `translate(-50%, -50%) rotate(${frame.rotate}deg)`,
+                  transformOrigin: "center",
+                  // A photo's EXIF turn is applied here as PaddleX applies it: same frame.
+                  imageOrientation: "from-image",
+                }}
                 onLoad={(event) => {
                   const { naturalWidth: width, naturalHeight: height } = event.currentTarget;
                   setSizes((previous) => new Map(previous).set(page.index, { width, height }));

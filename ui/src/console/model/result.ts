@@ -30,6 +30,11 @@ export interface ResultPage {
   width: number;
   height: number;
   lines: ResultLine[];
+  /**
+   * Degrees clockwise to turn the page image so it matches the frame the
+   * boxes are in, from the body's `page_angles`; `null` when unknown.
+   */
+  angle: number | null;
 }
 
 interface DocumentPage {
@@ -62,7 +67,12 @@ export function toResultPages(document: unknown): ResultPage[] {
   if (typeof document !== "object" || document === null) {
     throw new Error("the result body was not an object");
   }
-  const record = document as { text?: unknown; pages?: unknown; tokens?: unknown };
+  const record = document as {
+    text?: unknown;
+    pages?: unknown;
+    tokens?: unknown;
+    page_angles?: unknown;
+  };
   if (
     typeof record.text !== "string" ||
     !Array.isArray(record.pages) ||
@@ -74,11 +84,18 @@ export function toResultPages(document: unknown): ResultPage[] {
   const codePoints = Array.from(record.text);
   const pagesInput = record.pages as DocumentPage[];
   const tokens = record.tokens as Token[];
+  const angles = Array.isArray(record.page_angles) ? (record.page_angles as number[]) : null;
 
   const pages = new Map<number, ResultPage>();
-  for (const page of pagesInput) {
-    pages.set(page.index, { index: page.index, width: page.width, height: page.height, lines: [] });
-  }
+  pagesInput.forEach((page, position) => {
+    pages.set(page.index, {
+      index: page.index,
+      width: page.width,
+      height: page.height,
+      lines: [],
+      angle: angles?.[position] ?? null,
+    });
+  });
 
   tokens.forEach((token, tokenIndex) => {
     const [[start, end], geometry, confidence] = token;
@@ -109,6 +126,40 @@ function nearSquare(width: number, height: number): boolean {
 export function isTurned(page: ResultPage, imageWidth: number, imageHeight: number): boolean {
   if (nearSquare(page.width, page.height) || nearSquare(imageWidth, imageHeight)) return false;
   return page.width > page.height !== imageWidth > imageHeight;
+}
+
+/**
+ * The turned-page warning is for a turn nobody explained: once the OCR host
+ * reported the page's angle, the viewer turns the image itself.
+ */
+export function showsTurnedWarning(page: ResultPage, imageWidth: number, imageHeight: number): boolean {
+  return page.angle === null && isTurned(page, imageWidth, imageHeight);
+}
+
+/**
+ * The box a page is shown in — the straightened page, so the image's own
+ * size swapped for a quarter turn — and the turn the image takes inside it.
+ */
+export function viewFrame(
+  angle: number | null,
+  imageWidth: number,
+  imageHeight: number,
+): { boxWidth: number; boxHeight: number; rotate: number } {
+  const quarter = angle === 90 || angle === 270;
+  return {
+    boxWidth: quarter ? imageHeight : imageWidth,
+    boxHeight: quarter ? imageWidth : imageHeight,
+    rotate: angle ?? 0,
+  };
+}
+
+/**
+ * The unturned image's size as the page implies it — its straightened size,
+ * swapped back for a quarter turn — so the frame is right before the image loads.
+ */
+export function expectedImageSize(page: ResultPage): { width: number; height: number } {
+  const { boxWidth, boxHeight } = viewFrame(page.angle, page.width, page.height);
+  return { width: boxWidth, height: boxHeight };
 }
 
 /** Fixed copy for `isTurned`'s page, so boxes that no longer line up say why. */

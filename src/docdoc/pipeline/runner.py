@@ -39,6 +39,11 @@ from docdoc.extraction.extract import ExtractionResult
 from docdoc.grounding.result import GroundingResult
 from docdoc.kernel import Document
 from docdoc.pipeline.errors import PipelineError
+from docdoc.pipeline.orientation import (
+    ORIENTATION_FORMAT_VERSION,
+    PageOrientation,
+    orientation_id_for,
+)
 from docdoc.pipeline.plan import (
     extract_artifact_id,
     ground_artifact_id,
@@ -768,7 +773,7 @@ def _parse_stage(
     if cached is not None:
         return cached, _reused(Stage.PARSE, document_id, clock)
 
-    parsed = _execute_parse(plan)
+    parsed, angles = _execute_parse(plan)
     reuse.put(
         document_id,
         parsed,
@@ -781,6 +786,29 @@ def _parse_stage(
         options_hash=plan.options_hash,
         artifact_format_version=_format(Stage.PARSE),
     )
+    if angles is not None:
+        # Beside the Document, never in it: its bytes and identity stay as they
+        # were, and a later cache hit finds the angles under the same id (020).
+        try:
+            reuse.put(
+                orientation_id_for(document_id),
+                PageOrientation(angles=angles),
+                stage=Stage.PARSE.value,
+                input_artifact_id=document_id,
+                processor_id=plan.parser.id,
+                processor_version=plan.parser.version,
+                options_hash=plan.options_hash,
+                artifact_format_version=ORIENTATION_FORMAT_VERSION,
+            )
+        except ArtifactError as error:
+            # Display-only: a conflicting sidecar costs the viewer its turn, never
+            # the run its result. The Document's own conflict above still raises.
+            if error.reason != "conflict":
+                raise
+            _logger.warning(
+                "page orientation conflict, run continues",
+                extra={"event": "pipeline.orientation_conflict", "document_id": document_id},
+            )
     return parsed, _executed(Stage.PARSE, parsed, clock)
 
 
@@ -816,10 +844,10 @@ def parse_only(
         )
 
 
-def _execute_parse(plan: Any) -> Document:
-    from docdoc.ingest.parse import execute_plan
+def _execute_parse(plan: Any) -> tuple[Document, tuple[int, ...] | None]:
+    from docdoc.ingest.parse import execute_plan_oriented
 
-    return execute_plan(plan)
+    return execute_plan_oriented(plan)
 
 
 def _extract(

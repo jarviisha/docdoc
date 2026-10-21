@@ -33,7 +33,7 @@ from docdoc.ingest.source import Limits, SourceFile
 from docdoc.ingest.validate import validate_output
 from docdoc.kernel import Document, TextLayerRecord
 
-__all__ = ["ParsePlan", "execute_plan", "parse", "plan_parse"]
+__all__ = ["ParsePlan", "execute_plan", "execute_plan_oriented", "parse", "plan_parse"]
 
 Path = Literal["native", "recognition"]
 
@@ -263,11 +263,27 @@ def execute_plan(plan: ParsePlan, *, started: float | None = None) -> Document:
     the parse itself, and for a service-backed parser the network call and the
     bill that comes with it.
     """
+    return execute_plan_oriented(plan, started=started)[0]
+
+
+def execute_plan_oriented(
+    plan: ParsePlan, *, started: float | None = None
+) -> tuple[Document, tuple[int, ...] | None]:
+    """:func:`execute_plan`, plus each page's clockwise viewer turn (020).
+
+    The angles come from a parser's optional ``parse_with_orientation``; a
+    parser without one gives ``None``, meaning "not reported", not "upright".
+    """
     started = time.monotonic() if started is None else started
     file, parser, verdict = plan.file, plan.parser, plan.verdict
+    angles: tuple[int, ...] | None = None
 
     try:
-        document = parser.parse(file, dict(plan.options), plan.transport, verdict)
+        oriented = getattr(parser, "parse_with_orientation", None)
+        if callable(oriented):
+            document, angles = oriented(file, dict(plan.options), plan.transport, verdict)
+        else:
+            document = parser.parse(file, dict(plan.options), plan.transport, verdict)
         if not verdict.pages:
             # A skipped rule left the page count unknown, so this is the first
             # moment it exists. Checking here still stops an over-limit document
@@ -299,7 +315,7 @@ def execute_plan(plan: ParsePlan, *, started: float | None = None) -> Document:
         text_layer_rule=verdict.rule_id,
         pages=len(document.pages),
     )
-    return document
+    return document, angles
 
 
 def _log_failure(

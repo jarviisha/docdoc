@@ -413,6 +413,7 @@ CONFIG_DOCUMENTS = (
     "docs/superpowers/plans/2026-10-20-console-monitoring.md",
     "docs/superpowers/plans/2026-10-21-console-submit-ocr.md",
     "docs/superpowers/plans/2026-10-21-console-ocr-result.md",
+    "docs/superpowers/plans/2026-10-21-ocr-page-orientation.md",
 )
 
 #: Requires at least one character after the prefix, so the `DOCDOC_*` wildcard
