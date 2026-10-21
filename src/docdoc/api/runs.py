@@ -24,6 +24,8 @@ from docdoc.api.paging import DEFAULT_RUN_PAGE, MAX_RUN_PAGE
 from docdoc.api.settings import PRIORITY_CEILING_ENV, RUN_DATABASE_URL_ENV
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from docdoc.api.app import _Deployment
 
 
@@ -895,16 +897,25 @@ def _page_request(
     return None, (position.created_at, position.run_id)
 
 
+def _finished_at(status: str, updated_at: datetime) -> str | None:
+    """When a run finished: its `updated_at` once terminal, `None` before.
+
+    `updated_at` is when a terminal run reached its terminal state. `None`
+    while it has not: an absent field says "still going", and a timestamp that
+    moved with every heartbeat would not.
+    """
+    from docdoc.runs.model import TERMINAL_STATES
+
+    return updated_at.isoformat() if status in TERMINAL_STATES else None
+
+
 def _summary_fields(run: Any) -> dict[str, Any]:
     """A run as a listing row: `RunSummary`'s fields, shared with the console's."""
     return {
         "run_id": str(run.run_id),
         "status": str(run.status),
         "created_at": run.created_at.isoformat(),
-        # `updated_at` is when a terminal run reached its terminal state.
-        # `None` while it has not: an absent field says "still going",
-        # and a timestamp that moved with every heartbeat would not.
-        "finished_at": run.updated_at.isoformat() if run.is_terminal else None,
+        "finished_at": _finished_at(run.status, run.updated_at),
         "blob_id": run.blob_id,
         "schema_identity": run.schema_identity,
         "kind": str(run.kind),

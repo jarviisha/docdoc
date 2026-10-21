@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -40,6 +41,7 @@ from docdoc.api.models import (
 from docdoc.api.ocr import _ocr_document, ocr_unavailable, parser_listing, submit_ocr
 from docdoc.api.paging import DEFAULT_RUN_PAGE
 from docdoc.api.runs import (
+    _finished_at,
     _next_cursor,
     _no_runs,
     _page_request,
@@ -218,6 +220,25 @@ def _log_cancel(operator: str, *, tenant_id: str, run_id: str, status: int) -> N
     )
 
 
+def _log_ocr_submit(operator: str, *, tenant_id: str, run_id: str, status: int) -> None:
+    """One structured event per accepted console OCR submission, as `_log_cancel` does.
+
+    `POST /v1/ocr`'s caller is the tenant itself; a console submission is made
+    on a tenant's behalf, so it says who made it.
+    """
+    logging.getLogger("docdoc.api").info(
+        json.dumps(
+            {
+                "event": "console.ocr_submit",
+                "actor": f"console:{operator}",
+                "tenant_id": tenant_id,
+                "run_id": run_id,
+                "status": status,
+            }
+        )
+    )
+
+
 def _summary(run: Any) -> ConsoleRunSummary:
     """A run as a console row: the tenant row, plus its tenant and four monitoring fields."""
     return ConsoleRunSummary(
@@ -231,16 +252,18 @@ def _summary(run: Any) -> ConsoleRunSummary:
 
 
 def _detail(run: Any, owner: str) -> dict[str, Any]:
-    """The console's detail body: the tenant's, plus `tenant_id` and `finished_at`.
+    """The console's detail body: the tenant's, plus `tenant_id` and `finished_at`."""
+    return _owned(RunStateResponse(**run.dump_public()).model_dump(mode="json"), owner)
 
-    `finished_at` is the list row's rule (`_summary_fields`), so detail and row
+
+def _owned(body: dict[str, Any], owner: str) -> dict[str, Any]:
+    """A tenant's run body (`RunStateResponse` as JSON) as the console's detail.
+
+    `finished_at` is the list row's rule (`_finished_at`), so detail and row
     agree. Not on `RunStateResponse`: the tenant contract stays as it is.
     """
-    return {
-        **RunStateResponse(**run.dump_public()).model_dump(mode="json"),
-        "tenant_id": owner,
-        "finished_at": _summary_fields(run)["finished_at"],
-    }
+    updated_at = datetime.fromisoformat(body["updated_at"])
+    return {**body, "tenant_id": owner, "finished_at": _finished_at(body["status"], updated_at)}
 
 
 #: The Overview's window for terminal counts, and the length of each list.
@@ -623,10 +646,6 @@ def console_router() -> APIRouter:
         body is read with `await`; `submit_ocr` moves the blocking work to the
         threadpool.
         """
-        from uuid import UUID
-
-        from fastapi.concurrency import run_in_threadpool
-
         if not TENANT_PATTERN.match(tenant_id):
             return JSONResponse(status_code=422, content={"error": "invalid_tenant_id"})
         refusal = ocr_unavailable(request)
@@ -643,11 +662,14 @@ def console_router() -> APIRouter:
         )
         if response.status_code not in (200, 202):
             return response
-        # Read back for `finished_at`, which an idempotent replay of a finished
-        # run has; off the event loop, as every database call here is.
-        run_id = UUID(json.loads(bytes(response.body))["run_id"])
-        run = await run_in_threadpool(request.app.state.deployment.runs().get, run_id, tenant_id)
-        return JSONResponse(status_code=response.status_code, content=_detail(run, tenant_id))
+        # Built from the answer, not read back: the run exists now, and a read
+        # that failed would turn it into an error -- and the caller's retry
+        # into a second run.
+        body = _owned(json.loads(bytes(response.body)), tenant_id)
+        _log_ocr_submit(
+            operator, tenant_id=tenant_id, run_id=body["run_id"], status=response.status_code
+        )
+        return JSONResponse(status_code=response.status_code, content=body)
 
     @router.delete("/tenants/{tenant_id}")
     def erase_tenant(request: Request, tenant_id: str, operator: Operator) -> Any:

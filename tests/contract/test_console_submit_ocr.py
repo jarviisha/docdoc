@@ -10,6 +10,8 @@ union of every place a tenant can be known from; `GET /v1/console/parsers` is
 
 from __future__ import annotations
 
+import json
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -83,7 +85,9 @@ def test_console_submits_ocr_for_the_named_tenant(
 
 
 def test_console_ocr_replays_idempotently(
-    signed_in: tuple[TestClient, dict[str, str]], deployment: _Deployment
+    signed_in: tuple[TestClient, dict[str, str]],
+    deployment: _Deployment,
+    queue: InMemoryRunQueue,
 ) -> None:
     # Room for the replay: the caps are counted before idempotency is, as on /v1/ocr.
     deployment.ocr_queue_per_tenant = 2
@@ -96,6 +100,54 @@ def test_console_ocr_replays_idempotently(
     assert (first.status_code, again.status_code) == (202, 200)
     assert again.json() == first.json()
     assert again.json()["tenant_id"] == "acme"
+    assert len(queue.page_all_runs(tenant_id="acme", status=None, before=None, limit=10)) == 1
+
+
+def test_console_ocr_answers_202_without_reading_the_run_back(
+    signed_in: tuple[TestClient, dict[str, str]],
+    queue: InMemoryRunQueue,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A created run is answered from `submit_ocr`'s body: a failing read cannot unmake it."""
+    client, cookie = signed_in
+
+    def _fail(*_: object, **__: object) -> None:
+        raise AssertionError("the submit route read the run back")
+
+    monkeypatch.setattr(queue, "get", _fail)
+
+    r = client.post(OCR, content=IMAGE, headers={**cookie, **H})
+
+    assert r.status_code == 202
+    assert r.json()["tenant_id"] == "acme"
+    assert r.json()["finished_at"] is None
+
+
+def test_console_ocr_submission_is_logged_with_its_actor(
+    signed_in: tuple[TestClient, dict[str, str]], caplog: pytest.LogCaptureFixture
+) -> None:
+    client, cookie = signed_in
+
+    with caplog.at_level(logging.INFO, logger="docdoc.api"):
+        r = client.post(OCR, content=IMAGE, headers={**cookie, **H})
+
+    events = []
+    for record in caplog.records:
+        try:
+            payload = json.loads(record.getMessage())
+        except ValueError:
+            continue
+        if isinstance(payload, dict) and payload.get("event") == "console.ocr_submit":
+            events.append(payload)
+    assert events == [
+        {
+            "event": "console.ocr_submit",
+            "actor": "console:alice",
+            "tenant_id": "acme",
+            "run_id": r.json()["run_id"],
+            "status": 202,
+        }
+    ]
 
 
 def test_console_ocr_passes_parser_and_language(
