@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
 from docdoc.api.deps import (
@@ -918,13 +918,21 @@ def _register_callback(
     once: a second copy drifting from this one is exactly how a console route
     would end up reporting a refusal differently from the tenant route it
     mirrors.
+
+    **Raises, rather than returns, for the missing-field case.** `/v1/*` routes
+    are unchanged by this task (a global constraint — `POST /v1/callbacks` has
+    an API-key caller, mmerp, that already parses its answer), so this keeps
+    the exact body that route always gave: FastAPI's default `HTTPException`
+    handler wraps `detail` as `{"detail": {...}}`, and a caller of this helper
+    that caught the exception and returned a flat body instead would be a
+    second, different shape for the same refusal.
     """
     from docdoc.runs.delivery import DeliveryError
 
     if not url or not secret:
-        return JSONResponse(
+        raise HTTPException(
             status_code=422,
-            content={"error": "invalid_callback", "detail": "url and secret are required"},
+            detail={"error": "invalid_callback", "detail": "url and secret are required"},
         )
     try:
         callback = deliverer.register(

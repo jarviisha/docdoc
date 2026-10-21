@@ -160,6 +160,27 @@ def test_console_registers_a_callback(
     ]
 
 
+def test_console_register_without_a_url_or_a_secret_names_the_error_exactly(
+    client: TestClient, cookie: dict[str, str]
+) -> None:
+    """The same body `POST /v1/callbacks` answers with (021 Task 1 review finding 2).
+
+    `_register_callback` is shared, so this pins that the console's answer did
+    not drift from the tenant route's own
+    `test_a_callback_without_a_url_or_a_secret_names_the_error_exactly`.
+    """
+    for body in ({"secret": SECRET}, {"url": CALLBACK_URL}, {}):
+        response = client.post(
+            f"/v1/console/tenants/{ACME}/callbacks", json=body, headers={**cookie, **H}
+        )
+
+        assert response.status_code == 422, body
+        assert response.json() == {
+            "detail": {"error": "invalid_callback", "detail": "url and secret are required"}
+        }
+    assert _list(client, cookie) == []
+
+
 def test_console_register_refuses_an_unknown_secret(
     client: TestClient, cookie: dict[str, str]
 ) -> None:
