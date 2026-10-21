@@ -404,10 +404,15 @@ function RunDetail({
   }, [request, runId, reads, showDetail]);
 
   // While the run can still change, read it again. A failed re-read is left
-  // for the next one: the run shown is still the last one read.
+  // for the next one: the run shown is still the last one read — unless the
+  // run is gone (`410`), which no later read will undo, so polling stops.
   const pollDetail = useCallback(async () => {
     const answer = await request({ type: "run-detail", runId });
-    if (answer.ok) showDetail(answer.body);
+    if (answer.ok) return showDetail(answer.body);
+    if (answer.failure.kind === "removed") {
+      setRun(null);
+      setRemoved({ deletedAt: answer.failure.deletedAt, policy: answer.failure.policy });
+    }
   }, [request, runId, showDetail]);
   usePolling(pollDetail, detailPolls(run));
 
