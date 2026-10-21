@@ -28,9 +28,13 @@ import {
 import {
   canRegister,
   canRevoke,
+  choosing,
+  listFailedFor,
+  listProblem,
+  listedFor,
   registerBody,
   toCallbacks,
-  type CallbackRecord,
+  unavailableNote,
 } from "../model/callbacks.ts";
 import type { Intent } from "../model/client.ts";
 import { describe, type Failure } from "../model/failure.ts";
@@ -49,11 +53,14 @@ interface Props {
 
 export function CallbacksArea({ request, presetTenant }: Props) {
   const [tenants, setTenants] = useState<string[]>([]);
-  const [tenant, setTenant] = useState(presetTenant ?? "");
-  const [callbacks, setCallbacks] = useState<CallbackRecord[] | null>(null);
+  // Whose list is shown, with its rows or the failure that answered instead.
+  const [listing, setListing] = useState(() => choosing(presetTenant ?? ""));
+  const { tenant, callbacks } = listing;
   // A 503: this deployment delivers no callbacks, said in place of the table.
-  const [unavailable, setUnavailable] = useState<string | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
+  const unavailable = unavailableNote(listing);
+  // The tenant list, a register or a revoke that failed; a list failure is `listProblem`.
+  const [writeProblem, setWriteProblem] = useState<string | null>(null);
+  const problem = writeProblem ?? listProblem(listing);
   const [url, setUrl] = useState("");
   const [secret, setSecret] = useState("");
   const [sending, setSending] = useState(false);
@@ -65,7 +72,7 @@ export function CallbacksArea({ request, presetTenant }: Props) {
     void request({ type: "list-tenants" }).then((answer) => {
       if (!current) return;
       if (answer.ok) setTenants(toTenants(answer.body));
-      else setProblem(describe(answer.failure));
+      else setWriteProblem(describe(answer.failure));
     });
     return () => {
       current = false;
@@ -75,16 +82,9 @@ export function CallbacksArea({ request, presetTenant }: Props) {
   const load = useCallback(
     async (which: string) => {
       const answer = await request({ type: "list-callbacks", tenantId: which });
-      if (answer.ok) {
-        setCallbacks(toCallbacks(answer.body));
-        setUnavailable(null);
-      } else if (answer.failure.kind === "unavailable") {
-        setCallbacks(null);
-        setUnavailable(describe(answer.failure));
-      } else {
-        setCallbacks(null);
-        setProblem(describe(answer.failure));
-      }
+      // A late answer for a tenant no longer chosen is dropped by the model.
+      if (answer.ok) setListing((previous) => listedFor(previous, which, toCallbacks(answer.body)));
+      else setListing((previous) => listFailedFor(previous, which, answer.failure));
     },
     [request],
   );
@@ -94,12 +94,12 @@ export function CallbacksArea({ request, presetTenant }: Props) {
   }, [tenant, load]);
 
   const register = () => {
-    setProblem(null);
+    setWriteProblem(null);
     setSending(true);
     void request({ type: "register-callback", tenantId: tenant }, registerBody(url, secret)).then(
       (answer) => {
         setSending(false);
-        if (!answer.ok) return setProblem(describe(answer.failure));
+        if (!answer.ok) return setWriteProblem(describe(answer.failure));
         setSecret("");
         void load(tenant);
       },
@@ -107,12 +107,12 @@ export function CallbacksArea({ request, presetTenant }: Props) {
   };
 
   const revoke = (callbackId: string) => {
-    setProblem(null);
+    setWriteProblem(null);
     setSending(true);
     void request({ type: "revoke-callback", tenantId: tenant, callbackId }).then((answer) => {
       setSending(false);
       setConfirming(null);
-      if (!answer.ok) setProblem(describe(answer.failure));
+      if (!answer.ok) setWriteProblem(describe(answer.failure));
       void load(tenant);
     });
   };
@@ -130,10 +130,9 @@ export function CallbacksArea({ request, presetTenant }: Props) {
         options={tenants}
         value={tenant}
         onChange={(chosen) => {
-          setProblem(null);
+          setWriteProblem(null);
           setConfirming(null);
-          setCallbacks(null);
-          setTenant(chosen);
+          setListing(choosing(chosen));
         }}
       />
 

@@ -7,7 +7,18 @@
  */
 
 import { useEffect, useState } from "react";
-import { Banner, Button, Card, Code, HStack, Stack, Table, Text, pixel, proportional } from "@astryxdesign/core";
+import {
+  Banner,
+  Button,
+  Card,
+  Code,
+  HStack,
+  Stack,
+  Table,
+  Text,
+  pixel,
+  proportional,
+} from "@astryxdesign/core";
 
 import type { Intent } from "../model/client.ts";
 import { describe, type Failure } from "../model/failure.ts";
