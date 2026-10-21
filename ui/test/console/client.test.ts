@@ -112,7 +112,7 @@ test("an identifier with a slash in it cannot escape its path segment", () => {
   assert.ok(isAllowed(plan));
 });
 
-test("the writes are exactly the session, run, credential, and erasure actions", () => {
+test("the writes are exactly the session, run, credential, erasure, and OCR submission actions", () => {
   const written = allIntents()
     .map(requestFor)
     .filter((plan) => plan.method !== "GET")
@@ -127,5 +127,49 @@ test("the writes are exactly the session, run, credential, and erasure actions",
     "DELETE /v1/console/tenants/t/documents/b",
     "POST /v1/console/credentials",
     "POST /v1/console/session",
+    "POST /v1/console/tenants/t/ocr",
   ]);
+});
+
+test("the tenant and parser lists are GETs under the console API", () => {
+  assert.deepEqual(requestFor({ type: "list-tenants" }), {
+    method: "GET",
+    path: "/v1/console/tenants",
+    query: {},
+    hasBody: false,
+  });
+  assert.deepEqual(requestFor({ type: "list-parsers" }), {
+    method: "GET",
+    path: "/v1/console/parsers",
+    query: {},
+    hasBody: false,
+  });
+});
+
+test("submitting OCR posts to the tenant's own path, with a body", () => {
+  const plan = requestFor({ type: "submit-ocr", tenantId: "acme" });
+  assert.deepEqual(plan, {
+    method: "POST",
+    path: "/v1/console/tenants/acme/ocr",
+    query: {},
+    hasBody: true,
+  });
+});
+
+test("submitting OCR carries the parser and language only when set", () => {
+  assert.deepEqual(requestFor({ type: "submit-ocr", tenantId: "acme" }).query, {});
+  assert.deepEqual(requestFor({ type: "submit-ocr", tenantId: "acme", parser: "paddle-vl" }).query, {
+    parser: "paddle-vl",
+  });
+  assert.deepEqual(
+    requestFor({ type: "submit-ocr", tenantId: "acme", parser: "paddle-vl", language: "vi" }).query,
+    { parser: "paddle-vl", language: "vi" },
+  );
+});
+
+test("an OCR submission names its tenant in the path, encoded like any other", () => {
+  assert.equal(
+    requestFor({ type: "submit-ocr", tenantId: "a/../b" }).path,
+    "/v1/console/tenants/a%2F..%2Fb/ocr",
+  );
 });

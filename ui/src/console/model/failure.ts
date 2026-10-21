@@ -70,6 +70,10 @@ function messageOf(body: unknown): string {
     // A sentence beats a bare code: `{"error": "tenant_has_runs", "detail": "…"}`.
     const detail = (body as { detail?: unknown }).detail;
     if (typeof detail === "string") return detail;
+    // Same reasoning for a top-level `message`, as `system_overloaded` carries
+    // one beside a bare `error` code: `{"error": "system_overloaded", "message": "…"}`.
+    const topMessage = (body as { message?: unknown }).message;
+    if (typeof topMessage === "string") return topMessage;
     if (typeof wrapper === "string") return wrapper;
     // FastAPI's own 422: `{"detail": [{"loc": [...], "msg": "...", ...}]}`.
     if (Array.isArray(detail)) {
@@ -104,6 +108,37 @@ function tombstoneIn(body: unknown): { deletedAt: string; policy: string } | nul
   return { deletedAt: record.deleted_at, policy: record.policy };
 }
 
+/**
+ * The three figures `limit_exceeded` carries, or `null` when the body is not
+ * that shape — a 429 the tenant's OCR submission hit its per-tenant cap. The
+ * sentence this builds says the numbers the deployment sent, naming no
+ * mechanism of its own.
+ */
+function limitExceededIn(
+  body: unknown,
+): { observed: number; allowed: number; retryAfterSeconds: number } | null {
+  if (typeof body !== "object" || body === null) return null;
+  const record = body as {
+    error?: unknown;
+    observed?: unknown;
+    allowed?: unknown;
+    retry_after_seconds?: unknown;
+  };
+  if (record.error !== "limit_exceeded") return null;
+  if (
+    typeof record.observed !== "number" ||
+    typeof record.allowed !== "number" ||
+    typeof record.retry_after_seconds !== "number"
+  ) {
+    return null;
+  }
+  return {
+    observed: record.observed,
+    allowed: record.allowed,
+    retryAfterSeconds: record.retry_after_seconds,
+  };
+}
+
 /** Classify an answered request. Callers pass only responses that are not ok. */
 export function failureOf(response: Response): Failure {
   // An expired result is a `410` too, but the run itself is still here.
@@ -120,6 +155,18 @@ export function failureOf(response: Response): Failure {
   }
   if (response.status === 503) {
     return { kind: "unavailable", message: messageOf(response.body) };
+  }
+  if (response.status === 429) {
+    const limit = limitExceededIn(response.body);
+    if (limit !== null) {
+      return {
+        kind: "reported",
+        status: 429,
+        message:
+          `This tenant already has ${limit.observed} OCR runs waiting (limit ${limit.allowed}). ` +
+          `Try again in ${limit.retryAfterSeconds} s.`,
+      };
+    }
   }
   if (response.status === 401 && classOf(response.body) === "LoginRefused") {
     return { kind: "refused", message: messageOf(response.body) };

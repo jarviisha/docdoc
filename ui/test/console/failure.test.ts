@@ -137,3 +137,35 @@ test("an expired result is reported, not a removed run", () => {
   assert.equal(failure.kind, "reported");
   assert.equal(describe(failure), "this run's result is no longer stored");
 });
+
+test("limit exceeded reads as a sentence", () => {
+  const f = failureOf({
+    ok: false,
+    status: 429,
+    body: {
+      error: "limit_exceeded",
+      limit: "ocr_queue",
+      observed: 100,
+      allowed: 100,
+      retry_after_seconds: 30,
+    },
+  });
+  assert.equal(f.kind, "reported");
+  assert.equal(describe(f), "This tenant already has 100 OCR runs waiting (limit 100). Try again in 30 s.");
+});
+
+test("a 429 with no usable figures falls back to the bare code, not an invented sentence", () => {
+  const failure = failureOf({ ok: false, status: 429, body: { error: "limit_exceeded" } });
+  assert.equal(failure.kind, "reported");
+  assert.equal(describe(failure), "limit_exceeded");
+});
+
+test("overloaded shows the server's sentence", () => {
+  const failure = failureOf({
+    ok: false,
+    status: 503,
+    body: { error: "system_overloaded", message: "the system is overloaded; please send again later" },
+  });
+  assert.equal(failure.kind, "unavailable");
+  assert.equal(describe(failure), "the system is overloaded; please send again later");
+});
