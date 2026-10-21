@@ -12,6 +12,8 @@ import {
   canGoForward,
   currentCursor,
   autoRefreshes,
+  detailPolls,
+  showsResult,
   emptyNotice,
   failed,
   filtered,
@@ -31,6 +33,7 @@ import {
   toFailure,
   toPage,
   toRecord,
+  type RunRecord,
   type RunSummary,
 } from "../../src/console/model/runs.ts";
 
@@ -338,6 +341,16 @@ test("a detail body without finished_at reads it as null, so the timeline is a n
   assert.deepEqual(times, { waitMs: 6_000, runMs: 60_000 });
 });
 
+test("the detail view polls only while a run is still active", () => {
+  assert.equal(detailPolls(null), false);
+  for (const status of ["queued", "running"] as const) {
+    assert.equal(detailPolls({ ...SUMMARY, status } as RunRecord), true);
+  }
+  for (const status of ["succeeded", "failed", "cancelled"] as const) {
+    assert.equal(detailPolls({ ...SUMMARY, status } as RunRecord), false);
+  }
+});
+
 test("timeline treats a missing finished_at as still running", () => {
   const run = { created_at: "2026-10-20T10:00:00Z", started_at: "2026-10-20T10:00:06Z" } as never;
   assert.deepEqual(timeline(run, Date.parse("2026-10-20T10:01:06Z")), { waitMs: 6_000, runMs: 60_000 });
@@ -355,4 +368,13 @@ test("a 409 on cancel means the shown run is stale and is read again", () => {
   assert.equal(refetchAfterCancel({ kind: "reported", status: 409, message: "x" }), true);
   assert.equal(refetchAfterCancel({ kind: "reported", status: 500, message: "x" }), false);
   assert.equal(refetchAfterCancel({ kind: "transport", message: "x" }), false);
+});
+
+test("the detail view shows a result for a succeeded OCR run only", () => {
+  assert.equal(showsResult(null), false);
+  assert.equal(showsResult({ ...SUMMARY, kind: "ocr", status: "succeeded" } as RunRecord), true);
+  assert.equal(showsResult({ ...SUMMARY, kind: "extraction", status: "succeeded" } as RunRecord), false);
+  for (const status of ["queued", "running", "failed", "cancelled"] as const) {
+    assert.equal(showsResult({ ...SUMMARY, kind: "ocr", status } as RunRecord), false);
+  }
 });
