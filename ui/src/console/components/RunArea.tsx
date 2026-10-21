@@ -33,7 +33,9 @@ import { RUN_STATUSES, type Intent, type RunStatus } from "../model/client.ts";
 import { describe, type Failure } from "../model/failure.ts";
 import { toDelivery, type Delivery } from "../model/delivery.ts";
 import { duration, shortId, when } from "../model/format.ts";
+import { toResultPages, type ResultPage } from "../model/result.ts";
 import { DeliveryRecord } from "./DeliveryRecord.tsx";
+import { ResultViewer, type ImageRequest } from "./ResultViewer.tsx";
 import { usePolling } from "./usePolling.ts";
 import {
   autoRefreshes,
@@ -49,6 +51,7 @@ import {
   forward,
   initialListing,
   cancelNotice,
+  detailPolls,
   isCancellable,
   isEmpty,
   kindLabel,
@@ -60,6 +63,8 @@ import {
   toFailure,
   toPage,
   refetchAfterCancel,
+  resultNotice,
+  showsResult,
   toRecord,
   type ListingState,
   type RunFailure,
@@ -75,6 +80,8 @@ type Request = (
 
 interface Props {
   request: Request;
+  /** `request` for a page image, so the session ending is still the shell's to act on. */
+  requestImage: ImageRequest;
   onFailure: (failure: Failure) => void;
   /** The run whose detail is shown, held by the shell so the overview can open one. */
   openRunId: string | null;
@@ -112,7 +119,7 @@ function listIntent(
   };
 }
 
-export function RunArea({ request, onFailure, openRunId, onOpenRun }: Props) {
+export function RunArea({ request, requestImage, onFailure, openRunId, onOpenRun }: Props) {
   const [state, setState] = useState(initialListing);
   // What is typed, apart from what is applied: the list reloads on Enter or
   // Apply, not on every keystroke.
@@ -160,7 +167,14 @@ export function RunArea({ request, onFailure, openRunId, onOpenRun }: Props) {
   usePolling(poll, autoRefreshes(state) && openRunId === null);
 
   if (openRunId !== null) {
-    return <RunDetail runId={openRunId} request={request} onBack={() => onOpenRun(null)} />;
+    return (
+      <RunDetail
+        runId={openRunId}
+        request={request}
+        requestImage={requestImage}
+        onBack={() => onOpenRun(null)}
+      />
+    );
   }
 
   const rows = state.listing.state === "loaded" ? state.listing.page.runs : [];
@@ -316,10 +330,12 @@ export function RunArea({ request, onFailure, openRunId, onOpenRun }: Props) {
 function RunDetail({
   runId,
   request,
+  requestImage,
   onBack,
 }: {
   runId: string;
   request: Request;
+  requestImage: ImageRequest;
   onBack: () => void;
 }) {
   const [loading, setLoading] = useState(true);
@@ -333,6 +349,8 @@ function RunDetail({
   const [cancelling, setCancelling] = useState(false);
   const [cancelProblem, setCancelProblem] = useState<string | null>(null);
   const [cancelAccepted, setCancelAccepted] = useState(false);
+  const [pages, setPages] = useState<ResultPage[] | null>(null);
+  const [resultProblem, setResultProblem] = useState<ReturnType<typeof resultNotice> | null>(null);
   // Bumped to read the run again, e.g. after a `409` says the one shown is stale.
   const [reads, setReads] = useState(0);
 
@@ -344,20 +362,24 @@ function RunDetail({
     if (answer.kind !== "removed" && answer.kind !== "absent") setProblem(describe(answer));
   };
 
+  /** Show a `run-detail` answer: the run, its routing, and why it failed. */
+  const showDetail = useCallback((body: unknown) => {
+    setRun(toRecord(body));
+    // Absent, not empty: the route omits `routing` when no policy is
+    // configured rather than sending null, and a section headed "Routing"
+    // with nothing under it is a second way of saying "not configured".
+    setRouting((body as { routing?: { outcome?: string } }).routing?.outcome ?? null);
+    // Why it failed: read in the model, like the tombstone below, so the
+    // requirement has coverage (US2 scenario 7, SC-015).
+    setFailure(toFailure(body));
+  }, []);
+
   useEffect(() => {
     let current = true;
     const detail = request({ type: "run-detail", runId }).then((answer) => {
       if (!current) return;
       if (answer.ok) {
-        setRun(toRecord(answer.body));
-        const body = answer.body as { routing?: { outcome?: string } };
-        // Absent, not empty: the route omits `routing` when no policy is
-        // configured rather than sending null, and a section headed "Routing"
-        // with nothing under it is a second way of saying "not configured".
-        setRouting(body.routing?.outcome ?? null);
-        // Why it failed: read in the model, like the tombstone below, so the
-        // requirement has coverage (US2 scenario 7, SC-015).
-        setFailure(toFailure(answer.body));
+        showDetail(answer.body);
         return;
       }
       // The model classified the `410` and read the tombstone; this only shows
@@ -380,7 +402,46 @@ function RunDetail({
     return () => {
       current = false;
     };
-  }, [request, runId, reads]);
+  }, [request, runId, reads, showDetail]);
+
+  // While the run can still change, read it again. A failed re-read is left
+  // for the next one: the run shown is still the last one read — unless the
+  // run is gone (`410`), which no later read will undo, so polling stops.
+  const pollDetail = useCallback(async () => {
+    const answer = await request({ type: "run-detail", runId });
+    if (answer.ok) return showDetail(answer.body);
+    if (answer.failure.kind === "removed") {
+      setRun(null);
+      setRemoved({ deletedAt: answer.failure.deletedAt, policy: answer.failure.policy });
+    }
+  }, [request, runId, showDetail]);
+  usePolling(pollDetail, detailPolls(run));
+
+  // Read once, the first time the run is seen to have a result to show.
+  const hasResult = showsResult(run);
+  useEffect(() => {
+    if (!hasResult) return;
+    let current = true;
+    void request({ type: "run-result", runId }).then((answer) => {
+      if (!current) return;
+      if (!answer.ok) {
+        setResultProblem(resultNotice(answer.failure));
+        return;
+      }
+      try {
+        setPages(toResultPages(answer.body));
+      } catch (error) {
+        setResultProblem({
+          status: "error",
+          title: "The result could not be shown",
+          description: error instanceof Error ? error.message : "the result could not be read",
+        });
+      }
+    });
+    return () => {
+      current = false;
+    };
+  }, [request, runId, hasResult]);
 
   const download = async () => {
     const answer = await request({ type: "run-result", runId });
@@ -440,6 +501,13 @@ function RunDetail({
           <Banner status="error" title="The run could not be cancelled" description={cancelProblem} />
         )}
         {pending === null ? null : <Banner status="info" title={pending} />}
+        {resultProblem === null ? null : (
+          <Banner
+            status={resultProblem.status}
+            title={resultProblem.title}
+            description={resultProblem.description}
+          />
+        )}
       </div>
 
       {failure === null ? null : (
@@ -545,6 +613,10 @@ function RunDetail({
               <Button label="Download result" variant="secondary" onClick={() => void download()} />
             </HStack>
           ) : null}
+
+          {pages === null ? null : (
+            <ResultViewer runId={runId} pages={pages} request={requestImage} />
+          )}
         </>
       )}
 

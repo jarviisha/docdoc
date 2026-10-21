@@ -13,7 +13,7 @@
  */
 
 import type { RunStatus } from "./client.ts";
-import type { Failure } from "./failure.ts";
+import { describe, type Failure } from "./failure.ts";
 
 /** The two things a run can be. ADR-0023 §7 splits the console's cards by it. */
 export type RunKind = "ocr" | "extraction";
@@ -222,6 +222,24 @@ export function toRecord(body: unknown): RunRecord | null {
 }
 
 /**
+ * Whether the detail view keeps polling: only while a run can still change —
+ * `queued` or `running` — and never for a `null` run, which has nothing to
+ * poll for yet.
+ */
+export function detailPolls(run: RunRecord | null): boolean {
+  return run !== null && (run.status === "queued" || run.status === "running");
+}
+
+/**
+ * Whether the detail view reads and shows the run's result: a succeeded OCR
+ * run only. An extraction result has no page images to sit beside, and keeps
+ * only Download result.
+ */
+export function showsResult(run: RunRecord | null): boolean {
+  return run !== null && run.status === "succeeded" && run.kind === "ocr";
+}
+
+/**
  * What the detail view says after a cancel the server accepted. A running run
  * still reads `running` until its worker reaches a stage boundary (FR-029), so
  * an unchanged badge alone would look like the click did nothing.
@@ -235,6 +253,22 @@ export function cancelNotice(run: { status: RunStatus }): string | null {
 /** Whether a refused cancel means the run shown is stale: a `409` says it already finished. */
 export function refetchAfterCancel(failure: Failure): boolean {
   return failure.kind === "reported" && failure.status === 409;
+}
+
+/**
+ * The banner a result read that failed shows. An expired result (`410
+ * result_expired`) is the retention policy doing its job, not a fault, so it
+ * reads as information; anything else is an error.
+ */
+export function resultNotice(failure: Failure): {
+  status: "info" | "error";
+  title: string;
+  description?: string;
+} {
+  if (failure.kind === "reported" && failure.status === 410) {
+    return { status: "info", title: "This run's result is no longer stored." };
+  }
+  return { status: "error", title: "The result could not be shown", description: describe(failure) };
 }
 
 /**

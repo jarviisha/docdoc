@@ -22,7 +22,7 @@ import {
   Text,
 } from "@astryxdesign/core";
 
-import { send } from "../../transport.ts";
+import { send, sendForBlob } from "../../transport.ts";
 import { requestFor, type Intent } from "../model/client.ts";
 import { describe, failureOf, failureOfThrown, type Failure } from "../model/failure.ts";
 import {
@@ -56,6 +56,7 @@ const ADMIN: { name: Area; label: string }[] = [
 const SESSION_ENDED = "Your session ended. Sign in again.";
 
 type Answer = { ok: true; body: unknown } | { ok: false; failure: Failure };
+type ImageAnswer = { ok: true; blob: Blob } | { ok: false; failure: Failure };
 
 /** One request, classified. No side effect on the session. */
 async function call(intent: Intent, body?: BodyInit): Promise<Answer> {
@@ -63,6 +64,19 @@ async function call(intent: Intent, body?: BodyInit): Promise<Answer> {
     const response = await send(requestFor(intent), body === undefined ? {} : { body });
     if (!response.ok) return { ok: false, failure: failureOf(response) };
     return { ok: true, body: response.body };
+  } catch (error) {
+    return { ok: false, failure: failureOfThrown(error) };
+  }
+}
+
+/** `call`'s counterpart for a page image; a refusal is classified from its JSON body like any other. */
+async function callForImage(intent: Intent): Promise<ImageAnswer> {
+  try {
+    const response = await sendForBlob(requestFor(intent));
+    if (!response.ok || response.blob === null) {
+      return { ok: false, failure: failureOf({ ok: false, status: response.status, body: response.body }) };
+    }
+    return { ok: true, blob: response.blob };
   } catch (error) {
     return { ok: false, failure: failureOfThrown(error) };
   }
@@ -105,6 +119,16 @@ export function Shell() {
    */
   const request = useCallback(async (intent: Intent, body?: BodyInit) => {
     const answer = await call(intent, body);
+    if (!answer.ok && answer.failure.kind === "unauthenticated") {
+      setSession(signedOut);
+      setNotice(SESSION_ENDED);
+    }
+    return answer;
+  }, []);
+
+  /** `request` for a page image: the same session handling, bytes instead of JSON. */
+  const requestImage = useCallback(async (intent: Intent) => {
+    const answer = await callForImage(intent);
     if (!answer.ok && answer.failure.kind === "unauthenticated") {
       setSession(signedOut);
       setNotice(SESSION_ENDED);
@@ -205,6 +229,7 @@ export function Shell() {
         {area === "runs" ? (
           <RunArea
             request={request}
+            requestImage={requestImage}
             onFailure={handle}
             openRunId={openRunId}
             onOpenRun={setOpenRunId}

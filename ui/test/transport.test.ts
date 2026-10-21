@@ -7,9 +7,10 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import { send, type RequestPlan } from "../src/transport.ts";
+import { send, sendForBlob, type RequestPlan } from "../src/transport.ts";
 
 const PLAN: RequestPlan = { method: "POST", path: "/v1/console/x", query: {}, hasBody: true };
+const GET_PLAN: RequestPlan = { method: "GET", path: "/v1/console/runs/r1/pages/0", query: {}, hasBody: false };
 
 let original: typeof fetch;
 
@@ -47,4 +48,44 @@ test("a plan's headers are sent alongside the console header", async () => {
   await send({ ...PLAN, headers: { "Idempotency-Key": "k1" } }, { body: "{}" });
   assert.equal(seen[0]?.get("Idempotency-Key"), "k1");
   assert.equal(seen[0]?.get("X-Docdoc-Console"), "1");
+});
+
+test("sendForBlob carries the console header and returns the bytes on success", async () => {
+  original = globalThis.fetch;
+  const seen: Headers[] = [];
+  globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+    seen.push(new Headers(init?.headers));
+    return new Response(new Blob([new Uint8Array([1, 2, 3])]), {
+      status: 200,
+      headers: { "Content-Type": "image/png" },
+    });
+  }) as typeof fetch;
+
+  const result = await sendForBlob(GET_PLAN);
+  assert.equal(result.ok, true);
+  assert.equal(result.status, 200);
+  assert.equal(seen[0]?.get("X-Docdoc-Console"), "1");
+  assert.ok(result.blob instanceof Blob);
+  assert.equal(result.blob?.type, "image/png");
+});
+
+test("sendForBlob reports no blob when the deployment refused the request", async () => {
+  original = globalThis.fetch;
+  globalThis.fetch = (async () => new Response("not found", { status: 404 })) as typeof fetch;
+
+  const result = await sendForBlob(GET_PLAN);
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 404);
+  assert.equal(result.blob, null);
+  assert.equal(result.body, null);
+});
+
+test("sendForBlob hands a refusal's JSON body back so it can say why", async () => {
+  original = globalThis.fetch;
+  const refusal = { error: "no_page_images", detail: "extraction run" };
+  globalThis.fetch = (async () => new Response(JSON.stringify(refusal), { status: 409 })) as typeof fetch;
+
+  const result = await sendForBlob(GET_PLAN);
+  assert.equal(result.blob, null);
+  assert.deepEqual(result.body, refusal);
 });
