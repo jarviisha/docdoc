@@ -11,6 +11,7 @@
  */
 
 import type { RequestPlan } from "../../transport.ts";
+import type { RunKind } from "./runs.ts";
 
 export type { RequestPlan };
 
@@ -23,16 +24,19 @@ export type Intent =
   | { type: "who-am-i" }
   | { type: "sign-in" }
   | { type: "sign-out" }
+  | { type: "overview" }
   | {
       type: "list-runs";
       tenant?: string;
       status?: RunStatus;
+      kind?: RunKind;
       limit?: number;
       cursor?: string;
     }
   | { type: "run-detail"; runId: string }
   | { type: "run-delivery"; runId: string }
   | { type: "run-result"; runId: string }
+  | { type: "cancel-run"; runId: string }
   | { type: "list-credentials"; tenant: string }
   | { type: "issue-credential" }
   | { type: "revoke-credential"; credentialId: string }
@@ -48,6 +52,7 @@ export type Intent =
  */
 const ALLOWED = [
   /^\/v1\/console\/session$/,
+  /^\/v1\/console\/overview$/,
   /^\/v1\/console\/runs$/,
   /^\/v1\/console\/runs\/[^/]+$/,
   /^\/v1\/console\/runs\/[^/]+\/delivery$/,
@@ -73,12 +78,16 @@ export function requestFor(intent: Intent): RequestPlan {
     case "sign-out":
       return { method: "DELETE", path: "/v1/console/session", query: {}, hasBody: false };
 
+    case "overview":
+      return { method: "GET", path: "/v1/console/overview", query: {}, hasBody: false };
+
     case "list-runs": {
       // Absent rather than empty: a `status=` with nothing after it is a filter
       // nobody set, and the route would have to decide what that means.
       const query: Record<string, string> = {};
       if (intent.tenant !== undefined) query.tenant = intent.tenant;
       if (intent.status !== undefined) query.status = intent.status;
+      if (intent.kind !== undefined) query.kind = intent.kind;
       if (intent.limit !== undefined) query.limit = String(intent.limit);
       if (intent.cursor !== undefined) query.cursor = intent.cursor;
       return { method: "GET", path: "/v1/console/runs", query, hasBody: false };
@@ -104,6 +113,14 @@ export function requestFor(intent: Intent): RequestPlan {
       return {
         method: "GET",
         path: `/v1/console/runs/${encodeURIComponent(intent.runId)}/result`,
+        query: {},
+        hasBody: false,
+      };
+
+    case "cancel-run":
+      return {
+        method: "DELETE",
+        path: `/v1/console/runs/${encodeURIComponent(intent.runId)}`,
         query: {},
         hasBody: false,
       };
@@ -153,11 +170,20 @@ export function allIntents(): Intent[] {
     { type: "who-am-i" },
     { type: "sign-in" },
     { type: "sign-out" },
+    { type: "overview" },
     { type: "list-runs" },
-    { type: "list-runs", tenant: "acme", status: "failed", limit: 50, cursor: "abc" },
+    {
+      type: "list-runs",
+      tenant: "acme",
+      status: "failed",
+      kind: "ocr",
+      limit: 50,
+      cursor: "abc",
+    },
     { type: "run-detail", runId: "r" },
     { type: "run-delivery", runId: "r" },
     { type: "run-result", runId: "r" },
+    { type: "cancel-run", runId: "r" },
     { type: "list-credentials", tenant: "acme" },
     { type: "issue-credential" },
     { type: "revoke-credential", credentialId: "c" },

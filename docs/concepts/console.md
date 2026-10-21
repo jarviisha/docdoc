@@ -67,13 +67,18 @@ refused with `403`; the page sends it on every request.
 **A refused sign-in** says so in one sentence, the same for a wrong username, a wrong password, a
 locked account, and a disabled one. Five failures in a row lock an account for five minutes.
 
-**Sign out** in the header ends the session on the server, not only in the page.
+**Sign out**, at the bottom of the sidebar, ends the session on the server, not only in the page.
 
 ## What it does
 
+The page is a left sidebar — **Overview**, **Runs**, then under "Admin" **Credentials** and
+**Erasure**, with the username and **Sign out** at the bottom — and the chosen area on the right.
+It opens on the Overview.
+
 | Area | What it offers | Where the write goes |
 |---|---|---|
-| **Runs** | Every tenant's runs, newest first, with a Tenant column; filterable by tenant and by the five states, paged by cursor, and refreshable. One run's state, timings, routing outcome where a policy is configured, and delivery record, and **Download result** for a succeeded run. A failed run names the stage it failed at and the error's class. | nothing — reads only |
+| **Overview** | Four cards — Queued, Running, Failed (last hour), Done (last hour) — each a total split "OCR n · Extraction n"; Failed turns red when it is above zero. Then **Recent failures** (kind, tenant, reason, finished) and **Running now** (kind, tenant, parser, run time), ten each; a run id opens that run under Runs. | nothing — reads only |
+| **Runs** | Every tenant's runs, newest first; filterable by tenant, kind (OCR or extraction) and the five states, paged by cursor, and refreshable. Columns: state, kind (an OCR run names its parser), tenant, submitted, duration, run. One run's timeline (submitted → started, with the wait → finished, with the run time), tenant, parser and language for OCR, worker, attempts, error class, failure reason, routing outcome where a policy is configured, and delivery record; **Download result** for a succeeded run, and **Cancel run** — confirmed inline first — for a queued or running one. A failed run names the stage it failed at and the error's class. | `DELETE /v1/console/runs/{id}` (cancel) |
 | **Credentials** | Issue, list (per tenant, on **Show**), revoke — each revocation confirmed in its row first. The issued key is shown exactly once. Console-issued keys are tenant keys; the administrative scope is minted only by `docdoc credential issue --admin`. | `POST`/`DELETE /v1/console/credentials` |
 | **Erasure** | One tenant, or one document within a named tenant, per confirmation. | `DELETE /v1/console/tenants/{id}`, `DELETE /v1/console/tenants/{id}/documents/{blob}` |
 
@@ -84,16 +89,29 @@ cookie; the rest of `/v1` answers only to a Bearer key, and neither opens the ot
 | Route | What it does |
 |---|---|
 | `POST`/`GET`/`DELETE /v1/console/session` | sign in, who am I, sign out |
-| `GET /v1/console/runs` | every tenant's runs, or one with `?tenant=` |
+| `GET /v1/console/overview` | the overview's counts, recent failures, and running runs |
+| `GET /v1/console/runs` | every tenant's runs, or one with `?tenant=`; `?kind=ocr\|extraction` narrows by kind |
 | `GET /v1/console/runs/{id}`, `…/delivery`, `…/result` | one run, its delivery record, its result |
+| `DELETE /v1/console/runs/{id}` | cancel a queued or running run |
 | `GET`/`POST /v1/console/credentials`, `DELETE …/{id}` | list (`?tenant=`), issue, revoke |
 | `DELETE /v1/console/tenants/{id}`, `…/documents/{blob}` | erase a tenant, or one document |
 
-Every signed-in operator sees all three areas; there is one level of access (ADR-0023 §2). Every
-destructive action is logged with `actor="console:<username>"`.
+Every signed-in operator sees every area; there is one level of access (ADR-0023 §2). Every
+destructive action — a cancellation included — is logged with `actor="console:<username>"`.
+
+**The Overview and the run list refresh themselves every 5 seconds** while the tab is visible.
+A hidden tab stops polling, and becoming visible again refreshes at once rather than waiting out the
+interval. The Overview shows when it last refreshed; a refresh that fails keeps the last good answer
+on screen and shows the failure above it. The run list refreshes only on its first page: paging on
+stops it, so rows do not move under the reader, and returning to page one resumes it.
+
+**The counts' window.** Queued and Running count every such run, however old. Failed and Done count
+only runs that reached that state in the last 60 minutes; Done is succeeded runs only, and a
+cancelled run lands in no card.
 
 **A failed run says why.** The stage it failed at and the typed error's class name, as the
-deployment recorded them — `extract` / `ModelProviderError`. Never a message: the route sends none,
+deployment recorded them — `extract` / `ModelProviderError` — and, where the error carries one, its
+reason in fixed copy ("The OCR host timed out" for `timeout`). Never a message: the route sends none,
 because a provider's text may quote the document it choked on. A run that failed before any stage ran
 says that instead of naming one, which is a real distinction — an unresolvable schema fails a run
 with nothing having executed.
