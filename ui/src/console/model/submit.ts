@@ -10,6 +10,7 @@
  */
 
 import type { Intent } from "./client.ts";
+import { joined } from "./format.ts";
 
 /** What a parser can read out of a page: text, its geometry, tables, handwriting. */
 export interface ParserCapabilities {
@@ -115,6 +116,14 @@ export const PARSERS_POLL = false;
 
 /** The parsers screen's own refresh action, since it does not poll. */
 export const parsersRefreshLabel = "Refresh";
+
+/** The parsers screen's capability column: the true ones, in the contract's order. */
+export function capabilityList(capabilities: ParserCapabilities): string {
+  const names = (Object.keys(capabilities) as (keyof ParserCapabilities)[]).filter(
+    (name) => capabilities[name],
+  );
+  return joined(names);
+}
 
 /** The parser value that means "let the deployment choose". */
 export const AUTOMATIC = "";

@@ -71,8 +71,8 @@ locked account, and a disabled one. Five failures in a row lock an account for f
 
 ## What it does
 
-The page is a left sidebar — **Overview**, **Runs**, **Submit OCR**, then under "Admin" **Credentials** and
-**Erasure**, with the username and **Sign out** at the bottom — and the chosen area on the right.
+The page is a left sidebar — **Overview**, **Runs**, **Submit OCR**, **Parsers**, then under "Admin"
+**Tenants**, **Credentials**, **Callbacks** and **Erasure**, with the username and **Sign out** at the bottom — and the chosen area on the right.
 It opens on the Overview.
 
 | Area | What it offers | Where the write goes |
@@ -80,7 +80,10 @@ It opens on the Overview.
 | **Overview** | Four cards — Queued, Running, Failed (last hour), Done (last hour) — each a total split "OCR n · Extraction n"; Failed turns red when it is above zero. Then **Recent failures** (kind, tenant, reason, finished) and **Running now** (kind, tenant, parser, run time), ten each; a run id opens that run under Runs. | nothing — reads only |
 | **Runs** | Every tenant's runs, newest first; filterable by tenant, kind (OCR or extraction) and the five states, paged by cursor, and refreshable. Columns: state, kind (an OCR run names its parser), tenant, submitted, duration, run. One run's timeline (submitted → started, with the wait → finished, with the run time), tenant, parser and language for OCR, worker, attempts, error class, failure reason, routing outcome where a policy is configured, and delivery record; **Download result** for a succeeded run, and **Cancel run** — confirmed inline first — for a queued or running one. A failed run names the stage it failed at and the error's class. | `DELETE /v1/console/runs/{id}` (cancel) |
 | **Credentials** | Issue, list (per tenant, on **Show**), revoke — each revocation confirmed in its row first. The issued key is shown exactly once. Console-issued keys are tenant keys; the administrative scope is minted only by `docdoc credential issue --admin`. | `POST`/`DELETE /v1/console/credentials` |
+| **Parsers** | Every parser the deployment reports: status, media types, languages, capabilities. Refreshed on **Refresh** only. | nothing — reads only |
+| **Tenants** | Every tenant, each with jumps into its Runs, Credentials, Callbacks and Erasure. | nothing — reads only |
 | **Erasure** | One tenant, or one document within a named tenant, per confirmation. | `DELETE /v1/console/tenants/{id}`, `DELETE /v1/console/tenants/{id}/documents/{blob}` |
+| **Callbacks** | One tenant's delivery endpoints: list (URL, created), register (URL and secret), revoke — each revocation confirmed in its row first. | `POST`/`DELETE /v1/console/tenants/{id}/callbacks` |
 
 **The route family.** The console speaks only `/v1/console/*`, which answers only to the session
 cookie; the rest of `/v1` answers only to a Bearer key, and neither opens the other's doors
@@ -137,6 +140,23 @@ health check is marked "not responding"), a language (the parser's default, or o
 languages; changing the parser resets it), and the document. A refusal is shown in the form; an
 accepted document opens that run under Runs. If the tenant or parser list fails to load, the form
 says so and stays usable with whatever did load.
+
+**Parsers** lists what `GET /v1/console/parsers` reports, one row per parser: a status badge —
+healthy, not responding, unavailable (with the deployment's reason beneath it), or unknown when the
+deployment reported no health — its media types, its languages, and the capabilities it has. It
+never polls, because a health reading probes every parser live; press **Refresh** for a new one.
+
+**Tenants** lists every tenant `GET /v1/console/tenants` knows. Each row offers **Runs**,
+**Credentials**, **Callbacks** and **Erase…**, which open that area already scoped to the tenant: Runs
+filtered to it, Credentials listing its keys, Callbacks with it chosen, and Erasure with its
+identifier filled in. The erasure is not armed by the jump: **Continue** still asks for the
+identifier typed again. Choosing an area from the sidebar opens it unscoped.
+
+**Callbacks** registers and revokes a tenant's delivery endpoints. Choose a tenant, and its active
+callbacks are listed, newest first. Register one with a URL and a secret: the secret is typed once,
+sent once, and cleared after a successful register — no list, answer or log line carries it back.
+A refused destination says why in the form. When the deployment delivers no callbacks at all, the
+area says so in place of the list and offers no form.
 
 **An erasure requires the target typed back**, character for character, and is unavailable until it
 matches. There is no bulk erasure and no multi-select: one named target per confirmation. The counts

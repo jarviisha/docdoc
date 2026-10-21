@@ -25,7 +25,7 @@ import {
 import { send, sendForBlob } from "../../transport.ts";
 import { requestFor, type Intent } from "../model/client.ts";
 import { describe, failureOf, failureOfThrown, type Failure } from "../model/failure.ts";
-import type { Area } from "../model/navigation.ts";
+import type { Area, Jump } from "../model/navigation.ts";
 import {
   afterSignOut,
   emptySession,
@@ -40,15 +40,21 @@ import { CredentialArea } from "./CredentialArea.tsx";
 import { EraseArea } from "./EraseArea.tsx";
 import { OverviewArea } from "./OverviewArea.tsx";
 import { SubmitArea } from "./SubmitArea.tsx";
+import { ParsersArea } from "./ParsersArea.tsx";
+import { TenantsArea } from "./TenantsArea.tsx";
+import { CallbacksArea } from "./CallbacksArea.tsx";
 
 const MONITORING: { name: Area; label: string }[] = [
   { name: "overview", label: "Overview" },
   { name: "runs", label: "Runs" },
   { name: "submit", label: "Submit OCR" },
+  { name: "parsers", label: "Parsers" },
 ];
 
 const ADMIN: { name: Area; label: string }[] = [
+  { name: "tenants", label: "Tenants" },
   { name: "credentials", label: "Credentials" },
+  { name: "callbacks", label: "Callbacks" },
   { name: "erasure", label: "Erasure" },
 ];
 
@@ -93,6 +99,14 @@ export function Shell() {
   const [unavailable, setUnavailable] = useState<string | null>(null);
   const [area, setArea] = useState<Area>("overview");
   const [openRunId, setOpenRunId] = useState<string | null>(null);
+  // The tenant a jump from Tenants opened the area for; a sidebar visit has none.
+  const [presetTenant, setPresetTenant] = useState<string | null>(null);
+
+  const jump = useCallback(({ area: to, tenant }: Jump) => {
+    setOpenRunId(null);
+    setPresetTenant(tenant);
+    setArea(to);
+  }, []);
 
   // Ask once whether a session already exists: a reload keeps the cookie.
   useEffect(() => {
@@ -146,6 +160,7 @@ export function Shell() {
       setNotice(null);
       setArea("overview");
       setOpenRunId(null);
+      setPresetTenant(null);
       setSession((s) => signedIn(s, usernameOf(answer.body)));
     } else {
       setNotice(describe(answer.failure));
@@ -183,10 +198,7 @@ export function Shell() {
       key={name}
       label={label}
       isSelected={area === name}
-      onClick={() => {
-        setArea(name);
-        setOpenRunId(null);
-      }}
+      onClick={() => jump({ area: name, tenant: null })}
     />
   );
 
@@ -232,6 +244,7 @@ export function Shell() {
             onFailure={handle}
             openRunId={openRunId}
             onOpenRun={setOpenRunId}
+            presetTenant={presetTenant}
           />
         ) : null}
         {area === "submit" ? (
@@ -243,8 +256,15 @@ export function Shell() {
             }}
           />
         ) : null}
-        {area === "credentials" ? <CredentialArea request={request} onFailure={handle} /> : null}
-        {area === "erasure" ? <EraseArea request={request} onFailure={handle} /> : null}
+        {area === "parsers" ? <ParsersArea request={request} /> : null}
+        {area === "tenants" ? <TenantsArea request={request} onJump={jump} /> : null}
+        {area === "credentials" ? (
+          <CredentialArea request={request} onFailure={handle} presetTenant={presetTenant} />
+        ) : null}
+        {area === "callbacks" ? <CallbacksArea request={request} presetTenant={presetTenant} /> : null}
+        {area === "erasure" ? (
+          <EraseArea request={request} onFailure={handle} presetTenant={presetTenant} />
+        ) : null}
       </Stack>
     </AppShell>
   );

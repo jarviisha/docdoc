@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { duration, shortDigest, shortId, when } from "../../src/console/model/format.ts";
+import { duration, joined, shortDigest, shortId, when } from "../../src/console/model/format.ts";
 
 test("a timestamp loses its microseconds and keeps its second", () => {
   const rendered = when("2026-09-11T09:17:00.253693+00:00");
@@ -59,4 +59,9 @@ test("a duration reads in the coarsest unit that still tells rows apart", () => 
   assert.equal(duration(14000), "14 s");
   assert.equal(duration(185000), "3 min 5 s");
   assert.equal(duration(7440000), "2 h 4 min");
+});
+
+test("a list column is comma-joined, and an empty one is a dash rather than blank", () => {
+  assert.equal(joined(["image/png", "application/pdf"]), "image/png, application/pdf");
+  assert.equal(joined([]), "—");
 });

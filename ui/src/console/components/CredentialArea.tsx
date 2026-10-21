@@ -7,7 +7,7 @@
  * cannot be undone and the button sits beside every active key.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Badge,
   Banner,
@@ -29,13 +29,13 @@ import {
   SELF_REVOCATION_WARNING,
   acknowledged,
   disclosureFrom,
-  initialCredentials,
   issueBody,
   isActive,
   listedFor,
   listFailedFor,
   listingNote,
   needsWarning,
+  presetCredentials,
   scopesOf,
   showing,
   toRecords,
@@ -54,16 +54,18 @@ type Request = (
 interface Props {
   request: Request;
   onFailure: (failure: Failure) => void;
+  /** The tenant a jump from Tenants opened this area for: preset, then shown. */
+  presetTenant: string | null;
 }
 
-export function CredentialArea({ request, onFailure }: Props) {
-  const [state, setState] = useState(initialCredentials);
-  const [tenant, setTenant] = useState("");
+export function CredentialArea({ request, onFailure, presetTenant }: Props) {
+  const [state, setState] = useState(() => presetCredentials(presetTenant));
+  const [tenant, setTenant] = useState(presetTenant ?? "");
   const [label, setLabel] = useState("");
 
   // Which tenant's credentials to list: typed, then shown on Show — the route
   // requires one, and listing on every keystroke asks about tenants nobody meant.
-  const [listing, setListing] = useState("");
+  const [listing, setListing] = useState(presetTenant ?? "");
   const shown = state.shown;
   // The row awaiting "Revoke this key?", by credential id.
   const [confirming, setConfirming] = useState<string | null>(null);
@@ -80,6 +82,12 @@ export function CredentialArea({ request, onFailure }: Props) {
     },
     [request, onFailure],
   );
+
+  // A jump's own Show: the listing is already pending for the preset tenant.
+  // `load` ignores "", so a sidebar visit asks for nothing.
+  useEffect(() => {
+    void load(presetTenant ?? "");
+  }, [load, presetTenant]);
 
   return (
     <Stack direction="vertical" gap={3}>

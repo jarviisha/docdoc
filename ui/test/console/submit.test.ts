@@ -11,6 +11,7 @@ import {
   AUTOMATIC,
   PARSERS_POLL,
   canSubmit,
+  capabilityList,
   chooseFile,
   languageChoices,
   parserChoices,
@@ -205,4 +206,12 @@ test("a newly chosen file gets a new key; the same file keeps its own", () => {
 test("a submission carries its file's key as Idempotency-Key", () => {
   const form = { tenant: "acme", parser: "", language: "", file: new File(["a"], "a.png"), key: "k1", sending: false };
   assert.deepEqual(requestFor(submitIntent(form)).headers, { "Idempotency-Key": "k1" });
+});
+
+test("capabilities read as the true ones, comma-joined, or a dash when none", () => {
+  assert.equal(
+    capabilityList({ text: true, geometry: true, tables: false, handwriting: true }),
+    "text, geometry, handwriting",
+  );
+  assert.equal(capabilityList(NO_CAPABILITIES), "—");
 });
