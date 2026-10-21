@@ -1,0 +1,123 @@
+"""Page angles kept beside the cached parse, found again on a cache hit (020)."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import pytest
+from pydantic import ValidationError
+
+from docdoc.artifacts import FileArtifactStore
+from docdoc.ingest.parsers.paddlex import OcrEndpoint
+from docdoc.kernel import Document
+from docdoc.pipeline import StageStatus, parse_only
+from docdoc.pipeline.orientation import (
+    ORIENTATION_FORMAT_VERSION,
+    PageOrientation,
+    orientation_id_for,
+    read_orientation,
+)
+from tests.support.ocr import CountingPost, paddle_registry, response
+
+IMAGE = (Path(__file__).parent.parent / "fixtures" / "image" / "sample_page.png").read_bytes()
+
+
+class TurnedPost(CountingPost):
+    """A PaddleX answer whose page it straightened by `raw_angle` (its own label)."""
+
+    def __init__(self, raw_angle: int) -> None:
+        super().__init__()
+        self.raw_angle = raw_angle
+
+    def __call__(self, endpoint: OcrEndpoint, body: dict[str, Any], timeout_s: float) -> Any:
+        self.calls += 1
+        answer = response(self.text)
+        answer["result"]["ocrResults"][0]["prunedResult"]["doc_preprocessor_res"] = {
+            "angle": self.raw_angle
+        }
+        return answer
+
+
+def test_orientation_id_is_derived_and_distinct() -> None:
+    document_id = "sha256:" + "ab" * 32
+    derived = orientation_id_for(document_id)
+    assert derived.startswith("sha256:")
+    assert len(derived) == len(document_id)
+    assert derived != document_id
+    assert derived == orientation_id_for(document_id)
+    assert derived != orientation_id_for("sha256:" + "cd" * 32)
+
+
+def test_only_quarter_turns_are_valid() -> None:
+    assert PageOrientation(angles=(0, 90, 180, 270)).angles == (0, 90, 180, 270)
+    with pytest.raises(ValidationError):
+        PageOrientation(angles=(45,))
+    with pytest.raises(ValidationError):
+        PageOrientation(angles=(90,), extra=1)  # type: ignore[call-arg]
+
+
+def test_angles_survive_a_cache_hit(tmp_path: Path) -> None:
+    store = FileArtifactStore(tmp_path)
+    post = TurnedPost(raw_angle=270)
+    registry = paddle_registry(post)
+
+    first, _ = parse_only(IMAGE, store=store, parser="paddle", registry=registry)
+    assert read_orientation(store, first.id) == (90,)
+
+    second, outcome = parse_only(IMAGE, store=store, parser="paddle", registry=registry)
+
+    assert outcome.status is StageStatus.REUSED
+    assert post.calls == 1
+    assert second.id == first.id
+    assert read_orientation(store, second.id) == (90,)
+
+
+def test_the_sidecar_leaves_the_document_unchanged(tmp_path: Path) -> None:
+    # A half turn: unlike a quarter turn it leaves the page size alone, so the
+    # two parses differ only in whether angles were reported and stored.
+    turned, _ = parse_only(
+        IMAGE,
+        store=FileArtifactStore(tmp_path / "a"),
+        parser="paddle",
+        registry=paddle_registry(TurnedPost(raw_angle=180)),
+    )
+    plain, _ = parse_only(
+        IMAGE, store=None, parser="paddle", registry=paddle_registry(CountingPost())
+    )
+    assert turned.model_dump_json() == plain.model_dump_json()
+
+
+def test_a_parse_without_a_sidecar_reports_unknown(tmp_path: Path) -> None:
+    store = FileArtifactStore(tmp_path)
+    post = CountingPost()
+    document, _ = parse_only(IMAGE, store=store, parser="paddle", registry=paddle_registry(post))
+    # A Document filed before this change: present, with no sidecar beside it.
+    assert store.delete(orientation_id_for(document.id))
+
+    again, outcome = parse_only(IMAGE, store=store, parser="paddle", registry=paddle_registry(post))
+
+    assert outcome.status is StageStatus.REUSED
+    assert post.calls == 1, "a missing sidecar is 'unknown', never a reason to re-parse"
+    assert store.get(again.id, model=Document, artifact_format_version=1) is not None
+    assert read_orientation(store, again.id) is None
+
+
+def test_an_unreadable_store_reports_unknown() -> None:
+    class Broken:
+        def get(self, *args: Any, **kwargs: Any) -> Any:
+            raise OSError("disk gone")
+
+    assert read_orientation(Broken(), "sha256:" + "ab" * 32) is None  # type: ignore[arg-type]
+
+
+def test_the_sidecar_is_a_parse_stage_artifact_of_its_document(tmp_path: Path) -> None:
+    store = FileArtifactStore(tmp_path)
+    document, _ = parse_only(
+        IMAGE, store=store, parser="paddle", registry=paddle_registry(TurnedPost(raw_angle=180))
+    )
+    envelope = store.envelope(orientation_id_for(document.id))
+    assert envelope is not None
+    assert envelope.stage == "parse"
+    assert envelope.input_artifact_id == document.id
+    assert envelope.artifact_format_version == ORIENTATION_FORMAT_VERSION

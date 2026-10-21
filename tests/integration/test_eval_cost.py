@@ -99,7 +99,7 @@ def test_the_parser_is_not_merely_fast_the_second_time(
 
     # From `sys.modules`, not by `import docdoc.ingest.parse` — the package
     # re-exports a *function* of that name, which shadows the module and would
-    # hand back something with no `execute_plan` on it. The same collision
+    # hand back something with no `execute_plan_oriented` on it. The same collision
     # `pipeline/runner.py`'s docstring warns about for `docdoc.pipeline.run`.
     import sys
 
@@ -108,7 +108,7 @@ def test_the_parser_is_not_merely_fast_the_second_time(
     def refuse(_: Any) -> Any:
         raise AssertionError("the parser ran on a document whose parse was stored")
 
-    monkeypatch.setattr(ingest_parse, "execute_plan", refuse)
+    monkeypatch.setattr(ingest_parse, "execute_plan_oriented", refuse)
 
     second = run(path.read_bytes(), schema=schema, registry=registry, adapter=adapter, store=store)
     assert second.outcome_for(Stage.PARSE).status.value == "reused"  # type: ignore[union-attr]

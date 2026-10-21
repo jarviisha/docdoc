@@ -526,7 +526,7 @@ def console_router() -> APIRouter:
         if refusal is not None:
             return refusal
         if run.kind is RunKind.OCR:
-            return _ocr_document(request, owner, run)
+            return _ocr_document(request, owner, run, with_angles=True)
         if run.status is not RunStatus.SUCCEEDED or run.processing_id is None:
             return JSONResponse(
                 status_code=409,

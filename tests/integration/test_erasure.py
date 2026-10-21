@@ -26,6 +26,7 @@ from tests.fixtures.run_queue import InMemoryRunQueue
 
 from docdoc.artifacts.blobs import BlobStore
 from docdoc.artifacts.store import FileArtifactStore
+from docdoc.pipeline.orientation import orientation_id_for
 from docdoc.runs import retention
 from docdoc.runs.errors import RetentionError
 from docdoc.runs.model import Run, RunStatus, StageOutcomeRecord
@@ -269,6 +270,47 @@ class TestErasingOneDocument:
         assert _exists(tmp_path, "acme", kept_artifact)
         assert queue.get(kept.run_id, "acme") is not None
         assert blobs.get(kept_blob) is not None
+
+    def test_erasure_removes_the_orientation_sidecar(self, tmp_path: pathlib.Path) -> None:
+        """020. A parse's page angles go with it, and only with it."""
+        queue = InMemoryRunQueue()
+        blobs = BlobStore(tmp_path, tenant_id="acme")
+        doomed_blob = blobs.put(b"a turned scan")
+        kept_blob = blobs.put(b"another turned scan")
+        doomed_artifact, kept_artifact = "sha256:" + "4a" * 32, "sha256:" + "5a" * 32
+        for artifact in (doomed_artifact, kept_artifact):
+            _seed_artifact(tmp_path, "acme", artifact)
+            _seed_artifact(tmp_path, "acme", orientation_id_for(artifact))
+        _run(queue, tenant_id="acme", blob_id=doomed_blob, artifact_id=doomed_artifact)
+        _run(queue, tenant_id="acme", blob_id=kept_blob, artifact_id=kept_artifact)
+
+        report = retention.erase(
+            queue, _stores(tmp_path, "acme"), tenant_id="acme", now=NOW, blob_id=doomed_blob
+        )
+
+        assert report.artifacts == 2
+        assert not _exists(tmp_path, "acme", doomed_artifact)
+        assert not _exists(tmp_path, "acme", orientation_id_for(doomed_artifact))
+        assert _exists(tmp_path, "acme", kept_artifact)
+        assert _exists(tmp_path, "acme", orientation_id_for(kept_artifact))
+
+    def test_a_shared_parse_keeps_its_sidecar(self, tmp_path: pathlib.Path) -> None:
+        """The difference holds for sidecars: a surviving run still names the parse."""
+        queue = InMemoryRunQueue()
+        blobs = BlobStore(tmp_path, tenant_id="acme")
+        doomed_blob, kept_blob = blobs.put(b"copy one"), blobs.put(b"copy two")
+        shared = "sha256:" + "6a" * 32
+        _seed_artifact(tmp_path, "acme", shared)
+        _seed_artifact(tmp_path, "acme", orientation_id_for(shared))
+        _run(queue, tenant_id="acme", blob_id=doomed_blob, artifact_id=shared)
+        _run(queue, tenant_id="acme", blob_id=kept_blob, artifact_id=shared)
+
+        retention.erase(
+            queue, _stores(tmp_path, "acme"), tenant_id="acme", now=NOW, blob_id=doomed_blob
+        )
+
+        assert _exists(tmp_path, "acme", shared)
+        assert _exists(tmp_path, "acme", orientation_id_for(shared))
 
     def test_the_policy_names_the_document(self, tmp_path: pathlib.Path) -> None:
         queue = InMemoryRunQueue()
