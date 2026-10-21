@@ -77,4 +77,15 @@ test("sendForBlob reports no blob when the deployment refused the request", asyn
   assert.equal(result.ok, false);
   assert.equal(result.status, 404);
   assert.equal(result.blob, null);
+  assert.equal(result.body, null);
+});
+
+test("sendForBlob hands a refusal's JSON body back so it can say why", async () => {
+  original = globalThis.fetch;
+  const refusal = { error: "no_page_images", detail: "extraction run" };
+  globalThis.fetch = (async () => new Response(JSON.stringify(refusal), { status: 409 })) as typeof fetch;
+
+  const result = await sendForBlob(GET_PLAN);
+  assert.equal(result.blob, null);
+  assert.deepEqual(result.body, refusal);
 });

@@ -69,15 +69,12 @@ async function call(intent: Intent, body?: BodyInit): Promise<Answer> {
   }
 }
 
-/**
- * `call`'s counterpart for a page image. A refusal carries no body here —
- * `sendForBlob` never reads one — so it is classified by status alone.
- */
+/** `call`'s counterpart for a page image; a refusal is classified from its JSON body like any other. */
 async function callForImage(intent: Intent): Promise<ImageAnswer> {
   try {
     const response = await sendForBlob(requestFor(intent));
     if (!response.ok || response.blob === null) {
-      return { ok: false, failure: failureOf({ ok: false, status: response.status, body: null }) };
+      return { ok: false, failure: failureOf({ ok: false, status: response.status, body: response.body }) };
     }
     return { ok: true, blob: response.blob };
   } catch (error) {
