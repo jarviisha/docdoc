@@ -1,4 +1,5 @@
 import { fileURLToPath, URL } from "node:url";
+import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 
 // One build, one config. There were two until the viewer was removed
@@ -7,11 +8,11 @@ import { defineConfig } from "vite";
 // viewer's credential-gated mount — where it would never load, because a
 // browser's top-level navigation carries no bearer token.
 //
-// Astryx ships pre-built CSS and JS, so there is no StyleX plugin, no Babel
-// step, and no PostCSS configuration here (specs/008 research R2). If a future
-// change needs one, that is a finding about Astryx rather than a gap in this
-// file.
+// Tailwind runs as a Vite plugin, so there is still no PostCSS configuration
+// here (ADR-0024).
 export default defineConfig({
+  plugins: [tailwindcss()],
+
   // Served from the same origin as the API, under this prefix, so no
   // cross-origin configuration exists anywhere (specs/008 FR-034).
   base: "/console/",
@@ -36,6 +37,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@console": fileURLToPath(new URL("./src/console", import.meta.url)),
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
   },
 

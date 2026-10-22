@@ -18,6 +18,14 @@ Verified 2026-08-25 against the registry, not copied from documentation.
 | `@types/react-dom` (dev) | ^19.2.5 | MIT | yes |
 | `typescript` (dev) | ^7.0.2 | Apache-2.0 | yes |
 | `vite` (dev) | ^8.2.2 | MIT | yes |
+| `radix-ui` | ^1.8.1 | MIT | yes |
+| `class-variance-authority` | ^0.7.1 | Apache-2.0 | yes |
+| `clsx` | ^2.1.1 | MIT | yes |
+| `tailwind-merge` | ^3.7.0 | MIT | yes |
+| `lucide-react` | ^1.61.0 | ISC | yes |
+| `tw-animate-css` | ^1.4.0 | MIT | yes |
+| `tailwindcss` (dev) | ^4.3.3 | MIT | yes |
+| `@tailwindcss/vite` (dev) | ^4.3.3 | MIT | yes |
 
 ## On Astryx's `postinstall`
 
