@@ -109,14 +109,14 @@ def test_no_subcommand_offers_a_credential_flag() -> None:
 
 def test_parse_runs_with_authentication_configured() -> None:
     """A real command doing real work, which `--help` cannot prove."""
-    pytest.importorskip("pymupdf")
+    pytest.importorskip("pypdfium2")
 
     assert main(["parse", FIXTURE, "--json"]) == 0
 
 
 def test_extract_runs_with_authentication_configured(tmp_path: Path) -> None:
     """The command that reaches a model adapter and a store."""
-    pytest.importorskip("pymupdf")
+    pytest.importorskip("pypdfium2")
 
     code = main(["extract", FIXTURE, "--schema", SCHEMA, "--store", str(tmp_path), "--json"])
 
@@ -145,7 +145,7 @@ def test_the_library_entry_point_takes_no_credential() -> None:
 
 def test_the_library_runs_a_document_with_authentication_configured() -> None:
     """And it actually runs, because a signature check cannot see a global."""
-    pytest.importorskip("pymupdf")
+    pytest.importorskip("pypdfium2")
     from docdoc.extraction import SchemaRegistry
     from docdoc.extraction.adapters.echo import EchoAdapter
     from docdoc.pipeline import run

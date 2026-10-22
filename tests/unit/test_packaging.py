@@ -195,7 +195,7 @@ def test_the_wheel_carries_no_provider_sdk_and_no_web_framework(
     config = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
     required = " ".join(config["project"]["dependencies"]).lower()
 
-    for forbidden in ("fastapi", "uvicorn", "pymupdf", "google-genai", "azure"):
+    for forbidden in ("fastapi", "uvicorn", "pymupdf", "pypdfium2", "google-genai", "azure"):
         assert forbidden not in required, (
             f"{forbidden} is a hard dependency of the base install; it belongs in "
             "an optional extra (FR-053, SC-013)"

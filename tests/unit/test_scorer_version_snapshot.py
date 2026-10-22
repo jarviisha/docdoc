@@ -40,7 +40,7 @@ EXPECTED_SCORER_VERSION = "1.0.0"
 #: the same commit as a deliberate version bump, and never on its own -- a
 #: snapshot refreshed without a bump is the accident this file exists to catch,
 #: silenced.
-EXPECTED_REPORT_ID = "sha256:c3b4bc8e686aaa25a710067857b6aff7dc90f20c679057cba229b992d88d2b8e"
+EXPECTED_REPORT_ID = "sha256:04693bb51423e8503db9d8426037544192de06f39b187b38449286230ab76bd4"
 
 #: The numbers a reader would quote. Pinned beside the id because an id is opaque:
 #: when this fails, these say *what* moved, which is the first thing anyone asks.

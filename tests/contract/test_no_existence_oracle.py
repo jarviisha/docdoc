@@ -33,7 +33,7 @@ import pytest
 from tests.support import KEYS_FILE, bearer
 
 pytest.importorskip("fastapi", reason="the HTTP interface lives behind the docdoc[api] extra")
-pytest.importorskip("pymupdf", reason="a real parse is what is being counted")
+pytest.importorskip("pypdfium2", reason="a real parse is what is being counted")
 
 from fastapi.testclient import TestClient
 

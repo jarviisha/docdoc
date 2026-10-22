@@ -1029,7 +1029,10 @@ class PaddleXParser:
                 # from pypdfium2 5.0 (hence the `ocr` extra's floor) -- a defensive
                 # fallback rather than trusting every install to honour it.
                 code = getattr(error, "err_code", None)
-                reason = "encrypted" if code == pdfium.raw.FPDF_ERR_PASSWORD else "corrupt"
+                # PDFium's last error can be stale after a failed load (see
+                # pdf_text._open); only a file declaring /Encrypt is encrypted.
+                encrypted = code == pdfium.raw.FPDF_ERR_PASSWORD and b"/Encrypt" in source.data
+                reason = "encrypted" if encrypted else "corrupt"
                 raise UnsupportedDocumentError(
                     f"endpoint {self.id!r} was sent a PDF that could not be opened",
                     reason=reason,

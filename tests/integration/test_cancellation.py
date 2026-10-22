@@ -30,7 +30,7 @@ from typing import Any
 import pytest
 from tests.fixtures.run_queue import InMemoryRunQueue
 
-pytest.importorskip("pymupdf", reason="a real four-stage run is what is being cancelled")
+pytest.importorskip("pypdfium2", reason="a real four-stage run is what is being cancelled")
 
 from docdoc.artifacts import BlobStore, FileArtifactStore
 from docdoc.extraction import SchemaRegistry

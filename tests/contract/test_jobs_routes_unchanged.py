@@ -60,7 +60,7 @@ def client(tmp_path: Path) -> TestClient:
 
 def _produce(client: TestClient) -> str:
     """Run a document synchronously and return its `processing_id`."""
-    pytest.importorskip("pymupdf")
+    pytest.importorskip("pypdfium2")
     blob_id = client.post("/v1/documents", content=FIXTURE.read_bytes()).json()["blob_id"]
     result = client.post(f"/v1/documents/{blob_id}/extract", params={"schema": SCHEMA})
     assert result.status_code == 200, result.text

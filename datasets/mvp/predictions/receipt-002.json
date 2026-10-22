@@ -48,7 +48,7 @@
       }
     },
     "provenance": {
-      "document_id": "sha256:5205f6241bef96a96bebd936aa1c3add4a540f6193d17492ab366fc59185fa77",
+      "document_id": "sha256:bdb37935f278ea17aea95e2bddf70094f06a0a968e493c647b30627f7d1fb64a",
       "schema_identity": "receipt@1",
       "schema_hash": "sha256:b88cd54bba4ffd11e1c6b4076d31cc03af0e69667fc668e7fb5c53a123420347",
       "prompt_hash": "sha256:a0757647faa172933fa00bcd135492d8e549643689a98bc1b5ebafdeb8b79f56",
@@ -75,7 +75,7 @@
         "reasoning_tokens": null
       }
     },
-    "artifact_id": "sha256:cffff4639fb080e8057feac0a3831b54a0e22fb2d833298f34afc54863c5949e",
+    "artifact_id": "sha256:b073fd15d51ae37fb9d6e2f8e7ff887f419ce85d28e74dbce92ef5389a645dfd",
     "discarded": []
   },
   "grounding": {
@@ -96,18 +96,18 @@
             0,
             [
               0.10084033613445378,
-              0.08096793711610191,
+              0.08266624758758907,
               0.19327731092436976,
-              0.09891805399625149
+              0.09793822952234264
             ]
           ],
           [
             0,
             [
               0.198416804465927,
-              0.08096793711610191,
-              0.24772269625623686,
-              0.09891805399625149
+              0.08266624758758907,
+              0.24772267061121322,
+              0.09793822952234264
             ]
           ]
         ],
@@ -130,18 +130,18 @@
             0,
             [
               0.10084033613445378,
-              0.13797506300683826,
-              0.1953848446116728,
-              0.1559251798869878
+              0.13967337347832542,
+              0.19538487025669643,
+              0.15494535541307897
             ]
           ],
           [
             0,
             [
-              0.20052433815323004,
-              0.13797506300683826,
-              0.24677978002724527,
-              0.1559251798869878
+              0.2005243766207655,
+              0.13967337347832542,
+              0.2467798056722689,
+              0.15494535541307897
             ]
           ]
         ],
@@ -163,10 +163,10 @@
           [
             0,
             [
-              0.3351864598378414,
-              0.17597981360066248,
-              0.3711629146287421,
-              0.19392993048081206
+              0.335186485482865,
+              0.17767812407214964,
+              0.37116294027376573,
+              0.1929501060069032
             ]
           ]
         ],
@@ -196,10 +196,10 @@
           [
             0,
             [
-              0.1676352749351694,
-              0.21398456419448672,
-              0.20668064405938155,
-              0.23193468107463627
+              0.1676352877576812,
+              0.21568287466597388,
+              0.20668068252691701,
+              0.23095485660072743
             ]
           ]
         ],
@@ -215,11 +215,11 @@
       "truncated": 0
     },
     "provenance": {
-      "document_id": "sha256:5205f6241bef96a96bebd936aa1c3add4a540f6193d17492ab366fc59185fa77",
-      "extraction_artifact_id": "sha256:cffff4639fb080e8057feac0a3831b54a0e22fb2d833298f34afc54863c5949e",
+      "document_id": "sha256:bdb37935f278ea17aea95e2bddf70094f06a0a968e493c647b30627f7d1fb64a",
+      "extraction_artifact_id": "sha256:b073fd15d51ae37fb9d6e2f8e7ff887f419ce85d28e74dbce92ef5389a645dfd",
       "grounding_version": "v1",
       "match_view_version": "v1",
-      "view_id": "sha256:becf0a9de41defc567e752edd1559b7076e00b39a9d5d145bf288310b43fe6c0",
+      "view_id": "sha256:19fd4df0a2ae58e954b2829f236b722c6f4e1e0613a493aacb91560f7d1bfc80",
       "options": {
         "threshold": 0.9,
         "candidate_budget": 1500
@@ -227,7 +227,7 @@
       "grounder_id": "deterministic-grounder",
       "grounder_version": "1.0.0"
     },
-    "artifact_id": "sha256:6cafa1d151f9232ca81a3e60b42e5bfa1988c297cb91f5a50b39bad0902ec338"
+    "artifact_id": "sha256:722350e83baf2b84031b333fb71390a16c070d9a2c87184879412d8da817e415"
   },
   "validation": {
     "verdict": "valid",
@@ -280,9 +280,9 @@
       "infos": 0
     },
     "provenance": {
-      "document_id": "sha256:5205f6241bef96a96bebd936aa1c3add4a540f6193d17492ab366fc59185fa77",
-      "extraction_artifact_id": "sha256:cffff4639fb080e8057feac0a3831b54a0e22fb2d833298f34afc54863c5949e",
-      "grounding_artifact_id": "sha256:6cafa1d151f9232ca81a3e60b42e5bfa1988c297cb91f5a50b39bad0902ec338",
+      "document_id": "sha256:bdb37935f278ea17aea95e2bddf70094f06a0a968e493c647b30627f7d1fb64a",
+      "extraction_artifact_id": "sha256:b073fd15d51ae37fb9d6e2f8e7ff887f419ce85d28e74dbce92ef5389a645dfd",
+      "grounding_artifact_id": "sha256:722350e83baf2b84031b333fb71390a16c070d9a2c87184879412d8da817e415",
       "schema_identity": "receipt@1",
       "schema_hash": "sha256:b88cd54bba4ffd11e1c6b4076d31cc03af0e69667fc668e7fb5c53a123420347",
       "rule_vocabulary_version": "rule_vocabulary@1",
@@ -299,10 +299,10 @@
       "validator_id": "deterministic-validator",
       "validator_version": "1.1.0"
     },
-    "artifact_id": "sha256:95eb8ff35fcd7a1d603f487768b92516820fd71607d280da6eaf652e1daf05c3"
+    "artifact_id": "sha256:2398e17d32247c7dbcb8c0227d98c9b73a24c943a0cb60691c80de9b8224905f"
   },
   "failed_stage": null,
   "failure_reason": null,
   "parser_id": "pdf-text",
-  "parser_version": "1.0.0+pymupdf-1.28.2"
+  "parser_version": "2.0.0+pypdfium2-5.14.0"
 }

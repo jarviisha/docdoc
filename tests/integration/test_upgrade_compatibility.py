@@ -60,7 +60,7 @@ def _seed_milestone_8_store(root: Path) -> tuple[str, str, set[Path]]:
     would seed whatever the new code happens to do rather than what the old code
     did.
     """
-    pytest.importorskip("pymupdf")
+    pytest.importorskip("pypdfium2")
     data = FIXTURE.read_bytes()
 
     blobs = BlobStore(root)

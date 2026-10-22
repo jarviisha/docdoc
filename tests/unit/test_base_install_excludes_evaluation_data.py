@@ -121,7 +121,7 @@ def test_importing_the_scorer_pulls_in_no_provider_sdk() -> None:
         "import sys; sys.path.insert(0, 'src');"
         "import docdoc.evaluation;"
         "bad=[m for m in sys.modules if m.split('.')[0] in "
-        "{'google','openai','anthropic','azure','boto3','httpx','requests','pymupdf','fitz'}];"
+        "{'google','openai','anthropic','azure','boto3','httpx','requests','pymupdf','fitz','pypdfium2'}];"
         "print(sorted(bad))"
     )
     result = subprocess.run(

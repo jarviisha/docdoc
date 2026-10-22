@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-pytest.importorskip("pymupdf")
+pytest.importorskip("pypdfium2")
 pytest.importorskip("pypdfium2")
 
 from docdoc.ingest import parse

@@ -162,7 +162,7 @@ def test_another_tenants_blob_cannot_be_extracted_from(client: TestClient) -> No
     A 404 on the metadata route with a working extract route would be isolation
     that covers the door and not the window.
     """
-    pytest.importorskip("pymupdf")
+    pytest.importorskip("pypdfium2")
     blob_id = _submit(client, "acme")
 
     theirs = _extract(client, "globex", blob_id)
@@ -203,7 +203,7 @@ def test_another_tenants_result_is_indistinguishable_from_one_never_produced(
     derive the *same* `processing_id` — that is ADR-0003 working, not a bug. What
     must not follow is that either can read the other's copy.
     """
-    pytest.importorskip("pymupdf")
+    pytest.importorskip("pypdfium2")
     blob_id = _submit(client, "acme")
     produced = _extract(client, "acme", blob_id)
     assert produced.status_code == 200, produced.text
@@ -231,7 +231,7 @@ def test_two_tenants_derive_the_same_identity_and_that_is_correct(
     every isolation test above and break the property redelivery depends on: that
     a re-executed run recomputes the same terminal identity.
     """
-    pytest.importorskip("pymupdf")
+    pytest.importorskip("pypdfium2")
     acme = _extract(client, "acme", _submit(client, "acme"))
     globex = _extract(client, "globex", _submit(client, "globex"))
 

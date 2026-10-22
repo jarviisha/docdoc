@@ -1,7 +1,7 @@
 """T052 — performance targets for the ingest layer.
 
 Marked ``perf`` and deselectable. The figures in plan.md were written as targets
-before PyMuPDF was installed; this file is what replaces them with measurements.
+before a PDF library was installed; this file is what replaces them with measurements.
 
     uv run pytest -m perf
 
@@ -12,10 +12,11 @@ nothing.
 
 from __future__ import annotations
 
+import io
 import time
 from pathlib import Path
 
-import pymupdf
+import pypdfium2
 import pytest
 
 from docdoc.ingest import parse
@@ -29,13 +30,17 @@ FIXTURES = Path(__file__).parent.parent / "fixtures"
 
 def _many_pages(count: int) -> bytes:
     """A synthetic text-bearing document of ``count`` pages."""
-    with pymupdf.open(FIXTURES / "pdf" / "digital_invoice.pdf") as one:
-        out = pymupdf.open()
+    one = pypdfium2.PdfDocument(FIXTURES / "pdf" / "digital_invoice.pdf")
+    out = pypdfium2.PdfDocument.new()
+    try:
         while len(out) < count:
-            out.insert_pdf(one)
-        data: bytes = out.tobytes(garbage=4, deflate=True)
+            out.import_pages(one)
+        buffer = io.BytesIO()
+        out.save(buffer)
+    finally:
         out.close()
-    return data
+        one.close()
+    return buffer.getvalue()
 
 
 def timed(work: object, repeats: int = 3) -> float:

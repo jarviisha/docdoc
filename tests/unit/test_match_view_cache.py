@@ -234,7 +234,7 @@ def test_the_cache_is_not_reached_when_the_grounding_artifact_is_reused() -> Non
     import tempfile
     from pathlib import Path
 
-    pytest.importorskip("pymupdf")
+    pytest.importorskip("pypdfium2")
 
     from docdoc.artifacts import FileArtifactStore
     from docdoc.extraction import SchemaRegistry

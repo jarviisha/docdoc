@@ -144,7 +144,7 @@ def test_the_kernel_example_runs() -> None:
 
 def test_the_ingest_example_runs() -> None:
     """Milestone 2's example, which had the same gap and the same fix."""
-    pytest.importorskip("pymupdf", reason="parse_pdf.py needs the docdoc[pdf] extra")
+    pytest.importorskip("pypdfium2", reason="parse_pdf.py needs the docdoc[pdf] extra")
     fixture = pathlib.Path("tests/fixtures/pdf/digital_invoice.pdf")
     assert fixture.is_file(), "the committed fixture the documented command names"
     _assert_ran(_run(str(EXAMPLES / "parse_pdf.py"), str(fixture)), "parse_pdf.py")

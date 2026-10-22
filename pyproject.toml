@@ -38,11 +38,10 @@ dependencies = ["pydantic>=2.0", "rapidfuzz>=3.0"]
 # Principle IV: "the base install MUST NOT force installation of any provider
 # SDK or OCR engine").
 #
-# NOTE ON LICENSING: PyMuPDF is AGPL-3.0 (or a paid commercial licence), while
-# docdoc is Apache-2.0. Keeping it behind an opt-in extra means docdoc's own
-# distribution stays Apache-2.0 and the AGPL obligation is incurred only by a
-# user who installs `docdoc[pdf]`. See specs/002-ingest-parser-layer/research.md R1.
-pdf = ["pymupdf>=1.24"]
+# The native PDF text path. pypdfium2 is Apache-2.0/BSD-3, so unlike the PyMuPDF
+# it replaced (ADR-0025) it carries no licence caveat and ships in the default
+# image. The 5.0 floor is the same as `ocr`'s: `PdfiumError.err_code`.
+pdf = ["pypdfium2>=5.0"]
 azure = ["azure-ai-documentintelligence>=1.0"]
 # The one LLM adapter of the MVP (specs/003 research.md R1). The unified
 # `google-genai` SDK, not the legacy `google-generativeai`. Apache-2.0, so no
@@ -748,8 +747,7 @@ forbidden_modules = [
     "pypdfium2",
 ]
 ignore_imports = [
-    "docdoc.ingest.parsers.pdf_text -> pymupdf",
-    "docdoc.ingest.parsers.pdf_text -> fitz",
+    "docdoc.ingest.parsers.pdf_text -> pypdfium2",
     "docdoc.ingest.parsers.azure_di -> azure",
     "docdoc.ingest.parsers.azure_di -> httpx",
     "docdoc.ingest.parsers.gcv -> google",

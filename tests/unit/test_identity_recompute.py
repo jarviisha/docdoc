@@ -24,7 +24,7 @@ from docdoc.pipeline import PipelineResult, Stage, run
 
 # SC-013: every test here runs the pipeline over a real PDF through the module
 # fixture, so the whole module skips on a base install with no native reader.
-pytest.importorskip("pymupdf")
+pytest.importorskip("pypdfium2")
 
 FIXTURE = Path("tests/fixtures/pdf/digital_invoice.pdf")
 SCHEMA = "invoice@1"

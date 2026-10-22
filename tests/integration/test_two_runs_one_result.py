@@ -26,7 +26,7 @@ from typing import Any
 
 import pytest
 
-pytest.importorskip("pymupdf", reason="a real parse is what is being counted")
+pytest.importorskip("pypdfium2", reason="a real parse is what is being counted")
 
 from tests.fixtures.run_queue import InMemoryRunQueue
 

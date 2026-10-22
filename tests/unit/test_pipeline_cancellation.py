@@ -32,7 +32,7 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("pymupdf", reason="a real four-stage run is what is being cancelled")
+pytest.importorskip("pypdfium2", reason="a real four-stage run is what is being cancelled")
 
 from docdoc.artifacts import FileArtifactStore
 from docdoc.extraction import SchemaRegistry

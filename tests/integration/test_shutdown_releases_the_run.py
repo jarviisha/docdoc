@@ -34,7 +34,7 @@ from typing import Any
 
 import pytest
 
-pytest.importorskip("pymupdf", reason="a real multi-stage run is what gets interrupted")
+pytest.importorskip("pypdfium2", reason="a real multi-stage run is what gets interrupted")
 
 from tests.fixtures.run_queue import InMemoryRunQueue
 

@@ -18,9 +18,7 @@ import pytest
 # *collection* on a base install — and SC-013 requires the offline suite to pass
 # there. `importorskip` is the mechanism that makes the requirement structural
 # rather than a convention every new test file has to remember.
-pytest.importorskip("pymupdf")
-
-import pymupdf
+pytest.importorskip("pypdfium2")
 
 from docdoc.ingest.errors import UnsupportedDocumentError
 from docdoc.ingest.options import TransportSettings
@@ -103,14 +101,13 @@ class TestBlankAndMixedPages:
 class TestReadingOrder:
     """T030 — the R5 assumption, resolved by measurement.
 
-    The plan hoped PyMuPDF's sorted extraction would deliver multi-column
-    reading order. It does not: it sorts by vertical position across the whole
-    page, so a two-column page comes out interleaved line by line. The adapter
-    therefore uses unsorted (content-stream) order and declares exactly that.
+    The adapter claims no layout reconstruction: it delivers content-stream
+    order and declares exactly that. (Under PyMuPDF, its sorted mode was measured
+    to interleave the two columns, which is why sorting was never adopted.)
     """
 
     def test_the_declared_order_names_what_is_actually_delivered(self) -> None:
-        assert PdfTextParser().reading_order == "pymupdf-stream@1"
+        assert PdfTextParser().reading_order == "pdfium-stream@1"
 
     def test_columns_are_not_interleaved(self) -> None:
         document = parse("two_column.pdf")
@@ -121,30 +118,14 @@ class TestReadingOrder:
 
         assert end_of_left < start_of_right, "the second column leaked into the first"
 
-    def test_sorted_extraction_would_interleave_them(self) -> None:
-        """Why ``sort=True`` is not used — asserted, not just asserted in a comment.
-
-        If a future PyMuPDF changes this, the test fails and the choice gets
-        revisited deliberately rather than being inherited forever.
-        """
-        with pymupdf.open(FIXTURES / "two_column.pdf") as pdf:
-            words = [word[4] for word in pdf[0].get_text("words", sort=True)]
-
-        first_column_words = words.index("first")
-        second_column_words = words.index("second")
-
-        assert second_column_words - first_column_words < 10, (
-            "sorted mode no longer interleaves columns; revisit the declared reading order"
-        )
-
 
 class TestRotation:
     """T031 — the R8 assumption, resolved by measurement.
 
-    PyMuPDF reports word boxes in *unrotated* page space while ``page.rect`` is
-    the page as displayed. Normalizing one against the other would put every box
-    in the wrong place on a rotated page, so the adapter maps each box through
-    ``page.rotation_matrix`` first.
+    The adapter reads text with the page rotation reset to 0, so boxes arrive
+    in *unrotated* page space while the page is displayed rotated. Normalizing
+    one against the other would put every box in the wrong place on a rotated
+    page, so the adapter maps each box through ``displayed_box`` first.
     """
 
     def test_page_dimensions_are_the_displayed_ones(self) -> None:
@@ -184,6 +165,17 @@ class TestFailures:
 
         assert caught.value.reason == "encrypted"
         assert caught.value.blob_id is not None
+
+    def test_an_unopenable_pdf_after_an_encrypted_one_is_not_called_encrypted(self) -> None:
+        # PDFium leaves its last error in place when some loads fail, so a
+        # zero-page file opened right after a password-protected one reports
+        # the password error. Only a file that declares /Encrypt is encrypted.
+        with pytest.raises(UnsupportedDocumentError):
+            parse("encrypted.pdf")
+        with pytest.raises(UnsupportedDocumentError) as caught:
+            parse("zero_pages.pdf")
+
+        assert caught.value.reason == "corrupt"
 
     def test_truncated_pdf_is_refused_explicitly(self) -> None:
         source = source_for("digital_invoice.pdf")
@@ -231,3 +223,29 @@ class TestDeterminismAndIdentity:
         impatient = parser.parse(source, {}, TransportSettings(deadline_s=1.0, max_attempts=1))
 
         assert default.id == impatient.id
+
+
+class TestThreadSafety:
+    def test_parsing_holds_the_pdfium_lock(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # PDFium is not thread-safe, and the API parses from its threadpool
+        # while the console renders pages: every parse must hold the shared lock.
+        import threading
+
+        from docdoc.ingest.parsers import pdf_text
+
+        entered = 0
+        real = threading.RLock()
+
+        class Recorder:
+            def __enter__(self) -> None:
+                nonlocal entered
+                entered += 1
+                real.acquire()
+
+            def __exit__(self, *exc: object) -> None:
+                real.release()
+
+        monkeypatch.setattr(pdf_text, "PDFIUM_LOCK", Recorder())
+        parse("digital_invoice.pdf")
+
+        assert entered >= 1

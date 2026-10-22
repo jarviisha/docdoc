@@ -147,7 +147,7 @@ def test_the_synchronous_routes_still_work_which_is_why_strictness_is_a_choice(
     means the trade-off is visible to whoever next proposes to make readiness
     per-capability — the answer is that no orchestrator's probe can express it.
     """
-    pytest.importorskip("pymupdf")
+    pytest.importorskip("pypdfium2")
     blob_id = _blob(stopped_database)
 
     result = stopped_database.post(f"/v1/documents/{blob_id}/extract", params={"schema": SCHEMA})
