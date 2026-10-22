@@ -46,8 +46,10 @@ runs. Unstract moved its own frontend from Ant Design to shadcn/ui and Tailwind 
 
 ## Consequences
 
-- **Selects are native `<select>`.** Radix Select refuses an empty-string value, and the model's
-  "Parser default" language is exactly that.
+- **Selects are Radix `Select`, styled like the inputs.** A native `<select>`'s option list is
+  drawn by the operating system and cannot match. Radix refuses `""` as an item value, and the
+  model's "Parser default" language is exactly that, so `SelectField` swaps `""` for a private
+  token on the way in and back on the way out.
 - **The sidebar is hand-built.** shadcn's `sidebar` component writes `document.cookie`, which
   `check-no-persistence.mjs` forbids.
 - **The generated `Alert` has no `role="alert"`.** The console wraps every Alert in its own

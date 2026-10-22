@@ -3,14 +3,14 @@
  *
  * Each pairs a `<Label htmlFor>` with its control through `useId`, so every
  * field carries an accessible name (FR-045a) without each area wiring ids by
- * hand. Selects are native: Radix Select refuses an empty-string value, and
- * `languageChoices` offers "Parser default" as exactly that (ADR-0024).
+ * hand.
  */
 
 import { useEffect, useId, useState } from "react";
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 interface TextFieldProps {
@@ -62,34 +62,39 @@ interface SelectFieldProps {
 /** Smaller than the body text: a label names the box, it is not the content. */
 const LABEL_CLASS = "text-xs font-normal text-slate-600";
 
-/** The same look as `Input`, on a native `<select>`. */
-const SELECT_CLASS =
-  "h-[26px] w-full min-w-0 rounded-md border border-input bg-white px-1.5 text-[13px] outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50";
+/**
+ * Radix Select refuses `""` as an item value, and "Parser default" is exactly
+ * that. It is swapped for this token on the way in and back on the way out, so
+ * the model never sees it.
+ */
+const EMPTY = "__docdoc_empty__";
+const toItem = (value: string) => (value === "" ? EMPTY : value);
+const fromItem = (value: string) => (value === EMPTY ? "" : value);
 
 export function SelectField({ label, value, onChange, options, placeholder, className }: SelectFieldProps) {
   const id = useId();
   const choices = options.map((option) =>
     typeof option === "string" ? { value: option, label: option, disabled: false } : option,
   );
-  const showPlaceholder =
-    placeholder !== undefined && value === "" && !choices.some((choice) => choice.value === "");
+  // `""` with no `""` choice is "nothing chosen yet": Radix shows the placeholder.
+  const hasEmpty = choices.some((choice) => choice.value === "");
   return (
     <div className={cn("flex flex-col gap-1", className)}>
       <Label htmlFor={id} className={LABEL_CLASS}>
         {label}
       </Label>
-      <select id={id} className={SELECT_CLASS} value={value} onChange={(event) => onChange(event.target.value)}>
-        {showPlaceholder ? (
-          <option value="" disabled>
-            {placeholder}
-          </option>
-        ) : null}
-        {choices.map((choice) => (
-          <option key={choice.value} value={choice.value} disabled={choice.disabled === true}>
-            {choice.label}
-          </option>
-        ))}
-      </select>
+      <Select value={value === "" && !hasEmpty ? "" : toItem(value)} onValueChange={(next) => onChange(fromItem(next))}>
+        <SelectTrigger id={id} className="w-full">
+          <SelectValue placeholder={placeholder} />
+        </SelectTrigger>
+        <SelectContent position="popper" className="w-(--radix-select-trigger-width)">
+          {choices.map((choice) => (
+            <SelectItem key={choice.value} value={toItem(choice.value)} disabled={choice.disabled === true}>
+              {choice.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }
