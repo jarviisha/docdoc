@@ -3,8 +3,7 @@
 #   docker compose -f packaging/docker/compose.yml up -d
 #   docker compose -f packaging/docker/compose.yml run --rm api docdoc migrate
 #
-# Two commands. There is no Makefile and no task runner: this repository has
-# neither, and quickstart.md names both lines.
+# Two commands, which quickstart.md names; `make up` runs both.
 #
 # Constitution v1.6.0 admits `worker` to this composition. The sentence used to
 # read "only api, postgres, and object storage", which excluded a process type
