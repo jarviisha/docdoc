@@ -9,17 +9,11 @@
  * worth breaking to reclaim a shorter prefix.
  */
 
-// Astryx ships pre-built CSS. Three sheets, in this order: the reset first, the
-// component styles on top of it, the theme's custom properties last, because the
-// theme overrides tokens the other two declare.
-import "@astryxdesign/core/reset.css";
-import "@astryxdesign/core/astryx.css";
-import "@astryxdesign/theme-neutral/theme.css";
+// Tailwind's preflight, the theme tokens, and the indigo accent (ADR-0024).
+import "../styles.css";
 
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { Theme } from "@astryxdesign/core/theme";
-import { neutralTheme } from "@astryxdesign/theme-neutral/built";
 
 import { Shell } from "./components/Shell.tsx";
 
@@ -31,11 +25,6 @@ if (container === null) {
 
 createRoot(container).render(
   <StrictMode>
-    {/* The sheets above declare the tokens; `Theme` is what applies the body
-        font and text colour to the tree. Without it everything fell back to the
-        browser's serif default. */}
-    <Theme theme={neutralTheme}>
-      <Shell />
-    </Theme>
+    <Shell />
   </StrictMode>,
 );

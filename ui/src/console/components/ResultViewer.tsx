@@ -10,7 +10,10 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Banner, Button, Card, HStack, Stack, Text } from "@astryxdesign/core";
+
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 
 import type { Intent } from "../model/client.ts";
 import { describe, type Failure } from "../model/failure.ts";
@@ -119,40 +122,39 @@ export function ResultViewer({ runId, pages, request }: Props) {
     });
 
   return (
-    <Stack direction="vertical" gap={2}>
-      <HStack gap={2} align="center">
-        <Button
-          label="Previous"
-          variant="secondary"
-          isDisabled={previous === null}
-          onClick={() => previous !== null && turnTo(previous)}
-        />
-        <Text size="sm">
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <Button variant="outline" disabled={previous === null} onClick={() => previous !== null && turnTo(previous)}>
+          Previous
+        </Button>
+        <p className="text-sm">
           Page {shown + 1} of {pages.length}
-        </Text>
-        <Button
-          label="Next"
-          variant="secondary"
-          isDisabled={next === null}
-          onClick={() => next !== null && turnTo(next)}
-        />
-      </HStack>
+        </p>
+        <Button variant="outline" disabled={next === null} onClick={() => next !== null && turnTo(next)}>
+          Next
+        </Button>
+      </div>
 
-      <HStack gap={3} align="start">
+      <div className="flex items-start gap-3">
         <div style={{ flex: "0 1 55%", maxWidth: "55%", minWidth: 0 }}>
           <div role="status" aria-live="polite">
-            {turned ? <Banner status="warning" title={TURNED_NOTICE} /> : null}
-            {image !== undefined && "failure" in image ? (
-              <Banner
-                status="error"
-                title="The page image could not be read"
-                description={describe(image.failure)}
-                endContent={
-                  <Button label="Retry" variant="secondary" onClick={() => retry(page.index)} />
-                }
-              />
+            {turned ? (
+              <Alert variant="warning">
+                <AlertTitle>{TURNED_NOTICE}</AlertTitle>
+              </Alert>
             ) : null}
-            {image === undefined ? <Text size="sm">Loading…</Text> : null}
+            {image !== undefined && "failure" in image ? (
+              <Alert variant="destructive">
+                <AlertTitle>The page image could not be read</AlertTitle>
+                <AlertDescription>
+                  {describe(image.failure)}
+                  <Button variant="outline" size="sm" onClick={() => retry(page.index)}>
+                    Retry
+                  </Button>
+                </AlertDescription>
+              </Alert>
+            ) : null}
+            {image === undefined ? <p className="text-sm">Loading…</p> : null}
           </div>
           {image !== undefined && "url" in image ? (
             <div
@@ -160,7 +162,7 @@ export function ResultViewer({ runId, pages, request }: Props) {
                 position: "relative",
                 width: "100%",
                 aspectRatio: `${frame.boxWidth} / ${frame.boxHeight}`,
-                border: "1px solid var(--color-border-emphasized)",
+                border: "1px solid #a3a3a3",
               }}
             >
               {/* The unturned image, centred and turned into the box. */}
@@ -198,9 +200,9 @@ export function ResultViewer({ runId, pages, request }: Props) {
                       y={line.bbox[1]}
                       width={line.bbox[2] - line.bbox[0]}
                       height={line.bbox[3] - line.bbox[1]}
-                      fill={hovered === line.index ? "var(--color-icon-blue)" : "transparent"}
+                      fill={hovered === line.index ? "#2563eb" : "transparent"}
                       fillOpacity={hovered === line.index ? 0.25 : 1}
-                      stroke="var(--color-icon-blue)"
+                      stroke="#2563eb"
                       strokeWidth={hovered === line.index ? 2.5 : 1.5}
                       vectorEffect="non-scaling-stroke"
                       onMouseEnter={() => hoverFromBox(line.index)}
@@ -214,7 +216,7 @@ export function ResultViewer({ runId, pages, request }: Props) {
         </div>
 
         <div style={{ flex: "1 1 0", minWidth: 0 }}>
-          <Card>
+          <Card className="py-0">
             <ul
               ref={list}
               aria-label={`Recognised text, page ${shown + 1}`}
@@ -243,28 +245,24 @@ export function ResultViewer({ runId, pages, request }: Props) {
                   style={{
                     padding: "6px 8px",
                     borderRadius: 4,
-                    background: hovered === line.index ? "var(--color-background-blue)" : "transparent",
+                    background: hovered === line.index ? "#dbeafe" : "transparent",
                   }}
                 >
-                  <HStack gap={2} align="center" justify="between">
-                    <Text size="sm">{line.text}</Text>
-                    <Text size="sm" color="secondary">
-                      {confidenceLabel(line.confidence)}
-                    </Text>
-                  </HStack>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm">{line.text}</span>
+                    <span className="text-sm text-muted-foreground">{confidenceLabel(line.confidence)}</span>
+                  </div>
                 </li>
               ))}
               {page.lines.length === 0 ? (
                 <li style={{ padding: "6px 8px" }}>
-                  <Text size="sm" color="secondary">
-                    No text was recognised on this page.
-                  </Text>
+                  <span className="text-sm text-muted-foreground">No text was recognised on this page.</span>
                 </li>
               ) : null}
             </ul>
           </Card>
         </div>
-      </HStack>
-    </Stack>
+      </div>
+    </div>
   );
 }

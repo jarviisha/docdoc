@@ -63,6 +63,21 @@ describe("the view-model boundary guard", () => {
     assert.match(result.stderr, /rendering concern/);
     rmSync(PROBE_MODEL, { force: true });
   });
+  it("fails when the model imports a shadcn primitive", () => {
+    plant(PROBE_MODEL, 'import { Button } from "@/components/ui/button";\nexport const y = Button;\n');
+    const result = run("check-model-boundary.mjs");
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /rendering concern/);
+    rmSync(PROBE_MODEL, { force: true });
+  });
+
+  it("fails when the model imports radix-ui", () => {
+    plant(PROBE_MODEL, 'import { Dialog } from "radix-ui";\nexport const y = Dialog;\n');
+    const result = run("check-model-boundary.mjs");
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /rendering concern/);
+    rmSync(PROBE_MODEL, { force: true });
+  });
 });
 
 describe("the network boundary", () => {

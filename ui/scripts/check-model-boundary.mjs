@@ -24,7 +24,7 @@ const ROOT = fileURLToPath(new URL("..", import.meta.url));
 // console has more to lose than the viewer did, since it sends a credential and
 // a second `fetch` site is a second place that can fail to.
 const MODEL_DIRS = [join(ROOT, "src", "console", "model")];
-const COMPONENT_DIRS = [join(ROOT, "src", "console", "components")];
+const COMPONENT_DIRS = [join(ROOT, "src", "console", "components"), join(ROOT, "src", "components")];
 
 /**
  * Components reach the network through `src/transport.ts` or not at all.
@@ -47,7 +47,10 @@ const NETWORK_CALLS = [
 const FORBIDDEN = [
   { match: /^react(\/|$)/, why: "React is a rendering concern" },
   { match: /^react-dom(\/|$)/, why: "React DOM is a rendering concern" },
-  { match: /^@astryxdesign\//, why: "component libraries are a rendering concern" },
+  { match: /^@\/components\//, why: "component libraries are a rendering concern" },
+  { match: /^radix-ui(\/|$)/, why: "component libraries are a rendering concern" },
+  { match: /^@radix-ui\//, why: "component libraries are a rendering concern" },
+  { match: /^lucide-react(\/|$)/, why: "component libraries are a rendering concern" },
   { match: /^@components\//, why: "the model must not depend on components" },
   { match: /(^|\/)\.\.\/components\//, why: "the model must not depend on components" },
 ];

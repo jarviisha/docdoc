@@ -19,6 +19,14 @@ the work.
   the editing scan that would have was `check-readonly.mjs`'s, scoped to the
   viewer's tree and deleted with it (ADR-0020 §3).
 
+**Primitives.** `src/components/ui/` holds the shadcn/ui components these
+files are built from (ADR-0024). They are generated into the repo and owned
+here, not a versioned dependency. The model-boundary guard (its network rule)
+and the no-persistence guard scan them; the a11y guard does not, because a
+primitive takes its accessible name from the call site in this directory.
+`fields.tsx`, `DataTable.tsx` and `ConfirmDialog.tsx` are the console's own
+wrappers over them.
+
 **No decision belongs here.** If a component is deciding something — when a
 credential expires, whether an erasure is armed, which page comes next — the
 decision belongs in `../model/`, where a test can reach it.

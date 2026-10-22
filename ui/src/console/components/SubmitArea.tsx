@@ -10,7 +10,9 @@
  */
 
 import { useEffect, useState } from "react";
-import { Banner, Button, Card, FileInput, HStack, Selector, Stack, Text } from "@astryxdesign/core";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 
 import type { Intent } from "../model/client.ts";
 import { describe, type Failure } from "../model/failure.ts";
@@ -27,6 +29,7 @@ import {
   type ParserOption,
   type SubmitForm,
 } from "../model/submit.ts";
+import { FileField, SelectField } from "./fields.tsx";
 
 type Request = (
   intent: Intent,
@@ -82,22 +85,24 @@ export function SubmitArea({ request, onOpenRun }: Props) {
   };
 
   return (
-    <Card width="100%" maxWidth={520} padding={6}>
-      <Stack direction="vertical" gap={4}>
-        <Text size="lg" weight="bold">
-          Submit OCR
-        </Text>
-
+    <Card className="w-full max-w-[520px]">
+      <CardContent className="flex flex-col gap-4">
         <div role="status" aria-live="polite">
           {loadProblem === null ? null : (
-            <Banner status="error" title="Tenants or parsers could not be loaded" description={loadProblem} />
+            <Alert variant="destructive">
+              <AlertTitle>Tenants or parsers could not be loaded</AlertTitle>
+              <AlertDescription>{loadProblem}</AlertDescription>
+            </Alert>
           )}
           {problem === null ? null : (
-            <Banner status="error" title="The document was not submitted" description={problem} />
+            <Alert variant="destructive">
+              <AlertTitle>The document was not submitted</AlertTitle>
+              <AlertDescription>{problem}</AlertDescription>
+            </Alert>
           )}
         </div>
 
-        <Selector
+        <SelectField
           label="Tenant"
           placeholder="Choose a tenant"
           options={tenants}
@@ -105,44 +110,39 @@ export function SubmitArea({ request, onOpenRun }: Props) {
           onChange={(tenant) => setForm((f) => ({ ...f, tenant }))}
         />
 
-        <Selector
+        <SelectField
           label="Parser"
           options={parserChoices(parsers)}
           value={form.parser}
           onChange={(parser) => setForm((f) => ({ ...f, parser, language: "" }))}
         />
 
-        <Selector
+        <SelectField
           label="Language"
           options={languageChoices(parsers, form.parser)}
           value={form.language}
           onChange={(language) => setForm((f) => ({ ...f, language }))}
         />
 
-        <FileInput
+        <FileField
           label="Document"
           value={form.file}
-          // Single-file (no `isMultiple`), so the value is a `File` or `null`.
           // `getRandomValues`, not `randomUUID`: the latter exists only in a
           // secure context, and a console reached over plain http is not one.
           onChange={(file) => {
             const key = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
               b.toString(16).padStart(2, "0"),
             ).join("");
-            setForm((f) => chooseFile(f, file as File | null, key));
+            setForm((f) => chooseFile(f, file, key));
           }}
         />
 
-        <HStack gap={2}>
-          <Button
-            label="Submit"
-            variant="primary"
-            isDisabled={!canSubmit(form)}
-            isLoading={form.sending}
-            onClick={submit}
-          />
-        </HStack>
-      </Stack>
+        <div className="flex gap-2">
+          <Button disabled={!canSubmit(form)} onClick={submit}>
+            {form.sending ? "Submitting…" : "Submit"}
+          </Button>
+        </div>
+      </CardContent>
     </Card>
   );
 }

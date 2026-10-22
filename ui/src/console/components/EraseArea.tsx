@@ -15,7 +15,8 @@
  */
 
 import { useState } from "react";
-import { Banner, Button, Card, HStack, Stack, Text, TextInput } from "@astryxdesign/core";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 
 import type { Intent } from "../model/client.ts";
 import {
@@ -30,6 +31,8 @@ import {
   type Target,
 } from "../model/erasure.ts";
 import type { Failure } from "../model/failure.ts";
+import { ConfirmDialog } from "./ConfirmDialog.tsx";
+import { TextField } from "./fields.tsx";
 
 type Request = (
   intent: Intent,
@@ -52,65 +55,81 @@ export function EraseArea({ request, onFailure, presetTenant }: Props) {
   const [intent, setIntent] = useState<ErasureIntent | null>(null);
   const [outcome, setOutcome] = useState<string | null>(null);
 
+  const erase = async (current: ErasureIntent) => {
+    const target = current.target;
+    const answer = await request(
+      target.kind === "tenant"
+        ? { type: "erase-tenant", tenantId: target.id }
+        : { type: "erase-document", tenantId: target.tenantId, blobId: target.id },
+    );
+    // Closed either way, so a refusal is read on the page, not behind the dialog.
+    setIntent(null);
+    if (!answer.ok) {
+      onFailure(answer.failure);
+      return;
+    }
+    setOutcome(outcomeNotice(removedFrom(answer.body)));
+    setIdentifier("");
+  };
+
   return (
-    <Stack direction="vertical" gap={3} maxWidth={720}>
-      <Banner
-        status="warning"
-        title="Erasure removes source bytes, everything derived from them, and the records that describe them"
-        description="It cannot be undone, and the deployment reports what it removed."
-      />
+    <div className="flex max-w-[720px] flex-col gap-3">
+      <Alert variant="warning">
+        <AlertTitle>
+          Erasure removes source bytes, everything derived from them, and the records that describe them
+        </AlertTitle>
+        <AlertDescription>It cannot be undone, and the deployment reports what it removed.</AlertDescription>
+      </Alert>
 
       {/* FR-045b: an erasure completing. `assertive`, and it is the one place
           that is: the operator just destroyed data and the counts are the only
           report of what went. */}
       <div role="status" aria-live="assertive">
         {outcome === null ? null : (
-          <Banner status="info" title="Erasure complete" description={outcome} />
+          <Alert variant="info">
+            <AlertTitle>Erasure complete</AlertTitle>
+            <AlertDescription>{outcome}</AlertDescription>
+          </Alert>
         )}
       </div>
 
-      {intent === null ? (
-        <Stack direction="vertical" gap={2}>
-          <HStack gap={2}>
-            <Button
-              label="Tenant"
-              variant={kind === "tenant" ? "primary" : "secondary"}
-              onClick={() => setKind("tenant")}
-            />
-            <Button
-              label="Document"
-              variant={kind === "document" ? "primary" : "secondary"}
-              onClick={() => {
-                if (kind === "tenant") {
-                  const next = switchedToDocument(presetTenant, {
-                    identifier,
-                    documentTenant,
-                  });
-                  setIdentifier(next.identifier);
-                  setDocumentTenant(next.documentTenant);
-                }
-                setKind("document");
-              }}
-            />
-          </HStack>
-
-          {kind === "document" ? (
-            <TextInput label="Tenant" value={documentTenant} onChange={setDocumentTenant} />
-          ) : null}
-
-          <TextInput
-            label={kind === "tenant" ? "Tenant identifier" : "Document identifier"}
-            value={identifier}
-            onChange={setIdentifier}
-          />
-
-          <HStack gap={2}>
+      <div className="flex flex-col gap-2">
+        <div className="flex gap-2">
+          <Button variant={kind === "tenant" ? "default" : "outline"} onClick={() => setKind("tenant")}>
+            Tenant
+          </Button>
           <Button
-            label="Continue"
-            variant="secondary"
-            isDisabled={
-              identifier.trim() === "" || (kind === "document" && documentTenant.trim() === "")
-            }
+            variant={kind === "document" ? "default" : "outline"}
+            onClick={() => {
+              if (kind === "tenant") {
+                const next = switchedToDocument(presetTenant, {
+                  identifier,
+                  documentTenant,
+                });
+                setIdentifier(next.identifier);
+                setDocumentTenant(next.documentTenant);
+              }
+              setKind("document");
+            }}
+          >
+            Document
+          </Button>
+        </div>
+
+        {kind === "document" ? (
+          <TextField label="Tenant" value={documentTenant} onChange={setDocumentTenant} />
+        ) : null}
+
+        <TextField
+          label={kind === "tenant" ? "Tenant identifier" : "Document identifier"}
+          value={identifier}
+          onChange={setIdentifier}
+        />
+
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            disabled={identifier.trim() === "" || (kind === "document" && documentTenant.trim() === "")}
             onClick={() => {
               setOutcome(null);
               setIntent(
@@ -121,52 +140,34 @@ export function EraseArea({ request, onFailure, presetTenant }: Props) {
                 ),
               );
             }}
-          />
-          </HStack>
-        </Stack>
-      ) : (
-        <Card>
-          <Stack direction="vertical" gap={2}>
-          <Text size="sm">{confirmationPrompt(intent)}</Text>
+          >
+            Continue
+          </Button>
+        </div>
+      </div>
 
-          <TextInput
+      <ConfirmDialog
+        open={intent !== null}
+        onOpenChange={(open) => {
+          if (!open) setIntent(null);
+        }}
+        title="Erase permanently?"
+        description={intent === null ? undefined : confirmationPrompt(intent)}
+        confirmLabel="Erase"
+        // Armed only on an exact match. No trimming, no case folding:
+        // neither identifier has a form where "close enough" is a kindness.
+        confirmDisabled={intent === null || !armed(intent)}
+        onConfirm={() => (intent === null ? Promise.resolve() : erase(intent))}
+      >
+        {intent === null ? null : (
+          <TextField
             label="Type the identifier again"
-            {...{ autoComplete: "off" }}
+            autoComplete="off"
             value={intent.typed}
-            onChange={(typed) =>
-              setIntent((current) => (current === null ? null : retyped(current, typed)))
-            }
+            onChange={(typed) => setIntent((current) => (current === null ? null : retyped(current, typed)))}
           />
-
-          <HStack gap={2}>
-            <Button
-              label="Erase"
-              variant="destructive"
-              // Armed only on an exact match. No trimming, no case folding:
-              // neither identifier has a form where "close enough" is a kindness.
-              isDisabled={!armed(intent)}
-              onClick={() => {
-                const target = intent.target;
-                void request(
-                  target.kind === "tenant"
-                    ? { type: "erase-tenant", tenantId: target.id }
-                    : { type: "erase-document", tenantId: target.tenantId, blobId: target.id },
-                ).then((answer) => {
-                  if (!answer.ok) {
-                    onFailure(answer.failure);
-                    return;
-                  }
-                  setOutcome(outcomeNotice(removedFrom(answer.body)));
-                  setIntent(null);
-                  setIdentifier("");
-                });
-              }}
-            />
-            <Button label="Cancel" variant="secondary" onClick={() => setIntent(null)} />
-          </HStack>
-          </Stack>
-        </Card>
-      )}
-    </Stack>
+        )}
+      </ConfirmDialog>
+    </div>
   );
 }

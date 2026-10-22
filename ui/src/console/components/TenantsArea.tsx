@@ -7,23 +7,15 @@
  */
 
 import { useEffect, useState } from "react";
-import {
-  Banner,
-  Button,
-  Card,
-  Code,
-  HStack,
-  Stack,
-  Table,
-  Text,
-  pixel,
-  proportional,
-} from "@astryxdesign/core";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 
 import type { Intent } from "../model/client.ts";
 import { describe, type Failure } from "../model/failure.ts";
 import { TENANT_JUMPS, jumpTo, type Jump } from "../model/navigation.ts";
 import { toTenants } from "../model/submit.ts";
+import { DataTable } from "./DataTable.tsx";
 
 type Request = (
   intent: Intent,
@@ -55,59 +47,53 @@ export function TenantsArea({ request, onJump }: Props) {
   }, [request]);
 
   return (
-    <Stack direction="vertical" gap={3}>
-      <Text size="lg" weight="bold">
-        Tenants
-      </Text>
-
+    <div className="flex flex-col gap-3">
       <div role="status" aria-live="polite">
-        {tenants === null ? <Text size="sm">Loading…</Text> : null}
+        {tenants === null ? <p className="text-sm">Loading…</p> : null}
         {problem === null ? null : (
-          <Banner status="error" title="The tenants could not be read" description={problem} />
+          <Alert variant="destructive">
+            <AlertTitle>The tenants could not be read</AlertTitle>
+            <AlertDescription>{problem}</AlertDescription>
+          </Alert>
         )}
         {tenants !== null && tenants.length === 0 && problem === null ? (
-          <Banner status="info" title="This deployment has no tenants yet." />
+          <Alert variant="info">
+            <AlertTitle>This deployment has no tenants yet.</AlertTitle>
+          </Alert>
         ) : null}
       </div>
 
       {tenants !== null && tenants.length > 0 ? (
-        <Card>
-          <Table
-            data={tenants.map((tenant) => ({ tenant }))}
-            idKey="tenant"
-            hasHover
-            density="compact"
-            aria-label="Tenants"
+        <Card className="py-0">
+          <DataTable
+            rows={tenants}
+            rowKey={(tenant) => tenant}
+            label="Tenants"
             columns={[
               {
                 key: "tenant",
                 header: "Tenant",
-                width: proportional(1),
-                renderCell: (row) => <Code>{row.tenant as string}</Code>,
+                width: "auto",
+                cell: (tenant) => <code className="font-mono text-xs">{tenant}</code>,
               },
               {
                 key: "jumps",
                 header: "",
-                width: pixel(420),
-                resizable: false,
-                renderCell: (row) => (
-                  <HStack gap={2}>
+                width: "420px",
+                cell: (tenant) => (
+                  <div className="flex gap-2">
                     {TENANT_JUMPS.map(({ area, label }) => (
-                      <Button
-                        key={area}
-                        label={label}
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => onJump(jumpTo(area, row.tenant as string))}
-                      />
+                      <Button key={area} variant="outline" size="sm" onClick={() => onJump(jumpTo(area, tenant))}>
+                        {label}
+                      </Button>
                     ))}
-                  </HStack>
+                  </div>
                 ),
               },
             ]}
           />
         </Card>
       ) : null}
-    </Stack>
+    </div>
   );
 }

@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { duration, joined, shortDigest, shortId, when } from "../../src/console/model/format.ts";
+import { bothZones, duration, joined, shortDigest, shortId, when } from "../../src/console/model/format.ts";
 
 test("a timestamp loses its microseconds and keeps its second", () => {
   const rendered = when("2026-09-11T09:17:00.253693+00:00");
@@ -29,6 +29,18 @@ test("an unparseable timestamp is shown as it arrived", () => {
   // Inventing a date for a value the deployment sent would be this console
   // disagreeing with the deployment about what it said.
   assert.equal(when("not a date"), "not a date");
+});
+
+test("a timestamp's tooltip names both zones, UTC to the second", () => {
+  const [local, utc] = bothZones("2026-09-11T09:17:00.253693+00:00").split("\n");
+
+  assert.match(local ?? "", /^Local: .*2026/);
+  assert.equal(utc, "UTC: 2026-09-11 09:17:00");
+});
+
+test("an absent or unparseable timestamp has no tooltip", () => {
+  assert.equal(bothZones(null), "");
+  assert.equal(bothZones("not a date"), "");
 });
 
 test("a run identifier shortens to its first group", () => {

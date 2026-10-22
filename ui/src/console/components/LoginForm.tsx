@@ -1,7 +1,7 @@
 /**
  * Where an operator signs in (ADR-0023 §1).
  *
- * A real `<form>`, so Enter submits it, with labelled `TextInput`s so each
+ * A real `<form>`, so Enter submits it, with labelled `TextField`s so each
  * carries an accessible name and is operable by keyboard (FR-045a). The
  * `autoComplete` values are the standard ones: a console account is a
  * username and a password, and a password manager remembering it is the
@@ -13,7 +13,11 @@
  */
 
 import { useState, type FormEvent } from "react";
-import { Banner, Button, Card, Stack, Text, TextInput } from "@astryxdesign/core";
+import { Alert, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+
+import { TextField } from "./fields.tsx";
 
 interface Props {
   /** The refusal, the unavailable sentence, or the session-ended notice. */
@@ -33,42 +37,40 @@ export function LoginForm({ notice, onSubmit }: Props) {
   };
 
   return (
-    <Card width="100%" maxWidth={400} padding={6}>
-      <form onSubmit={submit}>
-      <Stack direction="vertical" gap={4}>
-        <Text size="lg" weight="bold">
-          docdoc operations console
-        </Text>
+    <Card className="w-full max-w-[380px]">
+      <CardContent>
+        <form onSubmit={submit} className="flex flex-col gap-4">
+          <p className="text-lg font-bold">docdoc operations console</p>
 
-        <div role="status" aria-live="polite">
-          {notice === null ? null : <Banner status="warning" title={notice} />}
-        </div>
+          <div role="status" aria-live="polite">
+            {notice === null ? null : (
+              <Alert variant="warning">
+                <AlertTitle>{notice}</AlertTitle>
+              </Alert>
+            )}
+          </div>
 
-        {/* `autoComplete` and `spellCheck` are not in TextInput's typed props,
-            but its rest props land on the `<input>`; spread to get past the type. */}
-        <TextInput
-          label="Username"
-          {...{ autoComplete: "username", spellCheck: false }}
-          value={username}
-          onChange={setUsername}
-        />
+          <TextField
+            label="Username"
+            autoComplete="username"
+            spellCheck={false}
+            value={username}
+            onChange={setUsername}
+          />
 
-        <TextInput
-          label="Password"
-          type="password"
-          {...{ autoComplete: "current-password" }}
-          value={password}
-          onChange={setPassword}
-        />
+          <TextField
+            label="Password"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={setPassword}
+          />
 
-        <Button
-          type="submit"
-          label="Sign in"
-          variant="primary"
-          isDisabled={username.trim() === "" || password === ""}
-        />
-      </Stack>
-      </form>
+          <Button type="submit" disabled={username.trim() === "" || password === ""}>
+            Sign in
+          </Button>
+        </form>
+      </CardContent>
     </Card>
   );
 }

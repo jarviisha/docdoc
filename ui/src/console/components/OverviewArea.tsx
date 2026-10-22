@@ -9,14 +9,21 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Banner, Card, Code, HStack, Link, Stack, Table, Text, pixel, proportional } from "@astryxdesign/core";
+
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Card } from "@/components/ui/card";
 
 import type { Intent } from "../model/client.ts";
 import { describe, type Failure } from "../model/failure.ts";
 import { duration, shortId, when } from "../model/format.ts";
-import { cardTone, toOverview, type KindSplit, type Overview, type OverviewCards } from "../model/overview.ts";
+import { toOverview, type Overview } from "../model/overview.ts";
 import { isNewer } from "../model/polling.ts";
 import { kindLabel, reasonLabel, timeline, type RunSummary } from "../model/runs.ts";
+import { CopyableId } from "./CopyableId.tsx";
+import { DataTable } from "./DataTable.tsx";
+import { SectionHeading } from "./SectionHeading.tsx";
+import { Time } from "./Time.tsx";
+import { StatStrip } from "./StatStrip.tsx";
 import { usePolling } from "./usePolling.ts";
 
 type Request = (
@@ -28,13 +35,6 @@ interface Props {
   request: Request;
   onOpenRun: (runId: string) => void;
 }
-
-const CARDS: { name: keyof OverviewCards; label: string }[] = [
-  { name: "queued", label: "Queued" },
-  { name: "running", label: "Running" },
-  { name: "failed", label: "Failed (last hour)" },
-  { name: "done", label: "Done (last hour)" },
-];
 
 export function OverviewArea({ request, onOpenRun }: Props) {
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -72,114 +72,86 @@ export function OverviewArea({ request, onOpenRun }: Props) {
   usePolling(refresh, true);
 
   // No `href`: a `<button>` styled as a link.
-  const openButton = (row: Record<string, unknown>) => (
-    <Link hasUnderline onClick={() => onOpenRun(row.run_id as string)}>{shortId(row.run_id as string)}</Link>
+  const openButton = (run: RunSummary) => (
+    <CopyableId value={run.run_id} display={shortId(run.run_id)} onOpen={() => onOpenRun(run.run_id)} />
   );
 
   return (
-    <Stack direction="vertical" gap={3}>
-      <div role="status" aria-live="polite">
-        {overview === null && problem === null ? <Text size="sm">Loading…</Text> : null}
+    <div className="flex flex-col gap-3">
+      <div role="status" aria-live="polite" className="empty:-mb-3">
+        {overview === null && problem === null ? <p className="text-sm">Loading…</p> : null}
         {problem === null ? null : (
-          <Banner status="error" title="The overview could not be refreshed" description={problem} />
+          <Alert variant="destructive">
+            <AlertTitle>The overview could not be refreshed</AlertTitle>
+            <AlertDescription>{problem}</AlertDescription>
+          </Alert>
         )}
       </div>
 
       {refreshedAt === null ? null : (
-        <Text size="sm" color="secondary">
+        <p className="text-sm text-muted-foreground">
           Last refreshed {when(new Date(refreshedAt).toISOString())}
-        </Text>
+        </p>
       )}
 
       {overview === null ? null : (
         <>
-          <HStack gap={3}>
-            {CARDS.map(({ name, label }) => (
-              <SplitCard
-                key={name}
-                label={label}
-                split={overview.cards[name]}
-                danger={cardTone(name, overview.cards[name]) === "danger"}
-              />
-            ))}
-          </HStack>
+          <StatStrip cards={overview.cards} />
 
-          <Text weight="bold">Recent failures</Text>
+          <SectionHeading>Recent failures</SectionHeading>
           {overview.recentFailures.length === 0 ? (
-            <Text size="sm">No failures.</Text>
+            <p className="text-sm">No failures.</p>
           ) : (
-            <Card>
-              <Table
-                data={overview.recentFailures as unknown as Record<string, unknown>[]}
-                idKey="run_id"
-                density="compact"
-                aria-label="Recent failures, newest first"
+            <Card className="py-0">
+              <DataTable
+                rows={overview.recentFailures}
+                rowKey={(run) => run.run_id}
+                label="Recent failures, newest first"
                 columns={[
-                  { key: "kind", header: "Kind", width: pixel(160), renderCell: (row) => <Text size="sm">{kindLabel(row as unknown as RunSummary)}</Text> },
-                  { key: "tenant_id", header: "Tenant", width: pixel(140), renderCell: (row) => <Code>{row.tenant_id as string}</Code> },
+                  { key: "kind", header: "Kind", width: "160px", cell: (run) => <span className="text-sm">{kindLabel(run)}</span> },
+                  { key: "tenant_id", header: "Tenant", width: "140px", cell: (run) => <code className="font-mono text-xs">{run.tenant_id}</code> },
                   {
                     key: "error_reason",
                     header: "Reason",
-                    width: proportional(1),
-                    renderCell: (row) => {
-                      const run = row as unknown as RunSummary;
-                      return <Text size="sm">{reasonLabel(run.error_reason, run.error_class) ?? "—"}</Text>;
-                    },
+                    width: "auto",
+                    cell: (run) => <span className="text-sm">{reasonLabel(run.error_reason, run.error_class) ?? "—"}</span>,
                   },
-                  { key: "finished_at", header: "Finished", width: pixel(200), renderCell: (row) => <Text size="sm">{when(row.finished_at as string | null)}</Text> },
-                  { key: "run_id", header: "Run", width: pixel(140), resizable: false, renderCell: openButton },
+                  { key: "finished_at", header: "Finished", width: "200px", cell: (run) => <Time iso={run.finished_at} /> },
+                  { key: "run_id", header: "Run", width: "140px", cell: openButton },
                 ]}
               />
             </Card>
           )}
 
-          <Text weight="bold">Running now</Text>
+          <SectionHeading>Running now</SectionHeading>
           {overview.running.length === 0 ? (
-            <Text size="sm">Nothing is running.</Text>
+            <p className="text-sm">Nothing is running.</p>
           ) : (
-            <Card>
-              <Table
-                data={overview.running as unknown as Record<string, unknown>[]}
-                idKey="run_id"
-                density="compact"
-                aria-label="Running now"
+            <Card className="py-0">
+              <DataTable
+                rows={overview.running}
+                rowKey={(run) => run.run_id}
+                label="Running now"
                 columns={[
-                  { key: "kind", header: "Kind", width: pixel(160), renderCell: (row) => <Text size="sm">{kindLabel(row as unknown as RunSummary)}</Text> },
-                  { key: "tenant_id", header: "Tenant", width: pixel(140), renderCell: (row) => <Code>{row.tenant_id as string}</Code> },
-                  { key: "ocr_parser", header: "Parser", width: proportional(1), renderCell: (row) => <Text size="sm">{(row.ocr_parser as string | null) ?? "—"}</Text> },
+                  { key: "kind", header: "Kind", width: "160px", cell: (run) => <span className="text-sm">{kindLabel(run)}</span> },
+                  { key: "tenant_id", header: "Tenant", width: "140px", cell: (run) => <code className="font-mono text-xs">{run.tenant_id}</code> },
+                  { key: "ocr_parser", header: "Parser", width: "auto", cell: (run) => <span className="text-sm">{run.ocr_parser ?? "—"}</span> },
                   {
                     key: "started_at",
                     header: "Run time",
-                    width: pixel(140),
-                    renderCell: (row) => (
-                      <Text size="sm">
-                        {duration(timeline(row as unknown as RunSummary, refreshedAt ?? Date.now()).runMs)}
-                      </Text>
+                    width: "140px",
+                    align: "right",
+                    cell: (run) => (
+                      <span className="text-sm">{duration(timeline(run, refreshedAt ?? Date.now()).runMs)}</span>
                     ),
                   },
-                  { key: "run_id", header: "Run", width: pixel(140), resizable: false, renderCell: openButton },
+                  { key: "run_id", header: "Run", width: "140px", cell: openButton },
                 ]}
               />
             </Card>
           )}
         </>
       )}
-    </Stack>
-  );
-}
-
-function SplitCard({ label, split, danger }: { label: string; split: KindSplit; danger: boolean }) {
-  return (
-    <Card padding={3} variant={danger ? "red" : "default"} width={200}>
-      <Stack direction="vertical" gap={1}>
-        <Text size="sm">{label}</Text>
-        <Text size="lg" weight="bold">
-          {split.total}
-        </Text>
-        <Text size="sm" color="secondary">
-          OCR {split.ocr} · Extraction {split.extraction}
-        </Text>
-      </Stack>
-    </Card>
+    </div>
   );
 }

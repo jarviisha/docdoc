@@ -20,7 +20,8 @@
     // enforced.
     // No `baseUrl`: TypeScript 7 removed it, and non-relative targets with it.
     "paths": {
-      "@console/*": ["./src/console/*"]
+      "@console/*": ["./src/console/*"],
+      "@/*": ["./src/*"]
     }
   },
   "include": ["src", "test", "vite.config.ts"]

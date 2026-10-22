@@ -8,19 +8,10 @@
  */
 
 import { useEffect, useState } from "react";
-import {
-  Badge,
-  Banner,
-  Button,
-  Card,
-  Code,
-  HStack,
-  Stack,
-  Table,
-  Text,
-  pixel,
-  proportional,
-} from "@astryxdesign/core";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 
 import type { Intent } from "../model/client.ts";
 import { describe, type Failure } from "../model/failure.ts";
@@ -32,6 +23,7 @@ import {
   toParsers,
   type ParserOption,
 } from "../model/submit.ts";
+import { DataTable } from "./DataTable.tsx";
 
 type Request = (
   intent: Intent,
@@ -75,84 +67,74 @@ export function ParsersArea({ request }: Props) {
   }, [request, loading]);
 
   return (
-    <Stack direction="vertical" gap={3}>
-      <HStack gap={2} align="center">
-        <Text size="lg" weight="bold">
-          Parsers
-        </Text>
-        <Button
-          label={parsersRefreshLabel}
-          variant="secondary"
-          size="sm"
-          isDisabled={loading}
-          onClick={() => setLoading(true)}
-        />
-      </HStack>
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-2">
+        <Button variant="outline" size="sm" disabled={loading} onClick={() => setLoading(true)}>
+          {parsersRefreshLabel}
+        </Button>
+      </div>
 
       <div role="status" aria-live="polite">
-        {loading ? <Text size="sm">Loading…</Text> : null}
+        {loading ? <p className="text-sm">Loading…</p> : null}
         {problem === null ? null : (
-          <Banner status="error" title="The parsers could not be read" description={problem} />
+          <Alert variant="destructive">
+            <AlertTitle>The parsers could not be read</AlertTitle>
+            <AlertDescription>{problem}</AlertDescription>
+          </Alert>
         )}
       </div>
 
       {parsers.length > 0 ? (
-        <Card>
-          <Table
-            data={parsers as unknown as Record<string, unknown>[]}
-            idKey="id"
-            density="compact"
-            aria-label="Parsers this deployment reports"
+        <Card className="py-0">
+          <DataTable
+            rows={parsers}
+            rowKey={(parser) => parser.id}
+            label="Parsers this deployment reports"
             columns={[
               {
                 key: "id",
                 header: "Parser",
-                width: pixel(180),
-                renderCell: (row) => <Code>{row.id as string}</Code>,
+                width: "180px",
+                cell: (parser) => <code className="font-mono text-xs">{parser.id}</code>,
               },
               {
                 key: "available",
                 header: "Status",
-                width: proportional(1),
-                renderCell: (row) => {
-                  const parser = row as unknown as ParserOption;
+                width: "auto",
+                cell: (parser) => {
                   const status = parserStatus(parser);
                   return (
-                    <Stack direction="vertical" gap={1} align="start">
-                      <Badge variant={TONE[status]} label={status} />
+                    <div className="flex flex-col items-start gap-1">
+                      <Badge variant={TONE[status]}>{status}</Badge>
                       {parser.unavailableReason === null ? null : (
-                        <Text size="sm" color="secondary">
-                          {parser.unavailableReason}
-                        </Text>
+                        <p className="text-sm text-muted-foreground">{parser.unavailableReason}</p>
                       )}
-                    </Stack>
+                    </div>
                   );
                 },
               },
               {
                 key: "mediaTypes",
                 header: "Media types",
-                width: proportional(1),
-                renderCell: (row) => <Text size="sm">{joined(row.mediaTypes as string[])}</Text>,
+                width: "auto",
+                cell: (parser) => <span className="text-sm">{joined(parser.mediaTypes)}</span>,
               },
               {
                 key: "languages",
                 header: "Languages",
-                width: proportional(1),
-                renderCell: (row) => <Text size="sm">{joined(row.languages as string[])}</Text>,
+                width: "auto",
+                cell: (parser) => <span className="text-sm">{joined(parser.languages)}</span>,
               },
               {
                 key: "capabilities",
                 header: "Capabilities",
-                width: proportional(1),
-                renderCell: (row) => (
-                  <Text size="sm">{capabilityList((row as unknown as ParserOption).capabilities)}</Text>
-                ),
+                width: "auto",
+                cell: (parser) => <span className="text-sm">{capabilityList(parser.capabilities)}</span>,
               },
             ]}
           />
         </Card>
       ) : null}
-    </Stack>
+    </div>
   );
 }
