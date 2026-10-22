@@ -14,7 +14,7 @@ export interface Column<T> {
 
 interface Props<T> {
   rows: T[];
-  rowKey: (row: T) => string;
+  rowKey: (row: T, index: number) => string;
   columns: Column<T>[];
   label: string;
 }
@@ -32,8 +32,8 @@ export function DataTable<T>({ rows, rowKey, columns, label }: Props<T>) {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {rows.map((row) => (
-          <TableRow key={rowKey(row)}>
+        {rows.map((row, index) => (
+          <TableRow key={rowKey(row, index)}>
             {columns.map((column) => (
               <TableCell key={column.key} className="py-1.5 whitespace-normal">
                 {column.cell(row)}

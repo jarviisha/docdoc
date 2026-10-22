@@ -20,10 +20,12 @@
  * noticed it was missing. `NOT_OFFERED` in the model is the record of that.
  */
 
-import { Badge, Card, Stack, Table, Text, pixel, proportional } from "@astryxdesign/core";
+import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
 
 import { summarise, type Attempt, type Delivery } from "../model/delivery.ts";
 import { when } from "../model/format.ts";
+import { DataTable } from "./DataTable.tsx";
 
 /** A receiver's answer, coloured — with the number always beside the colour. */
 function tone(attempt: Attempt): "success" | "error" | "warning" {
@@ -35,57 +37,51 @@ export function DeliveryRecord({ delivery }: { delivery: Delivery }) {
   const attempts = delivery.state === "none" ? [] : delivery.attempts;
 
   return (
-    <Stack direction="vertical" gap={2}>
-      <Text size="sm" weight="bold">
-        Delivery
-      </Text>
+    <div className="flex flex-col gap-2">
+      <p className="text-sm font-bold">Delivery</p>
 
       {/* The sentence first: it is the answer when there are no attempts to
           show, and an empty table in that case reads as "something went wrong"
           rather than as "nothing was owed". */}
-      <Text size="sm">{summarise(delivery)}</Text>
+      <p className="text-sm">{summarise(delivery)}</p>
 
       {attempts.length === 0 ? null : (
-        <Card>
-          <Table
-            data={attempts as unknown as Record<string, unknown>[]}
-            hasHover
-            density="compact"
-            aria-label="Delivery attempts, and what the receiver answered"
+        <Card className="py-0">
+          <DataTable
+            rows={attempts}
+            // Attempts carry no id of their own; their order is the record's.
+            rowKey={(_, index) => String(index)}
+            label="Delivery attempts, and what the receiver answered"
             columns={[
               {
                 key: "attempted_at",
                 header: "Attempted",
-                width: pixel(200),
-                renderCell: (row) => <Text size="sm">{when(row.attempted_at as string)}</Text>,
+                width: "200px",
+                cell: (attempt) => <span className="text-sm">{when(attempt.attempted_at)}</span>,
               },
               {
                 key: "status",
                 header: "Answered",
-                width: pixel(120),
-                renderCell: (row) => {
-                  const attempt = row as unknown as Attempt;
-                  return (
-                    <Badge
-                      variant={tone(attempt)}
-                      // `no answer` rather than a blank cell: a receiver that
-                      // never replied and one that replied `500` are different
-                      // failures, and the second is the one worth retrying.
-                      label={attempt.status === null ? "no answer" : String(attempt.status)}
-                    />
-                  );
-                },
+                width: "120px",
+                // `no answer` rather than a blank cell: a receiver that never
+                // replied and one that replied `500` are different failures,
+                // and the second is the one worth retrying.
+                cell: (attempt) => (
+                  <Badge variant={tone(attempt)}>
+                    {attempt.status === null ? "no answer" : String(attempt.status)}
+                  </Badge>
+                ),
               },
               {
                 key: "outcome",
                 header: "Outcome",
-                width: proportional(1),
-                renderCell: (row) => <Text size="sm">{row.outcome as string}</Text>,
+                width: "auto",
+                cell: (attempt) => <span className="text-sm">{attempt.outcome}</span>,
               },
             ]}
           />
         </Card>
       )}
-    </Stack>
+    </div>
   );
 }
