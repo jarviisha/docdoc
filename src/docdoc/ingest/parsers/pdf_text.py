@@ -60,8 +60,13 @@ Box = tuple[float, float, float, float]
 
 #: Unicode categories that are never part of a word: controls, format
 #: characters, surrogates, private use, unassigned. PDFium emits some of these
-#: itself (``\x02`` for a soft hyphen at a line end, ``\ufffe``).
+#: itself.
 _NOT_TEXT: Final = frozenset({"Cc", "Cf", "Cs", "Co", "Cn"})
+
+#: What PDFium puts in place of a hyphen that ends a line after a letter, and it
+#: drops the line break that followed. The hyphen is real text and the break is
+#: real layout, so both are restored.
+_LINE_END_HYPHEN: Final = "\ufffe"
 
 
 def displayed_size(crop: Box, rotation: int) -> tuple[float, float]:
@@ -107,29 +112,50 @@ def group_words(chars: Iterable[tuple[str, Box]]) -> list[list[tuple[str, Box]]]
             line.append((text, box))
         text, box = "", None
 
+    def end_line() -> None:
+        nonlocal line
+        if line:
+            lines.append(line)
+        line = []
+
     for char, char_box in chars:
+        if char == _LINE_END_HYPHEN:
+            if text:
+                text += "-"
+                box = _union(box, char_box)
+            end_word()
+            end_line()
+            continue
         if not char or char.isspace() or unicodedata.category(char[0]) in _NOT_TEXT:
             end_word()
             if char == "\n":
-                if line:
-                    lines.append(line)
-                line = []
+                end_line()
             continue
         text += char
-        box = (
-            char_box
-            if box is None
-            else (
-                min(box[0], char_box[0]),
-                min(box[1], char_box[1]),
-                max(box[2], char_box[2]),
-                max(box[3], char_box[3]),
-            )
-        )
+        box = _union(box, char_box)
     end_word()
-    if line:
-        lines.append(line)
+    end_line()
     return lines
+
+
+def _union(box: Box | None, other: Box) -> Box:
+    if box is None:
+        return other
+    return (
+        min(box[0], other[0]),
+        min(box[1], other[1]),
+        max(box[2], other[2]),
+        max(box[3], other[3]),
+    )
+
+
+def _is_text(char: str) -> bool:
+    return bool(char) and not char.isspace() and unicodedata.category(char[0]) not in _NOT_TEXT
+
+
+def _within(box: Box, page: Box) -> bool:
+    """Whether ``box`` overlaps ``page`` at all; both in PDF user space."""
+    return box[2] > page[0] and box[0] < page[2] and box[3] > page[1] and box[1] < page[3]
 
 
 def _open(source: SourceFile) -> pypdfium2.PdfDocument:
@@ -247,7 +273,10 @@ class PdfTextParser:
 
         for index, page in enumerate(document):
             rotation = page.get_rotation()
-            crop: Box = tuple(page.get_cropbox())
+            # The visible page: the crop box clipped to the media box. It is what
+            # PDFium renders and what a viewer shows, so the console's page
+            # image and these boxes share one frame.
+            crop: Box = tuple(page.get_bbox())
             width, height = displayed_size(crop, rotation)
             builder.start_page(width=width, height=height, rotation=rotation)
 
@@ -256,9 +285,17 @@ class PdfTextParser:
             page.set_rotation(0)
             try:
                 textpage = page.get_textpage()
+                # Text outside the visible page -- printer's marks, slug, text
+                # parked off the page -- is not on the page, so it is dropped
+                # rather than failing the document. Separators are kept whatever
+                # their box, because they carry the line structure.
                 chars = [
-                    (textpage.get_text_range(i, 1), textpage.get_charbox(i, loose=True))
+                    (char, char_box)
                     for i in range(textpage.count_chars())
+                    for char, char_box in [
+                        (textpage.get_text_range(i, 1), textpage.get_charbox(i, loose=True))
+                    ]
+                    if not _is_text(char) or _within(char_box, crop)
                 ]
             except Exception as error:
                 raise ParserError(

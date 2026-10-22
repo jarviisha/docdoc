@@ -37,6 +37,11 @@ The `pdf` extra is `pypdfium2` and is in the default image.
   every caller.
 - **Encrypted versus corrupt.** PDFium leaves its last error in place after some failed loads. A
   password error is believed only when the file declares `/Encrypt`.
+- **The visible page is the frame.** Boxes are relative to the crop box clipped to the media box,
+  which is what PDFium renders for the console. Text outside it (printer's marks, slug, text parked
+  off the page) is dropped, as PyMuPDF did, instead of failing the document.
+- **Line-end hyphens are kept.** PDFium replaces a hyphen that ends a line with U+FFFE and drops the
+  break after it. The parser restores both.
 - `parser_version` is `2.0.0+pypdfium2-<version>`.
 
 ## Evidence

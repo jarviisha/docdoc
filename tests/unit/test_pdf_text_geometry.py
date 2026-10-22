@@ -48,7 +48,7 @@ def test_generated_and_control_characters_split_words() -> None:
     b = (0.0, 0.0, 1.0, 1.0)
     chars = [
         ("A", b), ("B", b), (" ", b), ("C", b), ("\x02", b), ("D", b),
-        ("\r", b), ("\n", b), ("E", b), ("￾", b),
+        ("\r", b), ("\n", b), ("E", b), ("\x03", b),
     ]  # fmt: skip
     lines = group_words(chars)
     assert [[word for word, _ in line] for line in lines] == [["AB", "C", "D"], ["E"]]
@@ -62,3 +62,11 @@ def test_a_word_box_is_the_union_of_its_characters() -> None:
 def test_blank_lines_are_dropped() -> None:
     b = (0.0, 0.0, 1.0, 1.0)
     assert group_words([("\n", b), (" ", b), ("\n", b), ("X", b)]) == [[("X", b)]]
+
+
+def test_a_line_end_hyphen_marker_becomes_a_hyphen_and_ends_the_line() -> None:
+    # PDFium replaces a hyphen at a line end with U+FFFE and drops the line
+    # break after it; the hyphen is real text and the break is real layout.
+    b = (0.0, 0.0, 1.0, 1.0)
+    lines = group_words([("C", b), ("\ufffe", b), ("D", b)])
+    assert [[word for word, _ in line] for line in lines] == [["C-"], ["D"]]

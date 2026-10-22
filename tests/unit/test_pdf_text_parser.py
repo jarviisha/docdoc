@@ -249,3 +249,66 @@ class TestThreadSafety:
         parse("digital_invoice.pdf")
 
         assert entered >= 1
+
+
+def _drawn_pdf(
+    lines: list[tuple[float, float, str]], *, crop: tuple[float, ...] | None = None
+) -> bytes:
+    """A one-page PDF with each ``(x, y, text)`` drawn at a baseline, bottom-left origin."""
+    import io
+
+    canvas = pytest.importorskip("reportlab.pdfgen.canvas")
+    buffer = io.BytesIO()
+    page = canvas.Canvas(buffer, pagesize=(400, 400), invariant=1)
+    if crop is not None:
+        page.setCropBox(crop)
+    page.setFont("Helvetica", 11)
+    for x, y, text in lines:
+        page.drawString(x, y, text)
+    page.showPage()
+    page.save()
+    return buffer.getvalue()
+
+
+def _parse_bytes(data: bytes):  # type: ignore[no-untyped-def]
+    return PdfTextParser().parse(
+        SourceFile.from_bytes(data, filename="t.pdf"), {}, TransportSettings()
+    )
+
+
+class TestPageBounds:
+    """Text a viewer would never show must not fail the whole document."""
+
+    def test_text_outside_the_page_is_dropped_not_fatal(self) -> None:
+        document = _parse_bytes(
+            _drawn_pdf([(50, 300, "Hello"), (-300, 300, "slug"), (50, -200, "bleed")])
+        )
+
+        assert document.text.split() == ["Hello"]
+
+    def test_text_outside_the_crop_box_is_dropped(self) -> None:
+        document = _parse_bytes(
+            _drawn_pdf([(100, 200, "Inside"), (10, 10, "Mark")], crop=(50, 50, 350, 350))
+        )
+
+        assert document.text.split() == ["Inside"]
+
+    def test_a_crop_box_larger_than_the_media_box_is_clipped_to_it(self) -> None:
+        # PDFium's own page box -- and the console's rendered page -- is the
+        # intersection, so the parser's page must be too, or boxes drift.
+        document = _parse_bytes(_drawn_pdf([(100, 200, "Word")], crop=(-50, -50, 500, 500)))
+        page = document.pages[0]
+        (span,) = document.find("Word")
+        (where,) = document.locate(span)
+
+        assert (page.width, page.height) == (400, 400)
+        assert where.bbox.x0 == pytest.approx(100 / 400, abs=0.002)
+
+
+class TestLineEndHyphen:
+    def test_a_hyphen_at_a_line_end_is_kept_and_the_lines_stay_apart(self) -> None:
+        document = _parse_bytes(
+            _drawn_pdf([(50, 300, "Invoice no. ABC-"), (50, 280, "1234 total")])
+        )
+
+        assert document.text.split("\n")[:2] == ["Invoice no. ABC-", "1234 total"]
