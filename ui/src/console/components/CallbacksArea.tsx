@@ -10,20 +10,9 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import {
-  Banner,
-  Button,
-  Card,
-  Code,
-  HStack,
-  Selector,
-  Stack,
-  Table,
-  Text,
-  TextInput,
-  pixel,
-  proportional,
-} from "@astryxdesign/core";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 
 import {
   canRegister,
@@ -40,6 +29,9 @@ import type { Intent } from "../model/client.ts";
 import { describe, type Failure } from "../model/failure.ts";
 import { when } from "../model/format.ts";
 import { toTenants } from "../model/submit.ts";
+import { ConfirmDialog } from "./ConfirmDialog.tsx";
+import { DataTable } from "./DataTable.tsx";
+import { SelectField, TextField } from "./fields.tsx";
 
 type Request = (
   intent: Intent,
@@ -109,27 +101,24 @@ export function CallbacksArea({ request, presetTenant }: Props) {
     );
   };
 
-  const revoke = (callbackId: string) => {
+  const revoke = async (callbackId: string) => {
     setWriteProblem(null);
     setSending(true);
-    void request({ type: "revoke-callback", tenantId: tenant, callbackId }).then((answer) => {
-      setSending(false);
-      setConfirming(null);
-      if (!answer.ok) setWriteProblem(describe(answer.failure));
-      void load(tenant);
-    });
+    const answer = await request({ type: "revoke-callback", tenantId: tenant, callbackId });
+    setSending(false);
+    setConfirming(null);
+    if (!answer.ok) setWriteProblem(describe(answer.failure));
+    void load(tenant);
   };
 
   return (
-    <Stack direction="vertical" gap={3}>
-      <Text size="lg" weight="bold">
-        Callbacks
-      </Text>
+    <div className="flex flex-col gap-3">
+      <p className="text-lg font-bold">Callbacks</p>
 
-      <Selector
+      <SelectField
         label="Tenant"
         placeholder="Choose a tenant"
-        width={280}
+        className="w-[280px]"
         options={tenants}
         value={tenant}
         onChange={(chosen) => {
@@ -141,117 +130,106 @@ export function CallbacksArea({ request, presetTenant }: Props) {
 
       <div role="status" aria-live="polite">
         {tenantsProblem === null ? null : (
-          <Banner status="error" title="Tenants could not be loaded" description={tenantsProblem} />
+          <Alert variant="destructive">
+            <AlertTitle>Tenants could not be loaded</AlertTitle>
+            <AlertDescription>{tenantsProblem}</AlertDescription>
+          </Alert>
         )}
         {problem === null ? null : (
-          <Banner status="error" title="The callbacks request failed" description={problem} />
+          <Alert variant="destructive">
+            <AlertTitle>The callbacks request failed</AlertTitle>
+            <AlertDescription>{problem}</AlertDescription>
+          </Alert>
         )}
         {unavailable === null ? null : (
-          <Banner status="info" title="Callbacks are unavailable" description={unavailable} />
+          <Alert variant="info">
+            <AlertTitle>Callbacks are unavailable</AlertTitle>
+            <AlertDescription>{unavailable}</AlertDescription>
+          </Alert>
         )}
         {tenant !== "" && callbacks === null && unavailable === null && problem === null ? (
-          <Text size="sm">Loading…</Text>
+          <p className="text-sm">Loading…</p>
         ) : null}
         {callbacks !== null && callbacks.length === 0 ? (
-          <Banner status="info" title="This tenant has no callbacks registered." />
+          <Alert variant="info">
+            <AlertTitle>This tenant has no callbacks registered.</AlertTitle>
+          </Alert>
         ) : null}
       </div>
 
       {callbacks !== null && callbacks.length > 0 ? (
-        <Card>
-          <Table
-            data={callbacks as unknown as Record<string, unknown>[]}
-            idKey="callback_id"
-            hasHover
-            density="compact"
-            aria-label="Registered callbacks. Secrets are never shown here."
+        <Card className="py-0">
+          <DataTable
+            rows={callbacks}
+            rowKey={(callback) => callback.callback_id}
+            label="Registered callbacks. Secrets are never shown here."
             columns={[
               {
                 key: "url",
                 header: "URL",
-                width: proportional(1),
-                renderCell: (row) => <Code>{row.url as string}</Code>,
+                width: "auto",
+                cell: (callback) => <code className="font-mono text-xs">{callback.url}</code>,
               },
               {
                 key: "created_at",
                 header: "Created",
-                width: pixel(200),
-                renderCell: (row) => <Text size="sm">{when(row.created_at as string)}</Text>,
+                width: "200px",
+                cell: (callback) => <span className="text-sm">{when(callback.created_at)}</span>,
               },
               {
                 key: "revoke",
                 header: "",
-                width: pixel(320),
-                resizable: false,
-                renderCell: (row) => {
-                  const id = row.callback_id as string;
-                  if (confirming !== id) {
-                    return (
-                      <Button
-                        label="Revoke"
-                        variant="destructive"
-                        size="sm"
-                        isDisabled={!canRevoke(sending)}
-                        onClick={() => setConfirming(id)}
-                      />
-                    );
-                  }
-                  return (
-                    <HStack gap={2} align="center">
-                      <Text size="sm">Revoke this callback?</Text>
-                      <Button
-                        label="Confirm"
-                        variant="destructive"
-                        size="sm"
-                        isDisabled={!canRevoke(sending)}
-                        onClick={() => revoke(id)}
-                      />
-                      <Button
-                        label="Keep"
-                        variant="secondary"
-                        size="sm"
-                        isDisabled={!canRevoke(sending)}
-                        onClick={() => setConfirming(null)}
-                      />
-                    </HStack>
-                  );
-                },
+                width: "120px",
+                cell: (callback) => (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!canRevoke(sending)}
+                    onClick={() => setConfirming(callback.callback_id)}
+                  >
+                    Revoke
+                  </Button>
+                ),
               },
             ]}
           />
         </Card>
       ) : null}
 
+      <ConfirmDialog
+        open={confirming !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirming(null);
+        }}
+        title="Revoke this callback?"
+        confirmLabel="Revoke"
+        cancelLabel="Keep"
+        confirmDisabled={!canRevoke(sending)}
+        onConfirm={() => (confirming === null ? Promise.resolve() : revoke(confirming))}
+      />
+
       {/* Offered once the list answered: a deployment that cannot list callbacks
           (503, or no such route) cannot register one either. */}
       {callbacks !== null ? (
-        <Card maxWidth={520} padding={4}>
-          <Stack direction="vertical" gap={3}>
-            <Text size="sm" weight="bold">
-              Register a callback
-            </Text>
-            <TextInput label="URL" value={url} onChange={setUrl} />
-            {/* `autoComplete` is not in TextInput's typed props; its rest props
-                land on the `<input>`, as LoginForm does. */}
-            <TextInput
+        <Card className="max-w-[520px]">
+          <CardContent className="flex flex-col gap-3">
+            <p className="text-sm font-bold">Register a callback</p>
+            <TextField label="URL" value={url} onChange={setUrl} />
+            <TextField
               label="Secret"
               type="password"
-              {...{ autoComplete: "new-password" }}
+              autoComplete="new-password"
               value={secret}
               onChange={setSecret}
             />
-            <HStack gap={2}>
-              <Button
-                label="Register"
-                variant="primary"
-                isDisabled={!canRegister(url, secret, sending)}
-                isLoading={sending}
-                onClick={register}
-              />
-            </HStack>
-          </Stack>
+            <div className="flex gap-2">
+              <Button disabled={!canRegister(url, secret, sending)} onClick={register}>
+                Register
+              </Button>
+            </div>
+          </CardContent>
         </Card>
       ) : null}
-    </Stack>
+    </div>
   );
 }

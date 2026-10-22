@@ -16,7 +16,9 @@ import { cn } from "@/lib/utils";
 interface TextFieldProps {
   label: string;
   value: string;
-  onChange: (value: string) => void;
+  /** Absent for a read-only field. */
+  onChange?: (value: string) => void;
+  readOnly?: boolean;
   type?: string;
   placeholder?: string;
   autoComplete?: string;
@@ -35,7 +37,7 @@ export function TextField({ label, onChange, onEnter, className, ...rest }: Text
       <Input
         id={id}
         {...rest}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) => onChange?.(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "Enter" && onEnter !== undefined) onEnter();
         }}
