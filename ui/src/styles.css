@@ -58,4 +58,20 @@
   body {
     @apply bg-background text-[13px] text-foreground antialiased;
   }
+  /* Tailwind v4 leaves buttons on the default arrow. Anything that acts gets the
+     hand; a disabled one says so instead. */
+  button,
+  [role="button"],
+  [role="option"],
+  [role="menuitem"],
+  input[type="file"],
+  input[type="file"]::file-selector-button,
+  label[for] {
+    cursor: pointer;
+  }
+  :is(button, [role="button"], [role="option"], input):disabled,
+  [aria-disabled="true"],
+  [data-disabled] {
+    cursor: not-allowed;
+  }
 }

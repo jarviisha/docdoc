@@ -30,6 +30,7 @@ The console is a **dense operations tool**: an operator scans many rows, filters
   - Labels and secondary text are 12px (`text-xs`) in `text-slate-500` or `text-slate-600`.
   - Table headers and section headings are 11px uppercase with `tracking-wider`.
   - One page title at most. The top bar's "Group / Area" trail already says where the operator is.
+- **Cursor:** everything that acts shows the pointer hand, and a disabled control shows `not-allowed`. Both come from one rule in `styles.css`, so a new control inherits them as long as it is a `<button>` or carries `role="button"`/`"option"`.
 - **Control height** is 26px for buttons, inputs and selects alike. Controls in one row share that height and bottom-align with `items-end`.
 - **Mono** (`font-mono text-xs`) for every machine value: ids, tenant ids, hashes, URLs, schema identities.
 - **Numbers** are `tabular-nums`. Numeric and duration columns are right-aligned.
