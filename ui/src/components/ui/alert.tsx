@@ -21,6 +21,8 @@ const alertVariants = cva(
   }
 )
 
+// No `role="alert"`: the console wraps every Alert in its own live region and
+// chooses polite or assertive there (FR-045b).
 function Alert({
   className,
   variant,
@@ -29,7 +31,6 @@ function Alert({
   return (
     <div
       data-slot="alert"
-      role="alert"
       className={cn(alertVariants({ variant }), className)}
       {...props}
     />
