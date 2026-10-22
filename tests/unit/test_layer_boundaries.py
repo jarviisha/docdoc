@@ -98,7 +98,7 @@ def test_the_constitution_states_the_same_chain() -> None:
     `research.md` files. A dependency graph a reader must reconstruct from three
     research documents is not a governing one.
     """
-    text = (ROOT / ".specify" / "memory" / "constitution.md").read_text(encoding="utf-8")
+    text = (ROOT / "docs" / "constitution.md").read_text(encoding="utf-8")
 
     principle = text.split("### X. Layered Dependency Direction")[1].split("### XI.")[0]
     chain = re.search(r"```text\n(.*?)```", principle, re.DOTALL)

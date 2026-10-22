@@ -541,7 +541,7 @@ engine. The core library is usable with no database, no object store, and no run
 Scale comes later through stable boundaries, not premature infrastructure. The execution model
 may change; the core contracts must not.
 
-These are three of twenty in the [project constitution](.specify/memory/constitution.md), which
+These are three of twenty in the [project constitution](docs/constitution.md), which
 governs every specification, plan, and code change in this repository.
 
 ## Architecture
@@ -714,7 +714,7 @@ any of them. One result representation, reachable one way.
 
 ## Documentation
 
-- [Constitution](.specify/memory/constitution.md) — the governing principles
+- [Constitution](docs/constitution.md) — the governing principles
 - [Architecture decisions](docs/adr/) — fourteen accepted ADRs, and no open constitutional decisions
 - [Document concepts](docs/concepts/document.md)
 - [Identity model](docs/concepts/identity.md)

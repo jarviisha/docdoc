@@ -37,7 +37,7 @@ empty tuple, a default, or `None`. A caller must never be able to confuse "unava
 
 **5. Provenance beats convenience.** Given a choice between an ergonomic API that loses source
 information and a slightly clumsier one that preserves it, preserve it. This is
-[Principle XI](.specify/memory/constitution.md) and it decides most design arguments here.
+[Principle XI](docs/constitution.md) and it decides most design arguments here.
 
 ## Getting set up
 
@@ -131,9 +131,9 @@ branch.
 
 ## How work is planned here
 
-This repository uses [Spec Kit](https://github.com/github/spec-kit). Substantial features go
-through `specify → clarify → plan → tasks → analyze → implement`, and the artifacts live under
-`specs/`. You do not need to use that flow for a bug fix or a docs change.
+Milestones 1–11 were planned with [Spec Kit](https://github.com/github/spec-kit); their artifacts
+remain under `specs/` as design history. Spec Kit is no longer part of the workflow, and the
+constitution now lives at [`docs/constitution.md`](docs/constitution.md).
 
 Architectural decisions are recorded as ADRs in [`docs/adr/`](docs/adr/). If your change requires
 deciding something the constitution deliberately left open, write an ADR rather than settling it

@@ -37,7 +37,6 @@ ui/dist/
 # Design history. It governs the code and does not run.
 specs/
 docs/
-.specify/
 .claude/
 *.md
 

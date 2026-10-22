@@ -1,7 +1,7 @@
 # Architecture Decision Records
 
 Decisions that bind implementation. Each ADR resolves a question the
-[constitution](../../.specify/memory/constitution.md) raised but deliberately left open, so that
+[constitution](../constitution.md) raised but deliberately left open, so that
 it would be decided explicitly rather than settled by whichever code landed first.
 
 | ADR | Title | Status | Resolves |
