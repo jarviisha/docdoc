@@ -17,6 +17,7 @@ Select with HYPOTHESIS_PROFILE=thorough, or `pytest --hypothesis-profile=thoroug
 from __future__ import annotations
 
 import os
+from urllib.parse import urlsplit, urlunsplit
 
 import pytest
 from hypothesis import HealthCheck, Verbosity, settings
@@ -67,6 +68,42 @@ CREDENTIAL_ENV = (
 #: the fifth mark should come here first -- a mark that reads ambient
 #: configuration and is absent from this tuple is a suite that can never run.
 AMBIENT_MARKS = ("provider", "postgres", "s3", "otel")
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Give each xdist worker its own database, named `<database>_<worker>`.
+
+    The `postgres` tests `TRUNCATE` and even `DROP` between tests, so two workers
+    sharing one database would wipe each other's rows. Each fixture migrates the
+    schema itself, so an empty database is all a worker needs.
+    """
+    worker = os.environ.get("PYTEST_XDIST_WORKER")
+    dsn = os.environ.get("DOCDOC_TEST_DATABASE_URL")
+    if not (worker and dsn):
+        return
+    import psycopg
+    from psycopg import sql
+
+    url = urlsplit(dsn)
+    name = f"{url.path.lstrip('/')}_{worker}"
+    with psycopg.connect(dsn, autocommit=True) as connection:
+        exists = connection.execute("SELECT 1 FROM pg_database WHERE datname = %s", (name,))
+        if not exists.fetchone():
+            connection.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
+    os.environ["DOCDOC_TEST_DATABASE_URL"] = urlunsplit(url._replace(path=f"/{name}"))
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Run every object-store test on one xdist worker.
+
+    They share one bucket, which a per-worker name cannot split the way the
+    database above is split. `tryfirst` because xdist reads the group in its own
+    hook; `--dist loadgroup` in `addopts` is what makes the group binding.
+    """
+    for item in items:
+        if item.get_closest_marker("s3"):
+            item.add_marker(pytest.mark.xdist_group("s3"))
 
 
 @pytest.fixture(autouse=True)

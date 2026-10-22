@@ -421,7 +421,9 @@ capability neither satisfies and confirm the failure names the capability, not a
   at least one digital PDF, one fully scanned PDF, one PDF carrying a near-empty text layer, and one
   image.
 - **SC-005**: The native path produces byte-identical documents across repeated runs and across
-  platforms in 100% of cases.
+  platforms in 100% of cases. *(Amended 2026-10-22: "platforms" now means the supported Python
+  versions on Linux. docdoc runs as a server-side service in a Linux container, so CI no longer
+  runs macOS or Windows.)*
 - **SC-006**: Identical bytes with an identical parser, version, and options yield identical document
   identity in 100% of cases; any change to parser, version, or options yields a different identity in
   100% of cases.
