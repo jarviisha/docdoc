@@ -104,7 +104,7 @@ test("the a11y guard fails a status message with nowhere to be heard", async () 
   // T076. The failure that actually happened: a whole console of Banners and
   // not one live region in it.
   const directory = await fixture({
-    "Thing.tsx": '<Banner status="error" title="it broke" />\n',
+    "Thing.tsx": '<Alert variant="destructive"><AlertTitle>it broke</AlertTitle></Alert>\n',
   });
   const { code, output } = await guard("check-console-a11y.mjs", directory);
   assert.equal(code, 1);
@@ -115,7 +115,7 @@ test("the a11y guard fails a status message with nowhere to be heard", async () 
 test("the a11y guard passes a status message inside a live region", async () => {
   const directory = await fixture({
     "Thing.tsx":
-      '<div role="status" aria-live="polite">\n  <Banner status="error" title="it broke" />\n</div>\n',
+      '<div role="status" aria-live="polite">\n  <Alert variant="destructive"><AlertTitle>it broke</AlertTitle></Alert>\n</div>\n',
   });
   const { code } = await guard("check-console-a11y.mjs", directory);
   assert.equal(code, 0);
@@ -128,5 +128,25 @@ test("the a11y guard passes a labelled native control", async () => {
   });
   const { code } = await guard("check-console-a11y.mjs", directory);
   assert.equal(code, 0);
+  await rm(directory, { recursive: true, force: true });
+});
+
+test("the a11y guard does not mistake an AlertDialog for a status message", async () => {
+  const directory = await fixture({ "Thing.tsx": "<AlertDialog open={x}>\n</AlertDialog>\n" });
+  assert.equal((await guard("check-console-a11y.mjs", directory)).code, 0);
+  await rm(directory, { recursive: true, force: true });
+});
+
+test("the a11y guard fails an unnamed shadcn Input", async () => {
+  const directory = await fixture({ "Thing.tsx": "<Input value={v} onChange={f} />\n" });
+  const { code, output } = await guard("check-console-a11y.mjs", directory);
+  assert.equal(code, 1);
+  assert.match(output, /accessible name/);
+  await rm(directory, { recursive: true, force: true });
+});
+
+test("the a11y guard passes an Input a Label points at", async () => {
+  const directory = await fixture({ "Thing.tsx": "<Label htmlFor={id}>Key</Label>\n<Input id={id} />\n" });
+  assert.equal((await guard("check-console-a11y.mjs", directory)).code, 0);
   await rm(directory, { recursive: true, force: true });
 });

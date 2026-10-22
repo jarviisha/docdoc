@@ -47,7 +47,7 @@ const COMMENT = /^\s*(\*|\/\/|\/\*)/;
  * is plain text. Both appear and disappear in response to something the operator
  * did or something the deployment answered — which is exactly FR-045b's subject.
  */
-const TRANSIENT = [/<Banner\b/, /Loading…|Loading\.\.\./];
+const TRANSIENT = [/<Banner\b/, /<Alert\b/, /Loading…|Loading\.\.\./];
 
 /** Somewhere a screen reader is told. */
 const ANNOUNCES = /aria-live\s*=|role\s*=\s*["'{]?\s*["']?status["']?/;
@@ -172,7 +172,7 @@ if (unreachable.length > 0 || unnamed.length > 0 || unannounced.length > 0) {
     for (const violation of unnamed) {
       console.error(`  ${violation.file}:${violation.line} — ${violation.what}`);
     }
-    console.error("\nAdd aria-label, aria-labelledby, or an id a <Field> label points at.");
+    console.error("\nAdd aria-label, aria-labelledby, or an id a <Label htmlFor> points at.");
   }
 
   if (unannounced.length > 0) {
@@ -181,7 +181,7 @@ if (unreachable.length > 0 || unnamed.length > 0 || unannounced.length > 0) {
       console.error(`  ${violation.file}`);
     }
     console.error(
-      "\nThis file shows a Banner or a loading message and contains no live region.\n" +
+      "\nThis file shows an Alert or a loading message and contains no live region.\n" +
         'Wrap it: <div role="status" aria-live="polite">…</div>, or "assertive" when\n' +
         "the operator has just destroyed something and the report is the only record.\n" +
         "The viewer's Running.tsx is the pattern.",
