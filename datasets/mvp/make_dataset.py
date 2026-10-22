@@ -8,10 +8,10 @@ in CI -- the same arrangement, and the same reasoning, as
 **Scoring the committed dataset needs none of this.** ``uv sync --extra dev`` is
 enough to run ``examples/evaluate_golden_set.py`` and every test, because the
 predictions are committed and replayed. The ``--extra pdf`` above is needed only
-to *regenerate*, because regeneration parses the documents, and PyMuPDF is the
-parser. That asymmetry is the point of committing predictions at all: the
-contributor's path has no dependencies, and the maintainer's path is the one that
-carries them.
+to *regenerate*, because regeneration parses the documents with pypdfium2 (and
+writes them with reportlab, from the ``dev`` extra). That asymmetry is the point
+of committing predictions at all: the contributor's path has no dependencies,
+and the maintainer's path is the one that carries them.
 
 **Every document is synthetic**, written here, with its generator and version
 recorded in its ``origin``. No real document content and nothing that could carry
@@ -279,17 +279,22 @@ RESTRICTED = [
 
 
 def _write_pdf(name: str, lines: list[str]) -> bytes:
-    import pymupdf
+    import io
 
-    document = pymupdf.open()
-    page = document.new_page(width=WIDTH, height=HEIGHT)
+    from reportlab.pdfgen import canvas
+
+    buffer = io.BytesIO()
+    # `invariant=1` drops the timestamp and random file id: same input, same bytes.
+    document = canvas.Canvas(buffer, pagesize=(WIDTH, HEIGHT), invariant=1)
+    document.setFont("Helvetica", 11)
     y = 80.0
     for line in lines:
         if line:
-            page.insert_text((60.0, y), line, fontsize=11)
+            document.drawString(60.0, HEIGHT - y, line)
         y += 16.0
-    data: bytes = document.tobytes()
-    document.close()
+    document.showPage()
+    document.save()
+    data = buffer.getvalue()
 
     path = DOCUMENTS / f"{name}.pdf"
     path.write_bytes(data)

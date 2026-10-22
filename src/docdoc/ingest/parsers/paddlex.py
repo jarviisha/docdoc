@@ -97,6 +97,7 @@ from docdoc.ingest.errors import (
 )
 from docdoc.ingest.normalize import DocumentBuilder, normalize_bbox
 from docdoc.ingest.options import options_fingerprint
+from docdoc.ingest.pdfium_lock import PDFIUM_LOCK
 from docdoc.ingest.retry import analyze_with_retries
 from docdoc.ingest.source import JPEG, PDF, PNG
 from docdoc.kernel import DocdocError, Document, IngestProvenance
@@ -1019,45 +1020,50 @@ class PaddleXParser:
 
         import pypdfium2 as pdfium
 
-        try:
-            document = pdfium.PdfDocument(source.data)
-        except pdfium.PdfiumError as error:
-            # `getattr`, not `.err_code` directly: the attribute only exists
-            # from pypdfium2 5.0 (hence the `ocr` extra's floor) -- a defensive
-            # fallback rather than trusting every install to honour it.
-            code = getattr(error, "err_code", None)
-            reason = "encrypted" if code == pdfium.raw.FPDF_ERR_PASSWORD else "corrupt"
-            raise UnsupportedDocumentError(
-                f"endpoint {self.id!r} was sent a PDF that could not be opened",
-                reason=reason,
-                blob_id=source.blob_id,
-                media_type=source.media_type,
-                parser_id=self.id,
-            ) from None
+        # PDFium is not thread-safe; see `docdoc.ingest.pdfium_lock`.
+        with PDFIUM_LOCK:
+            try:
+                document = pdfium.PdfDocument(source.data)
+            except pdfium.PdfiumError as error:
+                # `getattr`, not `.err_code` directly: the attribute only exists
+                # from pypdfium2 5.0 (hence the `ocr` extra's floor) -- a defensive
+                # fallback rather than trusting every install to honour it.
+                code = getattr(error, "err_code", None)
+                # PDFium's last error can be stale after a failed load (see
+                # pdf_text._open); only a file declaring /Encrypt is encrypted.
+                encrypted = code == pdfium.raw.FPDF_ERR_PASSWORD and b"/Encrypt" in source.data
+                reason = "encrypted" if encrypted else "corrupt"
+                raise UnsupportedDocumentError(
+                    f"endpoint {self.id!r} was sent a PDF that could not be opened",
+                    reason=reason,
+                    blob_id=source.blob_id,
+                    media_type=source.media_type,
+                    parser_id=self.id,
+                ) from None
 
-        try:
-            page_count = len(document)
-            max_pages = self._endpoint.max_pages
-            if max_pages is None or page_count <= max_pages:
-                # Sent exactly as received -- no re-encoding through
-                # pypdfium2 when no splitting is needed (record.py: exactly
-                # at the limit is fine; the limit is `>`, not `>=`).
-                return [(source.data, page_count)]
+            try:
+                page_count = len(document)
+                max_pages = self._endpoint.max_pages
+                if max_pages is None or page_count <= max_pages:
+                    # Sent exactly as received -- no re-encoding through
+                    # pypdfium2 when no splitting is needed (record.py: exactly
+                    # at the limit is fine; the limit is `>`, not `>=`).
+                    return [(source.data, page_count)]
 
-            chunks: list[tuple[bytes, int]] = []
-            for start in range(0, page_count, max_pages):
-                count = min(max_pages, page_count - start)
-                chunk_doc = pdfium.PdfDocument.new()
-                try:
-                    chunk_doc.import_pages(document, pages=list(range(start, start + count)))
-                    buffer = io.BytesIO()
-                    chunk_doc.save(buffer)
-                finally:
-                    chunk_doc.close()
-                chunks.append((buffer.getvalue(), count))
-            return chunks
-        finally:
-            document.close()
+                chunks: list[tuple[bytes, int]] = []
+                for start in range(0, page_count, max_pages):
+                    count = min(max_pages, page_count - start)
+                    chunk_doc = pdfium.PdfDocument.new()
+                    try:
+                        chunk_doc.import_pages(document, pages=list(range(start, start + count)))
+                        buffer = io.BytesIO()
+                        chunk_doc.save(buffer)
+                    finally:
+                        chunk_doc.close()
+                    chunks.append((buffer.getvalue(), count))
+                return chunks
+            finally:
+                document.close()
 
     def _send(
         self,

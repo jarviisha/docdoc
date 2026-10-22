@@ -14,11 +14,11 @@ import pytest
 
 from docdoc.grounding import GroundingStatus, ground
 
-pymupdf = pytest.importorskip("pymupdf", reason="the pdf extra supplies the fixture parser")
+pytest.importorskip("pypdfium2", reason="the pdf extra supplies the fixture parser")
 
-from tests.support import make_extracted, make_extraction  # noqa: E402
+from tests.support import make_extracted, make_extraction
 
-from docdoc.ingest import parse  # noqa: E402
+from docdoc.ingest import parse
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "pdf" / "digital_invoice.pdf"
 

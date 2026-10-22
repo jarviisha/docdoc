@@ -199,7 +199,7 @@ def test_it_is_claimed_exactly_once_and_never_reported_as_abandoned(setup) -> No
 
 def test_a_resolvable_schema_still_runs(setup) -> None:  # type: ignore[no-untyped-def]
     """Guards both tests above: a registry that always refused would satisfy them."""
-    pytest.importorskip("pymupdf")
+    pytest.importorskip("pypdfium2")
     queue, blobs, store, blob_id, registry = setup
     submitted = queue.submit(
         Spec(blob_id=blob_id),  # type: ignore[arg-type]

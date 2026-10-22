@@ -230,7 +230,7 @@ def test_the_same_document_passes_under_a_sufficient_limit(
     is FR-039's "before parsing it and before contacting any provider" showing up
     as a property of the test suite.
     """
-    pytest.importorskip("pymupdf")  # SC-013: skips on a base install
+    pytest.importorskip("pypdfium2")  # SC-013: skips on a base install
     monkeypatch.delenv("DOCDOC_MAX_DOCUMENT_BYTES", raising=False)
     size = Path(FIXTURE).stat().st_size
 
@@ -247,7 +247,7 @@ def test_the_page_limit_refuses_a_document_with_too_many_pages(
     known — after routing, before the parser runs — which is the earliest point
     it can (ING-2).
     """
-    pytest.importorskip("pymupdf")  # SC-013: skips on a base install
+    pytest.importorskip("pypdfium2")  # SC-013: skips on a base install
     monkeypatch.delenv("DOCDOC_MAX_PAGES", raising=False)
 
     refused = main(["parse", MULTIPAGE, "--max-pages", "2", "--json"])
@@ -279,7 +279,7 @@ def test_moving_a_limit_moves_no_identity(
     deployments with different caps would share a store and reuse nothing from
     each other, and neither could tell.
     """
-    pytest.importorskip("pymupdf")  # SC-013: skips on a base install
+    pytest.importorskip("pypdfium2")  # SC-013: skips on a base install
     monkeypatch.delenv("DOCDOC_MAX_DOCUMENT_BYTES", raising=False)
     monkeypatch.delenv("DOCDOC_MAX_PAGES", raising=False)
     size = Path(MULTIPAGE).stat().st_size
@@ -310,7 +310,7 @@ def test_the_environment_form_of_a_limit_moves_no_identity_either(
     through `Settings.limits()`, the variable through the field's own default
     factory — and only one of them was exercised above.
     """
-    pytest.importorskip("pymupdf")  # SC-013: skips on a base install
+    pytest.importorskip("pypdfium2")  # SC-013: skips on a base install
     monkeypatch.delenv("DOCDOC_MAX_PAGES", raising=False)
     plain = _document_id(["parse", MULTIPAGE, "--json"], capsys)
 
@@ -449,7 +449,7 @@ def test_the_multipage_fixture_still_has_pages_to_exceed(
     reason only if the cap were also wrong — but it would make the *acceptance*
     half assert nothing at all, which is the quieter failure.
     """
-    pytest.importorskip("pymupdf")  # SC-013: skips on a base install
+    pytest.importorskip("pypdfium2")  # SC-013: skips on a base install
     assert main(["parse", MULTIPAGE, "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["pages"] == 3
 

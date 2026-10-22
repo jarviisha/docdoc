@@ -103,7 +103,7 @@ def test_the_command_set_is_the_twelve_the_contract_names() -> None:
 
 def test_json_writes_exactly_one_document_to_stdout(capsys: pytest.CaptureFixture[str]) -> None:
     """The whole of §2: stdout carries one JSON document and nothing else."""
-    pytest.importorskip("pymupdf")  # SC-013: skips on a base install
+    pytest.importorskip("pypdfium2")  # SC-013: skips on a base install
     code, out, _ = run(["extract", FIXTURE, "--schema", SCHEMA, "--json"], capsys)
     assert code in {EXIT_OK, EXIT_INVALID}
     parsed = json.loads(out)  # would raise on a banner, a warning, or two documents
@@ -119,7 +119,7 @@ def test_diagnostics_go_to_stderr_and_leave_stdout_parseable(
     that cannot be written degrades, logs, and continues (FR-063), which is
     exactly the shape of event that would land on stdout if anything did.
     """
-    pytest.importorskip("pymupdf")  # SC-013: skips on a base install
+    pytest.importorskip("pypdfium2")  # SC-013: skips on a base install
     code, out, _ = run(
         ["extract", FIXTURE, "--schema", SCHEMA, "--json", "--store", "/proc/nonexistent"],
         capsys,
@@ -137,7 +137,7 @@ def test_the_human_form_writes_no_json(capsys: pytest.CaptureFixture[str]) -> No
 
 def test_both_forms_carry_the_same_verdict(capsys: pytest.CaptureFixture[str]) -> None:
     """The human form is a projection of the machine form, not a second report."""
-    pytest.importorskip("pymupdf")  # SC-013: skips on a base install
+    pytest.importorskip("pypdfium2")  # SC-013: skips on a base install
     _, machine, _ = run(["extract", FIXTURE, "--schema", SCHEMA, "--json"], capsys)
     _, human, _ = run(["extract", FIXTURE, "--schema", SCHEMA], capsys)
     verdict = json.loads(machine)["verdict"]
@@ -148,7 +148,7 @@ def test_both_forms_carry_the_same_verdict(capsys: pytest.CaptureFixture[str]) -
 
 
 def test_a_valid_document_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:
-    pytest.importorskip("pymupdf")  # SC-013: skips on a base install
+    pytest.importorskip("pypdfium2")  # SC-013: skips on a base install
     code, _, _ = run(["extract", FIXTURE, "--schema", SCHEMA], capsys)
     assert code == EXIT_OK
 
@@ -253,7 +253,7 @@ def test_a_failed_run_still_reports_the_stages_that_succeeded(
     reader the parse is what fails. Guarded here rather than at module scope so
     the exit codes and output forms — which need no reader — still run there.
     """
-    pytest.importorskip("pymupdf")
+    pytest.importorskip("pypdfium2")
     code, out, _ = run(["extract", FIXTURE, "--schema", "no-such-schema@1", "--json"], capsys)
     assert code == EXIT_COULD_NOT_RUN
 
@@ -297,7 +297,7 @@ def test_no_untyped_exception_escapes_any_command(
 def test_an_explicit_flag_beats_the_environment(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    pytest.importorskip("pymupdf")  # SC-013: skips on a base install
+    pytest.importorskip("pypdfium2")  # SC-013: skips on a base install
     monkeypatch.setenv("DOCDOC_SCHEMA_PATHS", "/no/such/schemas")
     code, _, _ = run(["extract", FIXTURE, "--schema", SCHEMA, "--schema-path", "schemas"], capsys)
     assert code == EXIT_OK
@@ -307,7 +307,7 @@ def test_no_store_beats_a_configured_one(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The safer reading of an ambiguous invocation is the one that writes nothing."""
-    pytest.importorskip("pymupdf")  # SC-013: skips on a base install
+    pytest.importorskip("pypdfium2")  # SC-013: skips on a base install
     monkeypatch.setenv("DOCDOC_STORE_ROOT", str(tmp_path))
     code, _, _ = run(["extract", FIXTURE, "--schema", SCHEMA, "--no-store"], capsys)
     assert code == EXIT_OK
@@ -338,7 +338,7 @@ def test_inspect_reads_a_stored_result_by_its_identity(
     pipeline. Reading the stored run must produce the same values, verdicts, and
     locations — and must execute nothing.
     """
-    pytest.importorskip("pymupdf")
+    pytest.importorskip("pypdfium2")
     store = str(tmp_path)
 
     code, out, _ = run(["extract", FIXTURE, "--schema", SCHEMA, "--store", store, "--json"], capsys)

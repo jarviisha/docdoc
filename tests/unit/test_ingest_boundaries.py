@@ -32,6 +32,7 @@ PROVIDER_MODULES = frozenset(
     {
         "pymupdf",
         "fitz",
+        "pypdfium2",
         "azure",
         "httpx",
         "requests",

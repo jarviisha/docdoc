@@ -29,29 +29,15 @@ COPY src/ ./src/
 
 # `--all-extras` is deliberately NOT used. The image carries what a deployment
 # runs: the HTTP interface, run state, shared storage, and the provider adapters.
-# It does not carry `docdoc[pdf]` **by default**, because PyMuPDF is AGPL-3.0 and
-# baking it into a distributed image is an obligation this project's own README
-# warns about (ADR-0001).
+# The native PDF text path (`pdf`, pypdfium2, Apache-2.0/BSD-3, ADR-0025) is in
+# the default, so a fresh image reads a digital PDF with no credential at all.
+# `azure-di` and `gcv` report unavailable until they have credentials.
 #
-# The consequence is worth stating, because it surprised the first person to walk
-# the quickstart against this image: **the default build can parse nothing on its
-# own.** `pdf-text` is absent, and `azure-di` and `gcv` report unavailable until
-# they have credentials. Supplying a provider credential is the manual step
-# FR-077 permits — and for a purely local walk-through there is a second option
-# that FR-077 does not cover, so it is offered here explicitly rather than left
-# for somebody to discover by editing this file:
-#
-#   docker build --build-arg DOCDOC_EXTRAS=api,postgres,s3,google,azure,gcv,pdf .
-#
-# Opt-in, named in full at the command line, and therefore a licence decision
-# somebody made rather than one this file made for them.
-#
-# `ocr` carries none of that caveat and is in the default: it is pypdfium2
-# (Apache-2.0/BSD-3), needed by the PaddleX-protocol adapter (ADR-0021) to
-# send a PDF at all -- without it the adapter still serves images, but a PDF
+# `ocr` is the same library, needed by the PaddleX-protocol adapter (ADR-0021)
+# to send a PDF at all -- without it the adapter still serves images, but a PDF
 # of any length is refused, because the adapter cannot know the page count
 # and so cannot prove the result is complete.
-ARG DOCDOC_EXTRAS=api,postgres,s3,google,azure,gcv,ocr
+ARG DOCDOC_EXTRAS=api,postgres,s3,google,azure,gcv,ocr,pdf
 RUN uv pip install --system --no-cache ".[${DOCDOC_EXTRAS}]"
 
 # ---------------------------------------------------------------------------

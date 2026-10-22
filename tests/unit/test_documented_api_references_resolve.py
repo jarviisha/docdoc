@@ -417,6 +417,10 @@ CONFIG_DOCUMENTS = (
     # The admin screens plan (021, Task 1) names `DOCDOC_DELIVERY_SECRETS_FILE`
     # ahead of the console callback routes that need it configured.
     "docs/superpowers/plans/2026-10-21-console-admin-screens.md",
+    # The PDFium parser's design and plan name `DOCDOC_EXTRAS`, the Docker build
+    # argument that now includes `pdf`.
+    "docs/superpowers/specs/2026-10-22-pdfium-parser-design.md",
+    "docs/superpowers/plans/2026-10-22-pdfium-parser.md",
 )
 
 #: Requires at least one character after the prefix, so the `DOCDOC_*` wildcard

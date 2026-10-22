@@ -33,7 +33,7 @@ from docdoc.extraction import SchemaRegistry
 from docdoc.extraction.adapters.echo import EchoAdapter
 from docdoc.pipeline import Stage, run
 
-pytest.importorskip("pymupdf")
+pytest.importorskip("pypdfium2")
 
 FIXTURE = Path("tests/fixtures/pdf/digital_invoice.pdf")
 SCHEMA = "invoice@1"

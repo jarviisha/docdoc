@@ -102,7 +102,7 @@ class IngestProvenance(BaseModel):
     #: ingest layer always sets it (ING-19).
     text_layer: TextLayerRecord | None = None
     #: The reading order the producing parser declared, e.g.
-    #: ``"pymupdf-stream@1"``. Two parsers may legitimately order the same file
+    #: ``"pdfium-stream@1"``. Two parsers may legitimately order the same file
     #: differently; this says which ordering produced this text (FR-036).
     reading_order: str | None = None
 

@@ -32,6 +32,15 @@ The protected set is unchanged: 014 adds a run kind, OCR caps, and OCR
 retention, all in `runs/`, `api/`, and the pipeline runner, and touches none of
 the layers above. Only the guard-the-guard check moved, from `ingest/` to
 `runs/`, which is where this milestone's work is.
+
+**Re-pointed at the PDFium parser (ADR-0025,
+`docs/superpowers/specs/2026-10-22-pdfium-parser-design.md`), 2026-10-22.**
+The swap lives in `ingest/`, so the guard-the-guard check moved there. `kernel/`
+and `extraction/` came off the list: they mention PyMuPDF in docstrings and
+comments that the swap makes untrue, and those are rewritten. No code in either
+changes. `grounding/`, `validation/`, and the identity derivations stay
+protected, because a parser swap that moved one of them would be the bug this
+file exists to catch.
 """
 
 from __future__ import annotations
@@ -40,14 +49,10 @@ import subprocess
 
 import pytest
 
-#: Every layer Milestone 012 declared it would not touch. `kernel` first,
-#: because it is the one Principle I protects by name and the one whose purity
-#: is enforced by an AST scan and a runtime audit hook. `ingest/` is
-#: deliberately absent -- this milestone's own work -- see the module
+#: The layers the PDFium parser swap must not touch. `ingest/` is this work;
+#: `kernel/` and `extraction/` only have docstrings rewritten -- see the module
 #: docstring.
 PROTECTED = (
-    "src/docdoc/kernel/",
-    "src/docdoc/extraction/",
     "src/docdoc/grounding/",
     "src/docdoc/validation/",
 )
@@ -207,7 +212,7 @@ def test_the_diff_is_not_empty() -> None:
     changed = _changed()
 
     assert changed, "the diff against `main` is empty, so nothing above was checked"
-    assert any(path.startswith("src/docdoc/runs/") for path in changed), (
-        "this milestone's work is in `docdoc.runs` (async OCR, ADR-0022), "
-        "and the diff shows none of it. The comparison is against the wrong ref"
+    assert "src/docdoc/ingest/parsers/pdf_text.py" in changed, (
+        "this milestone's work is the native PDF parser (ADR-0025), and the diff "
+        "shows none of it. The comparison is against the wrong ref"
     )

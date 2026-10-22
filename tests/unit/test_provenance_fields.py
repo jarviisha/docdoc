@@ -39,7 +39,7 @@ def make_record(**overrides: object) -> TextLayerRecord:
 def make_provenance(**overrides: object) -> IngestProvenance:
     defaults: dict[str, object] = {
         "parser_id": "pdf-text",
-        "parser_version": "1.0.0+pymupdf-1.28.2",
+        "parser_version": "2.0.0+pypdfium2-5.14.0",
         "options": {},
         "options_hash": EMPTY_HASH,
         "capabilities": CAPS,
@@ -63,7 +63,7 @@ class TestBackCompat:
         # else. If provenance could change it, adding a field would have
         # invalidated every document ever produced.
         without = make_provenance()
-        with_record = make_provenance(text_layer=make_record(), reading_order="pymupdf-stream@1")
+        with_record = make_provenance(text_layer=make_record(), reading_order="pdfium-stream@1")
         blob = blob_id_for(b"same bytes")
 
         ids = {

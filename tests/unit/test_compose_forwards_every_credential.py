@@ -7,12 +7,12 @@ composition did: it forwarded `GEMINI_API_KEY` and none of the **parser**
 credentials.
 
 The consequence was invisible in every way that matters. `echo` replaces the
-*model*, not the parse, and the image ships no local parser because PyMuPDF is
-AGPL-3.0 — so on a default build a cloud parser credential is the only route to a
-working deployment. Export one, run `docker compose up`, and the containers start,
-report healthy, and refuse every document with `ParserCapabilityError`. Nothing
-logs a configuration problem, because from docdoc's point of view there is not
-one: no parser was configured.
+*model*, not the parse, and at the time the image shipped no local parser (it was
+PyMuPDF, AGPL-3.0, until ADR-0025) — so a cloud parser credential was the only route
+to a working deployment. It still is for scans and images. Export one, run
+`docker compose up`, and the containers start, report healthy, and refuse every
+document with `ParserCapabilityError`. Nothing logs a configuration problem,
+because from docdoc's point of view there is not one: no parser was configured.
 
 **Read as text rather than parsed as YAML**, deliberately. PyYAML is not a
 dependency of this project and adding one for a single test would be a poor
@@ -168,10 +168,10 @@ def test_a_parser_credential_is_reachable_at_all() -> None:
         name for extra in parser_extras for name in CREDENTIALS_BY_EXTRA[extra] if name in forwarded
     ]
     assert reachable, (
-        "no parser credential reaches the containers, and the default image "
-        "ships no local parser (PyMuPDF is AGPL-3.0, ADR-0001). There is "
-        "therefore no way to make this composition parse a document, which is "
-        "what FR-077 says it must do given one credential"
+        "no parser credential reaches the containers, and the default image's "
+        "local parser reads only digital PDFs. There is therefore no way to make "
+        "this composition parse a scan or an image, which is what FR-077 says it "
+        "must do given one credential"
     )
 
 

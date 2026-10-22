@@ -70,7 +70,7 @@ class TestThroughARealPdf:
         actually bites. A class decorator would have to be remembered by whoever
         adds the next test; this cannot be forgotten.
         """
-        pytest.importorskip("pymupdf")
+        pytest.importorskip("pypdfium2")
         return parse((FIXTURES / "pdf" / "unicode_text.pdf").read_bytes())
 
     def test_nothing_was_lost_to_a_broken_decode(self, document) -> None:  # type: ignore[no-untyped-def]
@@ -185,7 +185,7 @@ class TestZeroPageDocument:
     # SC-013: refusing a zero-page PDF still requires opening it, so this class
     # needs the native reader that a base install does not have.
     pytestmark = pytest.mark.skipif(
-        importlib.util.find_spec("pymupdf") is None,
+        importlib.util.find_spec("pypdfium2") is None,
         reason="needs the native PDF reader (docdoc[pdf])",
     )
 
@@ -196,8 +196,10 @@ class TestZeroPageDocument:
         with pytest.raises(UnsupportedDocumentError) as caught:
             parse((FIXTURES / "pdf" / "zero_pages.pdf").read_bytes())
 
+        # PDFium refuses to load a zero-page file at all, so the refusal comes
+        # from opening it ("could not be opened") rather than from counting
+        # its pages. The reason, which is what callers branch on, is the same.
         assert caught.value.reason == "corrupt"
-        assert "no pages" in str(caught.value)
 
     def test_the_refusal_names_the_file_and_no_content(self) -> None:
         with pytest.raises(UnsupportedDocumentError) as caught:

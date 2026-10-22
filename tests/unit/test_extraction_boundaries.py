@@ -30,7 +30,7 @@ ADAPTER_DIR = EXTRACTION_DIR / "adapters"
 HIGHER_LAYERS = frozenset({"pipeline", "api"})
 
 PROVIDER_MODULES = frozenset(
-    {"anthropic", "openai", "httpx", "requests", "boto3", "azure", "pymupdf", "fitz"}
+    {"anthropic", "openai", "httpx", "requests", "boto3", "azure", "pymupdf", "fitz", "pypdfium2"}
 )
 
 

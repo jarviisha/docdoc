@@ -168,7 +168,7 @@ def _resolve_document(
         )
 
     # Imported here rather than at module scope. `docdoc.ingest`'s package
-    # `__init__` reaches its parser registry and, through it, PyMuPDF and the
+    # `__init__` reaches its parser registry and, through it, pypdfium2 and the
     # Azure SDK; a caller who supplies parsed documents should not need either
     # installed to record a prediction set.
     from docdoc.ingest import parse

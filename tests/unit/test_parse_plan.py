@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("pymupdf")
+pytest.importorskip("pypdfium2")
 
 from docdoc.ingest import parse
 from docdoc.ingest.errors import IngestError

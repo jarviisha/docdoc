@@ -9,18 +9,15 @@ encoder, so serving a page adds no dependency.
 from __future__ import annotations
 
 import struct
-import threading
 import zlib
 
+from docdoc.ingest.pdfium_lock import PDFIUM_LOCK as _PDFIUM
 from docdoc.ingest.source import JPEG, PDF, PNG, detect_media_type
 
 #: The longer edge of a rendered PDF page, in pixels.
 MAX_EDGE = 2000
 #: Never render a small page above this resolution.
 _MAX_DPI = 200
-
-#: PDFium is not thread-safe (pypdfium2's docs): every call into it holds this.
-_PDFIUM = threading.Lock()
 
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 _COLOR_TYPE = {3: 2, 4: 6}  # channels -> PNG colour type: truecolour, truecolour + alpha

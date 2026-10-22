@@ -22,7 +22,7 @@ from docdoc.ingest.source import Limits, SourceFile
 # SDK at all. Constitution XII: "Provider adapters MUST have integration tests;
 # those tests MUST NOT be required to run the unit and property suites." These
 # tests exercise the native PDF path, so they skip rather than fail when it is absent.
-pytest.importorskip("pymupdf")
+pytest.importorskip("pypdfium2")
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 INVOICE = FIXTURES / "pdf" / "digital_invoice.pdf"
@@ -57,8 +57,8 @@ class TestEndToEnd:
         document = parse(invoice_bytes())
 
         assert document.provenance.parser_id == "pdf-text"
-        assert "pymupdf" in document.provenance.parser_version
-        assert document.provenance.reading_order == "pymupdf-stream@1"
+        assert "pypdfium2" in document.provenance.parser_version
+        assert document.provenance.reading_order == "pdfium-stream@1"
 
     def test_the_document_references_the_bytes_without_carrying_them(self) -> None:
         document = parse(invoice_bytes())
@@ -104,7 +104,7 @@ class TestIdentity:
         bumped = document_id_for(
             blob_id=document.source.blob_id,
             parser_id="pdf-text",
-            parser_version="1.0.0+pymupdf-99.0.0",
+            parser_version="2.0.0+pypdfium2-99.0.0",
             options_hash=options_hash_for({}),
         )
 

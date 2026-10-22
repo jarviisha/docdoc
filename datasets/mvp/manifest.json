@@ -21,7 +21,7 @@
   "documents": [
     {
       "document_id": "invoice-001",
-      "blob_sha256": "sha256:b0d9b6313a50500eed5db2a1773b2252b37dc5a8d856863df74d148ba917bc7e",
+      "blob_sha256": "sha256:039dade082dbc6cf1bf42e77e81467dff965dfd5a598eb7a70a81b0c18f04c27",
       "tier": "public",
       "origin": {
         "kind": "synthetic",
@@ -37,7 +37,7 @@
     },
     {
       "document_id": "invoice-002",
-      "blob_sha256": "sha256:f30e000331c6a8a31685ec8a355f7850560a991ff35b3d0abdb0582c145bc9e0",
+      "blob_sha256": "sha256:7eeec9d642517bfc24bd210e75b31d061eb89dfb39df3205807cc23366d4fdb5",
       "tier": "public",
       "origin": {
         "kind": "synthetic",
@@ -53,7 +53,7 @@
     },
     {
       "document_id": "receipt-001",
-      "blob_sha256": "sha256:ec85f51d1362dd6569b0e1ac9cbcc6d1f0f55f5e264599fbc8a6aa4560e49758",
+      "blob_sha256": "sha256:38cd5c0b5f70c7f74e3696f2dc904f1411c5cd75f563553bf057e17c659ddebc",
       "tier": "public",
       "origin": {
         "kind": "synthetic",
@@ -69,7 +69,7 @@
     },
     {
       "document_id": "receipt-002",
-      "blob_sha256": "sha256:d3f8a90489884a8cf61f94ce8f4041d014463e6d3981673a69ffe9499b2944e3",
+      "blob_sha256": "sha256:367d13434c2751e2ff8557a5b09de653aba54a066f556df931e928e4bb98bced",
       "tier": "public",
       "origin": {
         "kind": "synthetic",

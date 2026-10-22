@@ -22,7 +22,7 @@ from docdoc.ingest.source import SourceFile
 # those tests MUST NOT be required to run the unit and property suites." These
 # tests exercise the text-layer assessment, which reads page text, so they
 # skip rather than fail when it is absent.
-pytest.importorskip("pymupdf")
+pytest.importorskip("pypdfium2")
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 

@@ -4,6 +4,7 @@
 - **Date**: 2026-08-14
 - **Resolves**: `TODO(OCR_IN_MVP)` (BLOCKING, Milestone 2)
 - **Principles engaged**: IV (Provider-Agnostic Adapters), V (Text-First), XI (MVP Discipline)
+- **Superseded in part by**: [ADR-0025](0025-native-pdf-parsing-on-pdfium.md) (the native PDF library: PDFium, not PyMuPDF)
 
 ## Context
 

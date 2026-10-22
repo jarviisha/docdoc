@@ -111,7 +111,7 @@ Three things to get right, in order of how expensive they are to get wrong:
   on which container won. `docdoc migrate --check` exits non-zero when anything
   is pending, which is what a rollout gates on.
 - **Scale by replica count, not by a flag.** There is no `--concurrency`: a
-  worker runs one document at a time, because PyMuPDF and `rapidfuzz` hold the
+  worker runs one document at a time, because parsing and `rapidfuzz` hold the
   GIL in bursts and a threaded worker lets one long parse starve a sibling's
   heartbeat until that sibling loses a lease it is still executing.
 - **More than one worker needs a shared store.** Point every process at the same

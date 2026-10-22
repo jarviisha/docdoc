@@ -437,7 +437,7 @@ def _dispatch(args: argparse.Namespace) -> Any:
     """The command's entry point, imported at call time.
 
     Deferred deliberately. Importing every command at module scope would drag
-    ``docdoc.ingest`` and its parser registry — and through it PyMuPDF and the
+    ``docdoc.ingest`` and its parser registry — and through it pypdfium2 and the
     Azure SDK — into ``docdoc store clear``, which needs none of them. The base
     install has to stay usable with no extras at all (FR-053, SC-013).
     """

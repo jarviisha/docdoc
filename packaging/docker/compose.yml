@@ -21,21 +21,12 @@ services:
       context: ../..
       dockerfile: packaging/docker/Dockerfile
       args:
-        # The image parses nothing without one of these, and the default omits
-        # the local one on purpose: PyMuPDF is AGPL-3.0 (ADR-0001). For a local
-        # walk-through, add `pdf` — knowingly, which is what setting it here is:
-        #
-        #   DOCDOC_EXTRAS=api,postgres,s3,google,azure,gcv,pdf \
-        #     docker compose -f packaging/docker/compose.yml up -d --build
-        #
-        # For a real deployment, supply Azure Document Intelligence or Google
-        # Cloud Vision credentials instead and leave this alone.
-        #
-        # `ocr` is in the default, unlike `pdf`: it is pypdfium2 (Apache-2.0/
-        # BSD-3), not PyMuPDF, so it carries none of ADR-0001's licence
-        # caveat, and the PaddleX-protocol adapter (ADR-0021) cannot send a
-        # PDF at all without it.
-        DOCDOC_EXTRAS: ${DOCDOC_EXTRAS:-api,postgres,s3,google,azure,gcv,ocr}
+        # `pdf` is the native PDF text path (pypdfium2, Apache-2.0/BSD-3,
+        # ADR-0025), so a digital PDF parses with no credential at all. Scans
+        # and images need Azure Document Intelligence or Google Cloud Vision
+        # credentials, or an OCR endpoint. `ocr` is the same library, and the
+        # PaddleX-protocol adapter (ADR-0021) cannot send a PDF without it.
+        DOCDOC_EXTRAS: ${DOCDOC_EXTRAS:-api,postgres,s3,google,azure,gcv,ocr,pdf}
     depends_on:
       postgres: {condition: service_healthy}
       seaweedfs: {condition: service_healthy}
@@ -74,10 +65,10 @@ services:
       # a variable the containers never see is not a step an operator can take.
       #
       # The parser credentials are the ones that matter here and the ones that
-      # were missing. `echo` replaces the *model*, not the parse, and the image
-      # ships no local parser because PyMuPDF is AGPL-3.0 (ADR-0001) — so on a
-      # default build a cloud parser credential is the only route to a working
-      # deployment. Without these lines, exporting one did nothing: the
+      # were missing. `echo` replaces the *model*, not the parse, and the
+      # image's local parser reads only digital PDFs -- so for a scan or an
+      # image a cloud parser credential is the route to a working deployment.
+      # Without these lines, exporting one did nothing: the
       # composition came up, reported healthy, and refused every document with
       # `ParserCapabilityError`.
       #

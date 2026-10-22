@@ -213,7 +213,7 @@ won. `docdoc migrate --check` exits non-zero when anything is pending, which is 
 on.
 
 **One run per worker process.** There is no `--concurrency` flag, and its absence is a correctness
-choice rather than a simplification: PyMuPDF and `rapidfuzz` hold the GIL in bursts, so a threaded
+choice rather than a simplification: parsing and `rapidfuzz` hold the GIL in bursts, so a threaded
 worker lets one long parse starve a sibling's heartbeat until that sibling loses a lease it is still
 executing. Concurrency is replica count — `docker compose up --scale worker=3`.
 

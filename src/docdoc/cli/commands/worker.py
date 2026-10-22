@@ -8,7 +8,7 @@ everyone including everyone without ``docdoc[postgres]``, and fail at import.
 **No ``--concurrency``** (FR-025, research R9a). A worker executes one run at a
 time and concurrency is replica count. The flag is absent rather than accepting
 only ``1``, because a flag that takes one value is an invitation to make it take
-more — and the reason it must not is a correctness one: PyMuPDF and ``rapidfuzz``
+more — and the reason it must not is a correctness one: parsing and ``rapidfuzz``
 hold the GIL in bursts, so a threaded worker lets one long parse starve a
 sibling's heartbeat until that sibling loses a lease it is still executing.
 

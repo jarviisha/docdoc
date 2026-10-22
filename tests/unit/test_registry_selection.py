@@ -25,7 +25,7 @@ from docdoc.kernel import Document
 # those tests MUST NOT be required to run the unit and property suites." These
 # tests exercise parser selection over the installed registry, so they skip
 # rather than fail when it is absent.
-pytest.importorskip("pymupdf")
+pytest.importorskip("pypdfium2")
 
 PDF_TEXT = CapabilityRequest(media_type=PDF, text=True)
 PDF_GEOMETRY = CapabilityRequest(media_type=PDF, text=True, geometry=True)
@@ -263,7 +263,7 @@ class TestSwappingTheProvider:
         class Relabelled(PdfTextParser):  # type: ignore[misc, valid-type]
             id = new_id
             version = new_version
-            reading_order = "pymupdf-stream@1"
+            reading_order = "pdfium-stream@1"
 
         return Relabelled()
 

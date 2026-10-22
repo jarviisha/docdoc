@@ -9,6 +9,21 @@ API may change in any release. `document_id` derivation is versioned separately 
 
 ## [Unreleased]
 
+### Changed — native PDF parsing on PDFium (ADR-0025)
+
+- `pdf-text` parses with `pypdfium2` (Apache-2.0/BSD-3) instead of PyMuPDF (AGPL-3.0). PyMuPDF and
+  its licence caveat are gone. The `pdf` extra is now `pypdfium2`, and the default Docker image and
+  `compose.yml` include it, so a fresh deployment reads digital PDFs with no credential.
+- **Identities change.** `parser_version` is `2.0.0+pypdfium2-<version>` and `reading_order` is
+  `pdfium-stream@1`, so every document and artifact id derived from a native parse moves (pre-1.0,
+  ADR-0011). Words and their order are unchanged on every fixture. Boxes move by at most 0.0017 of
+  the page.
+- One process-wide PDFium lock serializes the native parser, PaddleX PDF splitting, and console page
+  rendering.
+- A PDF is reported `encrypted` only when it declares `/Encrypt`. PDFium's stale last error had made
+  an unreadable PDF opened after an encrypted one look encrypted too.
+- Test fixtures and the golden set are written with `reportlab` (dev-only) and are byte-reproducible.
+
 Milestone 11: the operations console. **The browser face of work Milestone 10 already did**, and
 almost nothing else. Every write it performs — issue a credential, revoke one, erase a tenant or a
 document — reaches a route that already existed and was already tested. The whole server-side

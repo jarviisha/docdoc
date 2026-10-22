@@ -384,6 +384,15 @@ class TestRefusedBeforeAnyCall:
             parser.parse(source, {}, FAST_TRANSPORT)
         assert excinfo.value.reason == "corrupt"
 
+    def test_an_unopenable_pdf_after_an_encrypted_one_is_not_called_encrypted(self) -> None:
+        # PDFium's last error is stale after some failed loads; see pdf_text.
+        parser = PaddleXParser(_endpoint(), post=_refuse_post)
+        with pytest.raises(UnsupportedDocumentError):
+            parser.parse(_source_pdf("encrypted.pdf"), {}, FAST_TRANSPORT)
+        with pytest.raises(UnsupportedDocumentError) as excinfo:
+            parser.parse(_source_pdf("zero_pages.pdf"), {}, FAST_TRANSPORT)
+        assert excinfo.value.reason == "corrupt"
+
     def test_pdf_without_pypdfium2_extra_is_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(paddlex, "_pdfium_installed", lambda: False)
         parser = PaddleXParser(_endpoint(), post=_refuse_post)

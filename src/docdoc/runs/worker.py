@@ -6,7 +6,7 @@ artifact store already checkpoints each stage; the claim query already handles
 lease expiry. What is left here is transport.
 
 **One run per process** (FR-025, research R9a). No `--concurrency`, no threads
-beyond the heartbeat, no subprocess pool. PyMuPDF and `rapidfuzz` hold the GIL in
+beyond the heartbeat, no subprocess pool. Parsing and `rapidfuzz` hold the GIL in
 bursts, so a threaded worker lets one long parse starve a sibling's heartbeat
 until that sibling loses a lease it is still executing — a utilisation choice
 becoming a correctness bug. Concurrency is replica count.
@@ -582,7 +582,7 @@ class Worker:
         whose docstring says the heartbeat is the only one — and the exception is
         narrow enough to state rather than to hide: this thread executes no run,
         touches no lease, and holds nothing the pipeline can see. The reason
-        there is no *worker pool* is that PyMuPDF and `rapidfuzz` hold the GIL in
+        there is no *worker pool* is that parsing and `rapidfuzz` hold the GIL in
         bursts and would starve a heartbeat; a thread that answers two constant
         questions cannot starve anything.
         """

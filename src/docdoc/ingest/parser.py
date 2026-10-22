@@ -37,7 +37,7 @@ class Parser(Protocol):
     @property
     def version(self) -> str:
         """The adapter's own version *plus* the underlying library or service
-        API version -- ``"1.0.0+pymupdf-1.28.2"``. A library upgrade that changes
+        API version -- ``"2.0.0+pypdfium2-5.14.0"``. A library upgrade that changes
         extraction output changes document identity, which is the point of a
         content-addressed chain (ADR-0003, FR-020)."""
         ...
@@ -50,7 +50,7 @@ class Parser(Protocol):
     @property
     def reading_order(self) -> str:
         """The ordering this parser emits tokens in, e.g.
-        ``"pymupdf-stream@1"``. Recorded in provenance so the ordering behind
+        ``"pdfium-stream@1"``. Recorded in provenance so the ordering behind
         any result is knowable after the fact (FR-036)."""
         ...
 

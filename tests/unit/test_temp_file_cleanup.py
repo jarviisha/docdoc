@@ -24,7 +24,7 @@ from docdoc.ingest.errors import IngestError
 # SDK at all. Constitution XII: "Provider adapters MUST have integration tests;
 # those tests MUST NOT be required to run the unit and property suites." These
 # tests exercise a real parse's temporary files, so they skip rather than fail when it is absent.
-pytest.importorskip("pymupdf")
+pytest.importorskip("pypdfium2")
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 

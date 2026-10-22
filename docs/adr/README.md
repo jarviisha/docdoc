@@ -6,7 +6,7 @@ it would be decided explicitly rather than settled by whichever code landed firs
 
 | ADR | Title | Status | Resolves |
 |-----|-------|--------|----------|
-| [0001](0001-parser-and-ocr-strategy-in-mvp.md) | Parser and OCR strategy in the MVP | Accepted | `OCR_IN_MVP` |
+| [0001](0001-parser-and-ocr-strategy-in-mvp.md) | Parser and OCR strategy in the MVP | Accepted; native PDF library superseded by ADR-0025 | `OCR_IN_MVP` |
 | [0002](0002-blob-and-document-identity.md) | Blob identity and document identity are separate | Accepted | `DOCUMENT_IDENTITY` |
 | [0003](0003-content-addressed-artifact-chain.md) | Per-stage content-addressed artifact chain | Accepted | `PROCESSING_CACHE_KEY` |
 | [0004](0004-confidence-semantics.md) | Confidence is never a single blended number | Accepted | `CONFIDENCE_SEMANTICS` |
@@ -30,6 +30,7 @@ it would be decided explicitly rather than settled by whichever code landed firs
 | [0022](0022-asynchronous-ocr-through-a-bounded-queue.md) | OCR is a run kind, accepted into a bounded queue | Accepted; requires constitution v1.11.0; amends 0021 | — |
 | [0023](0023-console-login-and-cross-tenant-operations.md) | Console login and cross-tenant operations | Accepted; requires constitution v1.12.0; supersedes 0019 §3–§4 in part, 0020 in part | — |
 | [0024](0024-console-ui-on-shadcn.md) | The console's UI is built on shadcn/ui | Accepted; replaces Astryx (`specs/008` R2) | — |
+| [0025](0025-native-pdf-parsing-on-pdfium.md) | Native PDF parsing on PDFium | Accepted; supersedes 0001's choice of PyMuPDF | — |
 
 ## Conventions
 

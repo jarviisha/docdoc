@@ -2,7 +2,7 @@
 
 Each module here wraps one source of documents behind the
 :class:`docdoc.ingest.parser.Parser` protocol. Nothing outside this package may
-import ``pymupdf``, ``fitz``, or an ``azure`` SDK; ``import-linter`` fails the
+import ``pypdfium2`` or an ``azure`` SDK; ``import-linter`` fails the
 build if it does (Constitution Principle IV).
 
 Adapters are imported lazily by :func:`docdoc.ingest.registry.default_registry`,

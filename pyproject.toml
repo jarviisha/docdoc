@@ -38,11 +38,10 @@ dependencies = ["pydantic>=2.0", "rapidfuzz>=3.0"]
 # Principle IV: "the base install MUST NOT force installation of any provider
 # SDK or OCR engine").
 #
-# NOTE ON LICENSING: PyMuPDF is AGPL-3.0 (or a paid commercial licence), while
-# docdoc is Apache-2.0. Keeping it behind an opt-in extra means docdoc's own
-# distribution stays Apache-2.0 and the AGPL obligation is incurred only by a
-# user who installs `docdoc[pdf]`. See specs/002-ingest-parser-layer/research.md R1.
-pdf = ["pymupdf>=1.24"]
+# The native PDF text path. pypdfium2 is Apache-2.0/BSD-3, so unlike the PyMuPDF
+# it replaced (ADR-0025) it carries no licence caveat and ships in the default
+# image. The 5.0 floor is the same as `ocr`'s: `PdfiumError.err_code`.
+pdf = ["pypdfium2>=5.0"]
 azure = ["azure-ai-documentintelligence>=1.0"]
 # The one LLM adapter of the MVP (specs/003 research.md R1). The unified
 # `google-genai` SDK, not the legacy `google-generativeai`. Apache-2.0, so no
@@ -53,11 +52,9 @@ google = ["google-genai>=1.0"]
 # and ingest -- and a deployment wanting one has no reason to install the other.
 gcv = ["google-cloud-vision>=3.4"]
 # PDF splitting for the PaddleX-protocol adapter (ADR-0021, Task 3): a long PDF
-# is cut into endpoint-sized sub-PDFs before it is sent. pypdfium2 is
-# Apache-2.0/BSD-3, not PyMuPDF (AGPL-3.0, the `pdf` extra's licence
-# caveat) -- so this extra carries none of that obligation, deliberately, for
-# the same adapter that also talks to the hand-written Tesseract shim, which
-# renders with the same library. Without it, a PDF cannot be sent at all: the
+# is cut into endpoint-sized sub-PDFs before it is sent. The same library as the
+# `pdf` extra (Apache-2.0/BSD-3), and the one the hand-written Tesseract shim
+# renders with. Without it, a PDF cannot be sent at all: the
 # adapter cannot know the page count, and so cannot prove the result it gets
 # back is complete (see paddlex.py's `_pdf_chunks`).
 #
@@ -89,8 +86,8 @@ api = ["fastapi>=0.110", "uvicorn>=0.29"]
 # compatibility window. They move together or they disagree about what `/ui`
 # means.
 #
-# NOTE ON LICENSING: unlike the `pdf` extra above, nothing here carries an
-# obligation beyond Apache-2.0 -- every browser dependency is MIT or Apache-2.0,
+# NOTE ON LICENSING: nothing here carries an obligation beyond Apache-2.0 --
+# every browser dependency is MIT or Apache-2.0,
 # recorded with its licence in `ui/LICENSES.md` and checked by `npm run licenses`
 # rather than asserted. That is not a coincidence: the renderer was chosen on
 # licence before it was chosen on merit, because the server-side alternative
@@ -157,6 +154,9 @@ dev = [
     # here because the server is a separate deployable with its own requirements.txt, not
     # something `docdoc[dev]` ships into anyone's install.
     "pillow>=10.0",
+    # Only for the fixture and golden-set generators (tests/fixtures/make_fixtures.py,
+    # datasets/mvp/make_dataset.py), which write their PDFs with it. BSD-licensed.
+    "reportlab>=4.0",
 ]
 
 # One console script, and only one. `docdoc` costs nothing because the CLI is
@@ -234,19 +234,10 @@ show_error_codes = true
 module = "tests.*"
 strict = false
 
-# PyMuPDF's public functions carry no annotations, so --strict's no-untyped-call
-# rule fires on every library call. Relaxing exactly that one rule, in exactly
-# the module whose job is to talk to that library, keeps everything else strict.
-# This is the practical reason adapters exist: the untyped world stops here
-# (Principle IV).
-[[tool.mypy.overrides]]
-module = "docdoc.ingest.parsers.pdf_text"
-disallow_untyped_calls = false
-
 # google-cloud-vision and its api_core/auth dependencies ship no py.typed marker,
-# so every symbol imported from them is untyped. Same reasoning as the PyMuPDF
-# override above and confined the same way: to the one module whose job is to
-# talk to that library. Everything the adapter hands onward is annotated.
+# so every symbol imported from them is untyped. Relaxing exactly that one rule,
+# in exactly the module whose job is to talk to that library, keeps everything
+# else strict: the untyped world stops at the adapter (Principle IV). Everything the adapter hands onward is annotated.
 [[tool.mypy.overrides]]
 module = "docdoc.ingest.parsers.gcv"
 disallow_untyped_calls = false
@@ -748,8 +739,7 @@ forbidden_modules = [
     "pypdfium2",
 ]
 ignore_imports = [
-    "docdoc.ingest.parsers.pdf_text -> pymupdf",
-    "docdoc.ingest.parsers.pdf_text -> fitz",
+    "docdoc.ingest.parsers.pdf_text -> pypdfium2",
     "docdoc.ingest.parsers.azure_di -> azure",
     "docdoc.ingest.parsers.azure_di -> httpx",
     "docdoc.ingest.parsers.gcv -> google",

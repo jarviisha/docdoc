@@ -159,7 +159,7 @@ def test_a_sidecar_conflict_keeps_the_run_going(
 def test_an_extraction_run_cache_miss_writes_the_sidecar(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    pytest.importorskip("pymupdf", reason="a real extraction run parses the fixture PDF")
+    pytest.importorskip("pypdfium2", reason="a real extraction run parses the fixture PDF")
     from docdoc.extraction import SchemaRegistry
     from docdoc.extraction.adapters.echo import EchoAdapter
     from docdoc.pipeline import Stage, run, runner
