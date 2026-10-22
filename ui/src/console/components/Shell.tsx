@@ -9,18 +9,9 @@
  */
 
 import { Fragment, useCallback, useEffect, useState } from "react";
-import {
-  AppShell,
-  Banner,
-  Button,
-  Center,
-  SideNav,
-  SideNavHeading,
-  SideNavItem,
-  SideNavSection,
-  Stack,
-  Text,
-} from "@astryxdesign/core";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 import { send, sendForBlob } from "../../transport.ts";
 import { requestFor, type Intent } from "../model/client.ts";
@@ -44,19 +35,40 @@ import { ParsersArea } from "./ParsersArea.tsx";
 import { TenantsArea } from "./TenantsArea.tsx";
 import { CallbacksArea } from "./CallbacksArea.tsx";
 
-const MONITORING: { name: Area; label: string }[] = [
-  { name: "overview", label: "Overview" },
-  { name: "runs", label: "Runs" },
-  { name: "submit", label: "Submit OCR" },
-  { name: "parsers", label: "Parsers" },
+/** A sidebar group: real areas, and the ones still to come, which go nowhere yet. */
+type NavEntry = { name: Area; label: string; danger?: boolean } | { soon: string };
+
+const NAV: { heading: string | null; entries: NavEntry[] }[] = [
+  { heading: null, entries: [{ name: "overview", label: "Overview" }] },
+  {
+    heading: "Operate",
+    entries: [
+      { name: "runs", label: "Runs" },
+      { name: "submit", label: "Submit OCR" },
+    ],
+  },
+  { heading: "Build", entries: [{ soon: "Schemas" }] },
+  {
+    heading: "Manage",
+    entries: [
+      { name: "tenants", label: "Tenants" },
+      { name: "credentials", label: "Credentials" },
+      { name: "callbacks", label: "Callbacks" },
+    ],
+  },
+  {
+    heading: "Settings",
+    entries: [
+      { name: "parsers", label: "Parsers" },
+      { soon: "Providers" },
+      { name: "erasure", label: "Erase…", danger: true },
+    ],
+  },
 ];
 
-const ADMIN: { name: Area; label: string }[] = [
-  { name: "tenants", label: "Tenants" },
-  { name: "credentials", label: "Credentials" },
-  { name: "callbacks", label: "Callbacks" },
-  { name: "erasure", label: "Erasure" },
-];
+const LABELS = Object.fromEntries(
+  NAV.flatMap((group) => group.entries).flatMap((entry) => ("name" in entry ? [[entry.name, entry.label]] : [])),
+) as Record<Area, string>;
 
 const SESSION_ENDED = "Your session ended. Sign in again.";
 
@@ -179,98 +191,132 @@ export function Shell() {
 
   if (!ready(session)) {
     return (
-      <Center minHeight="100vh" padding={4}>
-        <Stack direction="vertical" gap={4} width="100%" maxWidth={400}>
-        <div role="status" aria-live="polite">
-          {!session.checked ? <Text size="sm">Loading…</Text> : null}
-          {unavailable === null ? null : (
-            <Banner status="error" title="The console is unavailable" description={unavailable} />
-          )}
+      <div className="flex min-h-screen items-center justify-center p-4">
+        <div className="flex w-full max-w-[400px] flex-col gap-4">
+          <div role="status" aria-live="polite">
+            {!session.checked ? <p className="text-sm">Loading…</p> : null}
+            {unavailable === null ? null : (
+              <Alert variant="destructive">
+                <AlertTitle>The console is unavailable</AlertTitle>
+                <AlertDescription>{unavailable}</AlertDescription>
+              </Alert>
+            )}
+          </div>
+          {session.checked && unavailable === null ? (
+            <LoginForm notice={notice} onSubmit={(u, p) => void signIn(u, p)} />
+          ) : null}
         </div>
-        {session.checked && unavailable === null ? (
-          <LoginForm notice={notice} onSubmit={(u, p) => void signIn(u, p)} />
-        ) : null}
-        </Stack>
-      </Center>
+      </div>
     );
   }
 
-  const navItem = ({ name, label }: { name: Area; label: string }) => (
-    // `isSelected` sets `aria-current="page"`; no `href`, so each is a `<button>`.
-    <SideNavItem
-      key={name}
-      label={label}
-      isSelected={area === name}
-      onClick={() => jump({ area: name, tenant: null })}
-    />
-  );
+  const navEntry = (entry: NavEntry) => {
+    if (!("name" in entry)) {
+      return (
+        <span
+          key={entry.soon}
+          aria-disabled="true"
+          className="flex items-center justify-between rounded-md px-2 py-1.5 text-sm text-muted-foreground"
+        >
+          {entry.soon}
+          <span className="text-[10px] uppercase">soon</span>
+        </span>
+      );
+    }
+    const selected = area === entry.name;
+    return (
+      <button
+        key={entry.name}
+        type="button"
+        aria-current={selected ? "page" : undefined}
+        onClick={() => jump({ area: entry.name, tenant: null })}
+        className={cn(
+          "rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-neutral-100 focus-visible:ring-[3px] focus-visible:ring-ring/50",
+          selected && "bg-primary/10 font-medium text-primary hover:bg-primary/10",
+          entry.danger === true && !selected && "text-red-600",
+        )}
+      >
+        {entry.label}
+      </button>
+    );
+  };
 
   return (
-    <AppShell
-      contentPadding={4}
-      sideNav={
-        <SideNav
-          aria-label="Console"
-          header={<SideNavHeading heading="docdoc console" />}
-          footer={
-            <Stack direction="vertical" gap={2} padding={2}>
-              <Text size="sm" color="secondary">
-                Signed in as {session.username}
-              </Text>
-              <Button label="Sign out" variant="secondary" size="sm" onClick={() => void signOut()} />
-            </Stack>
-          }
-        >
-          <SideNavSection title="Monitoring" isHeaderHidden>{MONITORING.map(navItem)}</SideNavSection>
-          <SideNavSection title="Admin">{ADMIN.map(navItem)}</SideNavSection>
-        </SideNav>
-      }
-    >
-      <Stack direction="vertical" gap={4}>
-        <div role="status" aria-live="polite">
-          {notice === null ? null : <Banner status="warning" title={notice} />}
-        </div>
+    <div className="flex h-screen">
+      <aside className="flex w-56 shrink-0 flex-col border-r bg-neutral-50 px-2 py-3">
+        <p className="px-2 pb-2 text-sm font-semibold">docdoc console</p>
+        <nav aria-label="Console" className="flex flex-col gap-0.5">
+          {NAV.map((group) => (
+            <Fragment key={group.heading ?? "top"}>
+              {group.heading === null ? null : (
+                <p className="px-2 pt-4 pb-1 text-xs uppercase text-muted-foreground">{group.heading}</p>
+              )}
+              {group.entries.map(navEntry)}
+            </Fragment>
+          ))}
+        </nav>
+      </aside>
 
-        <Fragment key={visit}>
-        {area === "overview" ? (
-          <OverviewArea
-            request={request}
-            onOpenRun={(runId) => {
-              setOpenRunId(runId);
-              setArea("runs");
-            }}
-          />
-        ) : null}
-        {area === "runs" ? (
-          <RunArea
-            request={request}
-            requestImage={requestImage}
-            onFailure={handle}
-            openRunId={openRunId}
-            onOpenRun={setOpenRunId}
-            presetTenant={presetTenant}
-          />
-        ) : null}
-        {area === "submit" ? (
-          <SubmitArea
-            request={request}
-            onOpenRun={(runId) => {
-              setOpenRunId(runId);
-              setArea("runs");
-            }}
-          />
-        ) : null}
-        {area === "parsers" ? <ParsersArea request={request} /> : null}
-        {area === "tenants" ? <TenantsArea request={request} onJump={jump} /> : null}
-        {area === "credentials" ? (
-          <CredentialArea request={request} onFailure={handle} presetTenant={presetTenant} />
-        ) : null}
-        {area === "callbacks" ? <CallbacksArea request={request} presetTenant={presetTenant} /> : null}
-        {area === "erasure" ? (
-          <EraseArea request={request} onFailure={handle} presetTenant={presetTenant} />
-        ) : null}
-        </Fragment>
-      </Stack>
-    </AppShell>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex h-12 shrink-0 items-center justify-between border-b px-4">
+          <span className="text-sm font-medium">{LABELS[area]}</span>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-muted-foreground">Signed in as {session.username}</span>
+            <Button variant="outline" size="sm" onClick={() => void signOut()}>
+              Sign out
+            </Button>
+          </div>
+        </header>
+
+        <main className="flex flex-1 flex-col gap-4 overflow-auto p-4">
+          <div role="status" aria-live="polite">
+            {notice === null ? null : (
+              <Alert variant="warning">
+                <AlertTitle>{notice}</AlertTitle>
+              </Alert>
+            )}
+          </div>
+          <Fragment key={visit}>
+          {area === "overview" ? (
+            <OverviewArea
+              request={request}
+              onOpenRun={(runId) => {
+                setOpenRunId(runId);
+                setArea("runs");
+              }}
+            />
+          ) : null}
+          {area === "runs" ? (
+            <RunArea
+              request={request}
+              requestImage={requestImage}
+              onFailure={handle}
+              openRunId={openRunId}
+              onOpenRun={setOpenRunId}
+              presetTenant={presetTenant}
+            />
+          ) : null}
+          {area === "submit" ? (
+            <SubmitArea
+              request={request}
+              onOpenRun={(runId) => {
+                setOpenRunId(runId);
+                setArea("runs");
+              }}
+            />
+          ) : null}
+          {area === "parsers" ? <ParsersArea request={request} /> : null}
+          {area === "tenants" ? <TenantsArea request={request} onJump={jump} /> : null}
+          {area === "credentials" ? (
+            <CredentialArea request={request} onFailure={handle} presetTenant={presetTenant} />
+          ) : null}
+          {area === "callbacks" ? <CallbacksArea request={request} presetTenant={presetTenant} /> : null}
+          {area === "erasure" ? (
+            <EraseArea request={request} onFailure={handle} presetTenant={presetTenant} />
+          ) : null}
+          </Fragment>
+        </main>
+      </div>
+    </div>
   );
 }
