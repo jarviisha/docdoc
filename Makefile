@@ -7,13 +7,20 @@ STORE   ?= /tmp/docdoc-console-store
 PORT    ?= 8000
 KIND    ?= ocr
 ADAPTER ?= echo
+PG      ?= docdoc-dev-pg
+RUN_API    = uv run python -m uvicorn --factory docdoc.api.app:create_app --port $(PORT)
+RUN_WORKER = uv run docdoc --adapter $(ADAPTER) worker --kind $(KIND)
 COMPOSE := docker compose -f packaging/docker/compose.yml
 
 export DOCDOC_RUN_DATABASE_URL ?= $(DB)
 export DOCDOC_STORE_ROOT ?= $(STORE)
+# The OCR hosts' endpoints file, when it is where it has been kept so far.
+ifneq ($(wildcard /tmp/docdoc-ocr-endpoints.json),)
+export DOCDOC_OCR_ENDPOINTS_FILE ?= /tmp/docdoc-ocr-endpoints.json
+endif
 
 .DEFAULT_GOAL := help
-.PHONY: help install test lint fmt ui check migrate api worker user users up down
+.PHONY: help install test lint fmt ui check dev migrate api worker user users up down
 
 help: ## list the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-9s %s\n", $$1, $$2}'
@@ -40,14 +47,21 @@ ui: ## console: typecheck, tests, boundaries, licences, build
 
 check: lint test ui ## everything CI checks, locally
 
+dev: ## Postgres container PG up, migrate, then API + OCR worker + Vite (http://localhost:5173/console/, proxies /v1 to :8000); Ctrl-C stops all
+	docker start $(PG) >/dev/null
+	@for i in 1 2 3 4 5 6 7 8 9 10; do uv run docdoc migrate >/dev/null 2>&1 && exit 0; sleep 1; done; \
+	 echo "migrate failed: is $(DB) reachable?"; exit 1
+	@trap 'kill 0' INT TERM EXIT; \
+	 $(RUN_API) & $(RUN_WORKER) & (cd ui && npx vite) & wait
+
 migrate: ## apply the run-state schema to DB
 	uv run docdoc migrate
 
 api: ## serve the API and the built console on PORT (build it with `make ui`)
-	uv run python -m uvicorn --factory docdoc.api.app:create_app --port $(PORT)
+	$(RUN_API)
 
 worker: ## one worker of KIND (ocr|extraction); OCR needs DOCDOC_OCR_ENDPOINTS_FILE
-	uv run docdoc --adapter $(ADAPTER) worker --kind $(KIND)
+	$(RUN_WORKER)
 
 user: ## add a console account: make user NAME=admin (prompts for the password)
 	@test -n "$(NAME)" || { echo "usage: make user NAME=<username>"; exit 2; }
