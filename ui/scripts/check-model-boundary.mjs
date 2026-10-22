@@ -47,7 +47,6 @@ const NETWORK_CALLS = [
 const FORBIDDEN = [
   { match: /^react(\/|$)/, why: "React is a rendering concern" },
   { match: /^react-dom(\/|$)/, why: "React DOM is a rendering concern" },
-  { match: /^@astryxdesign\//, why: "component libraries are a rendering concern" },
   { match: /^@\/components\//, why: "component libraries are a rendering concern" },
   { match: /^radix-ui(\/|$)/, why: "component libraries are a rendering concern" },
   { match: /^@radix-ui\//, why: "component libraries are a rendering concern" },

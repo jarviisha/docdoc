@@ -43,11 +43,11 @@ const COMMENT = /^\s*(\*|\/\/|\/\*)/;
 /**
  * What a transient status message looks like in this tree.
  *
- * A `Banner` is how every one of them is rendered, and "Loading" is the one that
+ * An `Alert` is how every one of them is rendered, and "Loading" is the one that
  * is plain text. Both appear and disappear in response to something the operator
  * did or something the deployment answered — which is exactly FR-045b's subject.
  */
-const TRANSIENT = [/<Banner\b/, /<Alert\b/, /Loading…|Loading\.\.\./];
+const TRANSIENT = [/<Alert\b/, /Loading…|Loading\.\.\./];
 
 /** Somewhere a screen reader is told. */
 const ANNOUNCES = /aria-live\s*=|role\s*=\s*["'{]?\s*["']?status["']?/;

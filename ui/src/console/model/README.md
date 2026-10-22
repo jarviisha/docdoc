@@ -5,7 +5,7 @@ Every decision the console makes is here, and nothing here renders.
 **Which guards scan this directory, and what each one is enforcing:**
 
 - `scripts/check-model-boundary.mjs` — this directory imports nothing that
-  renders (no React, no `@astryxdesign/*`, no `@components/*`), and it reaches
+  renders (no React, no `@/components/ui/*` or `radix-ui`, no `@components/*`), and it reaches
   the network only through `src/transport.ts` (FR-041).
 - `scripts/check-console-boundary.mjs` — none of ADR-0019 §2's five nouns
   appears here (FR-002), and no result content does either (FR-037, SC-016).
