@@ -4,16 +4,19 @@
 DB      ?= postgresql://docdoc:docdoc@127.0.0.1:55432/docdoc_demo
 TEST_DB ?= postgresql://docdoc:docdoc@127.0.0.1:55432/docdoc
 STORE   ?= /tmp/docdoc-console-store
+TENANT  ?= acme
 PORT    ?= 8000
 KIND    ?= ocr
 ADAPTER ?= echo
 PG      ?= docdoc-dev-pg
 RUN_API    = uv run python -m uvicorn --factory docdoc.api.app:create_app --port $(PORT)
-RUN_WORKER = uv run docdoc --adapter $(ADAPTER) worker --kind $(KIND)
+RUN_WORKER = uv run docdoc worker --kind $(KIND) --adapter $(ADAPTER)
 COMPOSE := docker compose -f packaging/docker/compose.yml
 
 export DOCDOC_RUN_DATABASE_URL ?= $(DB)
 export DOCDOC_STORE_ROOT ?= $(STORE)
+# The demo database pins its unprefixed store root to this tenant; a mismatch is refused.
+export DOCDOC_DEFAULT_TENANT ?= $(TENANT)
 # The OCR hosts' endpoints file, when it is where it has been kept so far.
 ifneq ($(wildcard /tmp/docdoc-ocr-endpoints.json),)
 export DOCDOC_OCR_ENDPOINTS_FILE ?= /tmp/docdoc-ocr-endpoints.json
@@ -49,8 +52,8 @@ check: lint test ui ## everything CI checks, locally
 
 dev: ## Postgres container PG up, migrate, then API + OCR worker + Vite (http://localhost:5173/console/, proxies /v1 to :8000); Ctrl-C stops all
 	docker start $(PG) >/dev/null
-	@for i in 1 2 3 4 5 6 7 8 9 10; do uv run docdoc migrate >/dev/null 2>&1 && exit 0; sleep 1; done; \
-	 echo "migrate failed: is $(DB) reachable?"; exit 1
+	@for i in 1 2 3 4 5 6 7 8 9 10; do out=$$(uv run docdoc migrate 2>&1) && exit 0; sleep 1; done; \
+	 echo "$$out"; exit 1
 	@trap 'kill 0' INT TERM EXIT; \
 	 $(RUN_API) & $(RUN_WORKER) & (cd ui && npx vite) & wait
 
