@@ -169,7 +169,7 @@ def _document(text: str):
     """A minimal `Document` with geometry, so `locate` has boxes to return.
 
     In real use this is `docdoc.ingest.parse(pdf_bytes)`. Built by hand here so
-    the example needs no PDF fixture and no AGPL-licensed `docdoc[pdf]` extra --
+    the example needs no PDF fixture and no `docdoc[pdf]` extra --
     but *with* per-word geometry, because a grounding example that could not show
     a bounding box would be missing the point.
     """

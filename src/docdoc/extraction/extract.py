@@ -33,7 +33,7 @@ from docdoc.extraction.shape import PROJECTION_ID, response_shape_for
 from docdoc.extraction.value import ExtractedValue, ValueTree
 
 # From the submodule, never the package facade: `docdoc.ingest` reaches
-# parse -> registry -> parsers -> pymupdf and azure, which would put two provider
+# parse -> registry -> parsers -> pypdfium2 and azure, which would put two provider
 # SDKs in this layer's transitive graph. This is the second time that mistake was
 # made here; `test_extraction_boundaries.py` now asserts the submodule form so
 # there is no third.
@@ -59,7 +59,7 @@ def extractor_version_for(adapter: ModelAdapter) -> str:
     """The processor version ADR-0003 folds into the artifact id.
 
     It **embeds the adapter's identity and version**, the way ingest's
-    ``parser_version`` embeds the underlying library version (``1.0.0+pymupdf-…``)
+    ``parser_version`` embeds the underlying library version (``2.0.0+pypdfium2-…``)
     and for the same reason: the adapter builds the request and maps the response,
     so an adapter fix changes results, and a result-affecting input that does not
     reach the artifact id is the stale-cache bug ADR-0003 exists to prevent.

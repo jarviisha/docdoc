@@ -183,10 +183,10 @@ than the generic defaults assume.
 Reading order and coordinate systems belong to the adapter, not to the core. Each
 declares what it does:
 
-- `pdf-text` declares `pymupdf-stream@1` — the PDF content-stream order. It is
-  **not** a layout reconstruction: PyMuPDF's sorted mode was measured and found
-  to sort by vertical position across the whole page, interleaving columns, so it
-  is not used. docdoc performs no layout analysis and claims none.
+- `pdf-text` declares `pdfium-stream@1` — the PDF content-stream order, read
+  with PDFium (`pypdfium2`). It is **not** a layout reconstruction: a sort by
+  position interleaves the columns of a two-column page, so none is applied.
+  docdoc performs no layout analysis and claims none.
 - `azure-di` declares `azure-di-service@1` — the service's own ordering.
 - `gcv` declares `gcv-block-order@1` — the order the service emits blocks, then
   paragraphs, then words. Nothing is reconstructed on top of it.
@@ -206,9 +206,10 @@ outside the page is treated as rendering slop and clamped; anything further out
 raises, because that is a coordinate-system bug and a wrong box is worse than a
 missing one.
 
-`pdf-text` maps every box through the page's rotation matrix first: PyMuPDF
-reports word boxes in *unrotated* space while the page size is the displayed one,
-so skipping that step would misplace every box on a rotated page.
+`pdf-text` reads a rotated page with its rotation reset to 0, which keeps
+content-stream order, so word boxes arrive in *unrotated* space while the page
+size is the displayed one. Every box is mapped to the displayed page first;
+skipping that step would misplace every box on a rotated page.
 
 ## Provenance and identity
 
@@ -216,7 +217,7 @@ Every document records the parser, its version, the options, the declared
 capabilities, the reading order, and the text-layer verdict.
 
 `parser_version` embeds the underlying library or service version —
-`1.0.0+pymupdf-1.28.2` — because a library upgrade that changes extraction must
+`2.0.0+pypdfium2-5.14.0` — because a library upgrade that changes extraction must
 change document identity. `document_id` derives from the blob, the parser, that
 version, and the options hash, so two parses of one file are never
 interchangeable.

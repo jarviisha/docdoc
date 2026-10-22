@@ -133,7 +133,7 @@ def main() -> None:
 
         # ------------------------------------------------------------------
         # 3. A document. Normally this comes from docdoc.ingest.parse(pdf_bytes);
-        #    built by hand here so the example needs no PDF and no PyMuPDF.
+        #    built by hand here so the example needs no PDF and no PDF library.
         # ------------------------------------------------------------------
         document = _document(DOCUMENT_TEXT)
 
@@ -183,8 +183,8 @@ def _document(text: str):
     """Build a minimal `Document` by hand.
 
     In real use this is `docdoc.ingest.parse(pdf_bytes, require=...)`. Constructing
-    one directly keeps the example free of a PDF fixture and of the AGPL-licensed
-    `docdoc[pdf]` extra.
+    one directly keeps the example free of a PDF fixture and of the `docdoc[pdf]`
+    extra.
     """
     from docdoc.kernel import (
         BlobRef,

@@ -519,11 +519,10 @@ is the default, not a cage. `DOCDOC_SCHEMA_PATHS` is the exception worth knowing
 explicit path, the registry is **empty**, because docdoc ships no schema of its own. A schema is your
 data, not ours.
 
-> **Licence note.** `docdoc[pdf]` installs [PyMuPDF](https://pymupdf.readthedocs.io/), which is
-> **AGPL-3.0** (or a paid commercial licence). docdoc itself is Apache-2.0 and the extra is opt-in,
-> so docdoc's own distribution is unaffected — but if you embed `docdoc[pdf]` in a closed-source
-> pipeline, the AGPL applies to you. Know this before you install it, not after.
-> See [ADR-0001](docs/adr/0001-parser-and-ocr-strategy-in-mvp.md).
+> **Licence note.** `docdoc[pdf]` installs [pypdfium2](https://github.com/pypdfium2-team/pypdfium2)
+> (Apache-2.0 / BSD-3) over PDFium (BSD-3), so the native PDF path carries no obligation beyond
+> docdoc's own Apache-2.0, and the default Docker image includes it.
+> See [ADR-0025](docs/adr/0025-native-pdf-parsing-on-pdfium.md).
 
 ## Three principles that shape everything
 

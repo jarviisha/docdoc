@@ -6,8 +6,8 @@
 # packaging/docker/compose.yml) already exist to avoid.
 fastapi==0.141.1
 uvicorn==0.52.4
-# PDF rendering -- the same library `docdoc[ocr]` uses, Apache-2.0/BSD-3
-# rather than PyMuPDF's AGPL-3.0 (see pyproject.toml's `ocr` extra).
+# PDF rendering -- the same library `docdoc[ocr]` and `docdoc[pdf]` use
+# (Apache-2.0/BSD-3).
 pypdfium2==5.14.0
 # Renders pages to PNG for tesseract, and JPEG for `visualize`'s preview.
 pillow==13.0.0

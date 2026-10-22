@@ -909,7 +909,7 @@ Rationale: the kernel invariants are the foundation every other guarantee rests 
 ## MVP Scope Constraints
 
 **Sanctioned stack.** Python; local filesystem or S3-compatible object storage; PostgreSQL only
-where persistence is genuinely required; one native PDF parser (PyMuPDF, text path); one
+where persistence is genuinely required; one native PDF parser (PDFium via `pypdfium2`, text path, ADR-0025); one
 geometry-capable cloud document-intelligence parser (scanned/image/mixed path); one LLM adapter;
 `rapidfuzz` in the extraction layer for grounding. No standalone OCR engine in the MVP
 (ADR-0001). The core library MUST remain installable and usable without any of the optional

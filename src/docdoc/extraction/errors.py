@@ -27,11 +27,11 @@ from __future__ import annotations
 
 # Imported from the submodule, not from `docdoc.ingest`. Importing the package
 # facade pulls in `docdoc.ingest.parse` -> `registry` -> `parsers.pdf_text` ->
-# `pymupdf`, which would put a provider SDK in the extraction layer's transitive
-# import graph. `lint-imports` catches that; the AST boundary scan does not,
-# because the direct import looks innocent. It also matters at runtime and not
-# only to the linter: PyMuPDF is AGPL-3.0, and `import docdoc.extraction` has no
-# business loading it.
+# `pypdfium2`, which would put a provider library in the extraction layer's
+# transitive import graph. `lint-imports` catches that; the AST boundary scan does
+# not, because the direct import looks innocent. It also matters at runtime and
+# not only to the linter: `import docdoc.extraction` has no business loading a
+# PDF engine.
 from docdoc.ingest.errors import ProviderError
 from docdoc.kernel import DocdocError
 

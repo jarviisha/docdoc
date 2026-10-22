@@ -729,7 +729,7 @@ def _skipped_after(failed: Stage) -> list[StageOutcome]:
 
 # Stage calls are imported inside the functions that make them, not at module
 # scope. `docdoc.ingest`'s package __init__ reaches its parser registry and,
-# through it, PyMuPDF and the Azure SDK; a caller who supplies a parsed document
+# through it, pypdfium2 and the Azure SDK; a caller who supplies a parsed document
 # should not need either installed to run the rest of the pipeline. The same
 # reasoning `recording/record.py` already applies.
 
