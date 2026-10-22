@@ -22,10 +22,12 @@ import { toDelivery, type Delivery } from "../model/delivery.ts";
 import { duration, shortId, when } from "../model/format.ts";
 import { toResultPages, type ResultPage } from "../model/result.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
+import { CopyableId } from "./CopyableId.tsx";
 import { DataTable } from "./DataTable.tsx";
 import { DeliveryRecord } from "./DeliveryRecord.tsx";
 import { SelectField, TextField } from "./fields.tsx";
 import { LiveStatStrip } from "./StatStrip.tsx";
+import { Time } from "./Time.tsx";
 import { ResultViewer, type ImageRequest } from "./ResultViewer.tsx";
 import { usePolling } from "./usePolling.ts";
 import {
@@ -286,12 +288,13 @@ export function RunArea({
                 key: "created_at",
                 header: "Submitted",
                 width: "200px",
-                cell: (run) => <span className="text-sm">{when(run.created_at)}</span>,
+                cell: (run) => <Time iso={run.created_at} />,
               },
               {
                 key: "started_at",
                 header: "Duration",
                 width: "140px",
+                align: "right",
                 cell: (run) => <span className="text-sm">{duration(timeline(run, Date.now()).runMs)}</span>,
               },
               {
@@ -300,9 +303,7 @@ export function RunArea({
                 width: "140px",
                 cell: (run) => (
                   // No `href`: a `<button>` styled as a link.
-                  <Button variant="link" className="h-auto p-0" onClick={() => onOpenRun(run.run_id)}>
-                    {shortId(run.run_id)}
-                  </Button>
+                  <CopyableId value={run.run_id} display={shortId(run.run_id)} onOpen={() => onOpenRun(run.run_id)} />
                 ),
               },
             ]}
@@ -484,7 +485,7 @@ function RunDetail({
         {run === null ? null : <Badge variant={TONE[run.status]}>{run.status}</Badge>}
       </div>
 
-      <code className="font-mono text-xs">{runId}</code>
+      <CopyableId value={runId} />
 
       <div role="status" aria-live="polite">
         {loading ? <p className="text-sm">Loading…</p> : null}
@@ -548,8 +549,8 @@ function RunDetail({
       {run === null || times === null ? null : (
         <>
           <p className="text-sm">
-            Submitted {when(run.created_at)} → Started {when(run.started_at)} (wait{" "}
-            {duration(times.waitMs)}) → Finished {when(run.finished_at)} (run{" "}
+            Submitted <Time iso={run.created_at} /> → Started <Time iso={run.started_at} /> (wait{" "}
+            {duration(times.waitMs)}) → Finished <Time iso={run.finished_at} /> (run{" "}
             {duration(times.runMs)})
           </p>
 
@@ -576,7 +577,7 @@ function RunDetail({
                   </Meta>
                 )}
                 <Meta label="Document">
-                  <code className="font-mono text-xs">{run.blob_id}</code>
+                  <CopyableId value={run.blob_id} />
                 </Meta>
                 {routing === null ? null : <Meta label="Routing">{routing}</Meta>}
               </dl>

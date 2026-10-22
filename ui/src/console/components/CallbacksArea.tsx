@@ -27,11 +27,12 @@ import {
 } from "../model/callbacks.ts";
 import type { Intent } from "../model/client.ts";
 import { describe, type Failure } from "../model/failure.ts";
-import { when } from "../model/format.ts";
 import { toTenants } from "../model/submit.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { DataTable } from "./DataTable.tsx";
 import { SelectField, TextField } from "./fields.tsx";
+import { SectionHeading } from "./SectionHeading.tsx";
+import { Time } from "./Time.tsx";
 
 type Request = (
   intent: Intent,
@@ -113,8 +114,6 @@ export function CallbacksArea({ request, presetTenant }: Props) {
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-lg font-bold">Callbacks</p>
-
       <SelectField
         label="Tenant"
         placeholder="Choose a tenant"
@@ -174,7 +173,7 @@ export function CallbacksArea({ request, presetTenant }: Props) {
                 key: "created_at",
                 header: "Created",
                 width: "200px",
-                cell: (callback) => <span className="text-sm">{when(callback.created_at)}</span>,
+                cell: (callback) => <Time iso={callback.created_at} />,
               },
               {
                 key: "revoke",
@@ -213,7 +212,7 @@ export function CallbacksArea({ request, presetTenant }: Props) {
       {callbacks !== null ? (
         <Card className="max-w-[520px]">
           <CardContent className="flex flex-col gap-3">
-            <p className="text-sm font-bold">Register a callback</p>
+            <SectionHeading>Register a callback</SectionHeading>
             <TextField label="URL" value={url} onChange={setUrl} />
             <TextField
               label="Secret"
@@ -224,7 +223,7 @@ export function CallbacksArea({ request, presetTenant }: Props) {
             />
             <div className="flex gap-2">
               <Button disabled={!canRegister(url, secret, sending)} onClick={register}>
-                Register
+                {sending ? "Registering…" : "Register"}
               </Button>
             </div>
           </CardContent>

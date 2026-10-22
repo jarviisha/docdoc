@@ -11,7 +11,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
 import type { Intent } from "../model/client.ts";
@@ -20,7 +19,10 @@ import { duration, shortId, when } from "../model/format.ts";
 import { toOverview, type Overview } from "../model/overview.ts";
 import { isNewer } from "../model/polling.ts";
 import { kindLabel, reasonLabel, timeline, type RunSummary } from "../model/runs.ts";
+import { CopyableId } from "./CopyableId.tsx";
 import { DataTable } from "./DataTable.tsx";
+import { SectionHeading } from "./SectionHeading.tsx";
+import { Time } from "./Time.tsx";
 import { StatStrip } from "./StatStrip.tsx";
 import { usePolling } from "./usePolling.ts";
 
@@ -71,9 +73,7 @@ export function OverviewArea({ request, onOpenRun }: Props) {
 
   // No `href`: a `<button>` styled as a link.
   const openButton = (run: RunSummary) => (
-    <Button variant="link" className="h-auto p-0" onClick={() => onOpenRun(run.run_id)}>
-      {shortId(run.run_id)}
-    </Button>
+    <CopyableId value={run.run_id} display={shortId(run.run_id)} onOpen={() => onOpenRun(run.run_id)} />
   );
 
   return (
@@ -98,7 +98,7 @@ export function OverviewArea({ request, onOpenRun }: Props) {
         <>
           <StatStrip cards={overview.cards} />
 
-          <p className="font-bold">Recent failures</p>
+          <SectionHeading>Recent failures</SectionHeading>
           {overview.recentFailures.length === 0 ? (
             <p className="text-sm">No failures.</p>
           ) : (
@@ -116,14 +116,14 @@ export function OverviewArea({ request, onOpenRun }: Props) {
                     width: "auto",
                     cell: (run) => <span className="text-sm">{reasonLabel(run.error_reason, run.error_class) ?? "—"}</span>,
                   },
-                  { key: "finished_at", header: "Finished", width: "200px", cell: (run) => <span className="text-sm">{when(run.finished_at)}</span> },
+                  { key: "finished_at", header: "Finished", width: "200px", cell: (run) => <Time iso={run.finished_at} /> },
                   { key: "run_id", header: "Run", width: "140px", cell: openButton },
                 ]}
               />
             </Card>
           )}
 
-          <p className="font-bold">Running now</p>
+          <SectionHeading>Running now</SectionHeading>
           {overview.running.length === 0 ? (
             <p className="text-sm">Nothing is running.</p>
           ) : (
@@ -140,6 +140,7 @@ export function OverviewArea({ request, onOpenRun }: Props) {
                     key: "started_at",
                     header: "Run time",
                     width: "140px",
+                    align: "right",
                     cell: (run) => (
                       <span className="text-sm">{duration(timeline(run, refreshedAt ?? Date.now()).runMs)}</span>
                     ),

@@ -9,6 +9,8 @@ export interface Column<T> {
   header: string;
   /** Any CSS width: `"180px"`, `"auto"`. */
   width?: string;
+  /** Numbers and durations read down a column when they share a right edge. */
+  align?: "right";
   cell: (row: T) => ReactNode;
 }
 
@@ -25,7 +27,11 @@ export function DataTable<T>({ rows, rowKey, columns, label }: Props<T>) {
       <TableHeader>
         <TableRow>
           {columns.map((column) => (
-            <TableHead key={column.key} style={column.width === undefined ? undefined : { width: column.width }}>
+            <TableHead
+              key={column.key}
+              className={column.align === "right" ? "text-right" : undefined}
+              style={column.width === undefined ? undefined : { width: column.width }}
+            >
               {column.header}
             </TableHead>
           ))}
@@ -35,7 +41,7 @@ export function DataTable<T>({ rows, rowKey, columns, label }: Props<T>) {
         {rows.map((row, index) => (
           <TableRow key={rowKey(row, index)} className="even:bg-slate-50/60">
             {columns.map((column) => (
-              <TableCell key={column.key} className="whitespace-normal">
+              <TableCell key={column.key} className={column.align === "right" ? "text-right tabular-nums" : "whitespace-normal"}>
                 {column.cell(row)}
               </TableCell>
             ))}

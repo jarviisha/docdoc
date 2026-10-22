@@ -48,8 +48,6 @@ export function TenantsArea({ request, onJump }: Props) {
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-lg font-bold">Tenants</p>
-
       <div role="status" aria-live="polite">
         {tenants === null ? <p className="text-sm">Loading…</p> : null}
         {problem === null ? null : (

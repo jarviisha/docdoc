@@ -31,6 +31,21 @@ export function when(iso: string | null): string {
 }
 
 /**
+ * A timestamp's tooltip: the operator's local time and UTC, one per line.
+ *
+ * The cell shows local time; a log line, a ticket or a colleague in another
+ * office says UTC, and this is where the two are reconciled without arithmetic.
+ * Empty when there is no instant to describe, so no tooltip appears.
+ */
+export function bothZones(iso: string | null): string {
+  if (iso === null || iso === "") return "";
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return "";
+  const utc = at.toISOString().slice(0, 19).replace("T", " ");
+  return `Local: ${when(iso)}\nUTC: ${utc}`;
+}
+
+/**
  * The first segment of a UUID, which is what a person uses to tell rows apart.
  *
  * Never the identifier a caller passes anywhere: the full value is on the detail

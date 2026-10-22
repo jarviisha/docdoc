@@ -24,8 +24,9 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 
 import { summarise, type Attempt, type Delivery } from "../model/delivery.ts";
-import { when } from "../model/format.ts";
 import { DataTable } from "./DataTable.tsx";
+import { SectionHeading } from "./SectionHeading.tsx";
+import { Time } from "./Time.tsx";
 
 /** A receiver's answer, coloured — with the number always beside the colour. */
 function tone(attempt: Attempt): "success" | "error" | "warning" {
@@ -38,7 +39,7 @@ export function DeliveryRecord({ delivery }: { delivery: Delivery }) {
 
   return (
     <div className="flex flex-col gap-2">
-      <p className="text-sm font-bold">Delivery</p>
+      <SectionHeading>Delivery</SectionHeading>
 
       {/* The sentence first: it is the answer when there are no attempts to
           show, and an empty table in that case reads as "something went wrong"
@@ -57,7 +58,7 @@ export function DeliveryRecord({ delivery }: { delivery: Delivery }) {
                 key: "attempted_at",
                 header: "Attempted",
                 width: "200px",
-                cell: (attempt) => <span className="text-sm">{when(attempt.attempted_at)}</span>,
+                cell: (attempt) => <Time iso={attempt.attempted_at} />,
               },
               {
                 key: "status",

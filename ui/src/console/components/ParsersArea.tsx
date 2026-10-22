@@ -69,7 +69,6 @@ export function ParsersArea({ request }: Props) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
-        <p className="text-lg font-bold">Parsers</p>
         <Button variant="outline" size="sm" disabled={loading} onClick={() => setLoading(true)}>
           {parsersRefreshLabel}
         </Button>

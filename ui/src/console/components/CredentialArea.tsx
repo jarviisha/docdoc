@@ -34,10 +34,13 @@ import {
 } from "../model/credentials.ts";
 import type { CredentialRecord } from "../model/credentials.ts";
 import type { Failure } from "../model/failure.ts";
-import { shortId, when } from "../model/format.ts";
+import { shortId } from "../model/format.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
+import { CopyableId } from "./CopyableId.tsx";
 import { DataTable } from "./DataTable.tsx";
 import { TextField } from "./fields.tsx";
+import { SectionHeading } from "./SectionHeading.tsx";
+import { Time } from "./Time.tsx";
 
 type Request = (
   intent: Intent,
@@ -109,7 +112,7 @@ export function CredentialArea({ request, onFailure, presetTenant }: Props) {
       )}
 
       <div className="flex max-w-[480px] flex-col gap-2">
-        <p className="text-sm font-bold">Issue a credential</p>
+        <SectionHeading>Issue a credential</SectionHeading>
         <TextField label="Tenant" value={tenant} onChange={setTenant} />
         <TextField label="Label (what it is for)" value={label} onChange={setLabel} />
         <div className="flex gap-2">
@@ -131,7 +134,7 @@ export function CredentialArea({ request, onFailure, presetTenant }: Props) {
       </div>
 
       <div className="flex flex-col gap-2">
-        <p className="text-sm font-bold">Credentials</p>
+        <SectionHeading>Credentials</SectionHeading>
 
         <div className="flex items-end gap-2">
           <TextField
@@ -173,7 +176,7 @@ export function CredentialArea({ request, onFailure, presetTenant }: Props) {
                   key: "credential_id",
                   header: "Credential",
                   width: "auto",
-                  cell: (record) => <code className="font-mono text-xs">{shortId(record.credential_id)}</code>,
+                  cell: (record) => <CopyableId value={record.credential_id} display={shortId(record.credential_id)} />,
                 },
                 {
                   key: "label",
@@ -191,7 +194,7 @@ export function CredentialArea({ request, onFailure, presetTenant }: Props) {
                   key: "created_at",
                   header: "Issued",
                   width: "200px",
-                  cell: (record) => <span className="text-sm">{when(record.created_at)}</span>,
+                  cell: (record) => <Time iso={record.created_at} />,
                 },
                 {
                   key: "revoked_at",

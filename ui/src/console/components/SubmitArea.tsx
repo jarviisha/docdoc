@@ -87,8 +87,6 @@ export function SubmitArea({ request, onOpenRun }: Props) {
   return (
     <Card className="w-full max-w-[520px]">
       <CardContent className="flex flex-col gap-4">
-        <p className="text-lg font-bold">Submit OCR</p>
-
         <div role="status" aria-live="polite">
           {loadProblem === null ? null : (
             <Alert variant="destructive">
@@ -141,7 +139,7 @@ export function SubmitArea({ request, onOpenRun }: Props) {
 
         <div className="flex gap-2">
           <Button disabled={!canSubmit(form)} onClick={submit}>
-            Submit
+            {form.sending ? "Submitting…" : "Submit"}
           </Button>
         </div>
       </CardContent>
