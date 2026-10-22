@@ -33,7 +33,8 @@ install: ## Python deps (all extras) and the console's npm deps
 	cd ui && npm ci
 
 test: ## the Python suite; Postgres tests use TEST_DB (never the demo database)
-	DOCDOC_TEST_DATABASE_URL=$(TEST_DB) uv run pytest -m "not perf"
+	env -u DOCDOC_RUN_DATABASE_URL -u DOCDOC_STORE_ROOT -u DOCDOC_DEFAULT_TENANT -u DOCDOC_OCR_ENDPOINTS_FILE \
+	  DOCDOC_TEST_DATABASE_URL=$(TEST_DB) uv run pytest -m "not perf"
 
 lint: ## ruff, format check, mypy strict, import boundaries
 	uv run ruff check .

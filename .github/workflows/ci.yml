@@ -7,16 +7,14 @@ on:
 
 jobs:
   test:
-    # SC-005 claims the native path produces byte-identical documents across
-    # platforms. A single-OS matrix cannot verify that claim, so it runs on all
-    # three -- the geometry normalization and text assembly are float arithmetic
-    # and string handling, which is exactly where a platform difference would
-    # hide.
-    runs-on: ${{ matrix.os }}
+    # Linux only. This matrix ran macOS and Windows too while SC-005 promised
+    # byte-identical documents across platforms; docdoc is now a server-side
+    # service deployed as a Linux container, so that promise was narrowed to
+    # Linux, and the Windows leg was the slowest job in the workflow.
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ["3.11", "3.12"]
 
     steps:
@@ -180,8 +178,10 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --frozen
 
+      # `-n0`: `addopts` runs the suite on every core, and a wall-clock budget
+      # timed while other workers compete for the CPU measures the neighbours.
       - name: Performance budgets
-        run: uv run pytest -m perf -q
+        run: uv run pytest -m perf -q -n0
 
   # `[tool.coverage]` has been configured since Milestone 1, under a comment
   # citing SC-006, and nothing ever ran with `--cov`. A quality bar that is
@@ -314,7 +314,7 @@ jobs:
       # anything has moved the dependency rather than removed it.
       - name: The offline suite passes on the base install
         run: |
-          uv pip install --python .venv-base pytest hypothesis
+          uv pip install --python .venv-base pytest pytest-xdist hypothesis
           .venv-base/bin/python -m pytest tests/unit tests/property tests/contract -q
 
       # An absence check passes trivially if the import name is wrong, so prove
