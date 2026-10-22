@@ -549,6 +549,25 @@ widens what is permitted rather than retiring what is.
 
 Templates: no changes required — the plan-template gate table references
 Principle XI by number and remains accurate.
+
+---
+AMENDMENT 1.12.0 → 1.12.1 (2026-10-22)
+Bump rationale: PATCH — the sanctioned stack names a different library for the
+same role. Still one native PDF parser on the text path; no principle is added,
+removed, or redefined.
+
+  - **The native PDF parser is PDFium via `pypdfium2`, not PyMuPDF (ADR-0025).**
+    PyMuPDF is AGPL-3.0, which kept the native path out of the default image of
+    a service other people self-host. `pypdfium2` is Apache-2.0/BSD-3.
+
+Sections amended: MVP Scope Constraints (Sanctioned stack). No decision moved;
+the open list stays empty.
+
+Migration note: document and artifact identities derived from a native parse
+change, because `parser_version` and `reading_order` are part of them. Pre-1.0
+(ADR-0011): no migration.
+
+Templates: no changes required.
 -->
 
 # docdoc Constitution
@@ -1066,4 +1085,4 @@ insufficient. Unjustified violations are rejected regardless of the code's quali
 **Precedence for unresolved items.** Where an "Open Constitutional Decision" is unresolved,
 implementers MUST NOT resolve it silently in code. Raise it, decide it, record it.
 
-**Version**: 1.12.0 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-10-20
+**Version**: 1.12.1 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-10-22
