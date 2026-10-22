@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils"
 import { Slot } from "radix-ui"
 
 const badgeVariants = cva(
-  "inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-full border border-transparent px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none [&>svg]:size-3",
+  "inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-sm border border-transparent px-1.5 py-0 text-[10.5px] font-semibold tracking-wide uppercase whitespace-nowrap transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none [&>svg]:size-3",
   {
     variants: {
       variant: {
@@ -17,11 +17,11 @@ const badgeVariants = cva(
           "border-border text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
         ghost: "[a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
         link: "text-primary underline-offset-4 [a&]:hover:underline",
-        success: "bg-green-100 text-green-800",
-        info: "bg-blue-100 text-blue-800",
-        warning: "bg-amber-100 text-amber-800",
-        error: "bg-red-100 text-red-800",
-        neutral: "bg-neutral-100 text-neutral-700",
+        success: "border-green-300 bg-green-50 text-green-700",
+        info: "border-blue-300 bg-blue-50 text-blue-700",
+        warning: "border-amber-300 bg-amber-50 text-amber-700",
+        error: "border-red-300 bg-red-50 text-red-700",
+        neutral: "border-slate-300 bg-slate-50 text-slate-600",
       },
     },
     defaultVariants: {

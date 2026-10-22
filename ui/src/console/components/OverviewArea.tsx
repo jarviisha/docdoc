@@ -12,16 +12,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
+import { Card } from "@/components/ui/card";
 
 import type { Intent } from "../model/client.ts";
 import { describe, type Failure } from "../model/failure.ts";
 import { duration, shortId, when } from "../model/format.ts";
-import { cardTone, toOverview, type KindSplit, type Overview, type OverviewCards } from "../model/overview.ts";
+import { toOverview, type Overview } from "../model/overview.ts";
 import { isNewer } from "../model/polling.ts";
 import { kindLabel, reasonLabel, timeline, type RunSummary } from "../model/runs.ts";
 import { DataTable } from "./DataTable.tsx";
+import { StatStrip } from "./StatStrip.tsx";
 import { usePolling } from "./usePolling.ts";
 
 type Request = (
@@ -33,13 +33,6 @@ interface Props {
   request: Request;
   onOpenRun: (runId: string) => void;
 }
-
-const CARDS: { name: keyof OverviewCards; label: string }[] = [
-  { name: "queued", label: "Queued" },
-  { name: "running", label: "Running" },
-  { name: "failed", label: "Failed (last hour)" },
-  { name: "done", label: "Done (last hour)" },
-];
 
 export function OverviewArea({ request, onOpenRun }: Props) {
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -85,7 +78,7 @@ export function OverviewArea({ request, onOpenRun }: Props) {
 
   return (
     <div className="flex flex-col gap-3">
-      <div role="status" aria-live="polite">
+      <div role="status" aria-live="polite" className="empty:-mb-3">
         {overview === null && problem === null ? <p className="text-sm">Loading…</p> : null}
         {problem === null ? null : (
           <Alert variant="destructive">
@@ -103,16 +96,7 @@ export function OverviewArea({ request, onOpenRun }: Props) {
 
       {overview === null ? null : (
         <>
-          <div className="flex flex-wrap gap-3">
-            {CARDS.map(({ name, label }) => (
-              <SplitCard
-                key={name}
-                label={label}
-                split={overview.cards[name]}
-                danger={cardTone(name, overview.cards[name]) === "danger"}
-              />
-            ))}
-          </div>
+          <StatStrip cards={overview.cards} />
 
           <p className="font-bold">Recent failures</p>
           {overview.recentFailures.length === 0 ? (
@@ -168,19 +152,5 @@ export function OverviewArea({ request, onOpenRun }: Props) {
         </>
       )}
     </div>
-  );
-}
-
-function SplitCard({ label, split, danger }: { label: string; split: KindSplit; danger: boolean }) {
-  return (
-    <Card className={cn("w-[200px] py-3", danger && "border-red-300 bg-red-50")}>
-      <CardContent className="flex flex-col gap-1 px-3">
-        <p className="text-sm">{label}</p>
-        <p className="text-lg font-bold">{split.total}</p>
-        <p className="text-sm text-muted-foreground">
-          OCR {split.ocr} · Extraction {split.extraction}
-        </p>
-      </CardContent>
-    </Card>
   );
 }

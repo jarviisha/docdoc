@@ -66,9 +66,14 @@ const NAV: { heading: string | null; entries: NavEntry[] }[] = [
   },
 ];
 
-const LABELS = Object.fromEntries(
-  NAV.flatMap((group) => group.entries).flatMap((entry) => ("name" in entry ? [[entry.name, entry.label]] : [])),
-) as Record<Area, string>;
+/** Each area's place in the sidebar, for the top bar's "Group / Area" trail. */
+const PLACES = Object.fromEntries(
+  NAV.flatMap((group) =>
+    group.entries.flatMap((entry) =>
+      "name" in entry ? [[entry.name, { group: group.heading, label: entry.label }]] : [],
+    ),
+  ),
+) as Record<Area, { group: string | null; label: string }>;
 
 const SESSION_ENDED = "Your session ended. Sign in again.";
 
@@ -216,10 +221,10 @@ export function Shell() {
         <span
           key={entry.soon}
           aria-disabled="true"
-          className="flex items-center justify-between rounded-md px-2 py-1.5 text-sm text-muted-foreground"
+          className="flex items-center justify-between px-2 py-1 text-slate-400"
         >
           {entry.soon}
-          <span className="text-[10px] uppercase">soon</span>
+          <span className="text-[10px] tracking-wider uppercase">soon</span>
         </span>
       );
     }
@@ -231,8 +236,8 @@ export function Shell() {
         aria-current={selected ? "page" : undefined}
         onClick={() => jump({ area: entry.name, tenant: null })}
         className={cn(
-          "rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-neutral-100 focus-visible:ring-[3px] focus-visible:ring-ring/50",
-          selected && "bg-primary/10 font-medium text-primary hover:bg-primary/10",
+          "rounded-sm px-2 py-1 text-left text-slate-700 outline-none hover:bg-slate-200/60 focus-visible:ring-2 focus-visible:ring-ring/50",
+          selected && "bg-indigo-100 font-medium text-indigo-800 hover:bg-indigo-100",
           entry.danger === true && !selected && "text-red-600",
         )}
       >
@@ -243,13 +248,18 @@ export function Shell() {
 
   return (
     <div className="flex h-screen">
-      <aside className="flex w-56 shrink-0 flex-col border-r bg-neutral-50 px-2 py-3">
-        <p className="px-2 pb-2 text-sm font-semibold">docdoc console</p>
+      <aside className="flex w-52 shrink-0 flex-col overflow-y-auto border-r bg-slate-50 px-2 py-3">
+        <p className="flex items-center gap-2 px-2 pb-2 font-semibold">
+          <span aria-hidden="true" className="size-3.5 rounded-[1px] bg-primary" />
+          docdoc console
+        </p>
         <nav aria-label="Console" className="flex flex-col gap-0.5">
           {NAV.map((group) => (
             <Fragment key={group.heading ?? "top"}>
               {group.heading === null ? null : (
-                <p className="px-2 pt-4 pb-1 text-xs uppercase text-muted-foreground">{group.heading}</p>
+                <p className="px-2 pt-4 pb-1 text-[10px] font-medium tracking-widest text-slate-500 uppercase">
+                  {group.heading}
+                </p>
               )}
               {group.entries.map(navEntry)}
             </Fragment>
@@ -258,18 +268,22 @@ export function Shell() {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-12 shrink-0 items-center justify-between border-b px-4">
-          <span className="text-sm font-medium">{LABELS[area]}</span>
+        <header className="flex h-10 shrink-0 items-center justify-between border-b px-4">
+          <span className="text-slate-500">
+            {PLACES[area].group === null ? null : `${PLACES[area].group} / `}
+            <span className="font-medium text-foreground">{PLACES[area].label}</span>
+          </span>
           <div className="flex items-center gap-3">
-            <span className="text-sm text-muted-foreground">Signed in as {session.username}</span>
+            <span className="text-slate-500">Signed in as {session.username}</span>
             <Button variant="outline" size="sm" onClick={() => void signOut()}>
               Sign out
             </Button>
           </div>
         </header>
 
-        <main className="flex flex-1 flex-col gap-4 overflow-auto p-4">
-          <div role="status" aria-live="polite">
+        <main className="flex flex-1 flex-col gap-3 overflow-auto p-4">
+          {/* Empty, it would still take a gap: the negative margin gives it back. */}
+          <div role="status" aria-live="polite" className="empty:-mb-3">
             {notice === null ? null : (
               <Alert variant="warning">
                 <AlertTitle>{notice}</AlertTitle>
@@ -294,6 +308,7 @@ export function Shell() {
               openRunId={openRunId}
               onOpenRun={setOpenRunId}
               presetTenant={presetTenant}
+              onSubmit={() => jump({ area: "submit", tenant: null })}
             />
           ) : null}
           {area === "submit" ? (

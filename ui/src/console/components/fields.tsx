@@ -32,8 +32,10 @@ interface TextFieldProps {
 export function TextField({ label, onChange, onEnter, className, ...rest }: TextFieldProps) {
   const id = useId();
   return (
-    <div className={cn("flex flex-col gap-1.5", className)}>
-      <Label htmlFor={id}>{label}</Label>
+    <div className={cn("flex flex-col gap-1", className)}>
+      <Label htmlFor={id} className={LABEL_CLASS}>
+        {label}
+      </Label>
       <Input
         id={id}
         {...rest}
@@ -57,9 +59,12 @@ interface SelectFieldProps {
   className?: string;
 }
 
+/** Smaller than the body text: a label names the box, it is not the content. */
+const LABEL_CLASS = "text-xs font-normal text-slate-600";
+
 /** The same look as `Input`, on a native `<select>`. */
 const SELECT_CLASS =
-  "h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50";
+  "h-[26px] w-full min-w-0 rounded-md border border-input bg-white px-1.5 text-[13px] outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50";
 
 export function SelectField({ label, value, onChange, options, placeholder, className }: SelectFieldProps) {
   const id = useId();
@@ -69,8 +74,10 @@ export function SelectField({ label, value, onChange, options, placeholder, clas
   const showPlaceholder =
     placeholder !== undefined && value === "" && !choices.some((choice) => choice.value === "");
   return (
-    <div className={cn("flex flex-col gap-1.5", className)}>
-      <Label htmlFor={id}>{label}</Label>
+    <div className={cn("flex flex-col gap-1", className)}>
+      <Label htmlFor={id} className={LABEL_CLASS}>
+        {label}
+      </Label>
       <select id={id} className={SELECT_CLASS} value={value} onChange={(event) => onChange(event.target.value)}>
         {showPlaceholder ? (
           <option value="" disabled>
@@ -103,8 +110,10 @@ export function FileField({ label, value, onChange, accept, className }: FileFie
     if (value === null) setGeneration((g) => g + 1);
   }, [value]);
   return (
-    <div className={cn("flex flex-col gap-1.5", className)}>
-      <Label htmlFor={id}>{label}</Label>
+    <div className={cn("flex flex-col gap-1", className)}>
+      <Label htmlFor={id} className={LABEL_CLASS}>
+        {label}
+      </Label>
       <Input
         key={generation}
         id={id}

@@ -33,9 +33,9 @@ export function DataTable<T>({ rows, rowKey, columns, label }: Props<T>) {
       </TableHeader>
       <TableBody>
         {rows.map((row, index) => (
-          <TableRow key={rowKey(row, index)}>
+          <TableRow key={rowKey(row, index)} className="even:bg-slate-50/60">
             {columns.map((column) => (
-              <TableCell key={column.key} className="py-1.5 whitespace-normal">
+              <TableCell key={column.key} className="whitespace-normal">
                 {column.cell(row)}
               </TableCell>
             ))}

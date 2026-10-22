@@ -25,6 +25,7 @@ import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { DataTable } from "./DataTable.tsx";
 import { DeliveryRecord } from "./DeliveryRecord.tsx";
 import { SelectField, TextField } from "./fields.tsx";
+import { LiveStatStrip } from "./StatStrip.tsx";
 import { ResultViewer, type ImageRequest } from "./ResultViewer.tsx";
 import { usePolling } from "./usePolling.ts";
 import {
@@ -78,6 +79,8 @@ interface Props {
   onOpenRun: (runId: string | null) => void;
   /** The tenant a jump from Tenants opened this area for, applied as the filter on mount. */
   presetTenant: string | null;
+  /** Opens Submit OCR: the list's own primary action. */
+  onSubmit: () => void;
 }
 
 /** The state's colour, and the word that must always be beside it. */
@@ -118,6 +121,7 @@ export function RunArea({
   openRunId,
   onOpenRun,
   presetTenant,
+  onSubmit,
 }: Props) {
   const [state, setState] = useState(() => forTenant(initialListing(), presetTenant ?? ""));
   // What is typed, apart from what is applied: the list reloads on Enter or
@@ -182,6 +186,8 @@ export function RunArea({
 
   return (
     <div className="flex flex-col gap-3">
+      <LiveStatStrip request={request} />
+
       {/* One row, bottom-aligned: the labels sit above and the boxes and
           buttons share a baseline. */}
       <div className="flex flex-wrap items-end gap-2">
@@ -217,6 +223,8 @@ export function RunArea({
         <Button variant="outline" disabled={loading} onClick={() => setState(reloaded)}>
           Refresh
         </Button>
+        <div className="flex-1" />
+        <Button onClick={onSubmit}>Submit OCR</Button>
       </div>
 
       {/* FR-045b: a list loading, and a list that failed, reach a screen reader
