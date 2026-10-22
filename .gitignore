@@ -152,3 +152,4 @@ ui/dist/
 # built. Never committed, for the same reason ui/dist is not (FR-038).
 packaging/docdoc-ui/src/docdoc_ui/console/
 packaging/docdoc-ui/dist/
+.superpowers/
