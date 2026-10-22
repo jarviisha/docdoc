@@ -48,7 +48,7 @@
       }
     },
     "provenance": {
-      "document_id": "sha256:bdb37935f278ea17aea95e2bddf70094f06a0a968e493c647b30627f7d1fb64a",
+      "document_id": "sha256:0e3436b4be5a11836cdf0686505d5a5914c94124f3dda6985809b63d3e7c8e01",
       "schema_identity": "receipt@1",
       "schema_hash": "sha256:b88cd54bba4ffd11e1c6b4076d31cc03af0e69667fc668e7fb5c53a123420347",
       "prompt_hash": "sha256:a0757647faa172933fa00bcd135492d8e549643689a98bc1b5ebafdeb8b79f56",
@@ -75,7 +75,7 @@
         "reasoning_tokens": null
       }
     },
-    "artifact_id": "sha256:b073fd15d51ae37fb9d6e2f8e7ff887f419ce85d28e74dbce92ef5389a645dfd",
+    "artifact_id": "sha256:32a4611a625f08f99422a97126fb0c4277634c304a787698bf917f9b31c48231",
     "discarded": []
   },
   "grounding": {
@@ -215,11 +215,11 @@
       "truncated": 0
     },
     "provenance": {
-      "document_id": "sha256:bdb37935f278ea17aea95e2bddf70094f06a0a968e493c647b30627f7d1fb64a",
-      "extraction_artifact_id": "sha256:b073fd15d51ae37fb9d6e2f8e7ff887f419ce85d28e74dbce92ef5389a645dfd",
+      "document_id": "sha256:0e3436b4be5a11836cdf0686505d5a5914c94124f3dda6985809b63d3e7c8e01",
+      "extraction_artifact_id": "sha256:32a4611a625f08f99422a97126fb0c4277634c304a787698bf917f9b31c48231",
       "grounding_version": "v1",
       "match_view_version": "v1",
-      "view_id": "sha256:19fd4df0a2ae58e954b2829f236b722c6f4e1e0613a493aacb91560f7d1bfc80",
+      "view_id": "sha256:8a84402ba461cc2d73d9ca068cb77bb74bfde79b278eca01b0d210cf0df9d621",
       "options": {
         "threshold": 0.9,
         "candidate_budget": 1500
@@ -227,7 +227,7 @@
       "grounder_id": "deterministic-grounder",
       "grounder_version": "1.0.0"
     },
-    "artifact_id": "sha256:722350e83baf2b84031b333fb71390a16c070d9a2c87184879412d8da817e415"
+    "artifact_id": "sha256:c55245d3f0771001fec47d0c6f9a03b3b2dda85bc7c6e432799ffa7bbadf1040"
   },
   "validation": {
     "verdict": "valid",
@@ -280,9 +280,9 @@
       "infos": 0
     },
     "provenance": {
-      "document_id": "sha256:bdb37935f278ea17aea95e2bddf70094f06a0a968e493c647b30627f7d1fb64a",
-      "extraction_artifact_id": "sha256:b073fd15d51ae37fb9d6e2f8e7ff887f419ce85d28e74dbce92ef5389a645dfd",
-      "grounding_artifact_id": "sha256:722350e83baf2b84031b333fb71390a16c070d9a2c87184879412d8da817e415",
+      "document_id": "sha256:0e3436b4be5a11836cdf0686505d5a5914c94124f3dda6985809b63d3e7c8e01",
+      "extraction_artifact_id": "sha256:32a4611a625f08f99422a97126fb0c4277634c304a787698bf917f9b31c48231",
+      "grounding_artifact_id": "sha256:c55245d3f0771001fec47d0c6f9a03b3b2dda85bc7c6e432799ffa7bbadf1040",
       "schema_identity": "receipt@1",
       "schema_hash": "sha256:b88cd54bba4ffd11e1c6b4076d31cc03af0e69667fc668e7fb5c53a123420347",
       "rule_vocabulary_version": "rule_vocabulary@1",
@@ -299,7 +299,7 @@
       "validator_id": "deterministic-validator",
       "validator_version": "1.1.0"
     },
-    "artifact_id": "sha256:2398e17d32247c7dbcb8c0227d98c9b73a24c943a0cb60691c80de9b8224905f"
+    "artifact_id": "sha256:5f1d206ca47010ac02344c4368db27fcd2a6220984cf5f05e16f0133f5e2c7c4"
   },
   "failed_stage": null,
   "failure_reason": null,

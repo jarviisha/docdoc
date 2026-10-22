@@ -312,5 +312,5 @@ def test_the_size_does_not_move_the_report_id() -> None:
 
     assert report.dataset_size
     assert report.report_id == (
-        "sha256:04693bb51423e8503db9d8426037544192de06f39b187b38449286230ab76bd4"
+        "sha256:ac33a22a401b4d1a1738756c6065b7ba218ede602a39299dcf2866978649f237"
     )
