@@ -230,7 +230,16 @@ export function CredentialArea({ request, onFailure, presetTenant }: Props) {
           if (!open) setConfirming(null);
         }}
         title="Revoke this key?"
-        description={confirming === null ? undefined : `Credential ${shortId(confirming)}`}
+        description={
+          confirming === null ? undefined : (
+            <>
+              Credential {shortId(confirming)}.
+              {/* Behind the dialog the page is hidden from a screen reader, so
+                  the one warning this action has is said here too. */}
+              {needsWarning(state) ? <span className="mt-2 block">{SELF_REVOCATION_WARNING}</span> : null}
+            </>
+          )
+        }
         confirmLabel="Revoke"
         onConfirm={() => (confirming === null ? Promise.resolve() : revoke(confirming))}
       />

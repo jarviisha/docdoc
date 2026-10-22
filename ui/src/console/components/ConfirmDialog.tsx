@@ -49,7 +49,9 @@ export function ConfirmDialog({
   const [pending, setPending] = useState(false);
 
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
+    // Held open while the request is in flight, as the inline confirms were:
+    // the parent closes it when the answer arrives.
+    <AlertDialog open={open} onOpenChange={(next) => (pending ? undefined : onOpenChange(next))}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
@@ -57,7 +59,7 @@ export function ConfirmDialog({
         </AlertDialogHeader>
         {children}
         <AlertDialogFooter>
-          <AlertDialogCancel>{cancelLabel}</AlertDialogCancel>
+          <AlertDialogCancel disabled={pending}>{cancelLabel}</AlertDialogCancel>
           <Button
             variant="destructive"
             disabled={confirmDisabled || pending}
