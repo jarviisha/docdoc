@@ -621,9 +621,14 @@ have violated that clause is now compliant (ADR-0027).
   - **Packaging paragraph rewritten** to describe the Docker image. The extras
     stay, as the way the image composes what it installs. The kernel's
     pydantic-only dependency is unchanged.
+  - **Development Compose admits one-shot setup services (v1.11.0 scope).**
+    A service that runs the docdoc image or the object store's image once and
+    exits is not a long-running service: `createbucket` and `migrate` (applies
+    the schema once, before api and the workers start). Recorded here, in the
+    same unreleased amendment, so 2.0.0 stands.
 
 Sections amended: Principle IV, Principle X, MVP Scope Constraints (Sanctioned
-stack, Packaging). No decision moved; the open list stays empty.
+stack, Packaging, Deferred technology). No decision moved; the open list stays empty.
 
 Migration note: no artifact is invalidated, and no route, run or stored value
 changes. A script that called the removed commands must use the HTTP API.
@@ -1005,6 +1010,8 @@ deployment, distributed DAG engines, vector databases, RAG infrastructure, workf
 semantic chunking, EditMap-style normalization, automatic model training, multi-tenant billing,
 and a full review UI. Development Compose contains only api, worker, postgres, and object storage;
 the worker may appear as one service per run kind it claims (`docdoc worker --kind`, v1.11.0).
+One-shot setup services that run the docdoc image or the object store's image and then exit
+(`createbucket`, `migrate`) are not services in this sense (v2.0.0).
 
 "Multi-tenant billing" above forbids **billing**, not tenant isolation. Scoping runs, blobs, and
 artifacts to a tenant so that one customer cannot read another's is permitted and, from Milestone 9,

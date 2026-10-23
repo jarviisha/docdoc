@@ -111,7 +111,7 @@ no payload, no extracted value, no prompt body, and no credential: it explains i
 documents. "prompt_hash" is a name; the prompt is a document.
 
 A derivation is *read* from the record a write left behind. A run with no store configured produces
-identities that were never recorded, and the tool says so rather than reconstructing something
+identities that were never recorded, and a reader says so rather than reconstructing something
 plausible — a reconstruction would be a guess wearing the costume of a record.
 
 ## Reading a result back

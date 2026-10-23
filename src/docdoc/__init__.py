@@ -1,8 +1,9 @@
 """docdoc — a provider-agnostic Intelligent Document Processing engine.
 
-Turns unstructured documents into structured, validated data while preserving
-source-level provenance through the whole pipeline. There is no single entry
-point: each layer is imported directly, and they compose downward.
+A self-hosted service (HTTP API, operations console, Docker image) that turns
+unstructured documents into structured, validated data while preserving
+source-level provenance. These packages are its implementation, not a public
+library; they compose downward:
 
 :mod:`docdoc.kernel`
     The canonical Document IR and its deterministic operations --
@@ -17,9 +18,7 @@ point: each layer is imported directly, and they compose downward.
 :mod:`docdoc.validation`
     The verdict on whether the result is acceptable. Whether to trust it.
 
-The base install carries ``pydantic`` and ``rapidfuzz`` and no provider SDK;
-providers are optional extras. See the roadmap in ``README.md`` for what each
-milestone added and what is still ahead.
+Provider SDKs live only inside adapter directories (import-linter enforces it).
 """
 
 __version__ = "0.1.0"

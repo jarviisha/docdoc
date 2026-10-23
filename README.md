@@ -121,7 +121,8 @@ R2, SeaweedFS and every other S3-compatible store needs and AWS does not. **Run 
 and you need a shared store**: with a private directory per worker every lookup misses, every run is
 correct, and you pay for every parse twice with nothing anywhere reporting a problem.
 
-Apply the database schema explicitly with `docdoc migrate`. Nothing applies it on startup, because
+Outside compose, apply the database schema explicitly with `docdoc migrate` (compose's one-shot
+`migrate` service does it for you). Nothing applies it on startup, because
 several workers booting at once would be several processes altering one table.
 
 Three configure asynchronous runs, and only the worker reads the last two:

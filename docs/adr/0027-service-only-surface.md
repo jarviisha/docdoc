@@ -20,12 +20,13 @@ still presented it as a Python library and a local command-line tool: the README
 `pip install docdoc` and `from docdoc.ingest import parse`; `docdoc parse`, `extract`, `inspect`,
 `explain` and `eval` processed documents on a laptop with no server; eight examples called the
 packages directly; and Principle IV, with a CI `base-install` job behind it, guaranteed an install
-that needed only `pydantic` and `rapidfuzz`.
+that needed only `pydantic` and `rapidfuzz` (the Packaging paragraph named those two; Principle IV
+promised no provider SDK).
 
 That surface cost tests and maintenance, and it told newcomers the wrong story. ADR-0026 gave the
 service its own quality measure, so `docdoc eval` was no longer the only way to measure quality,
-and the console can now submit an extraction, so nothing in a first walk-through needs a local
-command.
+and the image carries the console, which can now submit an extraction, so nothing in a first
+walk-through needs a local command.
 
 ## Decision
 
@@ -99,9 +100,14 @@ one explicit process, never by every process on boot. A newcomer's first ten min
   deprecation period.
 - Passing `--verify-cache` is now an argparse error. `pipeline.run(verify=True)` remains for
   internal use.
+- ADR-0003 accepted opaque cache keys on condition that something would explain them, and that was
+  `docdoc explain`. `derivation_chain` and `derivation_of` now have no production caller, and drift
+  detection (`--verify-cache`) is gone too. Explanation and drift checking are internal-only; the
+  derivation records are still written. An HTTP or console surface for them is follow-up work.
 - Documents that described the removed commands as current usage carry a one-line note pointing
-  here (ADR-0015, ADR-0021) rather than being rewritten. Specifications and plans under `specs/` and
-  `docs/superpowers/` are records and are not edited.
+  here (ADR-0015, ADR-0021, ADR-0026) rather than being rewritten. Specifications and plans under
+  `specs/` and `docs/superpowers/` are records and are not edited, except the `plan.md` of specs
+  006, 008 and 010, which `test_plan_tree_is_current` requires to name files that still exist.
 
 ## Alternatives considered
 
