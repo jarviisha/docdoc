@@ -256,6 +256,20 @@ The five under `/v1/admin` require the `admin` scope, and a caller without it ge
 `403`: an ordinary tenant learning that an administrative surface exists at a URL is a disclosure
 with no upside.
 
+Four more measure quality on a tenant's own documents (a check is the correction route above, and a
+correction can now say a value is correct; see [quality](docs/concepts/quality.md)):
+
+```text
+GET  /v1/answers                          → the checked documents and fields, per schema
+POST /v1/evaluations?schema=              → 202; re-run the checked documents, score them
+GET  /v1/evaluations                      → this tenant's reports, newest first
+GET  /v1/evaluations/{evaluation_id}      → one report, with its per-field table
+```
+
+`POST /v1/evaluations` answers `409 no_answers` with nothing checked, `409 evaluation_in_progress`
+while another for that schema is unfinished, and `429` when a run limit is reached. Answers never
+expire.
+
 **There is no route that assigns a correction to a reviewer, no queue of work, no review state, and
 no `PATCH` on a result.** Principle IX permits the correction model and forbids the review platform,
 and a contract test asserts each of those absences by name.
@@ -727,6 +741,7 @@ any of them. One result representation, reachable one way.
 - [The pipeline](docs/concepts/pipeline.md) — the four stages, the reuse decision, what a cached parse still pays for, and why a job needs no queue
 - [Artifacts](docs/concepts/artifacts.md) — the chain, the two hashes, which misses are errors, and the one symptom of a missed version bump
 - [Runs](docs/concepts/runs.md) — the two identities, the lifecycle, why redelivery is mostly "resume", and the exact limits of cancellation
+- [Quality](docs/concepts/quality.md) — checking a tenant's own documents, answers that never expire, re-run reports, and what erasure leaves in them
 - [Grounding API contract](specs/004-deterministic-grounding/contracts/grounding-api.md)
 - [Validation API contract](specs/005-deterministic-validation/contracts/validation-api.md)
 - [Extraction API contract](specs/003-schema-driven-extraction/contracts/extraction-api.md)

@@ -327,6 +327,9 @@ SUITE_ONLY_ENV = frozenset(
         "DOCDOC_TEST_PADDLEX_URL",
         "DOCDOC_TEST_TESSERACT_URL",
         "DOCDOC_EXTRAS",
+        # Retired by ADR-0026 (answers never expire); the ADR and the design name it
+        # to say so, and no module defines it any more.
+        "DOCDOC_CORRECTION_RETENTION_DAYS",
     }
 )
 
@@ -424,6 +427,7 @@ CONFIG_DOCUMENTS = (
     # the evaluation adds, ahead of the tasks that define them.
     "docs/superpowers/specs/2026-10-22-tenant-quality-evaluation-design.md",
     "docs/superpowers/plans/2026-10-22-tenant-quality-evaluation.md",
+    "docs/adr/0026-tenant-quality-evaluation.md",
 )
 
 #: Requires at least one character after the prefix, so the `DOCDOC_*` wildcard

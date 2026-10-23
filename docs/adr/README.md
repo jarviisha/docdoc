@@ -28,9 +28,10 @@ it would be decided explicitly rather than settled by whichever code landed firs
 | [0020](0020-retire-the-grounding-viewer.md) | The grounding viewer is retired; `ui/` builds the console only | Accepted; retires `specs/011` FR-022b, FR-040, SC-012; partly superseded by ADR-0023 | — |
 | [0021](0021-caller-named-parsers-and-ocr-endpoints.md) | A request may name a configured parser; OCR endpoints are configured, not coded | Accepted; requires constitution v1.10.0 | — |
 | [0022](0022-asynchronous-ocr-through-a-bounded-queue.md) | OCR is a run kind, accepted into a bounded queue | Accepted; requires constitution v1.11.0; amends 0021 | — |
-| [0023](0023-console-login-and-cross-tenant-operations.md) | Console login and cross-tenant operations | Accepted; requires constitution v1.12.0; supersedes 0019 §3–§4 in part, 0020 in part | — |
+| [0023](0023-console-login-and-cross-tenant-operations.md) | Console login and cross-tenant operations | Accepted; requires constitution v1.12.0; supersedes 0019 §3–§4 in part, 0020 in part; §4 amended in part by ADR-0026 | — |
 | [0024](0024-console-ui-on-shadcn.md) | The console's UI is built on shadcn/ui | Accepted; replaces Astryx (`specs/008` R2) | — |
 | [0025](0025-native-pdf-parsing-on-pdfium.md) | Native PDF parsing on PDFium | Accepted; supersedes 0001's choice of PyMuPDF | — |
+| [0026](0026-tenant-quality-evaluation.md) | Tenant quality evaluation: checks, answers that never expire, and re-run reports | Accepted; requires constitution v1.13.0; amends 0023 §4 | — |
 
 ## Conventions
 
