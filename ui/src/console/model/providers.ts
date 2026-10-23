@@ -143,3 +143,45 @@ export function testBody(form: { model: string; apiKey: string }): {
 export const isOverride = (view: ProvidersView): boolean =>
   view.prioritySource === "tenant" ||
   view.rows.some((r) => r.modelSource === "tenant" || r.keySource === "tenant");
+
+/** What the status column says: "in use" is the adapter a run would take now. */
+export function statusOf(
+  view: ProvidersView,
+  row: ProviderRow,
+): { label: string; variant: "success" | "neutral" | "warning"; reason: string | null } {
+  if (view.selected === row.id) return { label: "in use", variant: "success", reason: null };
+  if (row.usable) return { label: "usable", variant: "neutral", reason: null };
+  return { label: "unavailable", variant: "warning", reason: row.reason };
+}
+
+/** The source a save in this scope writes. */
+const ownSource = (view: ProvidersView): Source => (view.scope === null ? "default" : "tenant");
+
+/** The edit form's starting model: only this scope's own, so saving never copies an inherited one down. */
+export const savedModel = (view: ProvidersView, row: ProviderRow): string =>
+  row.modelSource === ownSource(view) ? (row.model ?? "") : "";
+
+/** Whether this scope holds a key of its own, which "Remove saved key" would drop. */
+export const keySaved = (view: ProvidersView, row: ProviderRow): boolean =>
+  row.keySource === ownSource(view) && row.keyLast4 !== null;
+
+/** An empty key input keeps what is there; the placeholder says what that is. */
+export function keyPlaceholder(view: ProvidersView, row: ProviderRow): string {
+  if (keySaved(view, row)) return `••••${row.keyLast4} saved — type to replace`;
+  if (row.keyLast4 !== null) return `••••${row.keyLast4} from ${SOURCE_LABEL[row.keySource]} — type to override`;
+  return "not set — type to save";
+}
+
+export const SECRETS_NOTE = "set DOCDOC_SECRETS_KEY to store API keys";
+
+/** A typed key cannot be stored without the secrets key; clearing one can. */
+export const canSave = (
+  form: { model: string; apiKey: string; clearKey: boolean },
+  secretsConfigured: boolean,
+  busy: boolean,
+): boolean => !busy && (secretsConfigured || form.clearKey || form.apiKey.trim() === "");
+
+export function toTestResult(body: unknown): { ok: boolean; message: string } | null {
+  if (!isObj(body) || typeof body.ok !== "boolean" || typeof body.message !== "string") return null;
+  return { ok: body.ok, message: body.message };
+}

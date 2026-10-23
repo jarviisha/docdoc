@@ -3,13 +3,19 @@ import { test } from "node:test";
 
 import {
   adapterUpdate,
+  canSave,
   editable,
   isOverride,
   keyDisplay,
+  keyPlaceholder,
+  keySaved,
   movePriority,
+  savedModel,
   SOURCE_LABEL,
+  statusOf,
   testBody,
   toProvidersView,
+  toTestResult,
   withAdapter,
   withoutAdapter,
 } from "../../src/console/model/providers.ts";
@@ -112,4 +118,56 @@ test("isOverride is true when any source is tenant", () => {
   const plain = { ...body, adapters: [adapter("a")] };
   assert.equal(isOverride(toProvidersView(plain)!), false);
   assert.equal(isOverride(toProvidersView({ ...plain, priority: { value: ["a"], source: "tenant" } })!), true);
+});
+
+test("statusOf: in use is the selected row, else usable or unavailable with the reason", () => {
+  const view = toProvidersView({ ...body, selected: null })!;
+  const [b, a] = view.rows;
+  assert.deepEqual(statusOf(view, a!), { label: "usable", variant: "neutral", reason: null });
+  assert.deepEqual(statusOf(view, b!), { label: "unavailable", variant: "warning", reason: "no key" });
+  const selectedUsable = toProvidersView({ ...body, selected: "a" })!;
+  assert.equal(statusOf(selectedUsable, selectedUsable.rows.find((r) => r.id === "a")!).label, "in use");
+});
+
+test("the form starts from what this scope saved, never an inherited value", () => {
+  const atDefault = toProvidersView(body)!;
+  const a = atDefault.rows.find((r) => r.id === "a")!;
+  const c = atDefault.rows.find((r) => r.id === "c")!;
+  assert.equal(savedModel(atDefault, a), "m");
+  assert.equal(keySaved(atDefault, c), false);
+  const atTenant = toProvidersView({ ...body, scope: "acme" })!;
+  const ta = atTenant.rows.find((r) => r.id === "a")!;
+  const tc = atTenant.rows.find((r) => r.id === "c")!;
+  assert.equal(savedModel(atTenant, ta), "");
+  assert.equal(keySaved(atTenant, tc), true);
+  assert.equal(keySaved(atTenant, ta), false);
+});
+
+test("keyPlaceholder says what an empty input keeps", () => {
+  const atTenant = toProvidersView({ ...body, scope: "acme" })!;
+  const row = (id: string) => atTenant.rows.find((r) => r.id === id)!;
+  assert.equal(keyPlaceholder(atTenant, row("c")), "••••1234 saved — type to replace");
+  const inherited = toProvidersView({
+    ...body,
+    scope: "acme",
+    adapters: [adapter("a", { key: { last4: "9999", source: "env" } })],
+  })!;
+  assert.equal(keyPlaceholder(inherited, inherited.rows[0]!), "••••9999 from environment — type to override");
+  assert.equal(keyPlaceholder(atTenant, row("a")), "not set — type to save");
+});
+
+test("canSave: a typed key needs the secrets key; never while busy", () => {
+  const form = { model: "", apiKey: "", clearKey: false };
+  assert.equal(canSave(form, false, false), true);
+  assert.equal(canSave({ ...form, apiKey: "k" }, false, false), false);
+  assert.equal(canSave({ ...form, apiKey: "k" }, true, false), true);
+  assert.equal(canSave({ ...form, apiKey: "k", clearKey: true }, false, false), true);
+  assert.equal(canSave(form, true, true), false);
+});
+
+test("toTestResult reads ok and message; junk is null", () => {
+  assert.deepEqual(toTestResult({ ok: true, message: "connected" }), { ok: true, message: "connected" });
+  assert.deepEqual(toTestResult({ ok: false, message: "bad key" }), { ok: false, message: "bad key" });
+  assert.equal(toTestResult({ ok: "yes" }), null);
+  assert.equal(toTestResult(null), null);
 });

@@ -41,6 +41,7 @@ import { CredentialArea } from "./components/CredentialArea.tsx";
 import { EraseArea } from "./components/EraseArea.tsx";
 import { OverviewArea } from "./components/OverviewArea.tsx";
 import { ParsersArea } from "./components/ParsersArea.tsx";
+import { ProvidersArea } from "./components/ProvidersArea.tsx";
 import { QualityArea } from "./components/QualityArea.tsx";
 import { RunArea, RunDetail } from "./components/RunArea.tsx";
 import { SchemaEditor } from "./components/SchemaEditor.tsx";
@@ -90,7 +91,7 @@ const NAV: { heading: string | null; entries: NavEntry[] }[] = [
     heading: "Settings",
     entries: [
       { name: "parsers", label: "Parsers" },
-      { soon: "Providers" },
+      { name: "providers", label: "Providers" },
       { name: "erasure", label: "Erase…", danger: true },
     ],
   },
@@ -297,6 +298,16 @@ const parsersRoute = createRoute({
   },
 });
 
+const providersRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/providers",
+  validateSearch: tenantSearch,
+  component: function Providers() {
+    // Keyed by scope: an open form, typed key or write error never carries to another tenant.
+    return <ProvidersArea key={providersRoute.useSearch().tenant ?? ""} />;
+  },
+});
+
 const schemasRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/schemas",
@@ -344,6 +355,7 @@ const routeTree = rootRoute.addChildren([
   credentialsRoute,
   callbacksRoute,
   parsersRoute,
+  providersRoute,
   schemasRoute,
   schemaNewRoute,
   schemaRoute,
