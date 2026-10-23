@@ -130,12 +130,14 @@ test("the writes are exactly the session, run, credential, callback, erasure, OC
 
   assert.deepEqual(written, [
     "DELETE /v1/console/credentials/c",
+    "DELETE /v1/console/providers",
     "DELETE /v1/console/runs/r",
     "DELETE /v1/console/session",
     "DELETE /v1/console/tenants/acme/callbacks/c",
     "DELETE /v1/console/tenants/t",
     "DELETE /v1/console/tenants/t/documents/b",
     "POST /v1/console/credentials",
+    "POST /v1/console/providers/openai/test",
     "POST /v1/console/runs/r/corrections",
     "POST /v1/console/schemas",
     "POST /v1/console/session",
@@ -143,6 +145,8 @@ test("the writes are exactly the session, run, credential, callback, erasure, OC
     "POST /v1/console/tenants/t/evaluations",
     "POST /v1/console/tenants/t/extractions",
     "POST /v1/console/tenants/t/ocr",
+    "PUT /v1/console/providers/openai",
+    "PUT /v1/console/providers/priority",
   ]);
 });
 
@@ -260,4 +264,25 @@ test("checks, answers, and evaluations are allowed console requests", () => {
   assert.deepEqual(plans[3]!.query, { schema: "invoice" });
   assert.deepEqual(plans[4]!.query, {});
   assert.deepEqual(plans[5]!.query, { schema: "invoice" });
+});
+
+test("provider intents address /providers, scoped by tenant only when given", () => {
+  assert.deepEqual(requestFor({ type: "list-providers", tenantId: null }), {
+    method: "GET",
+    path: "/v1/console/providers",
+    query: {},
+    hasBody: false,
+  });
+  assert.deepEqual(requestFor({ type: "set-provider", tenantId: "acme", adapterId: "a b" }), {
+    method: "PUT",
+    path: "/v1/console/providers/a%20b",
+    query: { tenant: "acme" },
+    hasBody: true,
+  });
+  assert.deepEqual(requestFor({ type: "reset-providers", tenantId: "acme" }), {
+    method: "DELETE",
+    path: "/v1/console/providers",
+    query: { tenant: "acme" },
+    hasBody: false,
+  });
 });

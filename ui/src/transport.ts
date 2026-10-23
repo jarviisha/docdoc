@@ -19,7 +19,7 @@
  */
 
 export interface RequestPlan {
-  method: "GET" | "POST" | "DELETE";
+  method: "GET" | "POST" | "PUT" | "DELETE";
   path: string;
   query: Record<string, string>;
   hasBody: boolean;
