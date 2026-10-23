@@ -29,7 +29,7 @@ fixtures answers nothing at all.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, NamedTuple
 
 # Imported at runtime, not under TYPE_CHECKING: `AdapterCandidate` is a NamedTuple
@@ -96,7 +96,8 @@ class AdapterConfig:
     """
 
     model: str | None = None
-    api_key: str | None = None
+    #: Out of the repr, so logging a resolution can never log a key.
+    api_key: str | None = field(default=None, repr=False)
     unavailable: str | None = None
 
 

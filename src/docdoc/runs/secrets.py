@@ -46,10 +46,15 @@ class Sealer:
     def seal(self, text: str) -> bytes:
         return self._fernet.encrypt(text.encode())
 
-    def unseal(self, token: bytes) -> str:
+    def unseal(self, token: bytes | memoryview) -> str:
+        """Plaintext, or `SecretUnreadable` for anything that does not open cleanly.
+
+        A memoryview is what psycopg hands back for ``bytea``. A wrong type, a bad
+        token and non-UTF-8 plaintext are all "unreadable" to a caller.
+        """
         try:
-            return self._fernet.decrypt(token).decode()
-        except InvalidToken:
+            return self._fernet.decrypt(bytes(token)).decode()
+        except (InvalidToken, TypeError, UnicodeDecodeError):
             raise SecretUnreadable("sealed value does not open under the master key") from None
 
 

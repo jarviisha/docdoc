@@ -48,3 +48,22 @@ def test_repr_of_sealer_has_no_key() -> None:
     sealer = _sealer(key)
     assert key not in repr(sealer)
     assert key not in str(sealer)
+
+
+def test_unseal_accepts_a_memoryview() -> None:
+    sealer = _sealer()
+    assert sealer.unseal(memoryview(sealer.seal("sk-fake-1234"))) == "sk-fake-1234"
+
+
+@pytest.mark.parametrize("token", ["not-bytes", None, 42])
+def test_unseal_of_a_bad_type_is_unreadable(token: object) -> None:
+    with pytest.raises(SecretUnreadable) as caught:
+        _sealer().unseal(token)  # type: ignore[arg-type]
+    assert caught.value.__cause__ is None
+
+
+def test_unseal_of_non_utf8_plaintext_is_unreadable() -> None:
+    fernet = Fernet(Fernet.generate_key())
+    with pytest.raises(SecretUnreadable) as caught:
+        Sealer(fernet).unseal(fernet.encrypt(b"\xff\xfe"))
+    assert caught.value.__cause__ is None

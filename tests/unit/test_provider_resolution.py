@@ -128,6 +128,30 @@ def test_unreadable_inherited_key_is_unavailable_not_env(monkeypatch: pytest.Mon
             resolve_adapter("acme", store, sealer)
 
 
+def test_saved_empty_key_is_unavailable_not_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GEMINI_API_KEY", "fake-env-key-ABCD")
+    store, sealer = InMemoryProviderStore(), _sealer()
+    store.set_adapter(
+        DEFAULT_SCOPE, "gemini", model=None, key=(sealer.seal("  "), "  "), by="ops", now=NOW
+    )
+
+    gemini = _gemini(resolve("acme", store, sealer))
+    assert gemini.config.api_key is None
+    assert gemini.config.unavailable == "the stored API key for gemini is empty"
+    with pytest.raises(ModelProviderError):
+        resolve_adapter("acme", store, sealer)
+
+
+def test_repr_never_carries_a_saved_key() -> None:
+    store, sealer = InMemoryProviderStore(), _sealer()
+    _save(store, sealer, DEFAULT_SCOPE, key="fake-secret-plaintext-WXYZ")
+
+    resolved = resolve("acme", store, sealer)
+    assert _gemini(resolved).config.api_key == "fake-secret-plaintext-WXYZ"
+    assert "fake-secret-plaintext" not in repr(resolved)
+    assert "fake-secret-plaintext" not in str(resolved)
+
+
 def test_echo_only_when_named(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(ECHO_FIXTURES_ENV, "tests/fixtures/echo")
     store, sealer = InMemoryProviderStore(), _sealer()

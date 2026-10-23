@@ -131,13 +131,20 @@ def _resolve_one(
         key_source, row = key_row
         key_last4 = row.key_last4
         try:
-            if sealer is None:
+            if sealer is None or row.key_ciphertext is None:
                 raise SecretUnreadable
-            api_key = sealer.unseal(bytes(row.key_ciphertext))  # type: ignore[arg-type]
-        except (SecretUnreadable, TypeError):
+            plaintext = sealer.unseal(row.key_ciphertext)
+        except SecretUnreadable:
             unavailable = (
                 f"the stored API key for {adapter_id} cannot be decrypted with {SECRETS_KEY_ENV}"
             )
+        else:
+            # An empty key must not reach the adapter: `None or ""` there means
+            # "use the env key", the fallback a saved key must never take.
+            if plaintext.strip():
+                api_key = plaintext
+            else:
+                unavailable = f"the stored API key for {adapter_id} is empty"
     else:
         # The same lookup as `GeminiAdapter._resolved_key`, for the last 4 only.
         env_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
