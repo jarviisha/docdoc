@@ -6,14 +6,11 @@
  * and the list below it says what went wrong with the request that matters.
  */
 
-import { useCallback, useEffect, useState } from "react";
-
 import { cn } from "@/lib/utils";
 
-import type { Intent } from "../model/client.ts";
-import type { Failure } from "../model/failure.ts";
 import { cardTone, toOverview, type OverviewCards } from "../model/overview.ts";
-import { usePolling } from "./usePolling.ts";
+import { POLL_MS } from "../model/polling.ts";
+import { useIntent } from "./useIntent.ts";
 
 const CARDS: { name: keyof OverviewCards; label: string }[] = [
   { name: "queued", label: "Queued" },
@@ -48,28 +45,11 @@ export function StatStrip({ cards }: { cards: OverviewCards }) {
   );
 }
 
-type Request = (
-  intent: Intent,
-  body?: BodyInit,
-) => Promise<{ ok: true; body: unknown } | { ok: false; failure: Failure }>;
+/** The cards out of an overview body; a malformed one is the query's error, and hides the strip. */
+const toCards = (body: unknown) => toOverview(body).cards;
 
-export function LiveStatStrip({ request }: { request: Request }) {
-  const [cards, setCards] = useState<OverviewCards | null>(null);
-
-  const refresh = useCallback(async () => {
-    const answer = await request({ type: "overview" });
-    if (!answer.ok) return;
-    try {
-      setCards(toOverview(answer.body).cards);
-    } catch {
-      // ponytail: a malformed overview hides the strip; Overview itself reports it.
-    }
-  }, [request]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-  usePolling(refresh, true);
-
-  return cards === null ? null : <StatStrip cards={cards} />;
+export function LiveStatStrip() {
+  // ponytail: a malformed overview hides the strip; Overview itself reports it.
+  const { data: cards } = useIntent({ type: "overview" }, { select: toCards, refetchInterval: POLL_MS });
+  return cards === undefined ? null : <StatStrip cards={cards} />;
 }

@@ -222,16 +222,9 @@ const runsRoute = createRoute({
   path: "/runs",
   validateSearch: runsSearch,
   component: function Runs() {
-    const search = runsRoute.useSearch();
-    return (
-      <RunArea
-        key={JSON.stringify(search)}
-        request={useRequest().request}
-        onFailure={useFrame().onFailure}
-        onOpenRun={useOpenRun()}
-        presetTenant={search.tenant ?? null}
-      />
-    );
+    const { tenant, status, kind } = runsRoute.useSearch();
+    // Keyed by the filters: a change mounts the list afresh on page one.
+    return <RunArea key={JSON.stringify([tenant, status, kind])} onOpenRun={useOpenRun()} />;
   },
 });
 

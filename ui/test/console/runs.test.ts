@@ -7,30 +7,21 @@ import { test } from "node:test";
 
 import {
   back,
-  byKind,
   canGoBack,
-  canGoForward,
   currentCursor,
   autoRefreshes,
   detailPolls,
   showsFields,
   showsResult,
   emptyNotice,
-  failed,
-  filtered,
-  forTenant,
   forward,
-  initialListing,
   isCancellable,
-  isEmpty,
   kindLabel,
-  loaded,
-  polled,
+  listIntent,
   cancelNotice,
   reasonLabel,
   refetchAfterCancel,
   resultNotice,
-  reloaded,
   timeline,
   toFailure,
   toPage,
@@ -39,97 +30,48 @@ import {
   type RunSummary,
 } from "../../src/console/model/runs.ts";
 
-const PAGE = { runs: [{ run_id: "r1" }] as never, next_cursor: "c1" };
-
 test("the first page carries no cursor", () => {
-  const state = initialListing();
-  assert.equal(currentCursor(state), undefined);
-  assert.equal(canGoBack(state), false);
+  assert.equal(currentCursor([]), undefined);
+  assert.equal(canGoBack([]), false);
 });
 
 test("forward pushes the cursor and back pops it", () => {
-  const first = loaded(initialListing(), PAGE);
-  assert.equal(canGoForward(first), true);
-
-  const second = forward(first);
+  const second = forward([], "c1");
+  assert.deepEqual(second, ["c1"]);
   assert.equal(currentCursor(second), "c1");
   assert.equal(canGoBack(second), true);
-  assert.equal(second.listing.state, "loading");
 
-  const returned = back(second);
-  assert.equal(currentCursor(returned), undefined);
-  assert.equal(canGoBack(returned), false);
+  assert.deepEqual(back(["c1", "c2"]), ["c1"]);
+  assert.equal(currentCursor(back(second)), undefined);
 });
 
 test("forward on a last page does nothing", () => {
-  const last = loaded(initialListing(), { runs: [], next_cursor: null });
-  assert.equal(canGoForward(last), false);
-  assert.deepEqual(forward(last), last);
+  assert.deepEqual(forward(["c1"], null), ["c1"]);
 });
 
 test("back from the first page does nothing", () => {
-  const first = loaded(initialListing(), PAGE);
-  assert.deepEqual(back(first), first);
+  assert.deepEqual(back([]), []);
 });
 
-test("changing the filter returns to the first page", () => {
-  // A cursor is a position in one ordering; a filter produces a different one,
-  // and carrying the cursor across pages into a sequence it was never issued for.
-  const deep = forward(loaded(initialListing(), PAGE));
-  const refiltered = filtered(deep, "failed");
-
-  assert.deepEqual(refiltered.stack, []);
-  assert.equal(refiltered.status, "failed");
-  assert.equal(currentCursor(refiltered), undefined);
-});
-
-test("a failure resets the stack, so there is no back into a sequence that failed", () => {
-  const deep = forward(loaded(initialListing(), PAGE));
-  const broken = failed(deep, { kind: "transport", message: "gone" });
-
-  assert.equal(canGoBack(broken), false);
-  assert.equal(broken.listing.state, "failed");
-});
-
-test("empty and failed are different states", () => {
-  const empty = loaded(initialListing(), { runs: [], next_cursor: null });
-  const broken = failed(initialListing(), { kind: "transport", message: "gone" });
-
-  assert.equal(isEmpty(empty), true);
-  assert.equal(isEmpty(broken), false, "a failed request is not an empty tenant");
+test("the list request carries only the filters set, and the cursor", () => {
+  assert.deepEqual(listIntent({ tenant: "acme", status: "failed" }, "c1"), {
+    type: "list-runs",
+    tenant: "acme",
+    status: "failed",
+    cursor: "c1",
+  });
+  assert.deepEqual(listIntent({}, undefined), { type: "list-runs" });
 });
 
 test("an empty list says which emptiness it is", () => {
-  const all = loaded(initialListing(), { runs: [], next_cursor: null });
-  assert.match(emptyNotice(all), /no runs/);
-
-  const filteredEmpty = filtered(all, "failed");
-  assert.match(emptyNotice(filteredEmpty), /no failed runs/);
-
-  const oneTenant = loaded(forTenant(filteredEmpty, "acme"), { runs: [], next_cursor: null });
-  assert.equal(emptyNotice(oneTenant), "Tenant acme has no failed runs.");
-
-  assert.equal(emptyNotice(byKind(oneTenant, "ocr")), "Tenant acme has no failed OCR runs.");
-  assert.equal(emptyNotice(byKind(all, "extraction")), "No tenant has no extraction runs.");
-});
-
-test("a tenant filter returns to page one and keeps the state filter", () => {
-  const deep = forward(loaded(filtered(initialListing(), "failed"), PAGE));
-  const narrowed = forTenant(deep, "  acme ");
-  assert.equal(narrowed.tenant, "acme");
-  assert.equal(narrowed.status, "failed");
-  assert.deepEqual(narrowed.stack, []);
-  assert.equal(narrowed.listing.state, "loading");
-
-  assert.equal(forTenant(narrowed, "   ").tenant, null, "a blank filter means every tenant");
-  assert.equal(filtered(narrowed, null).tenant, "acme", "a state filter keeps the tenant");
-});
-
-test("a reload keeps its place", () => {
-  const deep = forward(loaded(initialListing(), PAGE));
-  const again = reloaded(loaded(deep, PAGE));
-  assert.deepEqual(again.stack, deep.stack);
-  assert.equal(again.listing.state, "loading");
+  assert.match(emptyNotice({}), /no runs/);
+  assert.match(emptyNotice({ status: "failed" }), /no failed runs/);
+  assert.equal(emptyNotice({ tenant: "acme", status: "failed" }), "Tenant acme has no failed runs.");
+  assert.equal(
+    emptyNotice({ tenant: "acme", status: "failed", kind: "ocr" }),
+    "Tenant acme has no failed OCR runs.",
+  );
+  assert.equal(emptyNotice({ kind: "extraction" }), "No tenant has no extraction runs.");
 });
 
 test("a malformed body becomes an empty page rather than a crash", () => {
@@ -170,22 +112,6 @@ test("a malformed or empty body reports no failure rather than an empty label", 
   assert.equal(toFailure("nope"), null);
   assert.equal(toFailure({ error_class: "" }), null);
   assert.equal(toFailure({ error_class: 7 }), null);
-});
-
-// -- the kind filter ----------------------------------------------------------
-
-test("a kind filter returns to page one and keeps the other filters", () => {
-  const deep = forward(loaded(filtered(initialListing(), "failed"), PAGE));
-  const narrowed = byKind(deep, "ocr");
-
-  assert.equal(narrowed.kind, "ocr");
-  assert.equal(narrowed.status, "failed");
-  assert.deepEqual(narrowed.stack, []);
-  assert.equal(narrowed.listing.state, "loading");
-});
-
-test("a fresh listing has no kind filter", () => {
-  assert.equal(initialListing().kind, null);
 });
 
 // -- timeline -------------------------------------------------------------
@@ -273,31 +199,8 @@ test("an OCR run's kind names its parser, once one claimed it", () => {
 });
 
 test("the listing refreshes itself only on page one", () => {
-  const first = loaded(initialListing(), PAGE);
-  assert.equal(autoRefreshes(first), true);
-  const second = loaded(forward(first), { runs: [], next_cursor: null });
-  assert.equal(autoRefreshes(second), false);
-  assert.equal(autoRefreshes(back(second)), true);
-});
-
-test("a background page lands only on the listing it was asked for", () => {
-  const fresh = { runs: [{ run_id: "r9" }] as never, next_cursor: null };
-  const asked = loaded(initialListing(), PAGE);
-
-  const applied = polled(asked, asked, fresh);
-  assert.equal(applied.listing.state === "loaded" && applied.listing.page, fresh);
-
-  const otherFilter = loaded(filtered(asked, "failed"), PAGE);
-  assert.equal(polled(otherFilter, asked, fresh), otherFilter, "a filter changed meanwhile");
-
-  const otherKind = loaded(byKind(asked, "ocr"), PAGE);
-  assert.equal(polled(otherKind, asked, fresh), otherKind, "a kind changed meanwhile");
-
-  const paged = forward(asked);
-  assert.equal(polled(paged, asked, fresh), paged, "the reader paged meanwhile");
-
-  const busy = reloaded(asked);
-  assert.equal(polled(busy, asked, fresh), busy, "a foreground load is under way");
+  assert.equal(autoRefreshes([]), true);
+  assert.equal(autoRefreshes(["c1"]), false);
 });
 
 const SUMMARY = {

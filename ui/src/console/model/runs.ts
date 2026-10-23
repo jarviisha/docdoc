@@ -1,18 +1,20 @@
 /**
- * The run listing's state, and the paging that makes it exact.
+ * The run listing's request, and the paging that makes it exact.
  *
  * **Three states, not two** (Edge Cases): loading, loaded, and failed. An empty
  * tenant and a failed request look identical if a list is only "the rows I have"
  * — and telling an operator there are no runs when the request was refused is the
- * failure this separation exists to prevent.
+ * failure this separation exists to prevent. The query holds the three; the
+ * filters live in the URL.
  *
- * **The cursor stack lives here.** The route offers a forward cursor only, and
+ * **The cursor stack's rules live here.** The route offers a forward cursor only, and
  * keeping the visited ones is what makes "back" a pop rather than a second
  * cursor direction the server would have to encode and order consistently. Half
  * the route's work, held in the page that needs it.
  */
 
-import type { RunStatus } from "./client.ts";
+import type { Intent, RunStatus } from "./client.ts";
+import type { RunsSearch } from "./search.ts";
 import { describe, type Failure } from "./failure.ts";
 
 /** The two things a run can be. ADR-0023 §7 splits the console's cards by it. */
@@ -46,105 +48,53 @@ export interface RunPage {
   next_cursor: string | null;
 }
 
-export type Listing =
-  | { state: "loading" }
-  | { state: "loaded"; page: RunPage }
-  | { state: "failed"; failure: Failure };
+/** The run list's filters: exactly what the URL holds (`RunsSearch`). */
+export type RunFilters = RunsSearch;
 
-export interface ListingState {
-  /** One tenant's runs, or `null` for every tenant's. */
-  tenant: string | null;
-  status: RunStatus | null;
-  kind: RunKind | null;
-  /** Cursors already used, so "back" is a pop. The first page has none. */
-  stack: string[];
-  listing: Listing;
+/** The request for one page of the list under `filters`; `cursor` is `undefined` on page one. */
+export function listIntent(filters: RunFilters, cursor: string | undefined): Intent {
+  return {
+    type: "list-runs",
+    ...(filters.tenant === undefined ? {} : { tenant: filters.tenant }),
+    ...(filters.status === undefined ? {} : { status: filters.status }),
+    ...(filters.kind === undefined ? {} : { kind: filters.kind }),
+    ...(cursor === undefined ? {} : { cursor }),
+  };
 }
 
-export function initialListing(): ListingState {
-  return { tenant: null, status: null, kind: null, stack: [], listing: { state: "loading" } };
-}
+/*
+ * The pager is a stack of the cursors already used, so "back" is a pop. The
+ * first page has none. A filter change starts a new stack: a cursor is a
+ * position in one ordering, and a different filter is a different ordering.
+ */
 
 /** Whether there is a previous page to return to. */
-export function canGoBack(state: ListingState): boolean {
-  return state.stack.length > 0;
-}
-
-/** Whether the current page offers a next one. */
-export function canGoForward(state: ListingState): boolean {
-  return state.listing.state === "loaded" && state.listing.page.next_cursor !== null;
+export function canGoBack(stack: string[]): boolean {
+  return stack.length > 0;
 }
 
 /** The cursor the next request should carry, or `undefined` for page one. */
-export function currentCursor(state: ListingState): string | undefined {
-  return state.stack.at(-1);
+export function currentCursor(stack: string[]): string | undefined {
+  return stack.at(-1);
 }
 
-export function forward(state: ListingState): ListingState {
-  if (state.listing.state !== "loaded") return state;
-  const next = state.listing.page.next_cursor;
-  if (next === null) return state;
-  return { ...state, stack: [...state.stack, next], listing: { state: "loading" } };
+/** The stack after Next; unchanged on a last page, which offers no cursor. */
+export function forward(stack: string[], nextCursor: string | null): string[] {
+  return nextCursor === null ? stack : [...stack, nextCursor];
 }
 
-export function back(state: ListingState): ListingState {
-  if (state.stack.length === 0) return state;
-  return { ...state, stack: state.stack.slice(0, -1), listing: { state: "loading" } };
-}
-
-/**
- * Changing the filter returns to the first page.
- *
- * A cursor is a position in one ordering, and the ordering a filter produces is
- * a different one — carrying it across would page into a sequence it was never
- * issued for. The route would refuse nothing, because the cursor is this
- * tenant's; it would simply skip rows nobody could explain.
- */
-export function filtered(state: ListingState, status: RunStatus | null): ListingState {
-  return { ...state, status, stack: [], listing: { state: "loading" } };
+/** The stack after Previous; unchanged on page one. */
+export function back(stack: string[]): string[] {
+  return stack.slice(0, -1);
 }
 
 /**
- * Narrow to one kind, or widen back to both with `null` — the cursor stack
- * resets for the same reason `filtered` resets it: a kind change is a
- * different ordering, and the cursor is bound to the one it was issued for.
+ * Whether the listing refreshes itself. Page one only: on a later page new
+ * runs would shift every row under the reader, and the cursor that reached
+ * the page would no longer describe it. Returning to page one resumes it.
  */
-export function byKind(state: ListingState, kind: RunKind | null): ListingState {
-  return { ...state, kind, stack: [], listing: { state: "loading" } };
-}
-
-/**
- * Narrow to one tenant, or widen back to all with a blank, for the same
- * reason `filtered` returns to page one: the server binds a cursor to the
- * tenant filter that produced it.
- */
-export function forTenant(state: ListingState, tenant: string): ListingState {
-  const trimmed = tenant.trim();
-  return { ...state, tenant: trimmed === "" ? null : trimmed, stack: [], listing: { state: "loading" } };
-}
-
-/** Read the current page again, from where it is. */
-export function reloaded(state: ListingState): ListingState {
-  return { ...state, listing: { state: "loading" } };
-}
-
-export function loaded(state: ListingState, page: RunPage): ListingState {
-  return { ...state, listing: { state: "loaded", page } };
-}
-
-/**
- * A failed page, and the stack reset with it.
- *
- * The stack describes positions in a listing this page does not have; keeping it
- * would offer a "back" that pages into a sequence never established.
- */
-export function failed(state: ListingState, failure: Failure): ListingState {
-  return { ...state, stack: [], listing: { state: "failed", failure } };
-}
-
-/** Whether the loaded page is genuinely empty, rather than merely unloaded. */
-export function isEmpty(state: ListingState): boolean {
-  return state.listing.state === "loaded" && state.listing.page.runs.length === 0;
+export function autoRefreshes(stack: string[]): boolean {
+  return stack.length === 0;
 }
 
 /**
@@ -154,10 +104,10 @@ export function isEmpty(state: ListingState): boolean {
  * and "no results found" over a filter nobody set is the sentence that made this
  * function exist (Edge Cases).
  */
-export function emptyNotice(state: ListingState): string {
-  const who = state.tenant === null ? "No tenant has" : `Tenant ${state.tenant} has`;
-  const what = [state.status, state.kind === null ? null : KIND_WORD[state.kind]]
-    .filter((word) => word !== null)
+export function emptyNotice(filters: RunFilters): string {
+  const who = filters.tenant === undefined ? "No tenant has" : `Tenant ${filters.tenant} has`;
+  const what = [filters.status, filters.kind === undefined ? undefined : KIND_WORD[filters.kind]]
+    .filter((word) => word !== undefined)
     .join(" ");
   return what === "" ? `${who} no runs.` : `${who} no ${what} runs.`;
 }
@@ -173,30 +123,6 @@ export function kindLabel(run: { kind: RunKind; ocr_parser: string | null }): st
 /** Whether a run can still be cancelled: only before it reaches an outcome. */
 export function isCancellable(status: RunStatus): boolean {
   return status === "queued" || status === "running";
-}
-
-/**
- * Whether the listing refreshes itself. Page one only: on a later page new
- * runs would shift every row under the reader, and the cursor that reached
- * the page would no longer describe it. Returning to page one resumes it.
- */
-export function autoRefreshes(state: ListingState): boolean {
-  return state.stack.length === 0;
-}
-
-/**
- * A background refresh's page, applied only if the listing is still the one
- * it was asked for — same filters, still page one, and no load of the
- * reader's own under way. Otherwise the answer is stale and dropped.
- */
-export function polled(state: ListingState, askedFor: ListingState, page: RunPage): ListingState {
-  const same =
-    state.tenant === askedFor.tenant &&
-    state.status === askedFor.status &&
-    state.kind === askedFor.kind &&
-    autoRefreshes(state) &&
-    state.listing.state !== "loading";
-  return same ? loaded(state, page) : state;
 }
 
 /** One run as its detail view shows it: the row, plus what only the detail body carries. */
