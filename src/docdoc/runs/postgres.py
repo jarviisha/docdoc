@@ -218,6 +218,9 @@ class PostgresRunQueue:
 
     def purge_tenant_rows(self, tenant_id: str) -> dict[str, int]:
         """One statement per table, counted (FR-086)."""
+        # '' is the deployment default's scope in the provider tables, not a tenant.
+        if not tenant_id:
+            raise ValueError("a tenant id is required")
         counts: dict[str, int] = {}
         for table in (
             "corrections",

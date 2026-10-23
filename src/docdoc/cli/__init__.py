@@ -49,6 +49,12 @@ EXIT_COULD_NOT_RUN = 2
 EXIT_BAD_INVOCATION = 64
 
 
+def _non_blank(value: str) -> str:
+    if not value.strip():
+        raise argparse.ArgumentTypeError("must not be empty")
+    return value
+
+
 def build_parser() -> argparse.ArgumentParser:
     """The operating commands, and nothing beyond them."""
     parser = argparse.ArgumentParser(
@@ -218,7 +224,13 @@ def build_parser() -> argparse.ArgumentParser:
     # reading of "erase the tenant" has to be typed rather than routed to
     # (ADR-0015 section 5).
     erase = subcommands.add_parser("erase", help="remove a tenant's or a document's data")
-    erase.add_argument("--tenant", required=True, metavar="TENANT", help="whose data to remove")
+    erase.add_argument(
+        "--tenant",
+        required=True,
+        metavar="TENANT",
+        type=_non_blank,
+        help="whose data to remove",
+    )
     erase.add_argument(
         "--document",
         default=None,

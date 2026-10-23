@@ -106,8 +106,32 @@ def test_reset_default_refused(store):
 
 def test_erase_purges_provider_rows(pg):
     store = PostgresProviderStore(execute=pg._execute)
+    store.set_priority(DEFAULT_SCOPE, ("d",), by="ana", now=NOW)
+    store.set_adapter(DEFAULT_SCOPE, "d", model="m", key=None, by="ana", now=NOW)
     store.set_priority("acme", ("a",), by="ana", now=NOW)
     store.set_adapter("acme", "a", model="m", key=None, by="ana", now=NOW)
     counts = pg.purge_tenant_rows("acme")
     assert (counts["provider_priorities"], counts["provider_settings"]) == (1, 1)
     assert store.scope("acme") == ScopeSettings(None, {})
+    assert store.scope(DEFAULT_SCOPE).priority == ("d",)
+    assert "d" in store.scope(DEFAULT_SCOPE).adapters
+
+
+def test_purge_refuses_the_default_scope(pg):
+    store = PostgresProviderStore(execute=pg._execute)
+    store.set_priority(DEFAULT_SCOPE, ("d",), by="ana", now=NOW)
+    with pytest.raises(ValueError, match="tenant"):
+        pg.purge_tenant_rows("")
+    assert store.scope(DEFAULT_SCOPE).priority == ("d",)
+
+
+def test_empty_priority_refused(store):
+    with pytest.raises(ValueError, match="empty"):
+        store.set_priority("acme", (), by="ana", now=NOW)
+
+
+def test_keep_key_without_model_keeps_a_keyed_row(store):
+    store.set_adapter("acme", "a", model="m", key=(b"sealed", "1234"), by="ana", now=NOW)
+    store.set_adapter("acme", "a", model=None, key=KEEP_KEY, by="bo", now=NOW)
+    got = store.scope("acme").adapters["a"]
+    assert (got.model, got.key_ciphertext, got.updated_by) == (None, b"sealed", "bo")

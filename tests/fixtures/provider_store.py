@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from docdoc.runs.provider_settings import AdapterSettings, KeepKey, ScopeSettings, refuse_default
+from docdoc.runs.provider_settings import (
+    AdapterSettings,
+    KeepKey,
+    ScopeSettings,
+    refuse_default,
+    refuse_empty,
+)
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -24,6 +30,7 @@ class InMemoryProviderStore:
     def set_priority(
         self, tenant_id: str, priority: tuple[str, ...] | None, *, by: str, now: datetime
     ) -> None:
+        refuse_empty(priority)
         if priority is None:
             self._priority.pop(tenant_id, None)
         else:

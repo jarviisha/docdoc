@@ -86,6 +86,11 @@ def refuse_default(tenant_id: str) -> None:
         raise ValueError("the deployment default cannot be reset")
 
 
+def refuse_empty(priority: tuple[str, ...] | None) -> None:
+    if priority is not None and not priority:
+        raise ValueError("an empty priority means nothing; use None to inherit")
+
+
 @dataclass
 class PostgresProviderStore:
     """``execute`` is `PostgresRunQueue._execute`, as in the schema store."""
@@ -123,6 +128,7 @@ class PostgresProviderStore:
     def set_priority(
         self, tenant_id: str, priority: tuple[str, ...] | None, *, by: str, now: datetime
     ) -> None:
+        refuse_empty(priority)
         if priority is None:
             self.execute("DELETE FROM provider_priorities WHERE tenant_id = %s", (tenant_id,))
             return
@@ -144,6 +150,21 @@ class PostgresProviderStore:
         by: str,
         now: datetime,
     ) -> None:
+        if model is None and (key is None or isinstance(key, KeepKey)):
+            # Nothing would be left to inherit from: delete, or for KEEP_KEY keep
+            # only a row that still holds a key. One statement, so it is atomic.
+            gone = "WHERE tenant_id = %s AND adapter_id = %s"
+            if key is None:
+                self.execute(f"DELETE FROM provider_settings {gone}", (tenant_id, adapter_id))
+            else:
+                self.execute(
+                    f"WITH d AS (DELETE FROM provider_settings {gone} AND key_ciphertext IS NULL "
+                    "RETURNING 1) UPDATE provider_settings SET model = NULL, updated_at = %s, "
+                    "updated_by = %s WHERE tenant_id = %s AND adapter_id = %s "
+                    "AND key_ciphertext IS NOT NULL",
+                    (tenant_id, adapter_id, now, by, tenant_id, adapter_id),
+                )
+            return
         if isinstance(key, KeepKey):
             self.execute(
                 "INSERT INTO provider_settings (tenant_id, adapter_id, model, updated_at, "
@@ -162,11 +183,6 @@ class PostgresProviderStore:
                 "updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by",
                 (tenant_id, adapter_id, model, ciphertext, last4, now, by),
             )
-        self.execute(
-            "DELETE FROM provider_settings WHERE tenant_id = %s AND adapter_id = %s "
-            "AND model IS NULL AND key_ciphertext IS NULL",
-            (tenant_id, adapter_id),
-        )
 
     def reset(self, tenant_id: str) -> None:
         refuse_default(tenant_id)
