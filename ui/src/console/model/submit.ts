@@ -205,13 +205,32 @@ export function chooseFile(form: SubmitForm, file: File | null, key: string): Su
   return { ...form, file, key: file === null ? "" : key };
 }
 
+/** A fresh `key` for a form that has a file; `""` with none. */
+function rekeyed(form: SubmitForm, key: string): string {
+  return form.file === null ? "" : key;
+}
+
 /**
  * Change the kind. The other kind's choices are cleared, so a parser left
- * over from OCR is never sent with an extraction; tenant and file stay.
+ * over from OCR is never sent with an extraction; tenant and file stay. The
+ * key is fresh: idempotency is scoped to (tenant, key), so keeping it would
+ * replay the other kind's run for the same file.
  */
-export function switchKind(form: SubmitForm, kind: SubmitKind): SubmitForm {
+export function switchKind(form: SubmitForm, kind: SubmitKind, key: string): SubmitForm {
   if (kind === form.kind) return form;
-  return { ...form, kind, parser: AUTOMATIC, language: "", schema: "" };
+  return { ...form, kind, parser: AUTOMATIC, language: "", schema: "", key: rekeyed(form, key) };
+}
+
+/** Choose the extraction's schema; a different one gets a fresh key, for the reason above. */
+export function chooseSchema(form: SubmitForm, schema: string, key: string): SubmitForm {
+  if (schema === form.schema) return form;
+  return { ...form, schema, key: rekeyed(form, key) };
+}
+
+/** Choose the OCR parser; a different one gets a fresh key and the language resets. */
+export function chooseParser(form: SubmitForm, parser: string, key: string): SubmitForm {
+  if (parser === form.parser) return form;
+  return { ...form, parser, language: "", key: rekeyed(form, key) };
 }
 
 /**

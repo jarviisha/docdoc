@@ -20,6 +20,8 @@ import {
   submitIntent,
   toSchemas,
   switchKind,
+  chooseSchema,
+  chooseParser,
   submittedRunId,
   toParsers,
   toTenants,
@@ -255,14 +257,25 @@ test("OCR does not need a schema", () => {
 
 test("switching kind clears the other kind's choices and keeps tenant and file", () => {
   const ocr = { ...FORM, parser: "paddle", language: "vi", schema: "invoice@1" };
-  const extraction = switchKind(ocr, "extraction");
+  const extraction = switchKind(ocr, "extraction", "k2");
   assert.equal(extraction.kind, "extraction");
   assert.equal(extraction.parser, "");
   assert.equal(extraction.language, "");
   assert.equal(extraction.schema, "");
   assert.equal(extraction.tenant, "acme");
   assert.equal(extraction.file, FILE);
-  assert.equal(extraction.key, "k");
+  assert.equal(extraction.key, "k2");
+  assert.equal(switchKind(ocr, "ocr", "k2"), ocr);
+  assert.equal(switchKind({ ...ocr, file: null, key: "" }, "extraction", "k2").key, "");
+});
+
+test("a different schema or parser gets a fresh key; the same one keeps it", () => {
+  const form = { ...FORM, kind: "extraction" as const, schema: "invoice@1" };
+  assert.equal(chooseSchema(form, "invoice@1", "k2"), form);
+  assert.equal(chooseSchema(form, "receipt@1", "k2").key, "k2");
+  assert.equal(chooseParser(FORM, FORM.parser, "k2"), FORM);
+  const next = chooseParser({ ...FORM, language: "vi" }, "paddle", "k2");
+  assert.deepEqual([next.key, next.language], ["k2", ""]);
 });
 
 test("an extraction submit carries the schema and key, and no parser", () => {

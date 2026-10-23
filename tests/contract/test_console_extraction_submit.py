@@ -64,6 +64,20 @@ def signed_in(
     return client, sign_in(client)
 
 
+def _deployment(tmp_path: Path, queue: InMemoryRunQueue, **extra: object) -> _Deployment:
+    return _Deployment(
+        store=FileArtifactStore(tmp_path),
+        blobs=BlobStore(tmp_path),
+        store_root=tmp_path,
+        registry=SchemaRegistry.from_paths([Path("schemas")]),
+        adapter=EchoAdapter.from_fixtures("tests/fixtures/echo"),
+        runs=queue,
+        console=accounts_with_alice(),
+        keys=Ring(),
+        **extra,  # type: ignore[arg-type]
+    )
+
+
 def test_an_operator_submits_an_extraction(
     signed_in: tuple[TestClient, dict[str, str]], queue: InMemoryRunQueue
 ) -> None:
@@ -79,6 +93,17 @@ def test_an_operator_submits_an_extraction(
     assert run.schema_identity == "invoice@1"
     assert r.json()["priority"] == "urgent"
     assert r.json()["status"] == "queued"
+    assert client.app.state.deployment.stores_for("acme")[1].get(run.blob_id) == DOCUMENT
+
+
+def test_a_body_over_the_cap_is_413(tmp_path: Path, queue: InMemoryRunQueue) -> None:
+    client = TestClient(build_app(_deployment(tmp_path, queue, max_request_bytes=10)))
+    cookie = sign_in(client)
+
+    r = client.post(URL, params=INVOICE, content=DOCUMENT, headers={**cookie, **H})
+
+    assert r.status_code == 413
+    assert queue.page_all_runs(tenant_id="acme", status=None, before=None, limit=10) == ()
 
 
 def test_an_unknown_schema_is_refused_as_the_bearer_route_refuses_it(

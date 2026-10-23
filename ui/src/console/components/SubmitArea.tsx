@@ -25,6 +25,8 @@ import {
   submitIntent,
   submittedRunId,
   switchKind,
+  chooseSchema,
+  chooseParser,
   toSchemas,
   toParsers,
   toTenants,
@@ -43,6 +45,13 @@ interface Props {
   request: Request;
   onOpenRun: (runId: string) => void;
 }
+
+// `getRandomValues`, not `randomUUID`: the latter exists only in a
+// secure context, and a console reached over plain http is not one.
+const newKey = () =>
+  Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
+    b.toString(16).padStart(2, "0"),
+  ).join("");
 
 const KINDS = [
   { value: "ocr", label: "OCR" },
@@ -124,7 +133,7 @@ export function SubmitArea({ request, onOpenRun }: Props) {
           label="Submit as"
           options={KINDS}
           value={form.kind}
-          onChange={(kind) => setForm((f) => switchKind(f, kind as SubmitKind))}
+          onChange={(kind) => setForm((f) => switchKind(f, kind as SubmitKind, newKey()))}
         />
 
         <SelectField
@@ -141,7 +150,7 @@ export function SubmitArea({ request, onOpenRun }: Props) {
             placeholder="Choose a schema"
             options={schemas}
             value={form.schema}
-            onChange={(schema) => setForm((f) => ({ ...f, schema }))}
+            onChange={(schema) => setForm((f) => chooseSchema(f, schema, newKey()))}
           />
         ) : (
           <>
@@ -150,7 +159,7 @@ export function SubmitArea({ request, onOpenRun }: Props) {
               options={parserChoices(parsers)}
               value={form.parser}
               onChange={(parser) =>
-                setForm((f) => ({ ...f, parser, language: "" }))
+                setForm((f) => chooseParser(f, parser, newKey()))
               }
             />
 
@@ -166,15 +175,7 @@ export function SubmitArea({ request, onOpenRun }: Props) {
         <FileField
           label="Document"
           value={form.file}
-          // `getRandomValues`, not `randomUUID`: the latter exists only in a
-          // secure context, and a console reached over plain http is not one.
-          onChange={(file) => {
-            const key = Array.from(
-              crypto.getRandomValues(new Uint8Array(16)),
-              (b) => b.toString(16).padStart(2, "0"),
-            ).join("");
-            setForm((f) => chooseFile(f, file, key));
-          }}
+          onChange={(file) => setForm((f) => chooseFile(f, file, newKey()))}
         />
 
         <div className="flex gap-2">
