@@ -49,6 +49,7 @@ interface Props {
 /** A history mark's colour; the word is always beside it. */
 const MARK_TONE: Record<string, "info" | "warning" | "neutral"> = {
   running: "info",
+  "Could not be scored": "warning",
   "schema changed": "warning",
   "not comparable": "neutral",
 };

@@ -287,3 +287,40 @@ def test_erasing_a_tenant_removes_its_evaluations(deployment) -> None:
 
     assert deployment.evaluations().get(evaluation.evaluation_id, tenant_id=TENANT) is None
     assert deployment.evaluations().list(tenant_id=TENANT, schema_name=None, limit=10) == ()
+
+
+def test_an_unscoreable_evaluation_is_failed_and_frees_the_schema(deployment, tmp_path) -> None:
+    import shutil
+
+    _checked(deployment, *PDFS)
+    evaluation = start(deployment, tenant_id=TENANT, schema_name="invoice", at=datetime.now(UTC))
+    _drain(deployment)
+    registered = deployment._registry
+    # invoice@2 removed between start and settle: it cannot be described.
+    only_receipts = tmp_path / "schemas"
+    only_receipts.mkdir()
+    shutil.copy("schemas/receipt@1.json", only_receipts)
+    shutil.copytree("schemas/prompts", only_receipts / "prompts")
+    deployment._registry = SchemaRegistry.from_paths([only_receipts])
+
+    after = settled(deployment, evaluation, at=datetime.now(UTC))
+
+    assert after.report is None
+    assert after.failure == "SchemaError"
+    assert after.settled_at is not None
+    stored = deployment.evaluations().get(evaluation.evaluation_id, tenant_id=TENANT)
+    assert stored.failure == "SchemaError"
+    summary = pytest.importorskip("docdoc.api.evaluations")._summary(stored)
+    assert (summary["status"], summary["failure"], summary["metrics"]) == (
+        "failed",
+        "SchemaError",
+        None,
+    )
+    assert deployment.evaluations().unfinished(tenant_id=TENANT, schema_name="invoice") is None
+    # Settling again changes nothing: the failure was written once.
+    again = settled(deployment, stored, at=datetime.now(UTC) + timedelta(hours=1))
+    assert again.settled_at == stored.settled_at
+
+    deployment._registry = registered
+    restarted = start(deployment, tenant_id=TENANT, schema_name="invoice", at=datetime.now(UTC))
+    assert restarted.evaluation_id != evaluation.evaluation_id

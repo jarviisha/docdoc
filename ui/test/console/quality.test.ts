@@ -125,3 +125,13 @@ test("answers read as schema choices with their document counts", () => {
   ]);
   assert.deepEqual(toAnswers(null), []);
 });
+
+test("a failed evaluation is terminal: not polled, not shown as the report, marked in the history", () => {
+  const list = [
+    { ...e, evaluation_id: "e2", created_at: "2026-02-01T00:00:00Z", schema_identity: "s@1", golden_set_id: "a", metrics: null, status: "failed" as const, failure: "SchemaError" },
+    { ...e, evaluation_id: "e1", created_at: "2026-01-01T00:00:00Z", schema_identity: "s@1", golden_set_id: "a", metrics: null, status: "finished" as const },
+  ];
+  assert.equal(stillRunning(list), false);
+  assert.equal(shownEvaluation(list, null), "e1");
+  assert.deepEqual(historyRows(list)[0]!.marks, ["Could not be scored"]);
+});

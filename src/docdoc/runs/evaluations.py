@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from docdoc.evaluation import (
     DocumentPrediction,
+    EvaluationError,
     EvaluationOptions,
     EvaluationReport,
     GoldenSet,
@@ -25,6 +26,7 @@ from docdoc.evaluation import (
     evaluate,
     schema_facts,
 )
+from docdoc.extraction.errors import SchemaError
 from docdoc.runs.answers import answer_set, prediction_for
 from docdoc.runs.errors import RunError
 
@@ -70,15 +72,18 @@ class Evaluation:
     erased_documents: int
     created_at: datetime
     settled_at: datetime | None
+    #: Why it could not be scored: an exception class, never a message. Set
+    #: once, with `settled_at`; a failed evaluation is finished, without a report.
+    failure: str | None = None
 
     @property
     def finished(self) -> bool:
-        return self.report is not None
+        return self.report is not None or self.failure is not None
 
 
 _COLUMNS = (
     "evaluation_id, tenant_id, schema_name, schema_identity, golden, run_ids, "
-    "document_ids, report, erased_documents, created_at, settled_at"
+    "document_ids, report, erased_documents, created_at, settled_at, failure"
 )
 
 
@@ -92,7 +97,7 @@ class PostgresEvaluationStore:
         """Insert, or refuse when this tenant's schema already has an unfinished one."""
         row = self.execute(
             f"INSERT INTO evaluations ({_COLUMNS}) "
-            "VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s::jsonb, %s, %s, %s) "
+            "VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s::jsonb, %s, %s, %s, %s) "
             "ON CONFLICT DO NOTHING RETURNING evaluation_id",
             (
                 evaluation.evaluation_id,
@@ -106,6 +111,7 @@ class PostgresEvaluationStore:
                 evaluation.erased_documents,
                 evaluation.created_at,
                 evaluation.settled_at,
+                evaluation.failure,
             ),
             fetch="one",
         )
@@ -135,7 +141,7 @@ class PostgresEvaluationStore:
     def unfinished(self, *, tenant_id: str, schema_name: str) -> Evaluation | None:
         row = self.execute(
             f"SELECT {_COLUMNS} FROM evaluations WHERE tenant_id = %s AND schema_name = %s "
-            "AND report IS NULL ORDER BY created_at DESC LIMIT 1",
+            "AND report IS NULL AND failure IS NULL ORDER BY created_at DESC LIMIT 1",
             (tenant_id, schema_name),
             fetch="one",
         )
@@ -149,9 +155,17 @@ class PostgresEvaluationStore:
         """
         self.execute(
             "UPDATE evaluations SET report = %s::jsonb, settled_at = %s "
-            "WHERE evaluation_id = %s AND report IS NULL "
+            "WHERE evaluation_id = %s AND report IS NULL AND failure IS NULL "
             "AND jsonb_array_length(golden->'documents') = %s",
             (report.model_dump_json(), at, evaluation_id, len(report.document_scores)),
+        )
+
+    def fail(self, evaluation_id: UUID, failure: str, *, at: datetime) -> None:
+        """Record once that this evaluation cannot be scored; it stops holding its schema."""
+        self.execute(
+            "UPDATE evaluations SET failure = %s, settled_at = %s "
+            "WHERE evaluation_id = %s AND report IS NULL AND failure IS NULL",
+            (failure, at, evaluation_id),
         )
 
     def forget_document(self, *, tenant_id: str, blob_id: str) -> int:
@@ -248,6 +262,7 @@ def _from_row(row: Any) -> Evaluation:
         erased_documents=row["erased_documents"],
         created_at=row["created_at"],
         settled_at=row["settled_at"],
+        failure=row["failure"],
     )
 
 
@@ -369,12 +384,19 @@ def settled(deployment: Any, evaluation: Evaluation, *, at: datetime) -> Evaluat
             for run, document_id in zip(runs, current.document_ids, strict=True)
         }
     )
-    report = evaluate(
-        current.golden,
-        predictions,
-        # Tenant documents are restricted; without this every one is skipped.
-        options=EvaluationOptions(include_restricted=True),
-        facts=schema_facts([deployment.registry().describe(current.schema_identity)]),
-    )
-    store.settle(current.evaluation_id, report, at=at)
+    try:
+        report = evaluate(
+            current.golden,
+            predictions,
+            # Tenant documents are restricted; without this every one is skipped.
+            options=EvaluationOptions(include_restricted=True),
+            facts=schema_facts([deployment.registry().describe(current.schema_identity)]),
+        )
+    except (SchemaError, EvaluationError) as error:
+        # The schema version was removed or edited since the start, or the
+        # library refused the pair: retrying cannot help, and an unfinished row
+        # would hold this tenant's schema for ever. The class only.
+        store.fail(current.evaluation_id, type(error).__name__, at=at)
+    else:
+        store.settle(current.evaluation_id, report, at=at)
     return store.get(current.evaluation_id, tenant_id=current.tenant_id) or current

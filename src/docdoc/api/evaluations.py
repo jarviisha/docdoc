@@ -106,7 +106,7 @@ def list_evaluations_of(request: Request, tenant_id: str, schema: str | None, li
 
 
 def read_evaluation_of(request: Request, tenant_id: str, evaluation_id: str) -> Any:
-    from docdoc.runs.evaluations import settled
+    from docdoc.runs.evaluations import settled_safely
     from docdoc.runs.identity import now
 
     deployment = _deployment_of(request)
@@ -120,7 +120,7 @@ def read_evaluation_of(request: Request, tenant_id: str, evaluation_id: str) -> 
     evaluation = store.get(identity, tenant_id=tenant_id)
     if evaluation is None:
         return _not_found()
-    evaluation = settled(deployment, evaluation, at=now())
+    evaluation = settled_safely(deployment, evaluation, at=now())
     report = evaluation.report
     return {
         **_summary(evaluation),
@@ -148,12 +148,19 @@ def _summary(evaluation: Any) -> dict[str, Any]:
         "evaluation_id": str(evaluation.evaluation_id),
         "schema_identity": evaluation.schema_identity,
         "created_at": _iso(evaluation.created_at),
-        "status": "finished" if evaluation.finished else "running",
+        "status": _status(evaluation),
+        "failure": evaluation.failure,
         "documents": len(evaluation.document_ids),
         "erased_documents": evaluation.erased_documents,
         "metrics": None if report is None else jsonable_encoder(report.metrics.micro),
         "golden_set_id": evaluation.golden.golden_set_id,
     }
+
+
+def _status(evaluation: Any) -> str:
+    if evaluation.failure is not None:
+        return "failed"
+    return "finished" if evaluation.finished else "running"
 
 
 def _documents(deployment: Any, evaluation: Any) -> list[dict[str, Any]]:

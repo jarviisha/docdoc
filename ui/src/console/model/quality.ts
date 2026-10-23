@@ -16,7 +16,10 @@ export interface EvaluationSummary {
   erased_documents: number;
   metrics: Metrics;
   golden_set_id: string;
-  status?: "running" | "finished";
+  /** "failed": it could not be scored (its schema version is gone or changed). Terminal, like "finished". */
+  status?: "running" | "finished" | "failed";
+  /** Why it failed: an exception class. */
+  failure?: string | null;
 }
 
 export interface EvaluationDetail {
@@ -88,7 +91,7 @@ export function historyRows(list: EvaluationSummary[]): {
   accuracy: string;
   schemaChanged: boolean;
   comparable: boolean;
-  /** Tags against the run before: "running", "schema changed", "not comparable". */
+  /** "running" or "Could not be scored", then tags against the run before: "schema changed", "not comparable". */
   marks: string[];
 }[] {
   return list.map((e, i) => {
@@ -103,6 +106,7 @@ export function historyRows(list: EvaluationSummary[]): {
       comparable,
       marks: [
         ...(e.status === "running" ? ["running"] : []),
+        ...(e.status === "failed" ? ["Could not be scored"] : []),
         ...(schemaChanged ? ["schema changed"] : []),
         ...(older !== undefined && !comparable ? ["not comparable"] : []),
       ],
@@ -114,13 +118,13 @@ export function rerunWarning(documents: number): string {
   return `This re-runs ${documents} document(s) with the current configuration. Unchanged steps are reused; changed ones may call paid providers.`;
 }
 
-/** The evaluation the report shows: the one chosen if still listed, else the newest finished. */
+/** The evaluation the report shows: the one chosen if still listed, else the newest with a report. */
 export function shownEvaluation(
   list: Pick<EvaluationSummary, "evaluation_id" | "status">[],
   chosen: string | null,
 ): string | null {
   if (chosen !== null && list.some((e) => e.evaluation_id === chosen)) return chosen;
-  return list.find((e) => e.status !== "running")?.evaluation_id ?? null;
+  return list.find((e) => e.status !== "running" && e.status !== "failed")?.evaluation_id ?? null;
 }
 
 /** Whether the list is read again: its newest evaluation has not settled. */
