@@ -63,6 +63,7 @@ class SchemaError(DocdocError):
         path: str | None = None,
         field_path: str | None = None,
         available: tuple[str, ...] = (),
+        problems: tuple[tuple[str, str], ...] = (),
     ) -> None:
         super().__init__(message)
         self.identity = identity
@@ -71,6 +72,9 @@ class SchemaError(DocdocError):
         #: Dotted path to the offending field, for a structural failure.
         self.field_path = field_path
         self.available = available
+        #: ``(dotted location, message)`` per structural defect, for a caller
+        #: that shows them beside the offending field rather than as one line.
+        self.problems = problems
 
 
 class ExtractionError(DocdocError):
