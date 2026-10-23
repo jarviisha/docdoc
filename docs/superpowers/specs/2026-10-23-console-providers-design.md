@@ -52,7 +52,7 @@ environment variables today (`DOCDOC_MODEL_ADAPTERS`, `DOCDOC_GEMINI_MODEL`,
    whole, not merged: the tenant's list if it has one, otherwise the default's, otherwise
    `DOCDOC_MODEL_ADAPTERS`.
 3. **Encryption.** Keys are encrypted with Fernet (`cryptography`) using a master key from a new
-   environment variable (suggested name `DOCDOC_SECRETS_KEY`). Add `cryptography` as an explicit
+   environment variable (name chosen at implementation). Add `cryptography` as an explicit
    dependency where `psycopg` is declared. Today it is only pulled in transitively by Google SDKs.
    Without the master key, the screen still loads and every non-key setting can be saved. Saving a
    key is refused with a message naming the variable. A stored key that cannot be decrypted makes

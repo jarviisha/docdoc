@@ -438,6 +438,10 @@ CONFIG_DOCUMENTS = (
     "docs/superpowers/specs/2026-10-23-service-only-surface-design.md",
     "docs/superpowers/plans/2026-10-23-service-only-surface.md",
     "docs/adr/0027-service-only-surface.md",
+    # The console Schemas and Providers designs and the Schemas plan.
+    "docs/superpowers/specs/2026-10-23-console-schemas-design.md",
+    "docs/superpowers/specs/2026-10-23-console-providers-design.md",
+    "docs/superpowers/plans/2026-10-23-console-schemas.md",
 )
 
 #: Requires at least one character after the prefix, so the `DOCDOC_*` wildcard
