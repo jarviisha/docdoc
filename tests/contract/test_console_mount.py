@@ -93,3 +93,46 @@ def test_the_listing_is_reachable_with_a_credential(client: TestClient) -> None:
     # 401, so the credential was accepted and the route exists.
     assert response.status_code == 503
     assert response.json()["error"]["class"] == "RunStateUnavailableError"
+
+
+@pytest.fixture
+def built_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    """An authenticated deployment with a built console to serve."""
+    from docdoc.api import ui as ui_module
+
+    assets = tmp_path / "console"
+    (assets / "assets").mkdir(parents=True)
+    (assets / "index.html").write_text("<!doctype html><div id=root></div>", encoding="utf-8")
+    (assets / "assets" / "app.js").write_text("console.log(1)", encoding="utf-8")
+    monkeypatch.setattr(ui_module, "chosen_assets", lambda: ("test", assets))
+    keys = tmp_path / "keys.json"
+    keys.write_text(
+        json.dumps({"keys": [{"sha256": digest_of(KEY), "tenant_id": "acme"}]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DOCDOC_API_KEYS_FILE", str(keys))
+    return TestClient(build_app(_Deployment(store_root=tmp_path)))
+
+
+def test_a_deep_console_path_gets_the_shell(built_client: TestClient) -> None:
+    for path in (
+        "/console/runs",
+        "/console/runs/abc",
+        "/console/runs/abc.def",
+        "/console/credentials?tenant=acme",
+    ):
+        response = built_client.get(path)
+        assert response.status_code == 200, path
+        assert "<div id=root>" in response.text, path
+
+
+def test_a_missing_asset_is_still_a_404(built_client: TestClient) -> None:
+    assert built_client.get("/console/assets/missing.js").status_code == 404
+
+
+def test_a_real_asset_is_served(built_client: TestClient) -> None:
+    assert built_client.get("/console/assets/app.js").status_code == 200
+
+
+def test_the_deep_path_exemption_does_not_widen(built_client: TestClient) -> None:
+    assert built_client.get("/consoleroom").status_code == 401

@@ -837,18 +837,35 @@ def _mount_console(app: FastAPI) -> None:
         return
 
     from fastapi.staticfiles import StaticFiles
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    class _ConsoleFiles(StaticFiles):
+        """Falls back to the shell for any miss outside `assets/`.
+
+        A miss under `assets/` stays a 404: answering a missing script with HTML
+        would turn a stale deploy into a baffling syntax error.
+        """
+
+        async def get_response(self, path, scope):  # type: ignore[no-untyped-def]
+            try:
+                return await super().get_response(path, scope)
+            except StarletteHTTPException as exc:
+                if exc.status_code != 404 or path.startswith("assets/"):
+                    raise
+                return await super().get_response("index.html", scope)
 
     logging.getLogger("docdoc.api").info(
         json.dumps({"event": "console.assets", "source": source, "path": str(assets)})
     )
 
-    # `html=True` serves the directory's `index.html` at its own root, which is
-    # what the build emits. It emitted `console.html` until ADR-0020, when the
-    # viewer stopped occupying the name — and the plugin that copied one to the
-    # other went with it.
+    # The console has client-side routes (`/console/runs/abc`), so a path with no
+    # file behind it is the shell's to answer, not a 404 (ADR-0028). `html=True`
+    # still serves `index.html` at the directory root, which is what the build
+    # emits. It emitted `console.html` until ADR-0020, when the viewer stopped
+    # occupying the name — and the plugin that copied one to the other went with it.
     app.mount(
         _CONSOLE_PREFIX,
-        StaticFiles(directory=assets, html=True),
+        _ConsoleFiles(directory=assets, html=True),
         name="console",
     )
 
