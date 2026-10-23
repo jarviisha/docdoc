@@ -110,10 +110,10 @@ function FieldLine({
                 {checkText(row)}
               </span>
             ) : null}
-            <Button size="sm" variant={verdict === "correct" ? "default" : "outline"} aria-pressed={verdict === "correct"} onClick={() => mark("correct")}>
+            <Button size="sm" variant={verdict === "correct" ? "default" : "outline"} aria-pressed={verdict === "correct"} aria-label={`Correct: ${row.path}`} onClick={() => mark("correct")}>
               Correct
             </Button>
-            <Button size="sm" variant={verdict === "wrong" ? "destructive" : "outline"} aria-pressed={verdict === "wrong"} onClick={() => mark("wrong")}>
+            <Button size="sm" variant={verdict === "wrong" ? "destructive" : "outline"} aria-pressed={verdict === "wrong"} aria-label={`Wrong: ${row.path}`} onClick={() => mark("wrong")}>
               Wrong
             </Button>
           </div>
