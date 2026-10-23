@@ -21,7 +21,15 @@ if TYPE_CHECKING:
 
     from docdoc.extraction.registry import SchemaRegistry
 
-__all__ = ["ConsoleSchema", "PostgresSchemaStore", "SchemaStore", "merged_registry"]
+__all__ = [
+    "ConsoleSchema",
+    "PostgresSchemaStore",
+    "SchemaNameTaken",
+    "SchemaStore",
+    "SchemaVersionTaken",
+    "create_version",
+    "merged_registry",
+]
 
 _log = logging.getLogger("docdoc.runs")
 
@@ -125,3 +133,59 @@ def merged_registry(files: SchemaRegistry, store: SchemaStore) -> SchemaRegistry
     for identity in merged.shadowed[len(files.shadowed) :]:
         _log.warning("console schema %s replaces the file of the same identity", identity)
     return merged
+
+
+class SchemaNameTaken(Exception):  # noqa: N818 - a refusal, not a fault
+    """A new schema (no base) names something that already exists."""
+
+
+class SchemaVersionTaken(Exception):  # noqa: N818 - a refusal, not a fault
+    """Every attempt to claim the next version lost a race."""
+
+
+_ATTEMPTS = 3
+
+
+def create_version(
+    store: SchemaStore,
+    registry: SchemaRegistry,
+    *,
+    document: dict[str, Any],
+    prompt: str,
+    base: str | None,
+    created_by: str,
+    now: datetime,
+) -> ConsoleSchema:
+    """Validate and store a new version; the server picks the number.
+
+    ``registry`` is the merged one, so it already holds the console rows it was
+    built from; the store is read again each attempt for rows added since.
+    """
+    name = document.get("name")
+    if not isinstance(name, str):
+        raise SchemaError("the schema document needs a string name")
+    if base is None:
+        if any(e.schema.name == name for e in registry.entries()) or any(
+            r.name == name for r in store.all()
+        ):
+            raise SchemaNameTaken(name)
+    elif registry.resolve(base).schema.name != name:  # raises SchemaError when unknown
+        raise SchemaError(f"the document is named {name!r}, not the name of {base!r}")
+    for _ in range(_ATTEMPTS):
+        taken = [e.schema.version for e in registry.entries() if e.schema.name == name]
+        taken += [r.version for r in store.all() if r.name == name]
+        doc = {**document, "version": max(taken, default=0) + 1}
+        schema = parse_schema(doc)
+        prompt_from_text(schema, prompt)
+        row = ConsoleSchema(
+            name=name,
+            version=schema.version,
+            document=doc,
+            prompt=prompt,
+            base=base,
+            created_at=now,
+            created_by=created_by,
+        )
+        if store.insert(row):
+            return row
+    raise SchemaVersionTaken(name)

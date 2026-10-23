@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -62,7 +62,9 @@ from docdoc.api.runs import (
     submit_extraction,
 )
 from docdoc.artifacts.paths import root_tenant
+from docdoc.extraction.errors import SchemaError
 from docdoc.runs import identity
+from docdoc.runs.console_schemas import SchemaNameTaken, SchemaVersionTaken, create_version
 from docdoc.runs.model import Priority
 from docdoc.runs.principal import TENANT_PATTERN
 
@@ -402,6 +404,37 @@ def _for_tenant(request: Request, tenant_id: str, call: Any) -> Any:
     if not request.app.state.deployment.has_runs:
         return _no_runs()
     return call()
+
+
+class _NewSchema(BaseModel):
+    document: dict[str, Any]
+    prompt: str
+    base: str | None = None
+
+
+class _NoRows:
+    def all(self) -> tuple[()]:
+        return ()
+
+
+_NO_ROWS = _NoRows()
+
+
+def _schema_detail(registry: Any, store: Any, identity: str) -> dict[str, Any]:
+    """A schema's detail: a console row's stored JSON, else the file schema's dump."""
+    entry = registry.resolve(identity)
+    row = store.get(identity) if store is not None and entry.source == "console" else None
+    return {
+        "identity": identity,
+        "source": entry.source,
+        "document": row.document
+        if row
+        else entry.schema.model_dump(mode="json", exclude_defaults=True),
+        "prompt": entry.prompt.text,
+        "base": row.base if row else None,
+        "created_at": _iso(row.created_at) if row else None,
+        "created_by": row.created_by if row else None,
+    }
 
 
 def console_router() -> APIRouter:
@@ -773,8 +806,75 @@ def console_router() -> APIRouter:
 
     @router.get("/schemas")
     def list_schemas(request: Request, operator: Operator) -> Any:
-        """`GET /v1/schemas`'s identities, behind a session."""
-        return {"schemas": list(request.app.state.deployment.registry().identities())}
+        """Every identity with its source; console rows add who made them and when."""
+        deployment = request.app.state.deployment
+        registry = deployment.registry()
+        rows = {r.identity: r for r in (deployment.console_schemas() or _NO_ROWS).all()}
+        entries = []
+        for e in registry.entries():
+            row = rows.get(e.identity) if e.source == "console" else None
+            entries.append(
+                {
+                    "identity": e.identity,
+                    "name": e.schema.name,
+                    "version": e.schema.version,
+                    "source": e.source,
+                    "field_count": len(e.schema.fields),
+                    "created_at": _iso(row.created_at) if row else None,
+                    "created_by": row.created_by if row else None,
+                    "shadows_file": row is not None and e.identity in registry.shadowed,
+                }
+            )
+        return {"entries": entries}
+
+    @router.get("/schemas/{identity}")
+    def read_schema(request: Request, operator: Operator, identity: str) -> Any:
+        """One schema's document and prompt; 404 when the identity is unknown."""
+        deployment = request.app.state.deployment
+        registry = deployment.registry()
+        if identity not in registry:
+            return JSONResponse(status_code=404, content={"error": "unknown_schema"})
+        return _schema_detail(registry, deployment.console_schemas(), identity)
+
+    @router.post("/schemas", status_code=201)
+    def create_schema(request: Request, operator: Operator, body: _NewSchema) -> Any:
+        """Save a new version: the server assigns the number (409 if it cannot)."""
+        deployment = request.app.state.deployment
+        store = deployment.console_schemas()
+        if store is None:
+            return _refusal(
+                503,
+                "ConsoleUnavailable",
+                "the console needs a run-state database; set DOCDOC_RUN_DATABASE_URL "
+                "and run docdoc migrate",
+            )
+        registry = deployment.registry()
+        try:
+            row = create_version(
+                store,
+                registry,
+                document=body.document,
+                prompt=body.prompt,
+                base=body.base,
+                created_by=operator,
+                now=datetime.now(UTC),
+            )
+        except (SchemaNameTaken, SchemaVersionTaken) as exc:
+            code = (
+                "schema_name_taken" if isinstance(exc, SchemaNameTaken) else "schema_version_taken"
+            )
+            return JSONResponse(status_code=409, content={"error": code, "message": str(exc)})
+        except SchemaError as exc:
+            problems = [{"path": p, "message": m} for p, m in exc.problems]
+            if not problems and exc.field_path:
+                problems = [{"path": exc.field_path, "message": str(exc)}]
+            return JSONResponse(
+                status_code=422,
+                content={"error": "invalid_schema", "message": str(exc), "problems": problems},
+            )
+        return JSONResponse(
+            status_code=201, content=_schema_detail(deployment.registry(), store, row.identity)
+        )
 
     @router.post("/tenants/{tenant_id}/ocr", status_code=202)
     async def submit_tenant_ocr(

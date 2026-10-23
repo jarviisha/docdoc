@@ -228,8 +228,10 @@ def test_the_console_lists_schemas(signed_in: tuple[TestClient, dict[str, str]])
     tenant = client.get("/v1/schemas", headers={"Authorization": f"Bearer {PLAIN_KEY}"})
 
     assert r.status_code == 200
-    assert r.json() == {"schemas": [s["identity"] for s in tenant.json()["schemas"]]}
-    assert "invoice@1" in r.json()["schemas"]
+    assert [e["identity"] for e in r.json()["entries"]] == [
+        s["identity"] for s in tenant.json()["schemas"]
+    ]
+    assert "invoice@1" in [e["identity"] for e in r.json()["entries"]]
 
 
 def test_listing_schemas_needs_a_session(signed_in: tuple[TestClient, dict[str, str]]) -> None:

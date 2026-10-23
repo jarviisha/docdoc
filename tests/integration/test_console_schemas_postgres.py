@@ -83,3 +83,35 @@ def test_merged_registry_skips_a_row_whose_document_names_another_identity(store
     assert "a@1" not in merged
     assert "b@1" in merged
     assert "a@1" in caplog.text
+
+
+def test_concurrent_creates_get_distinct_versions(store):
+    import threading
+
+    from docdoc.runs.console_schemas import create_version
+
+    files = SchemaRegistry.from_paths([SCHEMAS])
+    document = json.loads((SCHEMAS / "invoice@2.json").read_text())
+    barrier = threading.Barrier(2)
+    made: list[str] = []
+
+    def save() -> None:
+        barrier.wait()
+        made.append(
+            create_version(
+                store,
+                files,
+                document=document,
+                prompt="Extract the fields.",
+                base="invoice@2",
+                created_by="ana",
+                now=datetime.now(UTC),
+            ).identity
+        )
+
+    threads = [threading.Thread(target=save) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert set(made) == {"invoice@3", "invoice@4"}

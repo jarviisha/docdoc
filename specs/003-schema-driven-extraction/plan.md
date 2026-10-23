@@ -280,6 +280,7 @@ tests/
 │   ├── test_worker_registry_reload.py # a worker re-reads console schemas on an unknown identity
 │   └── test_documented_api_references_resolve.py  # SC-020 — the docs' API is the real API
 ├── contract/
+│   ├── test_console_schemas.py        # the console lists, reads and creates schemas over HTTP
 │   └── test_model_adapter_contract.py # every ModelAdapter must satisfy EXT-15…EXT-18,
 │                                      #   run against all three including the real one
 ├── property/

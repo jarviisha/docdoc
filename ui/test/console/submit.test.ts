@@ -233,12 +233,14 @@ const FORM = {
 };
 
 test("schemas are read from the listing, ignoring anything that is not an identity", () => {
-  assert.deepEqual(toSchemas({ schemas: ["invoice@1", 3, null, "receipt@2"] }), [
+  assert.deepEqual(toSchemas({
+      entries: [{ identity: "invoice@1" }, { identity: 3 }, null, {}, { identity: "receipt@2" }],
+    }), [
     "invoice@1",
     "receipt@2",
   ]);
   assert.deepEqual(toSchemas({}), []);
-  assert.deepEqual(toSchemas({ schemas: "x" }), []);
+  assert.deepEqual(toSchemas({ entries: "x" }), []);
   assert.deepEqual(toSchemas(null), []);
 });
 
