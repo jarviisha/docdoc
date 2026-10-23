@@ -1,11 +1,11 @@
 # The built browser client, as its own distribution.
 #
 # It exists because three requirements collide and nothing else satisfies all
-# three (research R7). The base install must acquire no static asset (FR-035);
+# three (research R7). An install without `ui` must acquire no static asset (FR-035);
 # built output must not be committed (FR-038); and the assets must be served from
 # the same origin as the API (FR-034). A Python extra can add a *dependency* but
 # cannot add *files* to a wheel everyone already installs — so assets in the main
-# wheel would reach every `pip install docdoc`, which FR-035 forbids in as many
+# wheel would reach every install of docdoc, the image's included, which FR-035 forbids in as many
 # words. Opting in has to be what delivers the files, and that means a second
 # distribution.
 #

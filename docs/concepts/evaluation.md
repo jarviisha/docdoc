@@ -8,6 +8,12 @@ Until this stage shipped, every quality claim in this repository was an
 assertion. Milestone 4 made the grounding rate computable and set no target.
 Milestone 5 did the same for validation. Both deferred the same question here.
 
+`docdoc.evaluation` is internal: the service's [Quality](quality.md) area scores a tenant's own
+checks with it, and the tests score the committed golden set `datasets/mvp` with it as the
+regression net for parser and prompt changes. The blocks below show the module's calls as those
+callers make them; they are not a public library API
+([ADR-0027](../adr/0027-service-only-surface.md)).
+
 ```python
 from docdoc.evaluation import evaluate, load_golden_set, load_prediction_set
 
@@ -443,10 +449,12 @@ recorded with the `echo` adapter.
 ### 5. Score it
 
 ```bash
-uv run python examples/evaluate_golden_set.py
+uv run pytest -n0 tests/unit/test_partial_reports.py tests/integration/test_recorder_parity.py
 ```
 
-Every metric with its numerator and denominator, plus the `report_id`.
+These load the golden set, record predictions through the pipeline, and score them; the recorder
+parity test fails when recording through the pipeline stops agreeing with the committed predictions. To read the numbers, call
+`evaluate(load_golden_set(...), load_prediction_set(...))` as the first block on this page shows.
 
 ## See also
 

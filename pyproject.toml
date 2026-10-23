@@ -34,9 +34,10 @@ classifiers = [
 dependencies = ["pydantic>=2.0", "rapidfuzz>=3.0"]
 
 [project.optional-dependencies]
-# Provider extras. The base install stays `pydantic` alone (Constitution
-# Principle IV: "the base install MUST NOT force installation of any provider
-# SDK or OCR engine").
+# Provider extras. Since ADR-0027 (constitution 2.0.0) docdoc is a service and
+# makes no base-install promise; the extras are how the Docker image composes
+# what it installs (`DOCDOC_EXTRAS` in packaging/docker). Provider SDKs are
+# still imported only inside adapter directories, which import-linter enforces.
 #
 # The native PDF text path. pypdfium2 is Apache-2.0/BSD-3, so unlike the PyMuPDF
 # it replaced (ADR-0025) it carries no licence caveat and ships in the default
@@ -70,14 +71,14 @@ ocr = ["pypdfium2>=5.0"]
 # nothing else (FR-038, FR-053).
 #
 # There is deliberately no `cli` extra. The command line is argparse, so there is
-# nothing to keep out of the base install, and `docdoc` is a console script every
-# `pip install docdoc` gets (research R12).
+# nothing to keep out of an install, and `docdoc` is a console script every
+# install of the package gets (research R12).
 api = ["fastapi>=0.110", "uvicorn>=0.29"]
 # The browser client of Milestone 8, as a *dependency* rather than as files.
 #
 # A Python extra can add a dependency but cannot add files to a wheel everyone
 # already installs, so shipping the assets here would give them to every
-# `pip install docdoc` -- which FR-035 forbids in as many words. Opting in has to
+# install of the package -- which FR-035 forbids in as many words. Opting in has to
 # be what delivers them, and that means a second distribution (research R7,
 # ADR-0012's neighbour in `packaging/docdoc-ui/`).
 #

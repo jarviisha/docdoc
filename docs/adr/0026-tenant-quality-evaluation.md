@@ -12,6 +12,7 @@
 - **Design**: `docs/superpowers/specs/2026-10-22-tenant-quality-evaluation-design.md`
 - **Principles engaged**: IX (evaluation and human correction are product features; the review
   platform fence), XI (MVP discipline)
+- **Superseded usage**: the `docdoc eval` command named below was removed in [ADR-0027](0027-service-only-surface.md); `datasets/mvp` stays, scored from tests.
 
 ## Context
 

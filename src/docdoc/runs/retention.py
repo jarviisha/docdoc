@@ -9,9 +9,10 @@
 An artifact becomes a candidate **only by having been named by a run that is
 being removed**. That is the whole safety property of this module, and the
 rejected form is one word away in English: "delete every artifact no surviving
-run references" is a *complement*, and it deletes every artifact ``docdoc
-extract`` ever wrote from the command line, everything a library caller produced,
-and everything the recorder wrote — because none of those has a run row.
+run references" is a *complement*, and it deletes every artifact the synchronous
+job route (``POST /v1/documents/{blob_id}/extract``) wrote, everything the
+recorder wrote, and everything an older release's ``docdoc extract`` wrote —
+because none of those has a run row.
 ``tests/unit/test_sweep_is_a_difference.py`` exists to fail if anyone converts
 one into the other.
 
@@ -246,7 +247,7 @@ def erase(
 
     The *default* tenant does not, and cannot. Its namespace is the store root, so
     the prefix path would remove everything written before authentication was
-    enabled and everything ``docdoc extract`` ever wrote — none of which belongs
+    enabled and everything written outside a run — none of which belongs
     to the customer being erased. It falls back to the set difference: that
     tenant's run-derived content, and nothing else. Emptying the root outright is
     `allow_store_root`, which one command-line flag passes and no HTTP route can.

@@ -133,8 +133,8 @@ class ArtifactStore(Protocol):
         Raises ``ArtifactError`` when this store's namespace is the store root
         itself — which is the case for the default tenant, whose prefix is
         unprefixed (ADR-0014 §3). That subtree holds everything written before
-        authentication was ever enabled and everything ``docdoc extract`` ever
-        wrote from the command line, none of which belongs to a customer anybody
+        authentication was ever enabled and everything written outside a run (the
+        synchronous job route, the recorder), none of which belongs to a customer anybody
         is erasing.
 
         ``allow_store_root=True`` is passed at exactly one call site in this

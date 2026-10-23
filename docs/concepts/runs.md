@@ -332,7 +332,8 @@ The events above reach an operator's collector when one is configured, and reach
 nothing when one is not.
 
 ```bash
-pip install 'docdoc[otel]'
+# build the image with the exporter: add `otel` to DOCDOC_EXTRAS, then `up -d --build`
+export DOCDOC_EXTRAS=api,postgres,s3,google,azure,gcv,ocr,pdf,otel
 export DOCDOC_OTLP_ENDPOINT=http://collector:4318/v1/traces
 export DOCDOC_OTLP_HEADERS='authorization=Bearer …'     # k=v,k=v
 ```
@@ -342,7 +343,7 @@ more than it looks: a claim, a lease expiry, and a redelivery all happen there,
 so a deployment tracing only the API would be tracing the half that never fails.
 
 **Unset means nothing is exported and no telemetry dependency is required.** The
-base install acquires neither the SDK nor the exporter, and the offline suite
+default image carries neither the SDK nor the exporter, and the offline suite
 passes with both absent.
 
 **An exporter never displaces one you installed.** docdoc's pipeline has a single

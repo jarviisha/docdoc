@@ -41,7 +41,8 @@ import pytest
 #: because it is the normative description of the API, so a drift between it and
 #: the code is a contract that no longer describes anything.
 DOCUMENTS = (
-    "README.md",
+    # README.md left this list with ADR-0027: it documents the service and carries no python
+    # block. It still names settings, so CONFIG_DOCUMENTS lists it on its own.
     "docs/concepts/extraction.md",
     "docs/concepts/validation.md",
     "specs/003-schema-driven-extraction/quickstart.md",
@@ -327,6 +328,9 @@ SUITE_ONLY_ENV = frozenset(
         "DOCDOC_TEST_PADDLEX_URL",
         "DOCDOC_TEST_TESSERACT_URL",
         "DOCDOC_EXTRAS",
+        # The compose file's host port for Postgres, the same shape as DOCDOC_EXTRAS:
+        # read by compose, never by docdoc. The README quickstart names it (ADR-0027).
+        "DOCDOC_PG_PORT",
         # Retired by ADR-0026 (answers never expire); the ADR and the design name it
         # to say so, and no module defines it any more.
         "DOCDOC_CORRECTION_RETENTION_DAYS",
@@ -337,6 +341,7 @@ SUITE_ONLY_ENV = frozenset(
 #: block at all, and those are exactly the ones an import check cannot reach.
 CONFIG_DOCUMENTS = (
     *DOCUMENTS,
+    "README.md",
     "CONTRIBUTING.md",
     "specs/003-schema-driven-extraction/data-model.md",
     "specs/003-schema-driven-extraction/research.md",
@@ -432,6 +437,7 @@ CONFIG_DOCUMENTS = (
     # and the worker reads.
     "docs/superpowers/specs/2026-10-23-service-only-surface-design.md",
     "docs/superpowers/plans/2026-10-23-service-only-surface.md",
+    "docs/adr/0027-service-only-surface.md",
 )
 
 #: Requires at least one character after the prefix, so the `DOCDOC_*` wildcard
@@ -529,7 +535,8 @@ def test_the_configuration_check_can_actually_fail() -> None:
 #: which is scoped to python blocks: the claim this guards is prose, and prose is
 #: exactly where it survived.
 _LOCATION_CLAIM_DOCUMENTS = (
-    "README.md",
+    # README.md left this list with ADR-0027: it documents the service and carries no python
+    # block. It still names settings, so CONFIG_DOCUMENTS lists it on its own.
     "CHANGELOG.md",
     "specs/007-pipeline-api-cli/spec.md",
     "specs/007-pipeline-api-cli/quickstart.md",

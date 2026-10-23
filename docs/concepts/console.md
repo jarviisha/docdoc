@@ -5,7 +5,10 @@ credentials exist, and what to erase. It is not a review platform and holds no p
 queue, no workload, no review state, no disposition. That boundary is ADR-0019's and it is enforced
 by a build check rather than by review (`npm run lint:boundaries`).
 
-Install it with `pip install 'docdoc[api,ui]'` and serve it the way you already serve the API:
+The compose stack serves it at `http://localhost:8000/console` once the assets are built
+(`cd ui && npm ci && npm run build`); the [README quickstart](../../README.md#quickstart) walks it.
+Outside compose, the API serves it from the `docdoc-ui` distribution (the `ui` extra) or from a
+checkout's `ui/dist`:
 
 ```bash
 uvicorn --factory docdoc.api.app:create_app --host 127.0.0.1 --port 8000
@@ -71,7 +74,7 @@ locked account, and a disabled one. Five failures in a row lock an account for f
 
 ## What it does
 
-The page is a left sidebar — **Overview**, **Runs**, **Submit OCR**, **Parsers**, then under "Admin"
+The page is a left sidebar — **Overview**, **Runs**, **Submit**, **Quality**, **Parsers**, then under "Admin"
 **Tenants**, **Credentials**, **Callbacks** and **Erasure**, with the username and **Sign out** at the bottom — and the chosen area on the right.
 It opens on the Overview.
 
@@ -132,9 +135,13 @@ phone photo's EXIF orientation needs no turn of its own: PaddleX and the browser
 image that cannot be fetched is replaced by an error, and its text still shows. A failed run requests
 no result, and an extraction run keeps **Download result** only.
 
-**Submit OCR** sends one document for OCR on a tenant's behalf, through
+**Submit** sends one document on a tenant's behalf, **as OCR** or **as an extraction** ("Submit
+as"). An extraction goes through `POST /v1/console/tenants/{id}/extractions?schema=<identity>`,
+which stores the bytes and submits an extraction run through the same path, limits and
+`Idempotency-Key` handling as `POST /v1/documents/{blob_id}/runs` with that tenant's key; pick a
+tenant and a schema (from `GET /v1/console/schemas`) and the document. OCR goes through
 `POST /v1/console/tenants/{id}/ocr` — the same path, caps and validation as `POST /v1/ocr` with
-that tenant's key. Pick a tenant (from `GET /v1/console/tenants`), a parser (Automatic, or one from
+that tenant's key. For OCR, pick a tenant (from `GET /v1/console/tenants`), a parser (Automatic, or one from
 `GET /v1/console/parsers`; an unavailable parser is listed but cannot be chosen, one failing its
 health check is marked "not responding"), a language (the parser's default, or one of that parser's
 languages; changing the parser resets it), and the document. A refusal is shown in the form; an

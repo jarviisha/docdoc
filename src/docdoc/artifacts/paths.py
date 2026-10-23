@@ -72,7 +72,7 @@ DEFAULT_TENANT = "default"
 #:
 #: Its flag lives on ``docdoc migrate`` **alone**, which is FR-083 satisfied and
 #: the safety argument kept: that command records the answer, so naming it there
-#: is an argument, while a ``--default-tenant`` on ``docdoc parse`` would be a
+#: is an argument, while a ``--default-tenant`` on ``docdoc worker`` would be a
 #: per-invocation override of a deployment-wide fact — precisely the disagreement
 #: the recorded value exists to prevent. ``migrate`` then refuses to change what
 #: it recorded, so a mismatch is caught at deploy time rather than discovered as

@@ -19,6 +19,9 @@ outcome.pages     # (2,)
 outcome.geometry  # the boxes covering it
 ```
 
+The block shows the internal call the worker makes for each run. docdoc's public surface is the
+HTTP API and the console, not these modules ([ADR-0027](../adr/0027-service-only-surface.md)).
+
 `document.text[outcome.span.start:outcome.span.end]` reads the value back out of
 the untouched source.
 

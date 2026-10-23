@@ -10,6 +10,7 @@
   storeless shape the raw OCR route this design introduces follows)
 - **Principles engaged**: IV (Provider-Agnostic Adapters), V (Text-First Document Processing),
   VIII (Reproducibility, Provenance, and Versioning — no silent fallback), XI (MVP Discipline)
+- **Superseded usage**: the `docdoc parse` command named below was removed in [ADR-0027](0027-service-only-surface.md); naming a parser is an HTTP concern only.
 
 ## Context
 

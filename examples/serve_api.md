@@ -1,10 +1,11 @@
 # Running the HTTP interface
 
-The HTTP interface ships behind an extra, because the library must stay usable
-with no web framework installed at all.
+The Docker image's default command serves the API, and the compose stack in the
+[README quickstart](../README.md#quickstart) runs it beside its workers. This guide
+covers the pieces, for a deployment that runs them itself or a contributor running
+from a checkout (`uv sync --all-extras`):
 
 ```bash
-pip install 'docdoc[api]'
 export DOCDOC_SCHEMA_PATHS=/etc/docdoc/schemas
 export DOCDOC_STORE_ROOT=/var/lib/docdoc
 export DOCDOC_MODEL_ADAPTERS=gemini
@@ -81,7 +82,6 @@ routes accept a document and return before any stage executes, and they need a
 second process to do the work and a database to record it.
 
 ```bash
-pip install 'docdoc[api,postgres]'
 export DOCDOC_RUN_DATABASE_URL=postgresql://docdoc:docdoc@localhost:5432/docdoc
 
 docdoc migrate                      # explicit, idempotent, never applied on boot
@@ -261,7 +261,7 @@ before any provider is contacted.
 
 Every failure is a stable, provider-neutral, typed docdoc error naming the stage
 at fault. A **document that fails validation is not an error** — the run
-succeeded and the result carries an invalid verdict, exactly as the library
+succeeded and the result carries an invalid verdict, exactly as the pipeline
 returns it, with a `200`.
 
 A failure part-way through a run returns the typed error **and** the results of
@@ -296,33 +296,23 @@ that refusal as a closed door, it has opened.
 
 ## The browser interface
 
-Behind a second extra, and absent unless you ask for it:
+The API serves the **operations console** at `/console/`, from the `docdoc-ui`
+distribution (the `ui` extra) or from a checkout's built `ui/dist`
+(`cd ui && npm ci && npm run build`). The compose stack mounts `ui/dist`.
 
-```bash
-pip install 'docdoc[api,ui]'
-# then open http://127.0.0.1:8000/console/
-```
+It is about the deployment rather than about a document — there is no reviewer
+assignment, no review queue, no workload, no review state and no disposition, and a
+build check greps for all five.
 
-The **operations console**: what ran, which credentials exist, what to erase. It is about the
-deployment rather than about a document — there is no reviewer assignment, no review queue, no
-workload, no review state and no disposition, and a build check greps for all five.
+**You sign in with a console account**, made inside the container with
+`docdoc console-user add <name>`. The session is a server-side cookie and ends after
+`DOCDOC_CONSOLE_IDLE_SECONDS` (default 900) without a request. Console accounts are
+separate from API keys, and the console speaks only `/v1/console/*`.
 
-**Its shell loads without a credential and that is the only place docdoc does that** — see the
-Authentication section above for why, and for what is and is not exempt.
-
-**You paste your key into the page, and a reload asks again.** No login route, no cookie, no session
-record. An idle tab discards the key after fifteen minutes.
-
-**With no key file configured the console works with no key at all**, and says which mode it is in
-rather than presenting a field that checks nothing. That is the default, and a deployment that has
-not enabled authentication is exactly as exposed as it always was — anyone who can reach it can spend
-your provider budget.
-
-**Without the administrative scope, the credentials and erasure areas are invisible.** The API
-answers `404` rather than `403`, so they are indistinguishable from not existing.
-
-It belongs on a trusted network. docdoc ships no `serve` command, so it cannot pick a safer bind
-address for you, and for single sign-on you put an authenticating proxy in front of it.
+It belongs on a trusted network, and behind TLS: run `uvicorn --proxy-headers` behind
+a TLS-terminating proxy so the session cookie is marked secure. For single sign-on you
+put an authenticating proxy in front of it. See
+[`docs/concepts/console.md`](../docs/concepts/console.md).
 
 **There is no browser surface for grounding.** There was one, at `/ui`; it is retired (ADR-0020).
 `POST /v1/extract` is unchanged and returns the boxes — see
@@ -337,4 +327,3 @@ address for you, and for single sign-on you put an authenticating proxy in front
 - [`docs/concepts/runs.md`](../docs/concepts/runs.md) — the two identities, redelivery, and the limits of cancellation
 - [`examples/submit_async_run.py`](submit_async_run.py) — submit and poll to completion, runnable
 - [`examples/view_grounding.md`](view_grounding.md) — a PDF to a rectangle, offline
-- [`examples/run_pipeline.py`](run_pipeline.py) — the same thing in-process

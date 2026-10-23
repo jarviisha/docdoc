@@ -67,6 +67,9 @@ verdict.text_layer_usable   # the document-level verdict, which decided routing
 verdict.pages               # one PageTextVerdict per page: index, char_count, text_bearing
 ```
 
+The block shows the internal call the worker makes for each run. docdoc's public surface is the
+HTTP API and the console, not these modules ([ADR-0027](../adr/0027-service-only-surface.md)).
+
 Routing is a whole-document decision — a document goes entirely to one path — but
 the evidence is per page. That matters for the common case of a scanned page
 appended to a digital contract: the document is parsed natively, that page
@@ -113,7 +116,7 @@ Those reasons are specific, because a caller acts differently on each:
 
 | Reason | What to do |
 |---|---|
-| `extra_not_installed` | `pip install docdoc[...]` |
+| `extra_not_installed` | build the image with that extra in `DOCDOC_EXTRAS` |
 | `credentials_not_configured` | set the adapter's environment variables |
 
 | Parser | Credentials |

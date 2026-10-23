@@ -113,7 +113,7 @@ class PostgresRunQueue:
             from psycopg.rows import dict_row
         except ImportError as exc:  # pragma: no cover - guarded by the extra
             raise RunStateUnavailableError(
-                "psycopg is not installed; run state needs `pip install docdoc[postgres]`"
+                "psycopg is not installed; run state needs the `postgres` extra"
             ) from exc
 
         try:

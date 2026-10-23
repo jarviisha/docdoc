@@ -32,6 +32,7 @@ it would be decided explicitly rather than settled by whichever code landed firs
 | [0024](0024-console-ui-on-shadcn.md) | The console's UI is built on shadcn/ui | Accepted; replaces Astryx (`specs/008` R2) | — |
 | [0025](0025-native-pdf-parsing-on-pdfium.md) | Native PDF parsing on PDFium | Accepted; supersedes 0001's choice of PyMuPDF | — |
 | [0026](0026-tenant-quality-evaluation.md) | Tenant quality evaluation: checks, answers that never expire, and re-run reports | Accepted; requires constitution v1.13.0; amends 0023 §4 | — |
+| [0027](0027-service-only-surface.md) | docdoc is a service, not an installable library | Accepted; requires constitution v2.0.0 | — |
 
 ## Conventions
 

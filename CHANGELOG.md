@@ -9,6 +9,32 @@ API may change in any release. `document_id` derivation is versioned separately 
 
 ## [Unreleased]
 
+### Removed — docdoc is a service, not an installable library (ADR-0027)
+
+- The CLI commands `parse`, `extract`, `inspect`, `explain` and `eval`. Documents reach docdoc
+  through the HTTP API and the console. The command line keeps `migrate`, `worker`, `sweep`,
+  `credential`, `console-user`, `erase` and `store`, unchanged.
+- The global `--verify-cache` option. Only the removed commands read it, so it did nothing on the
+  kept ones; passing it now (to `worker`, say) is an argparse error. `pipeline.run(verify=True)`
+  remains for internal use.
+- The library-usage examples `parse_pdf.py`, `extract_invoice.py`, `ground_invoice.py`,
+  `run_pipeline.py`, `evaluate_golden_set.py`, `build_document.py`, `compare_reports.py` and
+  `validate_invoice.py`. `submit_async_run.py`, `receive_webhook.py` and the operating guides stay.
+- The base-install promise: the CI `base-install` job, the tests whose only subject it was, and
+  Principle IV's clause that the base install must not pull in a provider SDK. The adapter-isolation
+  rule and the layer contracts stay. Constitution 2.0.0.
+
+### Added — submit an extraction from the console
+
+- `POST /v1/console/tenants/{tenant_id}/extractions?schema=` stores the body and submits an
+  extraction run on a tenant's behalf, with the same limits, `Idempotency-Key` handling and
+  priority as the console's OCR submit. `GET /v1/console/schemas` lists the schemas to choose from.
+- The console's Submit screen has a "Submit as" choice, OCR or Extraction, with a schema picker.
+  The sidebar entry is now **Submit**.
+- The README opens with a quickstart that walks a sample PDF through OCR, extraction, checks and a
+  quality report on the compose stack, with no API key. `packaging/docker/.env.example` names the
+  two settings that switch it to a real model. `FIRST_DOC.md` now points at it.
+
 ### Added — quality on a tenant's own documents (ADR-0026)
 
 - A correction can say a value is **correct**. Checks are stored as answers that never expire; the

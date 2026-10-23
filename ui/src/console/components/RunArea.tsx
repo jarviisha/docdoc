@@ -84,7 +84,7 @@ interface Props {
   onOpenRun: (runId: string | null) => void;
   /** The tenant a jump from Tenants opened this area for, applied as the filter on mount. */
   presetTenant: string | null;
-  /** Opens Submit OCR: the list's own primary action. */
+  /** Opens Submit: the list's own primary action. */
   onSubmit: () => void;
 }
 
@@ -229,7 +229,7 @@ export function RunArea({
           Refresh
         </Button>
         <div className="flex-1" />
-        <Button onClick={onSubmit}>Submit OCR</Button>
+        <Button onClick={onSubmit}>Submit</Button>
       </div>
 
       {/* FR-045b: a list loading, and a list that failed, reach a screen reader

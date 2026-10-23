@@ -1,6 +1,6 @@
 # Seeing where a value came from
 
-The shortest path from a PDF to a rectangle on a page, with no store, no database and no credentials.
+The shortest path from a PDF to a rectangle on a page, with no credentials.
 
 Principle XII requires every feature to ship with a runnable example; this is grounding's.
 
@@ -12,16 +12,9 @@ the response; nothing draws them for you.
 
 ## Run it
 
-```bash
-pip install 'docdoc[api,pdf]'
-
-export DOCDOC_SCHEMA_PATHS="$PWD/schemas"
-export DOCDOC_MODEL_ADAPTERS=echo                        # answers offline, costs nothing
-export DOCDOC_ECHO_FIXTURES="$PWD/tests/fixtures/echo"   # and the answers it gives
-# DOCDOC_STORE_ROOT deliberately unset — see below
-
-uvicorn --factory docdoc.api.app:create_app --host 127.0.0.1 --port 8000
-```
+Bring up the compose stack as the [README quickstart](../README.md#quickstart) does. It mounts
+`schemas/` and answers with the offline `echo` adapter from `tests/fixtures/echo`, so nothing here
+costs anything. Then, from the repository root:
 
 ```bash
 curl -sS -X POST 'http://127.0.0.1:8000/v1/extract?schema=invoice@1' \
@@ -63,15 +56,14 @@ already oriented the way the page is shown. Rotating to match double-rotates, an
 rotated pages — the plausible wrong implementation that looks correct everywhere you are likely to
 test it.
 
-## The same thing without HTTP
+## The same thing in the console
 
-```bash
-docdoc run tests/fixtures/pdf/digital_invoice.pdf --schema invoice@1
-```
+Submit the file as an extraction against `invoice@1` from the console's **Submit** screen and open
+the run: each field sits beside the page, and hovering one outlines where it was read.
 
 ## Why no store was configured
 
-Note `DOCDOC_STORE_ROOT` was never set. Before Milestone 8 this request could not be made at all:
+The compose stack configures a store, and this request still wrote nothing to it. Before Milestone 8 this request could not be made at all:
 every route capable of extracting took a `blob_id`, a `blob_id` existed only after a submission, and
 submission was refused without a store — so the document had to come to rest on disk before anything
 could read it. `POST /v1/extract` takes the bytes and writes nothing (ADR-0012).

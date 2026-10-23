@@ -13,12 +13,15 @@ result.value_at("total").claimed_text   # '1,240.00'  — byte-faithful, as retu
 result.value_at("due_date").present     # False — an explicit absence, not an error
 ```
 
+The block shows the internal call the worker makes for each run. docdoc's public surface is the
+HTTP API and the console, not these modules ([ADR-0027](../adr/0027-service-only-surface.md)).
+
 No provider is named. Which model answers is configuration, and the only observable difference
 between two of them is in provenance.
 
 ## Choosing an adapter without naming one
 
-`default_adapter()` is the call application code makes. It picks the first usable adapter in the
+`default_adapter()` is the call the worker makes. It picks the first usable adapter in the
 configured priority order, and raises with **every candidate's reason** when none is usable — so
 "why not?" is answerable without reading docdoc's source.
 
@@ -153,7 +156,7 @@ already defines and the kernel already implements, so `schema_hash` reuses an ex
 than inventing one.
 
 `schemas/` is **not** packaged in the wheel — it is data a deployment supplies. Anything that must
-run for a `pip install docdoc` user writes its own schema instead.
+run without a deployment's schemas, such as a test, writes its own schema instead.
 
 ## What this layer deliberately does not do
 

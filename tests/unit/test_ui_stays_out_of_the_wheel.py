@@ -6,8 +6,8 @@ built assets in the package and be done.
 
 **The failure this guards against is invisible in review.** A wheel that gains a
 `static/` directory looks like progress; nothing errors, nothing warns, and the
-only person who notices is a user wondering why a document-processing library
-installed a JavaScript bundle. So the rule is a test rather than a convention,
+only person who notices is an operator wondering why a document-processing image
+carries a JavaScript bundle. So the rule is a test rather than a convention,
 which is what Principle XII requires of every boundary in this repository.
 """
 
@@ -54,8 +54,8 @@ def test_the_ui_extra_exists_and_adds_only_a_dependency() -> None:
     """FR-035 — opting in delivers the files, because an extra cannot deliver files.
 
     The whole reason `docdoc-ui` is a separate distribution: a Python extra adds a
-    dependency and nothing else, so this is the only arrangement in which the base
-    install acquires nothing while `pip install docdoc[ui]` acquires an interface.
+    dependency and nothing else, so this is the only arrangement in which an install
+    without `ui` acquires nothing while the `ui` extra acquires an interface.
     """
     extras = _config()["project"]["optional-dependencies"]
 

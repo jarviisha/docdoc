@@ -1,6 +1,6 @@
 # docdoc
 
-An open-source **Intelligent Document Processing engine**.
+An open-source **Intelligent Document Processing service** that you host yourself.
 
 docdoc turns unstructured documents into structured, validated, traceable data while preserving
 source-level provenance through the entire pipeline. The differentiator is not that it can call an
@@ -8,243 +8,289 @@ LLM — everyone can do that. It is that every extracted value can answer:
 
 > **Where did this come from?**
 
-**Status:** Milestones 1–9 implemented — kernel, parsers, extraction, grounding, validation,
-evaluation, the pipeline and HTTP interface, the operations console, and asynchronous runs. An extracted
-value can be **located**, **checked**, and **measured**: docdoc will tell you that an invoice's stated
-total does not equal the sum of its lines, point at the place on the page the total was read from, and
-tell you how often it gets that right against a golden set. Since Milestone 9 it will also accept that
-invoice without holding your connection for the several minutes a long scan takes — see
-[Roadmap](#roadmap).
+You run it from its Docker image. Clients reach it through the HTTP API; the people who run the
+deployment use the operations console in a browser and a handful of commands inside the container.
+docdoc is not a Python library and makes no promise about importing its packages
+([ADR-0027](docs/adr/0027-service-only-surface.md)).
 
-## What it does today
+## Quickstart
 
-Hand it a PDF and ask where a value physically sits:
+You need Docker with Compose, and Node.js 24+ to build the console once. No API key and no cloud
+account.
 
-```python
-from docdoc.ingest import CapabilityRequest, parse
-
-document = parse(
-    pdf_bytes,
-    require=CapabilityRequest(media_type="application/pdf", geometry=True),
-)
-
-(span,) = document.find("INV-001")
-document.page_for(span)  # (0,)  -> page 1
-document.locate(span)  # (Geometry(page_index=0, bbox=BBox(0.45, 0.1, 0.63, 0.13)),)
-```
-
-Note that no provider is named. You ask for the capabilities you need; which parser supplies them
-is configuration. And the routing decision is on the result, per page:
-
-```python
-document.provenance.text_layer.rule_id          # 'text-layer@1'
-document.provenance.text_layer.text_layer_usable  # True
-document.provenance.text_layer.pages            # per-page verdicts and character counts
-```
-
-### Extract structured values against a versioned schema
-
-A schema is **data**, not code. Adding a document type is adding two files; there is no
-`InvoiceService` and no `if schema.name == "invoice"` anywhere in the engine.
-
-```python
-from docdoc.extraction import SchemaRegistry, default_adapter, extract
-
-registry = SchemaRegistry.from_paths(["schemas/"])
-result = extract(
-    document,
-    schema="invoice@1",
-    registry=registry,
-    adapter=default_adapter(),   # configuration picks it; this line names no provider
-)
-
-result.value_at("total").value          # Decimal('1240.00')  — not a float
-result.value_at("total").claimed_text   # '1,240.00'  — byte-faithful, as the model returned it
-result.value_at("due_date").present     # False — an explicit absence, not an error
-```
-
-Note the identity pair. `invoice@1` is the contract a consumer pins to; `schema_hash` answers a
-different question, and both are recorded:
-
-```python
-result.provenance.schema_identity   # 'invoice@1'      — did the contract change?
-result.provenance.schema_hash       # 'sha256:37a9f6…' — did anything result-affecting change?
-result.artifact_id                  # the extraction's own content-addressed identity
-```
-
-Rewording a field description moves the hash and not the version, which invalidates the extraction
-and **reuses the parse**. [ADR-0008](docs/adr/0008-schema-evolution-policy.md) has the bump rules.
-
-**Extraction resolves no grounding, and that is a stage boundary rather than a gap.** Every value
-leaves extraction with `grounding=None`, because grounding is its own stage with its own artifact
-under [ADR-0003](docs/adr/0003-content-addressed-artifact-chain.md). What extraction supplies is the
-byte-faithful `claimed_text`; `docdoc.grounding.ground()` resolves it:
-
-```python
-from docdoc.grounding import ground
-
-located = ground(document, result)
-total = located.outcomes["total"]
-total.status                                        # 'exact'
-document.text[total.span.start:total.span.end]      # 'TOTAL             1,240.00'
-total.pages, total.geometry                         # (0,), (Geometry(...),)
-located.counts.grounding_rate                       # 1.0
-```
-
-Grounding is deterministic and entirely offline — no network, no credentials, no model call, enforced
-by an import contract. It answers *where*, never *whether*: a value that disagrees with the text it
-resolved to is a **validation** finding. And `model_confidence` is stored verbatim, labelled
-UNTRUSTED, and routes nothing ([ADR-0004](docs/adr/0004-confidence-semantics.md)).
-
-Then ask whether the result is acceptable:
-
-```python
-from docdoc.validation import validate
-
-result = validate(extraction, located, schema)
-result.verdict                                      # Verdict.INVALID
-[(f.field_path, f.reason, f.expected, f.actual) for f in result.findings]
-# [('total', 'sum_mismatch', '1420.00', '1240.00')]
-result.findings[0].span, result.findings[0].pages   # copied from grounding, never recomputed
-```
-
-Validation is a separate stage with its own artifact, because a validator built into a prompt is
-unverifiable and cannot be regression-tested (Principle VII). Cross-field rules are **data in the
-schema** evaluated by one generic engine — there is no `InvoiceValidator` — and the verdict has three
-states, because a run where nothing could be checked must not report the same word as one where
-everything was checked and passed.
-
-And finally, ask how often it gets that right:
-
-```python
-from docdoc.evaluation import evaluate, load_golden_set, load_prediction_set
-
-golden = load_golden_set("datasets/mvp/manifest.json")
-report = evaluate(golden, load_prediction_set("datasets/mvp/predictions"))
-
-report.metrics.micro["field_accuracy"].value        # 0.9286
-report.metrics.micro["field_accuracy"].numerator    # 26
-report.metrics.micro["field_accuracy"].denominator  # 28
-report.partial.covered_labels                       # 28 of 48 — the restricted tier was skipped
-report.report_id                                    # "sha256:c3b4bc8e…"
-```
-
-Every metric states its numerator and denominator, and a metric with an empty denominator is `None`
-rather than `0.00` — a rate of zero reads as total failure, and an unasked question is not one. A
-document that crashes has its labelled fields counted as *missing* and stays in every denominator, so
-failing on the hard documents can never raise a score.
-
-Run the examples, which need no infrastructure and no credentials at all:
+**1. Clone, build the console, and start the stack.**
 
 ```bash
-uv sync --all-extras
-uv run python examples/build_document.py                       # kernel only
-uv run python examples/parse_pdf.py tests/fixtures/pdf/digital_invoice.pdf
-uv run python examples/extract_invoice.py                      # extraction, offline
-uv run python examples/ground_invoice.py                       # grounding, offline
-uv run python examples/validate_invoice.py                     # validation, offline
-uv run python examples/evaluate_golden_set.py                  # evaluation, offline
-uv run python examples/compare_reports.py                      # regression detection, offline
-uv run python examples/run_pipeline.py                         # all four stages plus reuse, offline
+git clone https://github.com/jarviisha/docdoc.git && cd docdoc
+(cd ui && npm ci && npm run build)        # the console's assets; compose mounts ui/dist
+docker compose -f packaging/docker/compose.yml up -d --build
+docker compose -f packaging/docker/compose.yml exec api docdoc migrate
 ```
 
-[`examples/serve_api.md`](examples/serve_api.md) covers running the HTTP interface.
+This starts the API on `http://localhost:8000`, an extraction worker, an OCR worker, Postgres and an
+S3-compatible object store. `docdoc migrate` creates the run database's tables. Nothing applies
+them on startup, so run it once now and again after each upgrade.
 
-### From the command line
+If port 5432 is already taken on your machine (by your own Postgres, say), `up` fails on the
+`postgres` service. Set `DOCDOC_PG_PORT=55433` in `packaging/docker/.env` and run `up` again; only
+the host side of the port changes.
 
-Everything above, without writing a script. `pip install docdoc` gives you the command — the CLI is
-`argparse`, so it costs no dependency.
+**2. Create a console account and sign in.**
 
 ```bash
-docdoc parse    invoice.pdf                        # route, parse, report what came back
-docdoc extract  invoice.pdf --schema invoice@1     # the whole pipeline
-docdoc inspect  invoice.pdf --schema invoice@1     # every value, its verdict, and where it was found
-docdoc inspect  --result sha256:3a1e…              # the same, read back from the store
-docdoc explain  sha256:3a1e… --chain               # why an identity is that value
-docdoc eval     manifest.json --predictions ./p    # score a golden set
-docdoc store    clear --stage extract              # all of it, or one stage
+docker compose -f packaging/docker/compose.yml exec api docdoc console-user add admin
 ```
 
-Two rules make up most of the contract. With `--json`, standard output carries **exactly one** JSON
-document and nothing else; diagnostics go to standard error in both forms. And the exit code
-distinguishes the two things a single non-zero code confuses:
+It asks for a password twice; it must be at least 12 characters. Open
+`http://localhost:8000/console` and sign in as `admin`.
 
-| Code | Meaning |
-|---|---|
-| `0` | the run completed and the document is valid |
-| `1` | the run completed and the document is **invalid** — a real result, not an error |
-| `2` | the run could not complete: a typed docdoc error |
-| `64` | the invocation itself was wrong |
+**3. See a document's text and where each word sits. No model is involved.**
 
-A script that treats "this invoice is wrong" as "docdoc is broken" is the outcome a single non-zero
-code guarantees.
+In the console, open **Submit**. Leave "Submit as" on **OCR**, choose the tenant (a fresh stack has
+one, `default`), choose `tests/fixtures/pdf/digital_invoice.pdf` from your clone, and press
+**Submit**. The run opens. Once it has succeeded, the page shows with a box around every word, and
+the recognised text sits beside it. A digital PDF is read by the native PDFium parser, offline.
 
-### Over HTTP
+**4. Extract fields, check them, and measure quality.**
+
+Open **Submit** again. Set "Submit as" to **Extraction**, choose the same tenant, the schema
+`invoice@1` and the same file, and press **Submit**. When the run succeeds it shows each extracted
+field beside the page; hover a field to see where on the page it was read.
+
+The stack's default model adapter is `echo`. It returns canned answers from
+`tests/fixtures/echo/invoice@1.json` without calling any model, so the whole flow can be walked
+offline. Those answers were written for a different invoice: some match the sample (the invoice
+number `INV-001`) and some do not (the total is `1240.00`; the PDF says `228.00`).
+That is useful here. Mark `invoice_number` **Correct**. Mark `total` **Wrong**, enter `228.00`
+under "Should be" and a short reason (a wrong check needs one), and press **Save check**.
+
+Then open **Quality**, choose the tenant and the `invoice` schema, and press **Re-run on checked
+documents**. docdoc re-runs every document you checked with the current configuration and scores
+the results against your checks. The report shows, per field, how many were right.
+
+### Use a real model
+
+Copy `packaging/docker/.env.example` to `packaging/docker/.env` and set both lines:
 
 ```bash
-pip install docdoc[api]
-uvicorn --factory docdoc.api.app:create_app
+DOCDOC_MODEL_ADAPTERS=gemini
+GEMINI_API_KEY=your-key
 ```
+
+Then run `docker compose -f packaging/docker/compose.yml up -d` again. Compose reads `.env` from
+the directory that holds `compose.yml`, and recreates the containers whose settings changed. Submit
+the extraction again, and the values come from the model. Re-run Quality to compare.
+
+Scans and photos need a parser that does OCR: Azure Document Intelligence, Google Cloud Vision, or
+an OCR endpoint you run. See [ingest](docs/concepts/ingest.md) for the settings each needs.
+
+### Stop it
+
+```bash
+docker compose -f packaging/docker/compose.yml down       # keeps the data
+docker compose -f packaging/docker/compose.yml down -v    # deletes it too
+```
+
+## Configuration
+
+Every setting is an environment variable. In the compose stack you set them in
+`packaging/docker/.env`; `compose.yml` forwards each one to the API and both workers, and lists
+them with their reasons. These are the ones a deployment decides first:
+
+```sh
+DOCDOC_SCHEMA_PATHS=/schemas                   # where schemas live; os.pathsep-separated
+DOCDOC_MODEL_ADAPTERS=gemini                   # adapter preference order, comma-separated
+DOCDOC_GEMINI_MODEL=gemini-3.5-flash           # which model answers
+GEMINI_API_KEY=...                             # or GOOGLE_API_KEY
+DOCDOC_STORE_URL=s3://bucket/prefix            # where artifacts and blobs land…
+DOCDOC_STORE_ROOT=/var/lib/docdoc              # …or a directory instead; the URL wins if both are set
+DOCDOC_RUN_DATABASE_URL=postgresql://…         # run state, accounts, credentials, corrections
+```
+
+`DOCDOC_SCHEMA_PATHS` has no default worth relying on: with none, the registry is **empty**,
+because docdoc ships no schema of its own. A schema is your data. The `schemas/` directory in this
+repository holds examples, and compose mounts it at `/schemas`.
+
+`DOCDOC_STORE_URL` takes `s3://bucket[/prefix][?endpoint_url=…]`; the query parameter is what MinIO,
+R2, SeaweedFS and every other S3-compatible store needs and AWS does not. **Run more than one worker
+and you need a shared store**: with a private directory per worker every lookup misses, every run is
+correct, and you pay for every parse twice with nothing anywhere reporting a problem.
+
+Apply the database schema explicitly with `docdoc migrate`. Nothing applies it on startup, because
+several workers booting at once would be several processes altering one table.
+
+Three configure asynchronous runs, and only the worker reads the last two:
+
+```sh
+DOCDOC_API_KEYS_FILE=/secrets/keys.json   # turns authentication on; absent means off
+DOCDOC_RUN_LEASE_SECONDS=90               # how long a worker's claim holds
+DOCDOC_RUN_MAX_ATTEMPTS=3                 # claims before a run is abandoned
+```
+
+OCR runs are queued (ADR-0022), and the queue is bounded twice. Both refusals carry `Retry-After`:
+
+```sh
+DOCDOC_OCR_QUEUE_PER_TENANT=100   # one consumer's OCR runs queued or running → else 429
+DOCDOC_OCR_QUEUE_TOTAL=500        # every consumer's together → else 503, "overloaded"
+DOCDOC_OCR_RETENTION_HOURS=24     # how long a result is kept after its run finishes
+```
+
+All three are on with no configuration. OCR results are swept even when
+`DOCDOC_RUN_RETENTION_DAYS` is unset; extraction runs are not.
+
+Two configure retention, and **both are unset by default, which means nothing is ever removed**:
+
+```sh
+DOCDOC_RUN_RETENTION_DAYS=30   # how long a run is kept; unset means kept forever
+DOCDOC_RUN_SWEEP_BATCH=500     # runs removed per pass
+```
+
+A sweep removes the run **and the artifacts and blobs no surviving run of that tenant still
+names**. Content written outside a run, such as by `POST /v1/documents/{blob_id}/extract`, is never
+touched. The worker sweeps between claims; a deployment running **no** worker sweeps nothing, and
+`docdoc sweep` is how it removes anything at all.
+
+One configures how quickly a revoked credential stops working:
+
+```sh
+DOCDOC_RUN_CREDENTIAL_TTL_SECONDS=30   # how long a resolution is cached
+```
+
+**This is a number and not "immediately", because "immediately" is not something you can test.**
+Each process that authenticates caches what a credential resolved to for this long, so revoking one
+takes effect everywhere within one lifetime, with no restart.
+
+Six configure per-tenant limits, and all are absent by default, which means nothing is counted and
+nothing is refused:
+
+```sh
+DOCDOC_LIMIT_SUBMISSIONS_PER_MINUTE=60     # fixed window
+DOCDOC_LIMIT_CONCURRENT_RUNS=25            # counted from the runs table, never stored
+DOCDOC_LIMIT_RUNS_PER_PERIOD=10000         # fixed window, 30 days
+DOCDOC_LIMIT_TOKENS_PER_PERIOD=5000000     # the budget refuses the *next* submission
+DOCDOC_LIMITS_FILE=/secrets/limits.json    # per-tenant overrides, and priority ceilings
+DOCDOC_PRIORITY_CEILING=ordinary           # the highest priority a client may be granted
+```
+
+A refusal is `429`, it names which limit and when to come back, and it creates no run. See
+[limits](docs/concepts/limits.md).
+
+Six configure webhook delivery, and the first is what turns it on at all:
+
+```sh
+DOCDOC_DELIVERY_SECRETS_FILE=/secrets/webhook-secrets.json
+DOCDOC_DELIVERY_MAX_ATTEMPTS=6             # then the delivery comes to rest at `failed`
+DOCDOC_DELIVERY_TIMEOUT_SECONDS=10
+DOCDOC_DELIVERY_BACKOFF_SECONDS=30         # doubled per attempt, capped at a day
+DOCDOC_MAINTENANCE_DELIVERY_BATCH=32       # deliveries attempted per tick
+DOCDOC_DELIVERY_ALLOW_PRIVATE=false        # permits http and private addresses; a guard
+```
+
+**A deployment that registers no callbacks performs no outbound request at all.** Destinations are
+validated at registration *and again before every attempt*, because validating once is defeated by
+DNS rebinding. See [delivery](docs/concepts/delivery.md).
+
+Two export traces of what docdoc already logs. The image does not include the exporter by default,
+so build it with the `otel` extra added:
+
+```sh
+DOCDOC_EXTRAS=api,postgres,s3,google,azure,gcv,ocr,pdf,otel   # read by `up --build`
+DOCDOC_OTLP_ENDPOINT=http://collector:4318/v1/traces
+DOCDOC_OTLP_HEADERS='authorization=Bearer …'
+```
+
+One configures routing, and it is unset by default; with no policy there is no `routing` block on a
+run at all:
+
+```sh
+DOCDOC_ROUTING_POLICY=/secrets/routing.json
+```
+
+A routing decision reads grounding status and score, validation severity and verdict, and schema
+requiredness. It does **not** read `model_confidence`. See [routing](docs/concepts/routing.md).
+
+Two bound the worker's unrequested work, and one names who owns content written before tenants
+existed:
+
+```sh
+DOCDOC_MAINTENANCE_INTERVAL_SECONDS=60     # how often a tick runs
+DOCDOC_MAINTENANCE_BUDGET_MS=5000          # how long one may take
+DOCDOC_DEFAULT_TENANT=acme                 # must match in the API, every worker, and migrate
+```
+
+`docdoc migrate` records `DOCDOC_DEFAULT_TENANT` and refuses to change it afterwards: moving it once
+content exists would leave that content at a path nothing looks at.
+
+Five more exist and are rarely worth touching:
+
+```sh
+DOCDOC_ECHO_FIXTURES=/fixtures      # canned answers for the offline `echo` adapter
+DOCDOC_MATCH_VIEW_CACHE=8           # folded views held in memory; LRU, default 8
+DOCDOC_MAX_REQUEST_BYTES=33554432   # HTTP request body cap, applied while reading
+DOCDOC_MAX_DOCUMENT_BYTES=52428800  # largest document accepted, before any parse
+DOCDOC_MAX_PAGES=1000               # page-count limit, checked as soon as it is known
+```
+
+The echo adapter is **never** selected automatically. The compose stack names it, which is an
+explicit local choice. No configuration that merely fails to name a usable adapter can land on it,
+because auto-selecting a fixture adapter would turn a missing credential into a stream of
+confident, fabricated extractions.
+
+The worker also accepts the settings that change what it does as flags of the same meaning
+(`docdoc --help`). An explicit flag beats the environment, which beats the default.
+
+## API routes
+
+All under `/v1`. Documents and results:
 
 ```text
 POST /v1/documents                        → the blob identity
 GET  /v1/documents/{blob_id}              → its size and media type
-POST /v1/documents/{blob_id}/extract      → the job identity, and the result
+POST /v1/documents/{blob_id}/extract      → the job identity, and the result, inside the request
 POST /v1/extract                          → the result, storing nothing
 GET  /v1/jobs/{job_id}                    → succeeded | unavailable | unknown
 GET  /v1/jobs/{job_id}/result             → the stored result
-POST /v1/ocr                              → 202 and a run_id; OCR happens on a worker
-GET  /v1/runs/{run_id}/result             → that OCR run's Document, once it has succeeded
+GET  /v1/schemas                          → the schemas this deployment has
 GET  /v1/parsers                          → the parsers this deployment has configured
 ```
 
-A result fetched over HTTP and the same run performed in-process agree on every value, verdict,
-location, and identity — asserted by a contract test that runs both and compares.
-
-`POST /v1/ocr` is the ingest layer's own output with no schema and no extraction on top — the body
-is the document, `?parser=<id>` names a configured parser instead of leaving selection to capability
-matching, and `?language=<code>` becomes a parse option. `GET /v1/parsers` lists them, each with its
-capabilities, media types, and (for a parser with a health probe) whether it currently answers —
-never a URL or a header (ADR-0021 §3).
-
-**OCR is queued** (ADR-0022), so it needs the run database and a store. `POST /v1/ocr` checks the
-body, the parser, and the language, stores the document, and answers `202` with a run before any
-OCR happens; a worker started with `--kind ocr` (the composition's `ocr-worker`) performs it. Poll
-`GET /v1/runs/{run_id}` or pass `?callback_id=`, then read the `Document` from
-`GET /v1/runs/{run_id}/result`. The queue is bounded twice, and both refusals carry `Retry-After`:
-
-```bash
-export DOCDOC_OCR_QUEUE_PER_TENANT=100   # one consumer's OCR runs queued or running → else 429
-export DOCDOC_OCR_QUEUE_TOTAL=500        # every consumer's together → else 503, "overloaded"
-export DOCDOC_OCR_RETENTION_HOURS=24     # how long a result is kept after its run finishes
-```
-
-All three are on with no configuration. A consumer's own cap can be set with `ocr_queue` in the
-limits file. OCR results are swept even when `DOCDOC_RUN_RETENTION_DAYS` is unset; extraction runs
-are not.
-
-Three more accept work without holding the connection open, and need a database:
+Runs accept work without holding the connection open:
 
 ```text
 POST   /v1/documents/{blob_id}/runs       → 202 and a run_id, before any stage runs
+POST   /v1/ocr                            → 202 and a run_id; OCR happens on a worker
+GET    /v1/runs                           → this tenant's runs, newest first
 GET    /v1/runs/{run_id}                  → queued | running | succeeded | failed | cancelled
+GET    /v1/runs/{run_id}/result           → an OCR run's Document, once it has succeeded
 DELETE /v1/runs/{run_id}                  → requests cancellation
 ```
 
-A `run_id` is not a `job_id`. A run is an *attempt* and exists the moment the request is accepted; a
-`processing_id` is a *result* and is the terminal artifact's identity, so it cannot exist until the
-stages feeding it have run. Submitting one document twice gives you two run ids and one processing
-id, and that is the answer rather than a collision. A succeeded run names its `processing_id`, and
-the unchanged job routes serve the result — see [runs](docs/concepts/runs.md).
+A `run_id` is not a `job_id`. A run is an *attempt* and exists the moment the request is accepted;
+a `processing_id` is a *result*, the terminal artifact's identity, and the job routes serve an
+extraction run's result by it. Submitting one document twice
+gives you two run ids and one processing id. See [runs](docs/concepts/runs.md), and
+[`examples/submit_async_run.py`](examples/submit_async_run.py) for a client.
 
-Milestone 10 adds eight, and every one of them is inert until configured:
+Callbacks, corrections and quality:
 
 ```text
 POST   /v1/callbacks                      → register a destination; 422 if the policy refuses it
 DELETE /v1/callbacks/{callback_id}        → 204, idempotent
 GET    /v1/runs/{run_id}/delivery         → what became of the notification
-POST   /v1/runs/{run_id}/corrections      → record a reviewer's statement; changes nothing
+POST   /v1/runs/{run_id}/corrections      → record a check: a value is correct, or wrong
 GET    /v1/runs/{run_id}/corrections      → this tenant's, and nobody else's
+GET    /v1/answers                        → the checked documents and fields, per schema
+POST   /v1/evaluations?schema=            → 202; re-run the checked documents, score them
+GET    /v1/evaluations                    → this tenant's reports, newest first
+GET    /v1/evaluations/{evaluation_id}    → one report, with its per-field table
+```
+
+[`examples/receive_webhook.py`](examples/receive_webhook.py) verifies a delivery's signature. See
+[quality](docs/concepts/quality.md) for what a report holds.
+
+Administration, which requires the `admin` scope. A caller without it gets `404` rather than `403`:
+
+```text
 POST   /v1/admin/credentials              → issue; the only time a key is readable
 GET    /v1/admin/credentials              → what has been issued; no key, no digest
 DELETE /v1/admin/credentials/{id}         → revoke, on every process, with no restart
@@ -252,336 +298,107 @@ DELETE /v1/admin/tenants/{tenant_id}      → erase a customer's data
 DELETE /v1/admin/documents/{blob_id}      → erase one document and the runs over it
 ```
 
-The five under `/v1/admin` require the `admin` scope, and a caller without it gets `404` rather than
-`403`: an ordinary tenant learning that an administrative surface exists at a URL is a disclosure
-with no upside.
-
-Four more measure quality on a tenant's own documents (a check is the correction route above, and a
-correction can now say a value is correct; see [quality](docs/concepts/quality.md)):
-
-```text
-GET  /v1/answers                          → the checked documents and fields, per schema
-POST /v1/evaluations?schema=              → 202; re-run the checked documents, score them
-GET  /v1/evaluations                      → this tenant's reports, newest first
-GET  /v1/evaluations/{evaluation_id}      → one report, with its per-field table
-```
-
-`POST /v1/evaluations` answers `409 no_answers` with nothing checked, `409 evaluation_in_progress`
-while another for that schema is unfinished, and `429` when a run limit is reached. Answers never
-expire.
-
-**There is no route that assigns a correction to a reviewer, no queue of work, no review state, and
-no `PATCH` on a result.** Principle IX permits the correction model and forbids the review platform,
-and a contract test asserts each of those absences by name.
-
-`GET /v1/runs/{run_id}` gains two outcomes: `410` when the run was this tenant's and has been
-erased, carrying when and under which policy, and `404` — byte-identical to an identifier that never
-existed — for everybody else. `POST /v1/documents/{blob_id}/runs` gains `429` when a configured
-limit is reached, naming which and carrying `Retry-After`.
-
-Two more are outside `/v1` and outside authentication, served by the API and every worker alike:
+Two are outside `/v1` and outside authentication, served by the API and every worker alike:
 
 ```text
 GET /healthz    → 200, always; touches no database, no store, no provider
 GET /readyz     → 200, or 503 naming the dependency it cannot reach
 ```
 
-Readiness is strict: a process that cannot reach the run-state database reports not ready even
-though the synchronous routes would still work. That withdraws working capacity on purpose, because
-no orchestrator's probe can express "route half the traffic here".
+The console speaks only `/v1/console/*`, which answers only to a console session. See
+[the console](docs/concepts/console.md).
+
+**There is no route that assigns a correction to a reviewer, no queue of work, no review state, and
+no `PATCH` on a result.** Principle IX permits the correction model and forbids the review platform,
+and a contract test asserts each of those absences by name.
 
 **Authentication exists, and it is off by default.** Point `DOCDOC_API_KEYS_FILE` at a key file and
-every route except the two health routes requires `Authorization: Bearer <key>`; each key resolves
-to exactly one tenant, and a tenant sees only its own blobs, runs, and results. The file holds
-SHA-256 hashes rather than keys, so a leak of it is not a set of working credentials:
+every `/v1` route requires `Authorization: Bearer <key>`; each key resolves to exactly one tenant,
+and a tenant sees only its own blobs, runs and results. The file holds SHA-256 hashes rather than
+keys, so a leak of it is not a set of working credentials:
 
 ```json
 {"keys": [{"sha256": "…", "tenant_id": "acme"}]}
 ```
 
 **Revoking a key from the file still requires restarting the process.** The file is read once, at
-startup. Delete a compromised key from it and nothing happens — no error, no warning, no change in
-behaviour — and the key keeps working until every process holding the old mapping has restarted.
-Reloading on change was left out deliberately: it means either a filesystem watch or a stat on every
-request.
+startup. Delete a compromised key from it and the key keeps working until every process holding the
+old mapping has restarted. For anything you may need to revoke, issue credentials instead:
+`docdoc credential issue --tenant acme` stores one in the run database and prints it once, and
+`docdoc credential revoke <id>` stops it working on every process within
+`DOCDOC_RUN_CREDENTIAL_TTL_SECONDS`, with no restart.
 
-**Milestone 10 added the other way, and it is the one to use for anything you may need to revoke.**
-`docdoc credential issue --tenant acme` stores a credential in the run database and prints it once;
-`docdoc credential revoke <id>` stops it working on **every** process within
-`DOCDOC_RUN_CREDENTIAL_TTL_SECONDS`, with no restart. The two sources coexist — the file is consulted
-first — so a deployment can move across one key at a time and nothing stops working because a table
-appeared. Issuance and revocation are also available over HTTP to a credential carrying the `admin`
-scope, and the first such credential is created by `docdoc credential issue --admin`, on a command
-line, because a route that could mint one would need no credential to call.
+> **A deployment that has not enabled authentication is exposed.** With no key file and no issued
+> credential there is no authentication on any `/v1` route, one implicit tenant owns everything,
+> and anyone who can reach the service can spend your model provider budget. Put it behind your own
+> gateway, or turn this on. See [ADR-0014](docs/adr/0014-tenant-scoping-and-store-namespacing.md)
+> and [`examples/serve_api.md`](examples/serve_api.md).
 
-> **A deployment that has not enabled it is exactly as exposed as it was before.** The default is the
-> *compatible* one, not the safe one: it exists so that upgrading breaks nothing, and it means
-> security is opt-in. With no key file configured there is no authentication on any route, one
-> implicit tenant owns everything, and anyone who can reach the service can spend your model provider
-> budget. Put it behind your own gateway, or turn this on. See
-> [ADR-0014](docs/adr/0014-tenant-scoping-and-store-namespacing.md).
->
-> **Milestone 10 changed one sentence of this and not the rest.** Credentials can now be issued and
-> revoked at runtime, and a revocation reaches every process within
-> `DOCDOC_RUN_CREDENTIAL_TTL_SECONDS` — the defect above is closed for table-issued keys. Everything
-> else in this warning is unchanged: authentication is still off by default, and a deployment that
-> has enabled none of it is exactly as exposed as Milestone 9 left it.
->
-> The grounding viewer used to carry a third sentence here — that it **did not work under
-> authentication at all**, because a browser cannot hold a bearer token it was never given. That was
-> true for its whole life and is why it is gone
-> ([ADR-0020](docs/adr/0020-retire-the-grounding-viewer.md)). The operations console solves the same
-> problem properly: its shell loads unauthenticated, and you paste a key into it.
+## Operating
 
-### Installing
+The image carries one command, `docdoc`, for the people who run the deployment. Run it inside a
+container, for example `docker compose -f packaging/docker/compose.yml exec api docdoc …`:
 
-```bash
-pip install docdoc          # every deterministic layer and the CLI, no provider SDK
-pip install docdoc[pdf]     # native PDF text path
-pip install docdoc[azure]   # geometry-capable cloud path, for scans and images
-pip install docdoc[gcv]     # image OCR for JPEG and PNG — no tables, no PDFs
-pip install docdoc[google]  # the LLM adapter for extraction
-pip install docdoc[api]     # the HTTP interface
-```
+| Command | What it does |
+|---|---|
+| `docdoc migrate` | applies the run database's schema; records the default tenant |
+| `docdoc worker --kind extraction\|ocr` | claims and runs queued runs; the compose stack starts one of each |
+| `docdoc sweep` | removes expired runs and what only they named |
+| `docdoc credential issue\|list\|revoke` | manages API credentials; `issue --admin` makes the first admin key |
+| `docdoc console-user add\|passwd\|disable\|list` | manages console accounts |
+| `docdoc erase` | erases a tenant's data, or one document's |
+| `docdoc store clear` | empties the artifact store, or one stage of it |
 
-### Configuration
+Each takes `--help`. The guides: [rotating a credential](examples/rotate_credential.md),
+[erasing a tenant](examples/erase_tenant.md), and [serving the API](examples/serve_api.md).
 
-Which schemas exist, which provider answers, and which model it uses are deployment decisions, so none
-of them appears in your code:
-
-```sh
-export DOCDOC_SCHEMA_PATHS=/etc/docdoc/schemas   # where default_registry() looks; os.pathsep-separated
-export DOCDOC_MODEL_ADAPTERS=gemini              # adapter preference order, comma-separated
-export DOCDOC_GEMINI_MODEL=gemini-3.5-flash      # which model answers
-export GEMINI_API_KEY=...                        # or GOOGLE_API_KEY
-export DOCDOC_STORE_ROOT=/var/lib/docdoc         # where artifacts and blobs land — no default
-export DOCDOC_STORE_URL=s3://bucket/prefix       # …or an object store, which is what lets two
-                                                 #   workers reuse each other's artifacts
-export DOCDOC_RUN_DATABASE_URL=postgresql://…    # run state, for asynchronous runs — no default
-```
-
-`DOCDOC_RUN_DATABASE_URL` has no default for the same reason `DOCDOC_STORE_ROOT` has none, and the
-library and the command line need one in no configuration.
-
-**Milestone 9's "the database is a dependency of asynchrony only" ends here.** That was true when the
-only thing in it was run state; runtime credential revocation, per-tenant limits, webhook delivery,
-and corrections each need it too. A deployment that has enabled none of them still needs no database
-at all — the synchronous routes are untouched — but "asynchronous runs" is no longer the whole list
-of what one buys. Apply the schema
-explicitly with `docdoc migrate`; nothing applies it on startup, because several workers booting at
-once would be several processes altering one table.
-
-`DOCDOC_STORE_URL` is the object-store form of `DOCDOC_STORE_ROOT`, and it wins when both are set —
-a deployment that named both meant the more specific one. It takes
-`s3://bucket[/prefix][?endpoint_url=…]`; the query parameter is what MinIO, R2, and every other
-S3-compatible store needs and AWS does not, and keeping it in the URL makes "where the store is" one
-value rather than three that can disagree. **Run more than one worker and you need this**, or a
-shared filesystem: with a private root per worker every lookup misses, every run is correct, and you
-pay for every parse twice with nothing anywhere reporting a problem.
-
-Three configure asynchronous runs, and only the worker reads the last two:
-
-```sh
-export DOCDOC_API_KEYS_FILE=/etc/docdoc/keys.json # turns authentication on; absent means off
-export DOCDOC_RUN_LEASE_SECONDS=90                # how long a worker's claim holds
-export DOCDOC_RUN_MAX_ATTEMPTS=3                  # claims before a run is abandoned
-```
-
-Two configure retention, and **both are unset by default, which means nothing is ever removed**:
-
-```sh
-export DOCDOC_RUN_RETENTION_DAYS=30               # how long a run is kept; unset means kept forever
-export DOCDOC_RUN_SWEEP_BATCH=500                 # runs removed per pass
-```
-
-One configures how quickly a revoked credential stops working:
-
-```sh
-export DOCDOC_RUN_CREDENTIAL_TTL_SECONDS=30        # how long a resolution is cached
-```
-
-**This is a number and not "immediately", because "immediately" is not something you can test.** Each
-process that authenticates caches what a credential resolved to for this long, so revoking one takes
-effect everywhere within one lifetime — with no restart, no file edit, and no signal. Issuing a
-credential takes effect at once: a hit is cached and a miss is not.
-
-Until Milestone 10 there was no revocation at all. A key removed from `DOCDOC_API_KEYS_FILE` keeps
-working until the process restarts, and that file still behaves that way — it is read once, at
-startup, and is consulted before the database-backed store.
-
-A run's `expires_at` has been recorded since Milestone 9 and nothing read it. Setting the first of
-these is what starts reading it — and a sweep removes the run **and the artifacts and blobs no
-surviving run of that tenant still names**. Content written outside a run is never touched: an
-extraction from the command line creates no run, so nothing a sweep considers can reach it.
-
-The worker sweeps between claims, so a deployment running one needs to arrange nothing. A deployment
-running **no** worker sweeps nothing, and `docdoc sweep` is how it removes anything at all.
-
-Four configure per-tenant limits, and all four are absent by default, which means nothing is counted
-and nothing is refused:
-
-```sh
-export DOCDOC_LIMIT_SUBMISSIONS_PER_MINUTE=60     # fixed window
-export DOCDOC_LIMIT_CONCURRENT_RUNS=25            # counted from the runs table, never stored
-export DOCDOC_LIMIT_RUNS_PER_PERIOD=10000         # fixed window, 30 days
-export DOCDOC_LIMIT_TOKENS_PER_PERIOD=5000000     # the budget refuses the *next* submission
-export DOCDOC_LIMITS_FILE=/etc/docdoc/limits.json # per-tenant overrides, and priority ceilings
-export DOCDOC_PRIORITY_CEILING=ordinary           # the highest priority a client may be granted
-```
-
-A refusal is `429`, it names which limit and when to come back, and it creates no run — see
-[limits](docs/concepts/limits.md).
-
-Six configure webhook delivery, and the first is what turns it on at all:
-
-```sh
-export DOCDOC_DELIVERY_SECRETS_FILE=/etc/docdoc/webhook-secrets.json
-export DOCDOC_DELIVERY_MAX_ATTEMPTS=6             # then the delivery comes to rest at `failed`
-export DOCDOC_DELIVERY_TIMEOUT_SECONDS=10
-export DOCDOC_DELIVERY_BACKOFF_SECONDS=30         # doubled per attempt, capped at a day
-export DOCDOC_MAINTENANCE_DELIVERY_BATCH=32       # deliveries attempted per tick
-export DOCDOC_DELIVERY_ALLOW_PRIVATE=false        # permits http and private addresses; a guard
-```
-
-**A deployment that registers no callbacks performs no outbound request at all** — it opens no
-socket to discover there was nothing to send. Destinations are resolved and validated at
-registration *and again before every attempt*, because validating once is defeated by DNS rebinding;
-redirects are not followed. See [delivery](docs/concepts/delivery.md).
-
-Two export what docdoc already logs, and unset means nothing is exported and **no telemetry
-dependency is required**:
-
-```sh
-pip install 'docdoc[otel]'
-export DOCDOC_OTLP_ENDPOINT=http://collector:4318/v1/traces
-export DOCDOC_OTLP_HEADERS='authorization=Bearer …'
-```
-
-The bridge is installed only when docdoc's observer slot is empty, so an exporter cannot take it from
-whatever you had there. No collector is added to the composition; if you run one, it is yours.
-
-One configures routing, and it is unset by default — with no policy there is no
-`routing` block on a run at all:
-
-```sh
-export DOCDOC_ROUTING_POLICY=/etc/docdoc/routing.json
-```
-
-A routing decision reads grounding status and score, validation severity and verdict, and schema
-requiredness. It does **not** read `model_confidence`, and a test varies that field alone and
-requires the decision not to move. See [routing](docs/concepts/routing.md).
-
-Two bound the worker's unrequested work:
-
-```sh
-export DOCDOC_MAINTENANCE_INTERVAL_SECONDS=60     # how often a tick runs
-export DOCDOC_MAINTENANCE_BUDGET_MS=5000          # how long one may take
-```
-
-One more matters only when you enable authentication over a store that already has content in it:
-
-```sh
-export DOCDOC_DEFAULT_TENANT=acme         # who owns everything written before tenants existed
-```
-
-Content written before Milestone 9 sits at `<root>/blobs/…` with no tenant segment, and it stays
-there — nothing is copied or moved. Every other tenant lives under `<root>/t/<tenant_id>/`. This
-names the one whose namespace *is* the root, and it must be the same value in the API, in every
-worker, and in `docdoc migrate`, because it describes the store's layout rather than one
-invocation's behaviour. `docdoc migrate` records it and refuses to change it afterwards: moving it
-once content exists would leave that content at a path nothing looks at, and the symptom is not an
-error but correct answers plus a silent re-payment for every parse.
-
-Five more exist and are rarely worth touching:
-
-```sh
-export DOCDOC_ECHO_FIXTURES=./fixtures    # canned answers for the offline `echo` adapter
-export DOCDOC_MATCH_VIEW_CACHE=8          # folded views held in memory; LRU, default 8
-export DOCDOC_MAX_REQUEST_BYTES=33554432  # HTTP request body cap, applied while reading
-export DOCDOC_MAX_DOCUMENT_BYTES=52428800 # largest document accepted, before any parse
-export DOCDOC_MAX_PAGES=1000              # page-count limit, checked as soon as it is known
-```
-
-`DOCDOC_ECHO_FIXTURES` is the one to know about: with `DOCDOC_MODEL_ADAPTERS=echo` it makes the whole
-pipeline runnable offline against committed answers. The echo adapter is **never** selected
-automatically — no configuration that merely fails to name a usable adapter can land on it — because
-auto-selecting a fixture adapter would turn a missing credential into a stream of confident,
-fabricated extractions.
-
-Every setting that can change what a command does gains a flag of the same meaning — `--schema-path`,
-`--adapter`, `--echo-fixtures`, `--store`, `--store-url`, `--max-document-bytes`, `--max-pages` — so
-there is no second vocabulary to learn. An explicit flag beats the environment, which beats the
-default, per setting. Three live only on the subcommands that can use them:
-`--run-database-url` on `docdoc migrate` and `docdoc worker`, and `--lease-seconds` and
-`--max-attempts` on `docdoc worker` alone. A flag that did nothing to the command carrying it would
-be the second vocabulary arriving from the other direction.
-
-Four have no flag on purpose: `DOCDOC_MAX_REQUEST_BYTES` caps an HTTP request body and the command
-line reads none; `DOCDOC_MATCH_VIEW_CACHE` bounds a per-process cache that a single run fills with
-one entry; `DOCDOC_API_KEYS_FILE` names a credential file and enables an HTTP concern the command
-line and the library do not have; and `DOCDOC_GEMINI_MODEL` and the credentials are per-provider — a
-credential especially, since `argv` is readable by every process on the host.
-
-`DOCDOC_STORE_ROOT` has **no default**, and that is deliberate. Artifacts hold extracted values and
-blobs hold whole source documents, so where they accumulate is your decision rather than ours. With
-none set, every run recomputes every stage and produces identical results; with one set, changing a
-prompt reuses the parse instead of paying the cloud parser again.
-
-Every one has a sensible default and every one can be overridden by an explicit argument — configuration
-is the default, not a cage. `DOCDOC_SCHEMA_PATHS` is the exception worth knowing: with neither it nor an
-explicit path, the registry is **empty**, because docdoc ships no schema of its own. A schema is your
-data, not ours.
-
-> **Licence note.** `docdoc[pdf]` installs [pypdfium2](https://github.com/pypdfium2-team/pypdfium2)
-> (Apache-2.0 / BSD-3) over PDFium (BSD-3), so the native PDF path carries no obligation beyond
-> docdoc's own Apache-2.0, and the default Docker image includes it.
-> See [ADR-0025](docs/adr/0025-native-pdf-parsing-on-pdfium.md).
-
-## Three principles that shape everything
-
-**1. Source location is a first-class concern.** A document is never reduced to a `str`. The
-canonical representation preserves pages, tokens, character spans, normalized geometry, and
-ingestion provenance, so any text range resolves back to a page and a bounding box.
-
-**2. Grounding is computed, never self-certified.** An extracted value is not a string — it
-carries its source spans, page, geometry, and grounding status. An LLM may propose a quote;
-docdoc alone decides whether that quote resolves to a real span. Ungrounded values stay
-distinguishable from grounded ones at every layer.
-
-**3. The MVP stays small.** No Kafka, no Temporal, no Kubernetes, no vector database, no workflow
-engine. The core library is usable with no database, no object store, and no running service.
-Scale comes later through stable boundaries, not premature infrastructure. The execution model
-may change; the core contracts must not.
-
-These are three of twenty in the [project constitution](docs/constitution.md), which
-governs every specification, plan, and code change in this repository.
+The operations console, at `/console`, is the browser face of the same work: list and inspect runs,
+submit a document, check extracted fields and measure quality, issue and revoke credentials, and
+erase a tenant or a document. You sign in with an account made by `docdoc console-user add`; the
+session is a server-side cookie that ends after 15 minutes idle. **It is not a review platform**:
+there is no reviewer assignment, review queue, workload, review state or disposition, and a build
+check greps for those words ([ADR-0019](docs/adr/0019-operations-console-boundary.md)). See
+[the console](docs/concepts/console.md).
 
 ## Architecture
 
-Dependencies flow strictly downward, and the rule is machine-checked in CI:
+**Three principles shape everything.**
+
+1. **Source location is a first-class concern.** A document is never reduced to a `str`. The
+   canonical representation preserves pages, tokens, character spans, normalized geometry, and
+   ingestion provenance, so any text range resolves back to a page and a bounding box.
+2. **Grounding is computed, never self-certified.** An LLM may propose a quote; docdoc alone
+   decides whether that quote resolves to a real span. Ungrounded values stay distinguishable from
+   grounded ones at every layer.
+3. **The MVP stays small.** No Kafka, no Temporal, no Kubernetes, no vector database, no workflow
+   engine. Scale comes through stable boundaries, not premature infrastructure.
+
+These are three of twenty in the [project constitution](docs/constitution.md), which governs every
+specification, plan, and code change in this repository.
+
+**Four process types**, from one image: the API, an extraction worker, an OCR worker, and
+`docdoc migrate`, with Postgres for run state and an S3-compatible store for blobs and artifacts.
+Retention, delivery and counter expiry happen in the worker's loop between claims, not in a
+scheduler.
+
+**A run is four stages**, each with its own content-addressed artifact
+([ADR-0003](docs/adr/0003-content-addressed-artifact-chain.md)): parse, extract, ground, validate.
+A schema is data, not code; adding a document type is adding two files under `schemas/`.
+Extraction returns the model's byte-faithful `claimed_text`; grounding, deterministic and offline,
+resolves it to a span, a page and a box; validation checks the values against the schema's rules and
+returns one of three verdicts. Changing a prompt reuses the parse instead of paying the parser again.
+
+Dependencies flow strictly downward, and the rule is machine-checked in CI by `import-linter`:
 
 ```text
 API, CLI → Recording → Evaluation → Pipeline → Validation → Grounding
          → Extraction → Ingest → Artifacts → Kernel
 ```
 
-The chain above is the one `pyproject.toml` enforces, which is the only one worth writing down. Two
-positions are not the ones a reader would guess, and both are deliberate. **`Artifacts` sits directly
-above the kernel**, because it stores whole result models without importing one — the caller names
-the model — so it depends on `pydantic` and two kernel helpers and nothing else. **`Pipeline` sits
-directly above `Validation`**, the highest stage it drives, which yields `Recording → Pipeline`: the
-recorder *calls* the pipeline rather than holding a second copy of the stage order. **`API` and `CLI`
-are siblings, not a stack** — neither may import the other, which an ordered position cannot express,
-so an `independence` contract states it instead.
-
-**`Recording` sits above `Evaluation` deliberately**: the recorder
-produces a prediction set and the scorer consumes one, so the data flows one way and the layers do
-too — which is what makes `evaluation → recording` a build failure rather than a sentence in a
-specification. Producing a prediction set needs a provider; scoring one must not.
-
-The **kernel** is the bottom layer and depends on nothing above it. Its only runtime dependency is
-`pydantic`; the base install adds `rapidfuzz` for grounding's approximate matching (ADR-0005). It performs no file, network, clock, or random access, so identical inputs always
-produce identical outputs — enforced by an AST scan and a runtime audit hook, not by convention.
+`API` and `CLI` are siblings, not a stack: neither may import the other. Provider SDKs appear only
+inside adapter directories. The **kernel** is the bottom layer; its only runtime dependency is
+`pydantic`, and it performs no file, network, clock, or random access, so identical inputs always
+produce identical outputs. That is enforced by an AST scan and a runtime audit hook.
 
 Identity is two-level ([ADR-0002](docs/adr/0002-blob-and-document-identity.md)):
 
@@ -590,168 +407,36 @@ Identity is two-level ([ADR-0002](docs/adr/0002-blob-and-document-identity.md)):
 | `blob_id` | the original bytes | the **source file** |
 | `document_id` | blob + parser id + version + options | **one specific parse** of it |
 
-Spans and geometry anchor to `document_id`. Two parsers over the same bytes share a `blob_id` and
-get different `document_id`s, so one parse's positions can never be silently applied to another.
-
-## Installation
-
-```bash
-pip install docdoc          # kernel only — no provider SDKs, no OCR engine
-```
-
-Provider integrations ship as optional extras and are never pulled in unless you ask for them.
+Spans and geometry anchor to `document_id`, so one parse's positions can never be silently applied
+to another.
 
 ## Development
 
 ```bash
-uv sync --all-extras
-uv run pytest tests/unit tests/property      # fast
-HYPOTHESIS_PROFILE=thorough uv run pytest    # what CI runs
-uv run mypy src/docdoc/kernel                # strict
-uv run ruff check . && uv run lint-imports   # lint + layer boundaries
+make install    # uv sync --all-extras, and the console's npm deps
+make test       # the Python suite
+make lint       # ruff, mypy strict, layer boundaries
+make ui         # the console: typecheck, tests, build
+make dev        # API, OCR worker and the console's dev server against a local Postgres
 ```
 
-The kernel's correctness rests on one property, verified across thousands of generated cases:
-
-```text
-locate(span) == merge(partition(document)).locate(span)
-```
-
-Cutting a document apart and reassembling it must not change where anything came from. No
-higher-layer work merges while that property is failing or absent.
-
-## Roadmap
-
-| Milestone | Scope | Status |
-|---|---|---|
-| 1 | Kernel: Document IR, `locate` / `find` / `slice` / `merge`, identity | **Done** |
-| 2 | Parsers: native PDF text path, one geometry-capable cloud provider | **Done** |
-| 3 | Schema-driven extraction, one LLM adapter | **Done** |
-| 4 | Deterministic grounding: exact → fuzzy → ungrounded | **Done** |
-| 5 | Validation: schema, field, and cross-field rules | **Done** |
-| 6 | Evaluation: golden dataset, field accuracy, grounding rate | **Done** |
-| 7 | Pipeline, artifact store, CLI, and HTTP API | **Done** |
-| 8 | Read-only grounding viewer, and the two endpoints that reach it | **Done**; viewer retired by [ADR-0020](docs/adr/0020-retire-the-grounding-viewer.md), its endpoints unchanged |
-| 9 | Asynchronous runs, shared object storage, health routes, tenant scoping | **Done** |
-| 10 | Retention and erasure, credential lifecycle, limits, webhook delivery, tracing, routing and corrections | **Done** |
-| 11 | The operations console: run listing, credentials, erasure, delivery — and the one read that makes it possible | **Done**; the only browser surface since [ADR-0020](docs/adr/0020-retire-the-grounding-viewer.md) |
-
-Milestone 8 added no guarantee — no stage, no provider, no change to any value docdoc produces. What
-it changed was who could see the guarantees the first seven built. Its browser surface is retired
-(ADR-0020) and the two endpoints it introduced, `POST /v1/extract` and `GET /v1/schemas`, are
-unchanged and in use.
-
-Milestone 9 adds none either, and that is the claim it is measured on: a result obtained through a
-worker and the same result obtained synchronously agree on every value, verdict, location, and
-identity, and the golden-set metrics do not move by a digit. What it buys is that a 400-page scan no
-longer holds an HTTP connection for the several minutes it takes.
-
-Milestone 10 adds none either, and it is measured the same way: golden-set metrics are bit-identical
-with every one of its capabilities enabled and with all of them disabled. It touched no file under
-`kernel/`, `ingest/`, `extraction/`, `grounding/`, or `validation/`, and a test reads the diff and
-asserts that. What it buys is that a deployment can now delete what it holds, revoke a key without a
-restart, refuse a customer that is consuming everything, tell a client when a run finishes, export
-what it already logs, and take a correction back — none of which moves a value.
-
-Milestone 11 adds no guarantee either, and its claim is the narrowest yet: **one new route, and it is
-a read.** Everything the operations console writes — issuing a credential, revoking one, erasing a
-tenant or a document — reaches a route Milestone 10 already ships and already tested. The addition is
-`GET /v1/runs`, because `GET /v1/runs/{run_id}` answers only for an identifier a caller already holds,
-and a surface that cannot enumerate cannot open. Zero migrations, zero new dependencies, zero new
-processes, and a test counts the routes rather than trusting this paragraph.
-
-It also moves no process boundary. Four process types and four containers, exactly as Milestone 9
-left them: retention, delivery, and counter expiry happen in the worker's loop between claims rather
-than in a scheduler somebody has to deploy, monitor, and have fail silently.
-
-## No browser surface for grounding
-
-There was one — a read-only viewer at `/ui` that drew each extracted value's rectangle on the page it
-came from. It is gone ([ADR-0020](docs/adr/0020-retire-the-grounding-viewer.md)), because it could
-not work on a deployment with authentication enabled: `/ui` required a credential like every other
-route, and a browser's top-level navigation cannot carry one. It worked on exactly one kind of
-deployment — the unauthenticated one — and cost two of everything in `ui/` to keep.
-
-Grounding is still fully reachable, and unchanged:
-
-```bash
-docdoc run invoice.pdf --schema invoice@1     # the CLI, with boxes in the result
-```
-
-**`POST /v1/extract` runs a document with no store configured** and writes nothing, which is the
-route the viewer used and is untouched (ADR-0012). See
-[`examples/view_grounding.md`](examples/view_grounding.md) for reading the boxes it returns.
-
-## The operations console
-
-```bash
-pip install 'docdoc[api,ui]'
-uvicorn --factory docdoc.api.app:create_app --port 8000    # then open /console/
-```
-
-For the person who **runs the deployment**: list and inspect runs, read a run's routing outcome and
-delivery record, issue and revoke credentials, and erase a tenant or a document. It is the browser
-face of commands the CLI already has — `docdoc credential`, `docdoc erase` — for the times you are not
-at a terminal.
-
-**It is not a review platform, and that boundary is constitutional rather than editorial.**
-Constitution v1.9.0 permits a console and keeps the deferred "full review UI" deferred; the difference
-is who the surface is *about*. There is no reviewer assignment, no review queue, no workload, no review
-state, and no disposition — five nouns a build check greps for, because a principle is argued at review
-time and an identifier is not ([ADR-0019](docs/adr/0019-operations-console-boundary.md)). It holds no
-per-operator state of any kind: no saved filters, no preferences, nothing.
-
-Five things worth knowing before you run it anywhere real:
-
-- **You paste your API key into the page, and a reload asks for it again.** There is no login route,
-  no session, and no cookie — deliberately. A session mechanism would be four new security surfaces
-  written by this project to guard a credential your deployment already issues and already rotates.
-  The cost is stated rather than softened: reload, and you type the key again.
-- **An idle console discards the key after 15 minutes** and asks for another. It erases tenants; the
-  tab you left open on an unlocked laptop is the reason this is not configurable away.
-- **`/console` serves its shell without a credential, and this is the one place docdoc does that.**
-  A browser's top-level navigation cannot carry a bearer token, so a gated shell would never load on
-  an authenticated deployment — which is every deployment the console is for. What is open is HTML,
-  CSS, and JavaScript: no run, no tenant identifier, no credential, and no document is reachable from
-  those bytes, the console makes zero requests before you enter a key, and every `/v1` call it then
-  makes is authenticated like any other client's.
-- **For single sign-on, put an authenticating proxy in front of it.** That is your infrastructure;
-  docdoc ships no part of one.
-- **No accessibility conformance level is claimed.** What is guaranteed instead:
-  every control carries a name and is operable by keyboard, and no state is conveyed by colour alone.
-
-It shows **no part of a result**. A succeeded run links to the result representation the API already
-serves; the console renders no value, no claimed text, and no grounding, and derives no figure from
-any of them. One result representation, reachable one way.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the rules that are not negotiable.
 
 ## Documentation
 
 - [Constitution](docs/constitution.md) — the governing principles
-- [Architecture decisions](docs/adr/) — fourteen accepted ADRs, and no open constitutional decisions
-- [Document concepts](docs/concepts/document.md)
-- [Identity model](docs/concepts/identity.md)
-- [Kernel API contract](specs/001-kernel-document-ir/contracts/kernel-api.md)
-- [Ingest API contract](specs/002-ingest-parser-layer/contracts/ingest-api.md)
-- [How ingest works](docs/concepts/ingest.md) — the two paths and the text-layer decision
+- [Architecture decisions](docs/adr/) — the accepted ADRs
+- [Document concepts](docs/concepts/document.md) and the [identity model](docs/concepts/identity.md)
+- [How ingest works](docs/concepts/ingest.md) — the parsers, and the text-layer decision
 - [How extraction works](docs/concepts/extraction.md) — the two identities, and the stage boundary with grounding
-- [How grounding works](docs/concepts/grounding.md) — the three states, the match view, and why the two scores are not comparable
-- [How validation works](docs/concepts/validation.md) — the three verdicts, rules as data, and why docdoc has its own regex dialect
-- [How evaluation works](docs/concepts/evaluation.md) — the six outcomes, the denominators, the two tiers, and how to add a document to the golden set
-- [How the operations console works](docs/concepts/console.md) — the session that is not one, the five forbidden nouns, and what carries no automated test
-- [The pipeline](docs/concepts/pipeline.md) — the four stages, the reuse decision, what a cached parse still pays for, and why a job needs no queue
-- [Artifacts](docs/concepts/artifacts.md) — the chain, the two hashes, which misses are errors, and the one symptom of a missed version bump
-- [Runs](docs/concepts/runs.md) — the two identities, the lifecycle, why redelivery is mostly "resume", and the exact limits of cancellation
-- [Quality](docs/concepts/quality.md) — checking a tenant's own documents, answers that never expire, re-run reports, and what erasure leaves in them
-- [Grounding API contract](specs/004-deterministic-grounding/contracts/grounding-api.md)
-- [Validation API contract](specs/005-deterministic-validation/contracts/validation-api.md)
-- [Extraction API contract](specs/003-schema-driven-extraction/contracts/extraction-api.md)
-- [Pipeline and store API contract](specs/007-pipeline-api-cli/contracts/pipeline-api.md)
-- [CLI contract](specs/007-pipeline-api-cli/contracts/cli.md) — commands, output forms, exit codes
-- [HTTP API contract](specs/007-pipeline-api-cli/contracts/http-api.md) — endpoints, statuses, error shapes
-- [HTTP API additions](specs/008-grounding-viewer/contracts/http-api-additions.md) — the storeless run and the schema listing
-- [View-model contract](specs/008-grounding-viewer/contracts/view-model.md) — written for the retired viewer; the boundary it describes still governs `ui/src/console/model/`
-- [Run routes and authentication](specs/009-asynchronous-runs/contracts/runs-http-api.md) — the three run routes, the two health routes, and the exemption list
-- [The runs layer](specs/009-asynchronous-runs/contracts/runs-layer.md) — the queue protocol, the worker loop, store namespacing, and the transition events
+- [How grounding works](docs/concepts/grounding.md) — the three states, and the match view
+- [How validation works](docs/concepts/validation.md) — the three verdicts, and rules as data
+- [The pipeline](docs/concepts/pipeline.md) and [artifacts](docs/concepts/artifacts.md) — the stages, the chain, and reuse
+- [Runs](docs/concepts/runs.md) — the lifecycle, redelivery, and cancellation
+- [Quality](docs/concepts/quality.md) and [evaluation](docs/concepts/evaluation.md) — checks, reports, and the golden set
+- [The operations console](docs/concepts/console.md)
+- [Credentials](docs/concepts/credentials.md), [limits](docs/concepts/limits.md), [retention](docs/concepts/retention.md), [delivery](docs/concepts/delivery.md), [routing](docs/concepts/routing.md)
+- [HTTP API contract](specs/007-pipeline-api-cli/contracts/http-api.md) and [run routes](specs/009-asynchronous-runs/contracts/runs-http-api.md)
 - [Contributing](CONTRIBUTING.md)
 
 ## License

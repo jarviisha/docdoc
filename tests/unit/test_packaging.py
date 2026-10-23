@@ -166,7 +166,7 @@ def wheel_packages(tmp_path_factory: pytest.TempPathFactory) -> set[str]:
 
 
 def test_a_built_wheel_contains_every_package(wheel_packages: set[str]) -> None:
-    """The end of the chain: what ``pip install docdoc`` actually gets.
+    """The end of the chain: what the image's ``uv pip install .[extras]`` actually gets.
 
     The one assertion in this repository that would have caught the untracked
     artifacts layer without anybody thinking to look for it.
@@ -174,7 +174,7 @@ def test_a_built_wheel_contains_every_package(wheel_packages: set[str]) -> None:
     missing = sorted(_packages() - wheel_packages)
     assert not missing, (
         f"the wheel does not contain {[f'docdoc.{m}' for m in missing]}, so "
-        "`pip install docdoc` produces an installation that cannot import them. "
+        "installing the package (as the image does) produces one that cannot import them. "
         f"Shipped: {sorted(wheel_packages)}"
     )
 
