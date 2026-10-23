@@ -119,3 +119,62 @@ def test_reload_during_a_database_outage_leaves_the_run_for_retry(tmp_path: Path
 
     assert worker._registry is files
     assert queue.get(run_id, "default").status is RunStatus.RUNNING
+
+
+def test_worker_starting_with_db_down_does_not_serve_a_shadowed_file(tmp_path: Path) -> None:
+    from docdoc.cli.commands.worker import _first_registry
+
+    files = SchemaRegistry.from_paths([Path("schemas")])
+    document = json.loads(Path("schemas/invoice@2.json").read_text(encoding="utf-8"))
+    store = InMemorySchemaStore()
+    down = True
+
+    class Flaky:
+        def all(self) -> tuple[ConsoleSchema, ...]:
+            if down:
+                raise RunStateUnavailableError("down")
+            return store.all()
+
+    class _Settings:
+        def registry(self, console: Any = None, *, strict: bool = False) -> Any:
+            return merged_registry(files, console, strict=strict)
+
+    flaky = Flaky()
+    registry = _first_registry(_Settings(), flaky)  # type: ignore[arg-type]
+    assert "invoice@2" not in registry
+
+    down = False
+    store.insert(
+        ConsoleSchema(
+            name="invoice",
+            version=2,
+            document=document,
+            prompt="console prompt",
+            base=None,
+            created_at=NOW,
+            created_by="alice",
+        )
+    )
+    queue = InMemoryRunQueue()
+    blobs = BlobStore(tmp_path)
+    run_id = uuid4()
+    queue.submit(
+        _Spec(blobs.put(DOCUMENT), schema_identity="invoice@2"),  # type: ignore[arg-type]
+        run_id=run_id,
+        now=NOW,
+        expires_at=NOW + timedelta(hours=24),
+    )
+    run = queue.claim(worker_id="w", now=NOW, lease=timedelta(seconds=90), max_attempts=3)
+    worker = Worker(
+        queue=queue,
+        blobs=blobs,
+        store=FileArtifactStore(tmp_path),
+        registry=registry,
+        adapter=EchoAdapter.from_fixtures(Path("tests/fixtures/echo")),
+        worker_id="w",
+        reload_registry=lambda: _Settings().registry(flaky, strict=True),
+    )
+
+    worker._execute_with_heartbeat(run)
+
+    assert worker._registry.resolve("invoice@2").source == "console"
