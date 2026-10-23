@@ -46,3 +46,9 @@ def test_an_unconfirmed_check_still_needs_a_value_or_absence():
 def test_an_unconfirmed_check_still_needs_a_reason():
     with pytest.raises(ValidationError):
         Correction(**BASE, corrected_value="1", reason=" ")
+
+
+def test_confirming_a_value_docdoc_did_not_find_is_an_absence():
+    c = Correction(**{**BASE, "predicted_value": None}, confirmed=True, reason="")
+    label = c.as_label()
+    assert (label.expectation, label.value, label.location) == (Expectation.ABSENT, None, None)

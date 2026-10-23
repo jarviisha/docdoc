@@ -147,8 +147,19 @@ class Correction(BaseModel):
         a promoted label keeps the attribution -- and neither enters
         ``golden_set_id``, because neither can change a metric (EVA-6).
 
-        A confirmed check labels the predicted value itself.
+        A confirmed check labels the predicted value itself. Confirming that
+        nothing was found is confirming the field is absent, so it becomes an
+        ``ABSENT`` label (a ``VALUE`` label with no value is refused).
         """
+        if self.confirmed and self.predicted_value is None:
+            return Label(
+                field_path=self.field_path,
+                expectation=Expectation.ABSENT,
+                value=None,
+                location=None,
+                labeler=self.annotator,
+                labeled_at=self.timestamp,
+            )
         if self.confirmed:
             return Label(
                 field_path=self.field_path,
