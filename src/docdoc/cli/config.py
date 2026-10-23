@@ -517,8 +517,12 @@ class Settings:
 
         return merged_registry(files, console, strict=strict)
 
-    def adapter(self) -> Any:
-        """The model adapter configuration selects.
+    def adapter(self, tenant_id: str | None = None, store: Any = None, sealer: Any = None) -> Any:
+        """The model adapter configuration selects, for ``tenant_id`` when given.
+
+        With no ``store`` this is the environment alone: ``--adapter`` or
+        ``DOCDOC_MODEL_ADAPTERS``, then the shipped priority. With one, the
+        tenant's and the default's saved settings come first (`resolve_adapter`).
 
         Imported here rather than at module scope: reaching
         ``docdoc.extraction``'s adapter registry pulls provider SDKs into the
@@ -530,12 +534,13 @@ class Settings:
         through it. The flag and the variable are the same setting (FR-031), and
         the registry should have one place to look for it.
         """
-        from docdoc.extraction.adapter_registry import ECHO_FIXTURES_ENV, default_adapter
+        from docdoc.extraction.adapter_registry import ECHO_FIXTURES_ENV
+        from docdoc.runs.providers import resolve_adapter
 
         if self.echo_fixtures is not None:
             os.environ[ECHO_FIXTURES_ENV] = str(self.echo_fixtures)
 
-        return default_adapter(self.adapters or None)
+        return resolve_adapter(tenant_id, store, sealer, env_priority=self.adapters or None)
 
     def limits(self) -> Limits:
         """What this invocation is willing to accept (FR-039).

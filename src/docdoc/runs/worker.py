@@ -454,9 +454,13 @@ class Worker:
         kind: RunKind | None = None,
         parsers: ParserRegistry | None = None,
         reload_registry: Callable[[], Any] | None = None,
+        #: The tenant's model adapter, resolved at the start of each extraction
+        #: run. `None` executes every run with `adapter`.
+        adapter_for: Callable[[str], Any] | None = None,
     ) -> None:
         self._queue = queue
         self._reload_registry = reload_registry
+        self._adapter_for = adapter_for
         self._blobs = blobs
         self._store = store
         #: How to reach one tenant's namespace. Without it a worker executes
@@ -689,13 +693,37 @@ class Worker:
                 and run.schema_identity not in self._registry
             ):
                 self._registry = self._reload_registry()
+            adapter = self._adapter
+            if self._adapter_for is not None and run.kind is not RunKind.OCR:
+                # At run start, so a redelivered run re-resolves. A store that
+                # cannot be read raises `RunStateUnavailableError` and the lease
+                # lapses, as for the registry above; nothing usable fails the
+                # run as an adapter that answered `unavailable` would.
+                from docdoc.extraction.errors import ModelProviderError
+                from docdoc.pipeline.result import reason_of
+
+                try:
+                    adapter = self._adapter_for(run.tenant_id)
+                except ModelProviderError as exc:
+                    _finish(
+                        self._queue,
+                        run,
+                        RunOutcome(
+                            status=RunStatus.FAILED,
+                            failed_stage="extract",
+                            error_class=type(exc).__name__,
+                            error_reason=reason_of(exc),
+                        ),
+                        now=identity.now(),
+                    )
+                    return
             execute_one(
                 run,
                 queue=self._queue,
                 blobs=blobs,
                 store=store,
                 registry=self._registry,
-                adapter=self._adapter,
+                adapter=adapter,
                 now=identity.now(),
                 limits=self._limits,
                 limiter=self._limiter,

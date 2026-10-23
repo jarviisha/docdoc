@@ -158,7 +158,7 @@ def routes() -> APIRouter:
             data,
             schema=schema,
             registry=deployment.registry(),
-            adapter=deployment.adapter(),
+            adapter=deployment.adapter(principal.tenant_id),
             store=_artifact_store(store),
             limits=deployment.limits,
             request_id=request.headers.get("x-request-id"),
@@ -175,7 +175,7 @@ def routes() -> APIRouter:
         return _run_response(result)
 
     @router.post("/extract")
-    async def extract_storeless(request: Request, schema: str) -> Any:
+    async def extract_storeless(request: Request, schema: str, principal: Caller) -> Any:
         """Run the pipeline over submitted bytes and persist nothing.
 
         The body is the document; ``schema`` is a concrete ``name@version``.
@@ -213,7 +213,7 @@ def routes() -> APIRouter:
                 data,
                 schema=schema,
                 registry=deployment.registry(),
-                adapter=deployment.adapter(),
+                adapter=deployment.adapter(principal.tenant_id),
                 store=NullArtifactStore(),
                 limits=deployment.limits,
                 request_id=request.headers.get("x-request-id"),

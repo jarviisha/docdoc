@@ -279,10 +279,12 @@ tests/
 │   ├── test_provider_tests_are_separable.py  # FR-045 — a credential-reading test must be marked
 │   ├── test_worker_registry_reload.py # a worker re-reads console schemas on an unknown identity
 │   ├── test_provider_resolution.py    # console Providers: per-tenant model, key and priority, and the probe
+│   ├── test_worker_tenant_adapter.py  # a worker resolves the run's tenant's adapter at run start
 │   ├── test_console_schemas_create.py # create_version's new-name race; merged_registry with the database down
 │   └── test_documented_api_references_resolve.py  # SC-020 — the docs' API is the real API
 ├── contract/
 │   ├── test_console_schemas.py        # the console lists, reads and creates schemas over HTTP
+│   ├── test_tenant_adapter.py         # synchronous extraction uses the caller's tenant's adapter
 │   └── test_model_adapter_contract.py # every ModelAdapter must satisfy EXT-15…EXT-18,
 │                                      #   run against all three including the real one
 ├── property/
