@@ -11,19 +11,24 @@ ADAPTER ?= echo
 PG      ?= docdoc-dev-pg
 RUN_API    = uv run python -m uvicorn --factory docdoc.api.app:create_app --port $(PORT)
 RUN_WORKER = uv run docdoc worker --kind $(KIND) --adapter $(ADAPTER)
+RUN_WORKERS = uv run docdoc worker --kind ocr --adapter $(ADAPTER) & \
+              uv run docdoc worker --kind extraction --adapter $(ADAPTER)
 COMPOSE := docker compose -f packaging/docker/compose.yml
 
 export DOCDOC_RUN_DATABASE_URL ?= $(DB)
 export DOCDOC_STORE_ROOT ?= $(STORE)
 # The demo database pins its unprefixed store root to this tenant; a mismatch is refused.
 export DOCDOC_DEFAULT_TENANT ?= $(TENANT)
-# The OCR hosts' endpoints file, when it is where it has been kept so far.
-ifneq ($(wildcard /tmp/docdoc-ocr-endpoints.json),)
-export DOCDOC_OCR_ENDPOINTS_FILE ?= /tmp/docdoc-ocr-endpoints.json
+# Schemas and the echo adapter's canned answers, so extraction runs work in `make dev`.
+export DOCDOC_SCHEMA_PATHS ?= $(CURDIR)/schemas
+export DOCDOC_ECHO_FIXTURES ?= $(CURDIR)/tests/fixtures/echo
+# The OCR hosts' endpoints file, kept outside the repository (it holds tokens).
+ifneq ($(wildcard $(HOME)/.config/docdoc/ocr-endpoints.json),)
+export DOCDOC_OCR_ENDPOINTS_FILE ?= $(HOME)/.config/docdoc/ocr-endpoints.json
 endif
 
 .DEFAULT_GOAL := help
-.PHONY: help install test lint fmt ui check dev migrate api worker user users up down
+.PHONY: help install test lint fmt ui check dev migrate api worker ocr user users up down
 
 help: ## list the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-9s %s\n", $$1, $$2}'
@@ -51,12 +56,12 @@ ui: ## console: typecheck, tests, boundaries, licences, build
 
 check: lint test ui ## everything CI checks, locally
 
-dev: ## Postgres container PG up, migrate, then API + OCR worker + Vite (http://localhost:5173/console/, proxies /v1 to :8000); Ctrl-C stops all
+dev: ## Postgres container PG up, migrate, then API + OCR and extraction workers + Vite (http://localhost:5173/console/, proxies /v1 to :8000); Ctrl-C stops all
 	docker start $(PG) >/dev/null
 	@for i in 1 2 3 4 5 6 7 8 9 10; do out=$$(uv run docdoc migrate 2>&1) && exit 0; sleep 1; done; \
 	 echo "$$out"; exit 1
 	@trap 'kill 0' INT TERM EXIT; \
-	 $(RUN_API) & $(RUN_WORKER) & (cd ui && npx vite) & wait
+	 $(RUN_API) & $(RUN_WORKERS) & (cd ui && npx vite) & wait
 
 migrate: ## apply the run-state schema to DB
 	uv run docdoc migrate
@@ -66,6 +71,10 @@ api: ## serve the API and the built console on PORT (build it with `make ui`)
 
 worker: ## one worker of KIND (ocr|extraction); OCR needs DOCDOC_OCR_ENDPOINTS_FILE
 	$(RUN_WORKER)
+
+ocr: ## show the OCR endpoints make dev uses (tokens hidden) and whether each answers
+	@test -n "$(DOCDOC_OCR_ENDPOINTS_FILE)" || { echo "no endpoints file at ~/.config/docdoc/ocr-endpoints.json"; exit 1; }
+	@uv run python packaging/ocr/show_endpoints.py "$(DOCDOC_OCR_ENDPOINTS_FILE)"
 
 user: ## add a console account: make user NAME=admin (prompts for the password)
 	@test -n "$(NAME)" || { echo "usage: make user NAME=<username>"; exit 2; }
