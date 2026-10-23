@@ -111,3 +111,10 @@ modified, and runs that used it keep pointing at it.
 - A deployment without a run database has no console. Schemas stay file-only there, and nothing
   about that path changes.
 - Run the full suite with `make test` before reporting done (AGENTS.md).
+
+## `console_schemas`
+
+One row per immutable identity, primary key `(name, version)`. Columns: `document`
+(jsonb, the schema as `parse_schema` reads it), `prompt` (text), `base` (the
+identity it was derived from, or null), `created_at`, `created_by`. A row is
+inserted once; nothing updates or deletes it.

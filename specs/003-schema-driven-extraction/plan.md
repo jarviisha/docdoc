@@ -285,7 +285,8 @@ tests/
 │   └── test_schema_hash.py            # reorder ⇒ same hash; any semantic edit ⇒ different hash
 ├── integration/
 │   ├── test_gemini_live.py            # marked `provider`
-│   └── test_examples_run.py           # SC-020 — the examples are executed, not read
+│   ├── test_examples_run.py           # SC-020 — the examples are executed, not read
+│   └── test_console_schemas_postgres.py  # the console schema store: insert-once, merge skips bad rows
 ├── perf/
 │   └── test_extraction_perf.py        # marked `perf`, SC-021
 └── fixtures/
