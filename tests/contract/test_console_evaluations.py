@@ -133,3 +133,35 @@ def test_console_evaluation_routes_need_a_session(operator, blob) -> None:  # no
         r = anonymous.request(method, path, headers=bearer)
         assert r.status_code == 401
         assert r.json()["error"]["class"] == "ConsoleSessionRequired"
+
+
+def test_starting_an_evaluation_is_logged_with_its_actor_and_outcome(
+    operator,
+    blob,  # noqa: F811
+    caplog,
+) -> None:
+    import json
+    import logging
+
+    _, client, headers = operator
+    path = "/v1/console/tenants/acme/evaluations"
+
+    with caplog.at_level(logging.INFO, logger="docdoc.api"):
+        client.post(path, params={"schema": "invoice"}, headers=headers)
+        client.post(path, params={"schema": "invoice"}, headers=headers)
+
+    events = []
+    for record in caplog.records:
+        try:
+            payload = json.loads(record.getMessage())
+        except ValueError:
+            continue
+        if isinstance(payload, dict) and payload.get("event") == "console.evaluation_start":
+            events.append(payload)
+    started = {
+        "event": "console.evaluation_start",
+        "actor": "console:alice",
+        "tenant_id": "acme",
+        "schema": "invoice",
+    }
+    assert events == [{**started, "status": 202}, {**started, "status": 409}]

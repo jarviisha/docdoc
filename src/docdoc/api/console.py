@@ -251,6 +251,26 @@ def _log_ocr_submit(operator: str, *, tenant_id: str, run_id: str, status: int) 
     )
 
 
+def _log_evaluation_start(operator: str, *, tenant_id: str, schema: str, status: int) -> None:
+    """One structured event per console evaluation start, attributed, with its outcome.
+
+    Starting one re-runs a tenant's checked documents, which may call paid
+    providers on the tenant's behalf; a refused start is logged too, as a
+    refused erasure is.
+    """
+    logging.getLogger("docdoc.api").info(
+        json.dumps(
+            {
+                "event": "console.evaluation_start",
+                "actor": f"console:{operator}",
+                "tenant_id": tenant_id,
+                "schema": schema,
+                "status": status,
+            }
+        )
+    )
+
+
 def _log_callback_register(
     operator: str, *, tenant_id: str, callback_id: str, url: str, status: int
 ) -> None:
@@ -801,9 +821,16 @@ def console_router() -> APIRouter:
     def start_tenant_evaluation(
         request: Request, tenant_id: str, schema: str, operator: Operator
     ) -> Any:
-        return _for_tenant(
+        response = _for_tenant(
             request, tenant_id, lambda: start_evaluation_of(request, tenant_id, schema)
         )
+        _log_evaluation_start(
+            operator,
+            tenant_id=tenant_id,
+            schema=schema,
+            status=getattr(response, "status_code", 200),
+        )
+        return response
 
     @router.get("/tenants/{tenant_id}/evaluations")
     def list_tenant_evaluations(
