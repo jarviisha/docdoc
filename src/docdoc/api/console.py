@@ -122,12 +122,7 @@ def console_gate(request: Request, accounts: Any, *, idle: timedelta) -> JSONRes
     request (`_Deployment.console_idle`).
     """
     if accounts is None:
-        return _refusal(
-            503,
-            "ConsoleUnavailable",
-            "the console needs a run-state database; set DOCDOC_RUN_DATABASE_URL "
-            "and run docdoc migrate",
-        )
+        return _refusal(503, "ConsoleUnavailable", _CONSOLE_UNAVAILABLE)
     if request.method not in _SAFE_METHODS and request.headers.get(CONSOLE_HEADER) != "1":
         return _refusal(
             403,
@@ -412,12 +407,9 @@ class _NewSchema(BaseModel):
     base: str | None = None
 
 
-class _NoRows:
-    def all(self) -> tuple[()]:
-        return ()
-
-
-_NO_ROWS = _NoRows()
+_CONSOLE_UNAVAILABLE = (
+    "the console needs a run-state database; set DOCDOC_RUN_DATABASE_URL and run docdoc migrate"
+)
 
 
 def _schema_detail(registry: Any, store: Any, identity: str) -> dict[str, Any]:
@@ -809,7 +801,8 @@ def console_router() -> APIRouter:
         """Every identity with its source; console rows add who made them and when."""
         deployment = request.app.state.deployment
         registry = deployment.registry()
-        rows = {r.identity: r for r in (deployment.console_schemas() or _NO_ROWS).all()}
+        store = deployment.console_schemas()
+        rows = {r.identity: r for r in (store.all() if store is not None else ())}
         entries = []
         for e in registry.entries():
             row = rows.get(e.identity) if e.source == "console" else None
@@ -842,12 +835,7 @@ def console_router() -> APIRouter:
         deployment = request.app.state.deployment
         store = deployment.console_schemas()
         if store is None:
-            return _refusal(
-                503,
-                "ConsoleUnavailable",
-                "the console needs a run-state database; set DOCDOC_RUN_DATABASE_URL "
-                "and run docdoc migrate",
-            )
+            return _refusal(503, "ConsoleUnavailable", _CONSOLE_UNAVAILABLE)
         registry = deployment.registry()
         try:
             row = create_version(

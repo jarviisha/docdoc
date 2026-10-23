@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from docdoc.extraction.errors import SchemaError
 from docdoc.extraction.loader import parse_schema, prompt_from_text
+from docdoc.runs.errors import RunStateUnavailableError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -117,8 +118,13 @@ class PostgresSchemaStore:
 
 def merged_registry(files: SchemaRegistry, store: SchemaStore) -> SchemaRegistry:
     """The file registry plus every valid console row; console wins a clash."""
+    try:
+        rows = store.all()
+    except RunStateUnavailableError as exc:
+        _log.warning("console schemas unavailable, serving the files only: %s", exc)
+        return files
     good = []
-    for row in store.all():
+    for row in rows:
         try:
             schema = parse_schema(row.document, path=row.identity)
             if schema.identity != row.identity:
@@ -168,10 +174,12 @@ def create_version(
         if any(e.schema.name == name for e in registry.entries()) or any(
             r.name == name for r in store.all()
         ):
-            raise SchemaNameTaken(name)
+            raise SchemaNameTaken(
+                f"a schema named {name!r} already exists; open it and save a new version instead"
+            )
     elif registry.resolve(base).schema.name != name:  # raises SchemaError when unknown
         raise SchemaError(f"the document is named {name!r}, not the name of {base!r}")
-    for _ in range(_ATTEMPTS):
+    for _ in range(_ATTEMPTS if base is not None else 1):
         taken = [e.schema.version for e in registry.entries() if e.schema.name == name]
         taken += [r.version for r in store.all() if r.name == name]
         doc = {**document, "version": max(taken, default=0) + 1}
@@ -188,4 +196,10 @@ def create_version(
         )
         if store.insert(row):
             return row
-    raise SchemaVersionTaken(name)
+    if base is None:  # lost a race on a brand-new name; never fall through to name@2
+        raise SchemaNameTaken(
+            f"a schema named {name!r} already exists; open it and save a new version instead"
+        )
+    raise SchemaVersionTaken(
+        f"could not assign a version for {name!r} after {_ATTEMPTS} attempts; try again"
+    )

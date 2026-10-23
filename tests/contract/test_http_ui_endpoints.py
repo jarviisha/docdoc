@@ -161,6 +161,8 @@ ROUTES = {
     ("GET", "/v1/console/parsers"),
     # The registered schema identities, for the extraction submit's picker.
     ("GET", "/v1/console/schemas"),
+    ("POST", "/v1/console/schemas"),
+    ("GET", "/v1/console/schemas/{identity}"),
     ("POST", "/v1/console/tenants/{tenant_id}/ocr"),
     # Console extraction submit: the two Bearer calls (store, then submit) in one,
     # through the same `submit_extraction`; session-only.

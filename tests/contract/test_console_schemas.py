@@ -124,7 +124,7 @@ def test_create_rejects_invalid_schema_with_paths(signed_in) -> None:
     assert r.status_code == 422
     problems = r.json()["problems"]
     assert problems
-    assert problems[0]["path"].startswith("fields.") or "rows.n" in problems[0]["path"]
+    assert problems[0]["path"] == "rows.n"
     assert _identities(client, cookie).count("g@1") == 0
 
 

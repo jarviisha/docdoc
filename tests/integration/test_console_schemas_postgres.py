@@ -28,7 +28,10 @@ def store() -> PostgresSchemaStore:
     with psycopg.connect(dsn, autocommit=True) as connection:
         migrations.apply(connection, now=datetime.now(UTC))
         connection.execute("TRUNCATE console_schemas")
-    return PostgresSchemaStore(execute=PostgresRunQueue(lambda: psycopg.connect(dsn))._execute)
+    yield PostgresSchemaStore(execute=PostgresRunQueue(lambda: psycopg.connect(dsn))._execute)
+    # Rows left behind would show up in every other test that reads the shared database.
+    with psycopg.connect(dsn, autocommit=True) as connection:
+        connection.execute("TRUNCATE console_schemas")
 
 
 def row(name: str, version: int, document: Any = None) -> ConsoleSchema:
