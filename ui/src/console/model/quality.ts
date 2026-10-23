@@ -44,22 +44,20 @@ export function toStatStrip(
 ): { label: string; value: string; detail: string }[] {
   const metrics = summary.metrics ?? {};
   const mislocated = metrics.mislocation_rate;
-  return [
+  const strip = [
     {
       label: "Checked documents",
       value: String(summary.documents),
       detail: summary.erased_documents > 0 ? `${summary.erased_documents} erased` : "",
     },
     { label: "Fields correct", ...share(metrics.field_accuracy) },
-    {
-      label: "Located on page",
-      // The metric counts the misses; the strip shows the hits.
-      ...(mislocated
-        ? percent(mislocated.denominator - mislocated.numerator, mislocated.denominator)
-        : dash),
-    },
+    { label: "Located on page", ...share(metrics.grounding_rate) },
     { label: "Missing", ...share(metrics.missing_rate) },
   ];
+  // Only where expected locations exist to measure against.
+  return mislocated && mislocated.denominator > 0
+    ? [...strip, { label: "Read from a different place", ...share(mislocated) }]
+    : strip;
 }
 
 export function toFieldTable(

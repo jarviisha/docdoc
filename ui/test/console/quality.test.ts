@@ -17,6 +17,7 @@ test("the stat strip reads the micro metrics", () => {
     erased_documents: 0,
     metrics: {
       field_accuracy: m("field_accuracy", 304, 333),
+      grounding_rate: m("grounding_rate", 90, 100),
       mislocation_rate: m("mislocation_rate", 10, 100),
       missing_rate: m("missing_rate", 5, 200),
     },
@@ -26,7 +27,18 @@ test("the stat strip reads the micro metrics", () => {
     { label: "Fields correct", value: "91.3%", detail: "(304/333)" },
     { label: "Located on page", value: "90.0%", detail: "(90/100)" },
     { label: "Missing", value: "2.5%", detail: "(5/200)" },
+    { label: "Read from a different place", value: "10.0%", detail: "(10/100)" },
   ]);
+});
+
+test("mislocation is omitted when nothing could be measured", () => {
+  const strip = toStatStrip({
+    documents: 1,
+    erased_documents: 0,
+    metrics: { grounding_rate: m("grounding_rate", 1, 2), mislocation_rate: m("mislocation_rate", 0, 0) },
+  });
+  assert.deepEqual(strip.map((s) => s.label), ["Checked documents", "Fields correct", "Located on page", "Missing"]);
+  assert.equal(strip[2]!.value, "50.0%");
 });
 
 test("a stat with no denominator reads as a dash", () => {
