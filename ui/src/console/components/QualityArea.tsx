@@ -291,6 +291,7 @@ export function QualityArea({ request, onOpenRun, presetTenant }: Props) {
               columns={[
                 { key: "when", header: "When", width: "200px", cell: (row) => row.when },
                 { key: "accuracy", header: "Fields correct", width: "140px", align: "right", cell: (row) => row.accuracy },
+                { key: "configuration", header: "Model · parser", cell: (row) => row.configuration },
                 {
                   key: "marks",
                   header: "Against the one before",

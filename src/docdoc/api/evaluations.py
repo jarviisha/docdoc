@@ -155,7 +155,23 @@ def _summary(evaluation: Any) -> dict[str, Any]:
         "erased_documents": evaluation.erased_documents,
         "metrics": None if report is None else jsonable_encoder(report.metrics.micro),
         "golden_set_id": evaluation.golden.golden_set_id,
+        "provenance": None if report is None else _provenance(report.provenance),
     }
+
+
+#: What configuration produced a report: identities and hashes only.
+_PROVENANCE = (
+    "model_ids",
+    "model_versions",
+    "parser_ids",
+    "parser_versions",
+    "schema_hashes",
+    "prompt_hashes",
+)
+
+
+def _provenance(provenance: Any) -> dict[str, list[str]]:
+    return {name: list(getattr(provenance, name)) for name in _PROVENANCE}
 
 
 def _status(evaluation: Any) -> str:

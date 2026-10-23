@@ -20,6 +20,29 @@ export interface EvaluationSummary {
   status?: "running" | "finished" | "failed";
   /** Why it failed: an exception class. */
   failure?: string | null;
+  /** What configuration produced the report; `null` until it is scored. */
+  provenance?: Provenance | null;
+}
+
+export interface Provenance {
+  model_ids: string[];
+  model_versions: string[];
+  parser_ids: string[];
+  parser_versions: string[];
+  schema_hashes: string[];
+  prompt_hashes: string[];
+}
+
+const versioned = (ids: string[], versions: string[]) => ids.map((id, i) => `${id} ${versions[i] ?? ""}`.trim()).join(", ");
+
+/** "model version · parser version", or a dash when nothing was scored. */
+export function configurationOf(provenance: Provenance | null | undefined): string {
+  if (!provenance) return "—";
+  const parts = [
+    versioned(provenance.model_ids, provenance.model_versions),
+    versioned(provenance.parser_ids, provenance.parser_versions),
+  ].filter((part) => part !== "");
+  return parts.length === 0 ? "—" : parts.join(" · ");
 }
 
 export interface EvaluationDetail {
@@ -89,6 +112,8 @@ export function historyRows(list: EvaluationSummary[]): {
   evaluationId: string;
   when: string;
   accuracy: string;
+  /** The model and parser that produced it. */
+  configuration: string;
   schemaChanged: boolean;
   comparable: boolean;
   /** "running" or "Could not be scored", then tags against the run before: "schema changed", "not comparable". */
@@ -102,6 +127,7 @@ export function historyRows(list: EvaluationSummary[]): {
       evaluationId: e.evaluation_id,
       when: when(e.created_at),
       accuracy: share(e.metrics?.field_accuracy).value,
+      configuration: configurationOf(e.provenance),
       schemaChanged,
       comparable,
       marks: [

@@ -293,6 +293,31 @@ def test_a_confirmed_check_without_grounding_stores_no_location(client, deployme
     ]
 
 
+def test_a_report_says_which_configuration_produced_it(client, deployment, blob) -> None:
+    eid = client.post("/v1/evaluations", params={"schema": "invoice"}, headers=A).json()[
+        "evaluation_id"
+    ]
+    assert client.get(f"/v1/evaluations/{eid}", headers=A).json()["provenance"] is None
+    _drain(deployment)
+
+    done = client.get(f"/v1/evaluations/{eid}", headers=A).json()
+    (listed,) = client.get("/v1/evaluations", headers=A).json()["evaluations"]
+
+    provenance = done["provenance"]
+    assert set(provenance) == {
+        "model_ids",
+        "model_versions",
+        "parser_ids",
+        "parser_versions",
+        "schema_hashes",
+        "prompt_hashes",
+    }
+    assert provenance["model_ids"]
+    assert provenance["parser_ids"]
+    assert provenance["schema_hashes"] == [deployment.registry().describe("invoice@2").schema_hash]
+    assert listed["provenance"] == provenance
+
+
 def test_a_rate_limited_start_is_429(deployment, blob, monkeypatch) -> None:
     from docdoc.api.app import _Deployment, build_app
 

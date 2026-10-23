@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { historyRows, rerunWarning, shownEvaluation, stillRunning, toAnswers, toFieldTable, toStatStrip } from "../../src/console/model/quality.ts";
+import { configurationOf, historyRows, rerunWarning, shownEvaluation, stillRunning, toAnswers, toFieldTable, toStatStrip } from "../../src/console/model/quality.ts";
 
 const e = { documents: 1, erased_documents: 0 };
 const m = (name: string, numerator: number, denominator: number) => ({
@@ -134,4 +134,22 @@ test("a failed evaluation is terminal: not polled, not shown as the report, mark
   assert.equal(stillRunning(list), false);
   assert.equal(shownEvaluation(list, null), "e1");
   assert.deepEqual(historyRows(list)[0]!.marks, ["Could not be scored"]);
+});
+
+test("a history row names the model and parser that produced it", () => {
+  const provenance = {
+    model_ids: ["echo"],
+    model_versions: ["1"],
+    parser_ids: ["pdfplumber", "tesseract"],
+    parser_versions: ["0.11", "5.3"],
+    schema_hashes: ["sha256:aa"],
+    prompt_hashes: ["sha256:bb"],
+  };
+  const rows = historyRows([
+    { ...e, evaluation_id: "e2", created_at: "2026-02-01T00:00:00Z", schema_identity: "s", golden_set_id: "a", metrics: null, provenance },
+    { ...e, evaluation_id: "e1", created_at: "2026-01-01T00:00:00Z", schema_identity: "s", golden_set_id: "a", metrics: null, provenance: null },
+  ]);
+  assert.equal(rows[0]!.configuration, "echo 1 · pdfplumber 0.11, tesseract 5.3");
+  assert.equal(rows[1]!.configuration, "—");
+  assert.equal(configurationOf(provenance), "echo 1 · pdfplumber 0.11, tesseract 5.3");
 });
