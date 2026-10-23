@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
 
 from docdoc.extraction.errors import SchemaError
 from docdoc.extraction.identity import prompt_hash_for, schema_hash_for
@@ -48,10 +48,12 @@ SCHEMA_PATHS_ENV = "DOCDOC_SCHEMA_PATHS"
 class RegisteredSchema:
     """A schema, its prompt, and the two hashes, resolved once at registration."""
 
-    __slots__ = ("prompt", "prompt_hash", "schema", "schema_hash")
+    __slots__ = ("prompt", "prompt_hash", "schema", "schema_hash", "source")
 
-    def __init__(self, *, schema: Schema, prompt: PromptTemplate) -> None:
+    def __init__(self, *, schema: Schema, prompt: PromptTemplate, source: str = "file") -> None:
         self.schema = schema
+        #: Where it came from: ``"file"`` or ``"console"``.
+        self.source = source
         self.prompt = prompt
         self.schema_hash = schema_hash_for(schema)
         self.prompt_hash = prompt_hash_for(prompt.text)
@@ -84,10 +86,12 @@ class SchemaDescription:
 
 
 class SchemaRegistry:
-    """Concrete versions only; concurrent majors; no shadowing."""
+    """Concrete versions only; concurrent majors; console entries may shadow files."""
 
     def __init__(self) -> None:
         self._entries: dict[str, RegisteredSchema] = {}
+        #: Identities a console entry replaced a file entry for.
+        self.shadowed: tuple[str, ...] = ()
 
     @classmethod
     def from_paths(cls, paths: Sequence[Path | str]) -> SchemaRegistry:
@@ -105,7 +109,9 @@ class SchemaRegistry:
                 registry.register(schema, prompt)
         return registry
 
-    def register(self, schema: Schema, prompt: PromptTemplate) -> RegisteredSchema:
+    def register(
+        self, schema: Schema, prompt: PromptTemplate, *, source: str = "file"
+    ) -> RegisteredSchema:
         if schema.identity in self._entries:
             raise SchemaError(
                 f"schema {schema.identity!r} is already registered. "
@@ -117,9 +123,29 @@ class SchemaRegistry:
                 f"prompt is keyed to {prompt.identity!r} but the schema is {schema.identity!r}",
                 identity=schema.identity,
             )
-        entry = RegisteredSchema(schema=schema, prompt=prompt)
+        entry = RegisteredSchema(schema=schema, prompt=prompt, source=source)
         self._entries[schema.identity] = entry
         return entry
+
+    def with_console(self, entries: Iterable[tuple[Schema, PromptTemplate]]) -> SchemaRegistry:
+        """A new registry: this one plus console entries, which win over files.
+
+        This registry is left untouched. A console entry on a file identity
+        replaces it and the identity is recorded in :attr:`shadowed`.
+        """
+        merged = SchemaRegistry()
+        merged._entries = dict(self._entries)
+        shadowed = list(self.shadowed)
+        for schema, prompt in entries:
+            if schema.identity in merged._entries:
+                del merged._entries[schema.identity]
+                shadowed.append(schema.identity)
+            merged.register(schema, prompt, source="console")
+        merged.shadowed = tuple(shadowed)
+        return merged
+
+    def entries(self) -> tuple[RegisteredSchema, ...]:
+        return tuple(self._entries[k] for k in sorted(self._entries))
 
     def resolve(self, identity: str) -> RegisteredSchema:
         """Look up a concrete ``name@version``.

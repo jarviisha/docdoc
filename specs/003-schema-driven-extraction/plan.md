@@ -251,6 +251,7 @@ tests/
 │   ├── test_schema_identity.py        # EXT-6…EXT-9, hash stability and sensitivity
 │   ├── test_loader_from_data.py       # schema data and console rows share load_schema's checks
 │   ├── test_registry.py               # EXT-10…EXT-13, concrete versions, concurrent majors
+│   ├── test_registry_console_merge.py # console rows merge over file schemas, source marked
 │   ├── test_adapter_registry.py       # FR-021: selection by configuration, and the
 │   │                                  #   structural refusal to auto-select the echo adapter
 │   ├── test_extraction_has_no_document_type_code.py  # SC-014's automated check —
