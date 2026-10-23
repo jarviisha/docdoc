@@ -21,15 +21,52 @@ export type Area =
   | "erasure"
   | "quality";
 
-/** One tenant row's jump: which area to show, and which tenant to show it for. */
+export type AreaPath =
+  | "/"
+  | "/runs"
+  | "/submit"
+  | "/quality"
+  | "/tenants"
+  | "/credentials"
+  | "/callbacks"
+  | "/parsers"
+  | "/erasure";
+
+/** Each area's route path, relative to the `/console` base. */
+export const AREA_PATHS: { readonly [A in Area]: AreaPath } = {
+  overview: "/",
+  runs: "/runs",
+  submit: "/submit",
+  quality: "/quality",
+  tenants: "/tenants",
+  credentials: "/credentials",
+  callbacks: "/callbacks",
+  parsers: "/parsers",
+  erasure: "/erasure",
+};
+
+/**
+ * The area a pathname belongs to, with or without the `/console` prefix and a
+ * trailing slash; nested paths (`/runs/abc`) belong to their first segment.
+ */
+export function areaOf(pathname: string): Area | null {
+  const rest = pathname.replace(/^\/console(?=\/|$)/, "");
+  const first = rest.split("/")[1] ?? "";
+  for (const [area, path] of Object.entries(AREA_PATHS)) {
+    if (path === `/${first}`) return area as Area;
+  }
+  return null;
+}
+
+/** One tenant row's jump: the area's path, and the tenant to show it for. */
 export interface Jump {
-  area: Area;
-  tenant: string | null;
+  to: AreaPath;
+  search: { tenant: string };
 }
 
 /** A tenant row's own jump into one of its areas. */
 export function jumpTo(area: Area, tenant: string): Jump {
-  return { area, tenant };
+  return { to: AREA_PATHS[area], search: { tenant } };
 }
 
 /** The tenants screen's own shortcuts, in the order they are offered. */

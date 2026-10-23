@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 import { send, sendForBlob } from "../../transport.ts";
 import { requestFor, type Intent } from "../model/client.ts";
 import { describe, failureOf, failureOfThrown, type Failure } from "../model/failure.ts";
-import type { Area, Jump } from "../model/navigation.ts";
+import { areaOf, jumpTo, type Area, type Jump } from "../model/navigation.ts";
 import {
   afterSignOut,
   emptySession,
@@ -123,11 +123,12 @@ export function Shell() {
   // Bumped by every jump, so even a click on the area already open starts it afresh.
   const [visit, setVisit] = useState(0);
 
-  const jump = useCallback(({ area: to, tenant }: Jump) => {
+  // Bridge until the router lands: map a path-shaped Jump back to an area.
+  const jump = useCallback(({ to, search }: Jump) => {
     setVisit((v) => v + 1);
     setOpenRunId(null);
-    setPresetTenant(tenant);
-    setArea(to);
+    setPresetTenant(search.tenant || null);
+    setArea(areaOf(to) ?? "overview");
   }, []);
 
   // Ask once whether a session already exists: a reload keeps the cookie.
@@ -236,7 +237,7 @@ export function Shell() {
         key={entry.name}
         type="button"
         aria-current={selected ? "page" : undefined}
-        onClick={() => jump({ area: entry.name, tenant: null })}
+        onClick={() => jump(jumpTo(entry.name, ""))}
         className={cn(
           "rounded-sm px-2 py-1 text-left text-slate-700 outline-none hover:bg-slate-200/60 focus-visible:ring-2 focus-visible:ring-ring/50",
           selected && "bg-indigo-100 font-medium text-indigo-800 hover:bg-indigo-100",
@@ -310,7 +311,7 @@ export function Shell() {
               openRunId={openRunId}
               onOpenRun={setOpenRunId}
               presetTenant={presetTenant}
-              onSubmit={() => jump({ area: "submit", tenant: null })}
+              onSubmit={() => jump(jumpTo("submit", ""))}
             />
           ) : null}
           {area === "submit" ? (
