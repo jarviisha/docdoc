@@ -74,9 +74,8 @@ user: ## add a console account: make user NAME=admin (prompts for the password)
 users: ## list console accounts
 	uv run docdoc console-user list
 
-up: ## the docker compose topology (api, workers, postgres, object store), migrated
+up: ## the docker compose topology (api, workers, postgres, object store); its migrate service applies the schema
 	$(COMPOSE) up -d --build
-	$(COMPOSE) run --rm api docdoc migrate
 
 down: ## stop the compose topology, keeping its data
 	$(COMPOSE) down

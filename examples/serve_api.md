@@ -298,7 +298,8 @@ that refusal as a closed door, it has opened.
 
 The API serves the **operations console** at `/console/`, from the `docdoc-ui`
 distribution (the `ui` extra) or from a checkout's built `ui/dist`
-(`cd ui && npm ci && npm run build`). The compose stack mounts `ui/dist`.
+(`cd ui && npm ci && npm run build`). The Docker image carries its own build and
+sets `DOCDOC_CONSOLE_ROOT` to it.
 
 It is about the deployment rather than about a document — there is no reviewer
 assignment, no review queue, no workload, no review state and no disposition, and a

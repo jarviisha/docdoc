@@ -495,7 +495,7 @@ def test_the_viewer_is_gone(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
         ("configured", "DOCDOC_CONSOLE_ROOT"),
         ("installed-but-empty", "built wrongly"),
         ("checkout", "npm run build"),
-        ("absent", "docdoc[ui]"),
+        ("absent", "rebuild the image"),
     ],
 )
 def test_each_kind_of_absence_gets_its_own_sentence(

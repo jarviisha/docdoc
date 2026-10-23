@@ -3,6 +3,8 @@
 - **Status**: Accepted
 - **Date**: 2026-10-23
 - **Requires**: constitution v2.0.0 (Principle IV's base-install clause removed)
+- **Amends**: [ADR-0020](0020-retire-the-grounding-viewer.md) in part (the Docker image carries the
+  console's build)
 - **Relates to**: [ADR-0011](0011-pre-1.0-versioning.md) (pre-1.0 breaking changes),
   [ADR-0025](0025-native-pdf-parsing-on-pdfium.md) and
   [ADR-0026](0026-tenant-quality-evaluation.md) (the two projects this one completes)
@@ -72,6 +74,21 @@ PDFium for a cloud parser, without touching the domain layers. It stays, word fo
 
 Removing a principle's guarantee makes previously non-compliant work compliant, so the amendment is
 MAJOR: 1.13.0 → 2.0.0.
+
+### 4. The image carries the console, and compose migrates (amends ADR-0020 in part)
+
+ADR-0020 left the image without built assets: `specs/008` FR-035 kept static assets out of the
+base install, so the image shipped none either and compose mounted a host `ui/dist`. That made Node a
+prerequisite of the quickstart. With the base install retired, the reason no longer reaches the
+image. The Dockerfile gains a `console` stage that builds `ui/` with Node 24 and copies the result
+to `/opt/docdoc/console`, and the image sets `DOCDOC_CONSOLE_ROOT` to it. Node stays in that stage;
+the runtime image carries the files only. The **wheel** is unchanged: it still carries no static
+asset, and the `ui` extra still delivers `docdoc-ui` to a deployment outside the image.
+
+Compose gains a one-shot `migrate` service, like `createbucket`, that runs `docdoc migrate` once
+and exits. The API and both workers start only after it succeeds. The schema is still applied by
+one explicit process, never by every process on boot. A newcomer's first ten minutes are then
+`git clone`, `docker compose up -d`, `docdoc console-user add`, and the console.
 
 ## Consequences
 

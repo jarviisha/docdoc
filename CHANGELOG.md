@@ -31,8 +31,17 @@ API may change in any release. `document_id` derivation is versioned separately 
   priority as the console's OCR submit. `GET /v1/console/schemas` lists the schemas to choose from.
 - The console's Submit screen has a "Submit as" choice, OCR or Extraction, with a schema picker.
   The sidebar entry is now **Submit**.
-- The README opens with a quickstart that walks a sample PDF through OCR, extraction, checks and a
-  quality report on the compose stack, with no API key. `packaging/docker/.env.example` names the
+- The Docker image builds and carries the console (a `node:24` build stage; `DOCDOC_CONSOLE_ROOT`
+  points at `/opt/docdoc/console`), so compose no longer mounts a host `ui/dist` and the host needs
+  no Node. Amends ADR-0020 in part. The `/console` 501 for a missing build now says to rebuild the
+  image, or to build `ui/` in a checkout, instead of `pip install 'docdoc[ui]'`.
+- Compose has a one-shot `migrate` service; the API and both workers start after it succeeds, so a
+  fresh `up` needs no separate `docdoc migrate`. `make up` no longer runs one.
+- Compose forwards `DOCDOC_RUN_LEASE_SECONDS`, `DOCDOC_RUN_MAX_ATTEMPTS`, `DOCDOC_MAX_REQUEST_BYTES`,
+  `DOCDOC_MAX_DOCUMENT_BYTES`, `DOCDOC_MAX_PAGES`, `DOCDOC_MATCH_VIEW_CACHE` and
+  `DOCDOC_CONSOLE_IDLE_SECONDS`.
+- The README opens with a Docker-only quickstart (clone, `up`, `console-user add`, console) that
+  walks a sample PDF through OCR, extraction, checks and a quality report, with no API key. `packaging/docker/.env.example` names the
   two settings that switch it to a real model. `FIRST_DOC.md` now points at it.
 
 ### Added — quality on a tenant's own documents (ADR-0026)

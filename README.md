@@ -15,21 +15,19 @@ docdoc is not a Python library and makes no promise about importing its packages
 
 ## Quickstart
 
-You need Docker with Compose, and Node.js 24+ to build the console once. No API key and no cloud
-account.
+You need Docker with Compose. No Node, no Python, no API key and no cloud account.
 
-**1. Clone, build the console, and start the stack.**
+**1. Clone and start the stack.**
 
 ```bash
 git clone https://github.com/jarviisha/docdoc.git && cd docdoc
-(cd ui && npm ci && npm run build)        # the console's assets; compose mounts ui/dist
-docker compose -f packaging/docker/compose.yml up -d --build
-docker compose -f packaging/docker/compose.yml exec api docdoc migrate
+docker compose -f packaging/docker/compose.yml up -d
 ```
 
-This starts the API on `http://localhost:8000`, an extraction worker, an OCR worker, Postgres and an
-S3-compatible object store. `docdoc migrate` creates the run database's tables. Nothing applies
-them on startup, so run it once now and again after each upgrade.
+The first `up` builds the image, console included, which takes a few minutes. It starts the API on
+`http://localhost:8000`, an extraction worker, an OCR worker, Postgres and an S3-compatible object
+store. A one-shot `migrate` service creates the run database's tables before the API and workers
+start, and does it again, idempotently, on every later `up`.
 
 If port 5432 is already taken on your machine (by your own Postgres, say), `up` fails on the
 `postgres` service. Set `DOCDOC_PG_PORT=55433` in `packaging/docker/.env` and run `up` again; only
@@ -84,6 +82,9 @@ the extraction again, and the values come from the model. Re-run Quality to comp
 Scans and photos need a parser that does OCR: Azure Document Intelligence, Google Cloud Vision, or
 an OCR endpoint you run. See [ingest](docs/concepts/ingest.md) for the settings each needs.
 
+After pulling a newer docdoc, run `docker compose -f packaging/docker/compose.yml up -d --build`
+so the image, and the console in it, are rebuilt.
+
 ### Stop it
 
 ```bash
@@ -93,9 +94,13 @@ docker compose -f packaging/docker/compose.yml down -v    # deletes it too
 
 ## Configuration
 
-Every setting is an environment variable. In the compose stack you set them in
-`packaging/docker/.env`; `compose.yml` forwards each one to the API and both workers, and lists
-them with their reasons. These are the ones a deployment decides first:
+Every setting is an environment variable. In the compose stack you set the tunable ones in
+`packaging/docker/.env`, and `compose.yml` forwards them to the API, both workers and `migrate`:
+the credentials, the model settings, and every setting from "Three configure asynchronous runs"
+below onwards except `DOCDOC_STORE_ROOT`. Four are fixed in `compose.yml` instead, because they
+name that file's own services and mounts: `DOCDOC_RUN_DATABASE_URL`, `DOCDOC_STORE_URL`,
+`DOCDOC_SCHEMA_PATHS` and `DOCDOC_ECHO_FIXTURES`. Change those by editing `compose.yml`, or by
+running the image your own way. These are the ones a deployment decides first:
 
 ```sh
 DOCDOC_SCHEMA_PATHS=/schemas                   # where schemas live; os.pathsep-separated
@@ -341,7 +346,7 @@ container, for example `docker compose -f packaging/docker/compose.yml exec api 
 
 | Command | What it does |
 |---|---|
-| `docdoc migrate` | applies the run database's schema; records the default tenant |
+| `docdoc migrate` | applies the run database's schema; records the default tenant. Compose's `migrate` service runs it on every `up` |
 | `docdoc worker --kind extraction\|ocr` | claims and runs queued runs; the compose stack starts one of each |
 | `docdoc sweep` | removes expired runs and what only they named |
 | `docdoc credential issue\|list\|revoke` | manages API credentials; `issue --admin` makes the first admin key |
@@ -419,6 +424,11 @@ make lint       # ruff, mypy strict, layer boundaries
 make ui         # the console: typecheck, tests, build
 make dev        # API, OCR worker and the console's dev server against a local Postgres
 ```
+
+**Developing the console.** The image builds `ui/` itself, so only console work needs Node (24+) on
+the host: `cd ui && npm ci && npm run build` writes `ui/dist`, which an API run from the checkout
+serves, and `make dev` serves it live with Vite. To try a host build inside the compose stack, mount
+it and point `DOCDOC_CONSOLE_ROOT` at the mount.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the rules that are not negotiable.
 
