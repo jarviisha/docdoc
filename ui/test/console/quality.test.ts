@@ -58,7 +58,32 @@ test("the field table counts per path and names the documents that missed", () =
       { document_id: "d3", run_id: "r3", outcomes: [{ field_path: "total", kind: "missing" }] },
     ],
   });
-  assert.deepEqual(table, [{ path: "total", correct: 1, wrong: 1, missing: 1, documents: [{ documentId: "d2", runId: "r2" }, { documentId: "d3", runId: "r3" }] }]);
+  assert.deepEqual(table.map((f) => f.documents.map((d) => [d.documentId, d.runId])), [[["d2", "r2"], ["d3", "r3"]]]);
+  assert.deepEqual({ ...table[0], documents: [] }, { path: "total", correct: 1, wrong: 1, missing: 1, documents: [] });
+});
+
+test("each document that missed a field says what was expected and what was extracted", () => {
+  const table = toFieldTable({
+    per_field: { total: {}, due_date: {} },
+    documents: [
+      {
+        document_id: "d1",
+        run_id: "r1",
+        outcomes: [
+          { field_path: "total", kind: "incorrect", expected: "1240.50", extracted: "1240.00" },
+          { field_path: "due_date", kind: "missing", expected: "2026-04-01", extracted: null },
+        ],
+      },
+      { document_id: "d2", outcomes: [{ field_path: "due_date", kind: "incorrect", expected: null, extracted: "2026-04-02" }] },
+    ],
+  });
+  assert.deepEqual(table[0]!.documents, [
+    { documentId: "d1", runId: "r1", outcome: "Wrong", expected: "1240.50", extracted: "1240.00" },
+  ]);
+  assert.deepEqual(table[1]!.documents, [
+    { documentId: "d1", runId: "r1", outcome: "Missing", expected: "2026-04-01", extracted: "— not found" },
+    { documentId: "d2", runId: null, outcome: "Wrong", expected: "not in the document", extracted: "2026-04-02" },
+  ]);
 });
 
 test("a running evaluation has an empty field table", () => {

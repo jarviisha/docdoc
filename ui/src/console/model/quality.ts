@@ -50,7 +50,7 @@ export interface EvaluationDetail {
   documents: {
     document_id: string;
     run_id?: string;
-    outcomes: { field_path: string; kind: string | null }[];
+    outcomes: { field_path: string; kind: string | null; expected?: unknown; extracted?: unknown }[];
   }[];
 }
 
@@ -94,18 +94,32 @@ export function toFieldTable(
   correct: number;
   wrong: number;
   missing: number;
-  documents: { documentId: string; runId: string | null }[];
+  /** The documents this field went wrong on, each with what was expected and extracted. */
+  documents: { documentId: string; runId: string | null; outcome: string; expected: string; extracted: string }[];
 }[] {
   return Object.entries(detail.per_field ?? {}).map(([path, metrics]) => ({
     path,
     correct: metrics.field_accuracy?.numerator ?? 0,
     wrong: metrics.incorrect_rate?.numerator ?? 0,
     missing: metrics.missing_rate?.numerator ?? 0,
-    documents: detail.documents
-      .filter((d) => d.outcomes.some((o) => o.field_path === path && o.kind !== "correct"))
-      .map((d) => ({ documentId: d.document_id, runId: d.run_id ?? null })),
+    documents: detail.documents.flatMap((d) =>
+      d.outcomes
+        .filter((o) => o.field_path === path && o.kind !== "correct")
+        .map((o) => ({
+          documentId: d.document_id,
+          runId: d.run_id ?? null,
+          outcome: OUTCOME[o.kind ?? ""] ?? o.kind ?? "Not scored",
+          expected: shown(o.expected, "not in the document"),
+          extracted: shown(o.extracted, "— not found"),
+        })),
+    ),
   }));
 }
+
+const OUTCOME: Record<string, string> = { incorrect: "Wrong", missing: "Missing", spurious: "Extra" };
+
+const shown = (v: unknown, none: string): string =>
+  v === null || v === undefined ? none : typeof v === "string" ? v : JSON.stringify(v);
 
 /** Newest first, as the route lists them. */
 export function historyRows(list: EvaluationSummary[]): {

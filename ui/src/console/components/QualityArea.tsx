@@ -264,17 +264,30 @@ export function QualityArea({ request, onOpenRun, presetTenant }: Props) {
           {missed === undefined ? null : (
             <div className="flex flex-col gap-1">
               <SectionHeading>Documents that missed {missed.path}</SectionHeading>
-              <ul className="flex flex-col gap-1">
-                {missed.documents.map((d) => (
-                  <li key={d.documentId}>
-                    <CopyableId
-                      value={d.documentId}
-                      display={shortId(d.documentId)}
-                      {...(d.runId === null ? {} : { onOpen: () => onOpenRun(d.runId!) })}
-                    />
-                  </li>
-                ))}
-              </ul>
+              <Card className="py-0">
+                <DataTable
+                  rows={missed.documents}
+                  rowKey={(d) => d.documentId}
+                  label={`Documents that missed ${missed.path}`}
+                  columns={[
+                    {
+                      key: "document",
+                      header: "Document",
+                      width: "200px",
+                      cell: (d) => (
+                        <CopyableId
+                          value={d.documentId}
+                          display={shortId(d.documentId)}
+                          {...(d.runId === null ? {} : { onOpen: () => onOpenRun(d.runId!) })}
+                        />
+                      ),
+                    },
+                    { key: "outcome", header: "Outcome", width: "100px", cell: (d) => d.outcome },
+                    { key: "expected", header: "Expected", cell: (d) => d.expected },
+                    { key: "extracted", header: "Extracted", cell: (d) => d.extracted },
+                  ]}
+                />
+              </Card>
             </div>
           )}
         </>
