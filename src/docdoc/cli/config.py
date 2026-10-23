@@ -498,11 +498,16 @@ class Settings:
 
     # -- the things a command actually asks for -------------------------------
 
-    def registry(self) -> Any:
-        """The schema registry, built from the resolved paths."""
+    def registry(self, console: Any = None) -> Any:
+        """The schema registry, built from the resolved paths plus ``console``'s rows if given."""
         from docdoc.extraction import SchemaRegistry
 
-        return SchemaRegistry.from_paths(self.schema_paths)
+        files = SchemaRegistry.from_paths(self.schema_paths)
+        if console is None:
+            return files
+        from docdoc.runs.console_schemas import merged_registry
+
+        return merged_registry(files, console)
 
     def adapter(self) -> Any:
         """The model adapter configuration selects.

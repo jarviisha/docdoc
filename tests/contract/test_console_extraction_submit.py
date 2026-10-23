@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -18,12 +19,14 @@ pytest.importorskip("fastapi", reason="the HTTP interface lives behind the docdo
 from fastapi.testclient import TestClient
 from tests.fixtures.limiter import InMemoryLimiter
 from tests.fixtures.run_queue import InMemoryRunQueue
+from tests.fixtures.schema_store import InMemorySchemaStore
 from tests.support.console import ADMIN_KEY, PLAIN_KEY, H, Ring, accounts_with_alice, sign_in
 
 from docdoc.api.app import _Deployment, build_app
 from docdoc.artifacts import BlobStore, FileArtifactStore
 from docdoc.extraction import SchemaRegistry
 from docdoc.extraction.adapters import EchoAdapter
+from docdoc.runs.console_schemas import ConsoleSchema
 from docdoc.runs.limits import LimitPolicy
 from docdoc.runs.model import RunKind
 
@@ -236,3 +239,24 @@ def test_listing_schemas_needs_a_session(signed_in: tuple[TestClient, dict[str, 
     r = client.get("/v1/console/schemas", headers={"Authorization": f"Bearer {ADMIN_KEY}"})
 
     assert r.status_code == 401
+
+
+def test_console_schema_is_extractable_through_v1(tmp_path: Path, queue: InMemoryRunQueue) -> None:
+    store = InMemorySchemaStore()
+    document = json.loads(Path("schemas/invoice@2.json").read_text(encoding="utf-8"))
+    store.insert(
+        ConsoleSchema(
+            name="invoice",
+            version=3,
+            document={**document, "version": 3},
+            prompt=Path("schemas/prompts/invoice@2.md").read_text(encoding="utf-8"),
+            base="invoice@2",
+            created_at=datetime(2026, 10, 20, tzinfo=UTC),
+            created_by="alice",
+        )
+    )
+    client = TestClient(build_app(_deployment(tmp_path, queue, schemas=store)))
+
+    r = client.get("/v1/schemas", headers={"Authorization": f"Bearer {PLAIN_KEY}"})
+
+    assert "invoice@3" in [s["identity"] for s in r.json()["schemas"]]

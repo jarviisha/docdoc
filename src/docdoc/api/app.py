@@ -171,6 +171,7 @@ class _Deployment:
         limiter: Any = None,
         deliverer: Any = None,
         corrections: Any = None,
+        schemas: Any = None,
         routing: Any = None,
         #: The console accounts store (ADR-0023 §1). `None` builds one from the
         #: run-state database, see `console_accounts`.
@@ -193,6 +194,7 @@ class _Deployment:
         )
         self._corrections = corrections
         self._evaluations: Any = None
+        self._schemas = schemas
         self._console = console
         #: The console's idle bound (ADR-0023 §1), read once like every other
         #: configuration value here rather than per gated request.
@@ -342,6 +344,19 @@ class _Deployment:
         self._evaluations = PostgresEvaluationStore(execute=execute)
         return self._evaluations
 
+    def console_schemas(self) -> Any:
+        """The console schema store, or ``None`` with no database, built once like `evaluations`."""
+        if self._schemas is not None:
+            return self._schemas
+        execute = getattr(self._runs, "_execute", None)
+        if execute is None:
+            return None
+
+        from docdoc.runs.console_schemas import PostgresSchemaStore
+
+        self._schemas = PostgresSchemaStore(execute=execute)
+        return self._schemas
+
     def console_accounts(self) -> Any:
         """The console accounts store, or ``None``, built once (ADR-0023 §1).
 
@@ -466,12 +481,18 @@ class _Deployment:
         return self._readiness
 
     def registry(self) -> Any:
-        if self._registry is not None:
-            return self._registry
-        from docdoc.extraction import SchemaRegistry
+        base = self._registry
+        if base is None:
+            from docdoc.extraction import SchemaRegistry
 
-        raw = os.environ.get(SCHEMA_PATHS_ENV, "")
-        return SchemaRegistry.from_paths([p for p in raw.split(os.pathsep) if p.strip()])
+            raw = os.environ.get(SCHEMA_PATHS_ENV, "")
+            base = SchemaRegistry.from_paths([p for p in raw.split(os.pathsep) if p.strip()])
+        store = self.console_schemas()
+        if store is None:
+            return base
+        from docdoc.runs.console_schemas import merged_registry
+
+        return merged_registry(base, store)
 
     def adapter(self) -> Any:
         if self._adapter is not None:

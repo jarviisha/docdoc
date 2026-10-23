@@ -453,8 +453,10 @@ class Worker:
         #: a priority.
         kind: RunKind | None = None,
         parsers: ParserRegistry | None = None,
+        reload_registry: Callable[[], Any] | None = None,
     ) -> None:
         self._queue = queue
+        self._reload_registry = reload_registry
         self._blobs = blobs
         self._store = store
         #: How to reach one tenant's namespace. Without it a worker executes
@@ -681,6 +683,12 @@ class Worker:
         heartbeat = _Heartbeat(self._queue, run, self._lease)
         heartbeat.start()
         try:
+            if (
+                self._reload_registry is not None
+                and run.schema_identity
+                and run.schema_identity not in self._registry
+            ):
+                self._registry = self._reload_registry()
             execute_one(
                 run,
                 queue=self._queue,

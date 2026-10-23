@@ -277,6 +277,7 @@ tests/
 │   ├── test_reextraction.py           # FR-038/FR-043, results independent and frozen
 │   ├── test_plan_tree_is_current.py   # this tree — asserts it did not go stale a fourth time
 │   ├── test_provider_tests_are_separable.py  # FR-045 — a credential-reading test must be marked
+│   ├── test_worker_registry_reload.py # a worker re-reads console schemas on an unknown identity
 │   └── test_documented_api_references_resolve.py  # SC-020 — the docs' API is the real API
 ├── contract/
 │   └── test_model_adapter_contract.py # every ModelAdapter must satisfy EXT-15…EXT-18,

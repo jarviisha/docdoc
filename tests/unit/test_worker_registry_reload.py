@@ -1,0 +1,84 @@
+"""A worker re-reads the registry when a claimed run names a schema it has not seen."""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+from uuid import uuid4
+
+from docdoc.artifacts import BlobStore, FileArtifactStore
+from docdoc.extraction import SchemaRegistry
+from docdoc.extraction.adapters import EchoAdapter
+from docdoc.runs.console_schemas import ConsoleSchema, merged_registry
+from docdoc.runs.model import RunStatus
+from docdoc.runs.worker import Worker
+from tests.fixtures.run_queue import InMemoryRunQueue
+from tests.fixtures.schema_store import InMemorySchemaStore
+
+NOW = datetime(2026, 10, 20, 9, 0, tzinfo=UTC)
+DOCUMENT = Path("tests/fixtures/pdf/digital_invoice.pdf").read_bytes()
+
+
+@dataclass
+class _Spec:
+    blob_id: str
+    schema_identity: str = "invoice@3"
+    tenant_id: str = "default"
+    request_id: str | None = None
+    idempotency_key: str | None = None
+    kind: str = "extraction"
+
+
+def test_worker_reloads_registry_on_unknown_identity(tmp_path: Path) -> None:
+    files = SchemaRegistry.from_paths([Path("schemas")])
+    document = json.loads(Path("schemas/invoice@2.json").read_text(encoding="utf-8"))
+    store = InMemorySchemaStore()
+    store.insert(
+        ConsoleSchema(
+            name="invoice",
+            version=3,
+            document={**document, "version": 3},
+            prompt=Path("schemas/prompts/invoice@2.md").read_text(encoding="utf-8"),
+            base="invoice@2",
+            created_at=NOW,
+            created_by="alice",
+        )
+    )
+    echo = tmp_path / "echo"
+    echo.mkdir()
+    (echo / "invoice@3.json").write_text(
+        Path("tests/fixtures/echo/invoice@2.json").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    reloads: list[int] = []
+
+    def reload() -> Any:
+        reloads.append(1)
+        return merged_registry(files, store)
+
+    queue = InMemoryRunQueue()
+    blobs = BlobStore(tmp_path)
+    run_id = uuid4()
+    queue.submit(
+        _Spec(blobs.put(DOCUMENT)),  # type: ignore[arg-type]
+        run_id=run_id,
+        now=NOW,
+        expires_at=NOW + timedelta(hours=24),
+    )
+    run = queue.claim(worker_id="w", now=NOW, lease=timedelta(seconds=90), max_attempts=3)
+    worker = Worker(
+        queue=queue,
+        blobs=blobs,
+        store=FileArtifactStore(tmp_path),
+        registry=files,
+        adapter=EchoAdapter.from_fixtures(echo),
+        worker_id="w",
+        reload_registry=reload,
+    )
+
+    worker._execute_with_heartbeat(run)
+
+    assert queue.get(run_id, "default").status is RunStatus.SUCCEEDED
+    assert len(reloads) == 1
