@@ -6,18 +6,24 @@ import {
   addField,
   changesBetween,
   constraintsFor,
+  constraintText,
   documentOf,
   draftFrom,
   emptyDraft,
   groupByName,
   isDirty,
+  isNumberConstraint,
   moveField,
+  problemRows,
   removeField,
   rowOfProblem,
   saveLabel,
+  sourceLabel,
   toSchemaDetail,
   toSchemaEntries,
   updateField,
+  visibleRows,
+  withConstraint,
 } from "../../src/console/model/schemas.ts";
 
 const file = JSON.parse(readFileSync(new URL("../../../schemas/invoice@2.json", import.meta.url), "utf8"));
@@ -144,4 +150,55 @@ test("rowOfProblem maps index-form and dotted-name problem paths to tree paths",
   assert.equal(rowOfProblem(invoice, "line_items.nope"), null);
   assert.equal(rowOfProblem(invoice, "name"), null);
   assert.equal(rowOfProblem(invoice, "<root>"), null);
+});
+
+test("sourceLabel says file, or console with when and who", () => {
+  assert.equal(sourceLabel({ source: "file", createdAt: null, createdBy: null }), "file");
+  const label = sourceLabel({ source: "console", createdAt: "2026-10-23T10:00:00Z", createdBy: "ops" });
+  assert.match(label, /^console · .*2026.* · ops$/);
+  assert.equal(sourceLabel({ source: "console", createdAt: null, createdBy: null }), "console · — · —");
+});
+
+test("visibleRows shows top-level fields and opens only expanded groups", () => {
+  const closed = visibleRows(invoice.fields, new Set());
+  assert.equal(closed.length, invoice.fields.length);
+  assert.deepEqual(closed[6], { field: invoice.fields[6], path: [6], key: "6", depth: 0, expandable: true });
+  assert.equal(closed[0]?.expandable, false);
+  const open = visibleRows(invoice.fields, new Set(["6"]));
+  assert.deepEqual(open.slice(7, 9).map((r) => [r.key, r.depth, r.field.name]), [["6.0", 1, "description"], ["6.1", 1, "quantity"]]);
+  assert.equal(open.length, invoice.fields.length + 4);
+});
+
+test("withConstraint parses typed values, comma enums, and drops a cleared key", () => {
+  const f = (patch: object) => ({ ...addField(emptyDraft(), []).fields[0]!, ...patch });
+  const int = f({ type: "integer", constraints: { minimum: 1 } });
+  assert.deepEqual(withConstraint(int, "enum", "1, 2,,3"), { minimum: 1, enum: [1, 2, 3] });
+  assert.deepEqual(withConstraint(int, "minimum", ""), {});
+  assert.deepEqual(withConstraint(int, "maximum", "9"), { minimum: 1, maximum: 9 });
+  assert.deepEqual(withConstraint(f({ type: "string" }), "enum", "EUR, USD"), { enum: ["EUR", "USD"] });
+  assert.deepEqual(withConstraint(f({ type: "string" }), "min_length", "2"), { min_length: 2 });
+  assert.deepEqual(withConstraint(f({ type: "boolean" }), "const", "true"), { const: true });
+  assert.deepEqual(withConstraint(f({ type: "date" }), "minimum", "2020-01-01"), { minimum: "2020-01-01" });
+  // Not a number: kept as typed, so the server names the problem.
+  assert.deepEqual(withConstraint(int, "const", "x"), { minimum: 1, const: "x" });
+});
+
+test("constraintText and isNumberConstraint", () => {
+  assert.equal(constraintText(["EUR", "USD"]), "EUR, USD");
+  assert.equal(constraintText(undefined), "");
+  assert.equal(constraintText(3), "3");
+  const f = (patch: object) => ({ ...addField(emptyDraft(), []).fields[0]!, ...patch });
+  assert.equal(isNumberConstraint(f({ type: "string" }), "max_length"), true);
+  assert.equal(isNumberConstraint(f({ type: "integer" }), "minimum"), true);
+  assert.equal(isNumberConstraint(f({ type: "date" }), "minimum"), false);
+  assert.equal(isNumberConstraint(f({ type: "integer" }), "enum"), false);
+});
+
+test("problemRows keys every row a problem names", () => {
+  const rows = problemRows(invoice, [
+    { path: "fields.6.fields.1.constraints", message: "a" },
+    { path: "supplier", message: "b" },
+    { path: "<root>", message: "c" },
+  ]);
+  assert.deepEqual([...rows].sort(), ["5", "6.1"]);
 });

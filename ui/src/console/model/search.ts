@@ -23,6 +23,11 @@ export interface QualitySearch {
   evaluation?: string;
 }
 
+export interface SchemaEditorSearch {
+  /** The identity a new version starts from; absent for a new name. */
+  base?: string;
+}
+
 /** A non-empty trimmed string, else undefined. */
 function text(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -59,6 +64,10 @@ export function qualitySearch(raw: Record<string, unknown>): QualitySearch {
     schema: text(raw.schema),
     evaluation: text(raw.evaluation),
   });
+}
+
+export function schemaEditorSearch(raw: Record<string, unknown>): SchemaEditorSearch {
+  return defined<SchemaEditorSearch>({ base: text(raw.base) });
 }
 
 /**

@@ -27,7 +27,14 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 import { AREA_PATHS, areaOf, type Area } from "./model/navigation.ts";
-import { parseQuery, qualitySearch, runsSearch, stringifyQuery, tenantSearch } from "./model/search.ts";
+import {
+  parseQuery,
+  qualitySearch,
+  runsSearch,
+  schemaEditorSearch,
+  stringifyQuery,
+  tenantSearch,
+} from "./model/search.ts";
 import { useRequest } from "./components/RequestContext.tsx";
 import { CallbacksArea } from "./components/CallbacksArea.tsx";
 import { CredentialArea } from "./components/CredentialArea.tsx";
@@ -36,6 +43,9 @@ import { OverviewArea } from "./components/OverviewArea.tsx";
 import { ParsersArea } from "./components/ParsersArea.tsx";
 import { QualityArea } from "./components/QualityArea.tsx";
 import { RunArea, RunDetail } from "./components/RunArea.tsx";
+import { SchemaEditor } from "./components/SchemaEditor.tsx";
+import { SchemasArea } from "./components/SchemasArea.tsx";
+import { SchemaView } from "./components/SchemaView.tsx";
 import { SubmitArea } from "./components/SubmitArea.tsx";
 import { TenantsArea } from "./components/TenantsArea.tsx";
 
@@ -67,7 +77,7 @@ const NAV: { heading: string | null; entries: NavEntry[] }[] = [
       { name: "quality", label: "Quality" },
     ],
   },
-  { heading: "Build", entries: [{ soon: "Schemas" }] },
+  { heading: "Build", entries: [{ name: "schemas", label: "Schemas" }] },
   {
     heading: "Manage",
     entries: [
@@ -287,12 +297,31 @@ const parsersRoute = createRoute({
   },
 });
 
-// Registered so `/schemas` is a known path; the screen replaces this in the next task.
 const schemasRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/schemas",
   component: function Schemas() {
-    return null;
+    return <SchemasArea />;
+  },
+});
+
+const schemaNewRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/schemas/new",
+  validateSearch: schemaEditorSearch,
+  component: function SchemaNew() {
+    const { base } = schemaNewRoute.useSearch();
+    // Keyed by the base: another base starts another draft.
+    return <SchemaEditor key={base ?? ""} base={base} />;
+  },
+});
+
+const schemaRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/schemas/$identity",
+  component: function Schema() {
+    const { identity } = schemaRoute.useParams();
+    return <SchemaView key={identity} identity={identity} />;
   },
 });
 
@@ -316,6 +345,8 @@ const routeTree = rootRoute.addChildren([
   callbacksRoute,
   parsersRoute,
   schemasRoute,
+  schemaNewRoute,
+  schemaRoute,
   erasureRoute,
 ]);
 

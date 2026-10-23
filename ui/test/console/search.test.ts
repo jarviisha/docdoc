@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { parseQuery, qualitySearch, runsSearch, stringifyQuery, tenantSearch } from "../../src/console/model/search.ts";
+import { parseQuery, qualitySearch, runsSearch, schemaEditorSearch, stringifyQuery, tenantSearch } from "../../src/console/model/search.ts";
 
 test("runs search keeps valid filters", () => {
   assert.deepEqual(runsSearch({ tenant: " acme ", status: "failed", kind: "ocr" }), { tenant: "acme", status: "failed", kind: "ocr" });
@@ -33,4 +33,9 @@ test("query stringifying writes plain strings and omits the empty", () => {
   assert.equal(stringifyQuery({ tenant: undefined }), "");
   assert.equal(stringifyQuery({ tenant: "" }), "");
   assert.deepEqual(parseQuery(stringifyQuery({ tenant: "a b" })), { tenant: "a b" });
+});
+
+test("schema editor search keeps a base identity", () => {
+  assert.deepEqual(schemaEditorSearch({ base: " invoice@2 ", x: 1 }), { base: "invoice@2" });
+  assert.deepEqual(schemaEditorSearch({ base: "" }), {});
 });

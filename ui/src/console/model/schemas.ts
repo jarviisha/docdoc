@@ -1,3 +1,5 @@
+import { when } from "./format.ts";
+
 /**
  * Schemas: the list the console reads, and the draft an operator edits before
  * saving it as a new version.
@@ -120,6 +122,12 @@ export function groupByName(entries: SchemaEntry[]): SchemaGroup[] {
 export function saveLabel(groups: SchemaGroup[], name: string): string {
   const latest = groups.find((g) => g.name === name)?.latest.version ?? 0;
   return `Save as ${name}@${latest + 1}`;
+}
+
+/** Where a schema came from: `file`, or `console · when · who`. */
+export function sourceLabel(entry: Pick<SchemaEntry, "source" | "createdAt" | "createdBy">): string {
+  if (entry.source === "file") return "file";
+  return `console · ${when(entry.createdAt)} · ${entry.createdBy ?? "—"}`;
 }
 
 /** Read `GET /v1/console/schemas/{identity}` (or the 201 of a create). */
@@ -269,6 +277,64 @@ export function constraintsFor(field: FieldDraft): string[] {
   return keys;
 }
 
+const NUMERIC: readonly (FieldType | null)[] = ["integer", "number", "decimal"];
+
+/** Whether a constraint's value is a number, so the form offers a number input. */
+export function isNumberConstraint(field: FieldDraft, key: string): boolean {
+  if (["min_length", "max_length", "multiple_of"].includes(key)) return true;
+  return (key === "minimum" || key === "maximum") && NUMERIC.includes(field.type);
+}
+
+/** A typed value as the field's type reads it; text that does not parse stays text for the server to name. */
+function valueOf(field: FieldDraft, text: string): unknown {
+  if (NUMERIC.includes(field.type) && text !== "" && Number.isFinite(Number(text))) return Number(text);
+  if (field.type === "boolean" && (text === "true" || text === "false")) return text === "true";
+  return text;
+}
+
+/** A constraint's value as its input shows it; an `enum` is a comma list. */
+export function constraintText(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  return Array.isArray(value) ? value.join(", ") : String(value);
+}
+
+/** `field`'s constraints with `key` set from its input's text; empty text removes the key. */
+export function withConstraint(field: FieldDraft, key: string, text: string): Record<string, unknown> {
+  const { [key]: _old, ...rest } = field.constraints;
+  const trimmed = text.trim();
+  if (trimmed === "") return rest;
+  if (key === "enum") {
+    const items = trimmed.split(",").map((t) => t.trim()).filter((t) => t !== "");
+    return { ...rest, enum: items.map((t) => valueOf(field, t)) };
+  }
+  if (isNumberConstraint(field, key)) {
+    const n = Number(trimmed);
+    return { ...rest, [key]: Number.isFinite(n) ? n : trimmed };
+  }
+  return { ...rest, [key]: key === "const" ? valueOf(field, trimmed) : trimmed };
+}
+
+// --- showing the tree -----------------------------------------------------
+
+export interface TreeRow {
+  field: FieldDraft;
+  path: number[];
+  /** `path` joined by dots: what `expanded` and `problemRows` hold. */
+  key: string;
+  depth: number;
+  expandable: boolean;
+}
+
+/** The rows a tree table shows: every top-level field, and the children of expanded groups. */
+export function visibleRows(fields: FieldDraft[], expanded: Set<string>, parent: number[] = []): TreeRow[] {
+  return fields.flatMap((field, i) => {
+    const path = [...parent, i];
+    const key = path.join(".");
+    const row = { field, path, key, depth: parent.length, expandable: field.cardinality !== "scalar" };
+    return expanded.has(key) ? [row, ...visibleRows(field.fields, expanded, path)] : [row];
+  });
+}
+
 // --- comparing -------------------------------------------------------------
 
 function flatten(fields: FieldDraft[], prefix = "", into = new Map<string, string>()) {
@@ -331,4 +397,14 @@ export function rowOfProblem(draft: SchemaDraft, path: string): number[] | null 
     list = (list[i] as FieldDraft).fields;
   }
   return found;
+}
+
+/** The keys (`TreeRow.key`) of every row the server's problems name. */
+export function problemRows(draft: SchemaDraft, problems: { path: string; message: string }[]): Set<string> {
+  const rows = new Set<string>();
+  for (const { path } of problems) {
+    const row = rowOfProblem(draft, path);
+    if (row !== null) rows.add(row.join("."));
+  }
+  return rows;
 }
