@@ -160,6 +160,9 @@ ROUTES = {
     ("GET", "/v1/console/tenants"),
     ("GET", "/v1/console/parsers"),
     ("POST", "/v1/console/tenants/{tenant_id}/ocr"),
+    # Console extraction submit: the two Bearer calls (store, then submit) in one,
+    # through the same `submit_extraction`; session-only.
+    ("POST", "/v1/console/tenants/{tenant_id}/extractions"),
     # 019 (console OCR result plan, Task 1): an OCR run's page images.
     ("GET", "/v1/console/runs/{run_id}/pages/{page}"),
     # 021 (console admin screens plan, Task 1): callbacks, per tenant --

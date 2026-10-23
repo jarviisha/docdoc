@@ -101,6 +101,9 @@ CONSOLE_ADDED = {
     ("/v1/console/tenants", "GET"),
     ("/v1/console/parsers", "GET"),
     ("/v1/console/tenants/{tenant_id}/ocr", "POST"),
+    # Console extraction submit, through the same `submit_extraction` the run
+    # route's shared part serves.
+    ("/v1/console/tenants/{tenant_id}/extractions", "POST"),
     # 019 (console OCR result plan, Task 1): an OCR run's page images, so the
     # result view can draw token boxes over the page they came from.
     ("/v1/console/runs/{run_id}/pages/{page}", "GET"),
