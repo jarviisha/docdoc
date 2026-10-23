@@ -26,22 +26,37 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any, Final, Protocol
 
 from docdoc.evaluation.corrections import Correction
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
-    from datetime import datetime
     from uuid import UUID
 
 __all__ = [
+    "ANSWERS_NEVER_EXPIRE",
+    "Answer",
     "Correction",
     "CorrectionStore",
     "NullCorrectionStore",
     "PostgresCorrectionStore",
     "for_promotion",
 ]
+
+#: A check is an answer, and an answer is kept until its document or tenant is
+#: erased. There is no retention setting for it.
+ANSWERS_NEVER_EXPIRE: Final = datetime.max.replace(tzinfo=UTC)
+
+
+@dataclass(frozen=True)
+class Answer:
+    """The newest check on one field of one document, and the run it was made on."""
+
+    blob_id: str
+    run_id: UUID
+    correction: Correction
 
 
 class CorrectionStore(Protocol):
@@ -53,6 +68,8 @@ class CorrectionStore(Protocol):
         *,
         tenant_id: str,
         run_id: UUID,
+        blob_id: str,
+        schema_name: str,
         at: datetime,
         expires_at: datetime,
     ) -> UUID:
@@ -65,6 +82,14 @@ class CorrectionStore(Protocol):
 
     def pinned_runs(self, run_ids: Sequence[UUID], *, at: datetime) -> frozenset[UUID]:
         """Which of these runs carry a correction that has not itself expired."""
+        ...
+
+    def answers(self, *, tenant_id: str, schema_name: str) -> tuple[Answer, ...]:
+        """The newest check per (document, field), ordered by blob then field."""
+        ...
+
+    def answer_summary(self, *, tenant_id: str) -> tuple[tuple[str, int, int], ...]:
+        """``(schema_name, documents, fields)`` per schema name, from the same set."""
         ...
 
 
@@ -89,6 +114,12 @@ class NullCorrectionStore:
     def pinned_runs(self, run_ids: Sequence[UUID], *, at: datetime) -> frozenset[UUID]:
         return frozenset()
 
+    def answers(self, *, tenant_id: str, schema_name: str) -> tuple[Answer, ...]:
+        return ()
+
+    def answer_summary(self, *, tenant_id: str) -> tuple[tuple[str, int, int], ...]:
+        return ()
+
 
 @dataclass
 class PostgresCorrectionStore:
@@ -107,6 +138,8 @@ class PostgresCorrectionStore:
         *,
         tenant_id: str,
         run_id: UUID,
+        blob_id: str,
+        schema_name: str,
         at: datetime,
         expires_at: datetime,
     ) -> UUID:
@@ -129,8 +162,8 @@ class PostgresCorrectionStore:
         correction_id = new_correction_id()
         self.execute(
             "INSERT INTO corrections (correction_id, tenant_id, run_id, processing_id, "
-            "field_path, payload, created_at, expires_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s)",
+            "field_path, payload, created_at, expires_at, blob_id, schema_name) "
+            "VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s)",
             (
                 correction_id,
                 tenant_id,
@@ -140,6 +173,8 @@ class PostgresCorrectionStore:
                 correction.model_dump_json(),
                 at,
                 expires_at,
+                blob_id,
+                schema_name,
             ),
         )
         return correction_id
@@ -175,6 +210,35 @@ class PostgresCorrectionStore:
             fetch="all",
         )
         return frozenset(row["run_id"] for row in rows or ())
+
+    #: Rows with no `blob_id` pre-date answers and are not answers.
+    _NEWEST = (
+        "SELECT DISTINCT ON (schema_name, blob_id, field_path) "
+        "schema_name, blob_id, field_path, run_id, payload FROM corrections "
+        "WHERE tenant_id = %s AND blob_id IS NOT NULL"
+    )
+
+    def answers(self, *, tenant_id: str, schema_name: str) -> tuple[Answer, ...]:
+        rows = self.execute(
+            f"{self._NEWEST} AND schema_name = %s "
+            "ORDER BY schema_name, blob_id, field_path, created_at DESC",
+            (tenant_id, schema_name),
+            fetch="all",
+        )
+        return tuple(
+            Answer(row["blob_id"], row["run_id"], _correction_from(row["payload"]))
+            for row in rows or ()
+        )
+
+    def answer_summary(self, *, tenant_id: str) -> tuple[tuple[str, int, int], ...]:
+        rows = self.execute(
+            f"SELECT schema_name, count(DISTINCT blob_id) AS documents, count(*) AS fields "
+            f"FROM ({self._NEWEST} ORDER BY schema_name, blob_id, field_path, created_at DESC) "
+            "newest GROUP BY schema_name ORDER BY schema_name",
+            (tenant_id,),
+            fetch="all",
+        )
+        return tuple((r["schema_name"], int(r["documents"]), int(r["fields"])) for r in rows or ())
 
 
 def _correction_from(payload: Any) -> Correction:

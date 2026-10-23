@@ -2,6 +2,8 @@
 
 - **Status**: Accepted
 - **Date**: 2026-10-20
+- **Amended in part by**: [ADR-0026](0026-tenant-quality-evaluation.md) §6 (§4's page images
+  are also served for succeeded extraction runs)
 - **Supersedes in part**: [ADR-0019](0019-operations-console-boundary.md) §3 ("the console introduces
   no server-side concept") and §4 (the pasted, never-persisted key), and `specs/011`'s FR-022a and
   FR-037 (no part of a result is rendered); [ADR-0020](0020-retire-the-grounding-viewer.md) in part

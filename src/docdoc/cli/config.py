@@ -348,12 +348,6 @@ ENVIRONMENT_ONLY: dict[str, str] = {
         "recorded against a policy version, so a per-invocation override would "
         "make two processes disagree about what `default@3` means"
     ),
-    "DOCDOC_CORRECTION_RETENTION_DAYS": (
-        "how long a correction is kept (FR-013). Read by whichever process "
-        "sweeps and by the route that records one, so it belongs to the "
-        "deployment -- and `docdoc sweep`'s own `--retention-days` is the run's, "
-        "which is a different deadline on purpose"
-    ),
     # Milestone 12 (the OCR gateway, ADR-0021 §3). Names a file of configured
     # endpoints, each optionally carrying an `Authorization` or similar header
     # -- a credential by another name, and the same reason `DOCDOC_API_KEYS_FILE`

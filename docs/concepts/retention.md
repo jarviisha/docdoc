@@ -160,7 +160,6 @@ implied: retention is work, and work happens where work happens.
 | `DOCDOC_RUN_SWEEP_BATCH` | runs removed per sweep invocation | 500 |
 | `DOCDOC_MAINTENANCE_INTERVAL_SECONDS` | how often a worker ticks | 60 |
 | `DOCDOC_MAINTENANCE_BUDGET_MS` | how long one tick may take | 5000 |
-| `DOCDOC_CORRECTION_RETENTION_DAYS` | how long a correction is kept | unset — as long as its run |
 
 `docdoc sweep` takes `--retention-days` and `--batch` for the same two settings.
 The worker has no flags for them: a process that sweeps between claims is

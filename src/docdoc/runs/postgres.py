@@ -219,7 +219,13 @@ class PostgresRunQueue:
     def purge_tenant_rows(self, tenant_id: str) -> dict[str, int]:
         """One statement per table, counted (FR-086)."""
         counts: dict[str, int] = {}
-        for table in ("corrections", "callbacks", "deliveries", "limit_counters"):
+        for table in (
+            "corrections",
+            "evaluations",
+            "callbacks",
+            "deliveries",
+            "limit_counters",
+        ):
             rows = self._execute(
                 # The table name is interpolated and the tenant is a parameter.
                 # `table` comes from the literal tuple above and from nowhere

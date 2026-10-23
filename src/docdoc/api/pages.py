@@ -1,4 +1,4 @@
-"""Page images for an OCR run's source document (019).
+"""Page images for a run's source document (019): OCR runs, and succeeded extraction runs.
 
 The console draws a run's token boxes over the page they came from. PNG and
 JPEG are already images and are served as stored; a PDF page is rendered with

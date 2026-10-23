@@ -249,6 +249,11 @@ OPERATIONS_DATA_MODEL = pathlib.Path("specs/010-operations-and-corrections/data-
 #: `specs/` directory invented just to hold it.
 CONSOLE_ADR = pathlib.Path("docs/adr/0023-console-login-and-cross-tenant-operations.md")
 
+#: The `evaluations` table is documented in the design that decided it.
+QUALITY_DESIGN = pathlib.Path(
+    "docs/superpowers/specs/2026-10-22-tenant-quality-evaluation-design.md"
+)
+
 RUNS_MIGRATION = pathlib.Path("src/docdoc/runs/migrations/0001_runs.sql")
 
 #: A column definition in the `CREATE TABLE runs` body: four leading spaces, a
@@ -459,6 +464,8 @@ def test_the_table_scan_finds_all_three() -> None:
         # ADR-0023.
         "console_users",
         "console_sessions",
+        # Tenant quality evaluation.
+        "evaluations",
     }, (
         f"the migrations create {sorted(tables)}; the scan or the migrations "
         f"changed, and the check below is now describing something else"
@@ -488,6 +495,7 @@ TABLE_SECTIONS = {
     "corrections": "## `corrections`",
     "console_users": "## `console_users`",
     "console_sessions": "## `console_sessions`",
+    "evaluations": "## `evaluations`",
 }
 
 SECTION_DOCUMENTS = {
@@ -502,6 +510,7 @@ SECTION_DOCUMENTS = {
     "callbacks": OPERATIONS_DATA_MODEL,
     "deliveries": OPERATIONS_DATA_MODEL,
     "corrections": OPERATIONS_DATA_MODEL,
+    "evaluations": QUALITY_DESIGN,
 }
 
 

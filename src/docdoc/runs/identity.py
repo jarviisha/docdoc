@@ -37,7 +37,6 @@ from datetime import UTC, datetime, timedelta
 
 __all__ = [
     "CONSOLE_IDLE_ENV",
-    "CORRECTION_RETENTION_DAYS_ENV",
     "CREDENTIAL_TTL_ENV",
     "DEFAULT_CREDENTIAL_TTL_SECONDS",
     "DEFAULT_DELIVERY_ATTEMPTS",
@@ -72,7 +71,6 @@ __all__ = [
     "RunId",
     "backoff",
     "configured_console_idle",
-    "configured_correction_retention",
     "configured_credential_ttl",
     "configured_delivery_attempts",
     "configured_delivery_backoff",
@@ -93,6 +91,7 @@ __all__ = [
     "new_credential_id",
     "new_delivery_id",
     "new_erasure_id",
+    "new_evaluation_id",
     "new_key_secret",
     "new_password_salt",
     "new_run_id",
@@ -292,6 +291,11 @@ def new_correction_id() -> uuid.UUID:
     return uuid.uuid4()
 
 
+def new_evaluation_id() -> uuid.UUID:
+    """A fresh evaluation identity."""
+    return uuid.uuid4()
+
+
 def new_erasure_id() -> uuid.UUID:
     """A fresh identity for one erasure request, so a caller can refer to it."""
     return uuid.uuid4()
@@ -429,29 +433,6 @@ def configured_credential_ttl(explicit: int | None = None) -> int:
     if explicit is not None:
         return _demand_positive(explicit, "--credential-ttl-seconds")
     return _positive_int(os.environ.get(CREDENTIAL_TTL_ENV, "")) or DEFAULT_CREDENTIAL_TTL_SECONDS
-
-
-#: How long a **correction** is kept, which is configured independently of how
-#: long a run is (FR-013). Unset means corrections are kept for as long as their
-#: runs are — the same "configure nothing and nothing changes" default retention
-#: itself has.
-#:
-#: Where the two disagree, the longer wins: a run whose result carries a live
-#: correction is not swept, because deleting a result somebody reviewed is the
-#: data-loss bug that appears only once both halves of this milestone exist.
-CORRECTION_RETENTION_DAYS_ENV = "DOCDOC_CORRECTION_RETENTION_DAYS"
-
-
-def configured_correction_retention(explicit: int | None = None) -> timedelta | None:
-    """How long a correction is kept: explicit, then environment, then ``None``.
-
-    ``None`` means "as long as the run", which the caller expresses by using the
-    run's own ``expires_at``. It is not "for ever" and it is not "immediately".
-    """
-    if explicit is not None:
-        return timedelta(days=_demand_positive(explicit, "--correction-retention-days"))
-    days = _positive_int(os.environ.get(CORRECTION_RETENTION_DAYS_ENV, ""))
-    return None if days is None else timedelta(days=days)
 
 
 #: How long a run waits before it outranks everything (FR-089). One hour: long

@@ -82,8 +82,8 @@ def test_no_route_names_a_review_workflow(client: TestClient, word: str) -> None
     )
 
 
-def test_the_correction_routes_are_exactly_two(client: TestClient) -> None:
-    """Record one, read this tenant's. There is no third."""
+def test_the_correction_routes_are_exactly_four(client: TestClient) -> None:
+    """Record one, read this tenant's, on the Bearer surface and the console's. No fifth."""
     correction_routes = {
         (method.upper(), path)
         for path, methods in _paths(client).items()
@@ -94,6 +94,8 @@ def test_the_correction_routes_are_exactly_two(client: TestClient) -> None:
     assert correction_routes == {
         ("POST", "/v1/runs/{run_id}/corrections"),
         ("GET", "/v1/runs/{run_id}/corrections"),
+        ("POST", "/v1/console/runs/{run_id}/corrections"),
+        ("GET", "/v1/console/runs/{run_id}/corrections"),
     }
 
 

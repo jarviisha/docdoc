@@ -13,8 +13,6 @@ each test sets only the one it is about.
 
 from __future__ import annotations
 
-from datetime import timedelta
-
 import pytest
 
 from docdoc.runs import identity, maintenance
@@ -116,18 +114,6 @@ def test_an_explicit_non_positive_value_is_refused_by_flag_name(
 
 
 # -- the two that are not integers -------------------------------------------
-
-
-def test_correction_retention_is_absent_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``None`` means "as long as the run" — not "for ever" and not "immediately"."""
-    assert identity.configured_correction_retention() is None
-
-
-def test_correction_retention_reads_days(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(identity.CORRECTION_RETENTION_DAYS_ENV, "90")
-
-    assert identity.configured_correction_retention() == timedelta(days=90)
-    assert identity.configured_correction_retention(5) == timedelta(days=5)
 
 
 def test_the_ssrf_guard_stays_on_for_anything_but_an_affirmative(

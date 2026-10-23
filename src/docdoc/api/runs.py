@@ -22,6 +22,7 @@ from docdoc.api.documents import _terminal
 from docdoc.api.models import RunAcceptedResponse, RunListResponse, RunStateResponse, RunSummary
 from docdoc.api.paging import DEFAULT_RUN_PAGE, MAX_RUN_PAGE
 from docdoc.api.settings import PRIORITY_CEILING_ENV, RUN_DATABASE_URL_ENV
+from docdoc.runs.queue import Submission as _RunSpec
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -89,17 +90,7 @@ def routes() -> APIRouter:
         # to make to anyone else.
         verdict = deployment.limiter.check(tenant_id=tenant, now=now())
         if not verdict.allowed:
-            return JSONResponse(
-                status_code=429,
-                headers={"Retry-After": str(verdict.retry_after_seconds)},
-                content={
-                    "error": "limit_exceeded",
-                    "limit": verdict.limit,
-                    "observed": verdict.observed,
-                    "allowed": verdict.permitted,
-                    "retry_after_seconds": verdict.retry_after_seconds,
-                },
-            )
+            return _limit_refusal(verdict)
 
         _, blobs = _stores_of(request, principal)
         assert blobs is not None
@@ -422,104 +413,12 @@ def routes() -> APIRouter:
         every reviewer's corrections is the ordinary case rather than the strange
         one.
         """
-        from uuid import UUID
-
-        from docdoc.evaluation.corrections import Correction
-        from docdoc.runs.identity import configured_correction_retention, now
-        from docdoc.runs.model import RunStatus
-
-        deployment = _deployment_of(request)
-        store = deployment.corrections()
-        if store is None or not deployment.has_runs:
-            return _unknown_run(run_id)
-
-        try:
-            identity = UUID(run_id)
-        except ValueError:
-            return _unknown_run(run_id)
-
-        # Tenant-scoped in the query rather than checked after the fetch, which
-        # is what makes another tenant's run indistinguishable from one that
-        # never existed (FR-079).
-        run = deployment.runs().get(identity, principal.tenant_id)
-        if run is None:
-            stone = deployment.runs().tombstone(identity, principal.tenant_id)
-            if stone is None:
-                return _unknown_run(run_id)
-            # `410` and not `404`, and naming which: an annotation against
-            # something that is gone is uninterpretable, and a reviewer who typed
-            # the right identifier should not be told they typed a wrong one
-            # (FR-082).
-            return _run_erased(stone)
-
-        if run.status is not RunStatus.SUCCEEDED:
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "error": "run_has_no_result",
-                    "detail": f"this run is {run.status} and has no result to correct",
-                    "status": str(run.status),
-                },
-            )
-
-        body = await _read_json(request)
-        try:
-            correction = Correction.model_validate(body)
-        except Exception as error:
-            # The class and the field, never the body: a validation message from
-            # a correction quotes the value a reviewer typed, which is document
-            # content by another route.
-            return JSONResponse(
-                status_code=422,
-                content={"error": "invalid_correction", "detail": type(error).__name__},
-            )
-
-        at = now()
-        period = configured_correction_retention()
-        # **The longer of the two deadlines wins** (FR-013). A correction is
-        # evidence about a result, so a policy that expired it before the result
-        # would leave the result unexplained; one that expired the result first
-        # is prevented by `pinned_runs`.
-        expires_at = max(run.expires_at, at + period) if period else run.expires_at
-
-        correction_id = store.record(
-            correction,
-            tenant_id=principal.tenant_id,
-            run_id=identity,
-            at=at,
-            expires_at=expires_at,
-        )
-        return JSONResponse(
-            status_code=201,
-            content={
-                "correction_id": str(correction_id),
-                "run_id": str(identity),
-                "field_path": correction.field_path,
-                "expires_at": expires_at.isoformat(),
-            },
-        )
+        return await record_check(request, run_id, principal.tenant_id)
 
     @router.get("/runs/{run_id}/corrections")
     async def list_corrections(request: Request, run_id: str, principal: Caller) -> Any:
         """This tenant's corrections against this run, and nobody else's (FR-079)."""
-        from uuid import UUID
-
-        deployment = _deployment_of(request)
-        store = deployment.corrections()
-        if store is None:
-            return _unknown_run(run_id)
-
-        try:
-            identity = UUID(run_id)
-        except ValueError:
-            return _unknown_run(run_id)
-
-        return {
-            "corrections": [
-                correction.model_dump(mode="json")
-                for correction in store.for_run(tenant_id=principal.tenant_id, run_id=identity)
-            ]
-        }
+        return list_checks(request, run_id, principal.tenant_id)
 
     # -- callbacks (ADR-0018) -----------------------------------------------
 
@@ -621,62 +520,165 @@ def routes() -> APIRouter:
     return router
 
 
-class _RunSpec:
-    """What a submission carries before it is a run.
-
-    A plain object rather than a pydantic model: `RunQueue.submit` takes a
-    structural `RunSpec`, and building a validated model here would validate the
-    same five strings twice — once at the HTTP boundary and once on the way to a
-    database that has its own constraints.
-    """
-
-    __slots__ = (
-        "blob_id",
-        "callback_id",
-        "idempotency_key",
-        "kind",
-        "ocr_language",
-        "ocr_parser",
-        "priority",
-        "request_id",
-        "schema_identity",
-        "tenant_id",
-    )
-
-    def __init__(
-        self,
-        *,
-        tenant_id: str,
-        blob_id: str,
-        schema_identity: str | None,
-        request_id: str | None,
-        idempotency_key: str | None,
-        #: The **granted** priority, already clamped to the tenant's ceiling.
-        #: Clamping happens at this boundary and nowhere below it, so nothing
-        #: further down can be used to escalate past another tenant's queue.
-        priority: int = 0,
-        callback_id: Any = None,
-        #: 014 (ADR-0022): an OCR run names a parser and a language, not a schema.
-        kind: str = "extraction",
-        ocr_parser: str | None = None,
-        ocr_language: str | None = None,
-    ) -> None:
-        self.kind = kind
-        self.ocr_parser = ocr_parser
-        self.ocr_language = ocr_language
-        self.tenant_id = tenant_id
-        self.blob_id = blob_id
-        self.schema_identity = schema_identity
-        self.request_id = request_id
-        self.idempotency_key = idempotency_key
-        self.priority = priority
-        self.callback_id = callback_id
-
-
 #: Returned by `_requested_callback` for a callback that is unknown, malformed,
 #: or another tenant's. A sentinel rather than `None`, because `None` is the
 #: ordinary answer — most submissions ask to be notified about nothing.
 _UNKNOWN_CALLBACK = object()
+
+
+async def record_check(
+    request: Request, run_id: str, tenant_id: str, annotator: str | None = None
+) -> Any:
+    """Record one check on a run: the Bearer route's body, and the console's.
+
+    `annotator`, when given, overrides the body's (the console records the
+    signed-in operator).
+    """
+    from uuid import UUID
+
+    from docdoc.evaluation.corrections import Correction
+    from docdoc.runs.corrections import ANSWERS_NEVER_EXPIRE
+    from docdoc.runs.identity import now
+    from docdoc.runs.model import RunStatus
+
+    deployment = _deployment_of(request)
+    store = deployment.corrections()
+    if store is None or not deployment.has_runs:
+        return _unknown_run(run_id)
+
+    try:
+        identity = UUID(run_id)
+    except ValueError:
+        return _unknown_run(run_id)
+
+    # Tenant-scoped in the query rather than checked after the fetch, which
+    # is what makes another tenant's run indistinguishable from one that
+    # never existed (FR-079).
+    run = deployment.runs().get(identity, tenant_id)
+    if run is None:
+        stone = deployment.runs().tombstone(identity, tenant_id)
+        if stone is None:
+            return _unknown_run(run_id)
+        # `410` and not `404`, and naming which: an annotation against
+        # something that is gone is uninterpretable, and a reviewer who typed
+        # the right identifier should not be told they typed a wrong one
+        # (FR-082).
+        return _run_erased(stone)
+
+    if run.schema_identity is None:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": "run_has_no_fields",
+                "detail": "an OCR run extracts no fields, so there is nothing to check",
+            },
+        )
+
+    if run.status is not RunStatus.SUCCEEDED:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": "run_has_no_result",
+                "detail": f"this run is {run.status} and has no result to correct",
+                "status": str(run.status),
+            },
+        )
+
+    body = await _read_json(request)
+    if annotator is not None and isinstance(body, dict):
+        # Set before validating: the body of a console check carries none.
+        body = {**body, "annotator": annotator}
+    try:
+        correction = Correction.model_validate(body)
+    except Exception as error:
+        # The class and the field, never the body: a validation message from
+        # a correction quotes the value a reviewer typed, which is document
+        # content by another route.
+        return JSONResponse(
+            status_code=422,
+            content={"error": "invalid_correction", "detail": type(error).__name__},
+        )
+
+    if correction.corrected_value is not None:
+        # Typed as the schema declares, as the dataset loader types a label:
+        # `comparators@1` gates on type, so "3" never equals an extracted 3.
+        from docdoc.evaluation.values import strip_indices
+        from docdoc.extraction.errors import SchemaError
+        from docdoc.runs.answers import field_types, typed
+
+        try:
+            declared = field_types(deployment.registry().describe(run.schema_identity)).get(
+                strip_indices(correction.field_path)
+            )
+        except SchemaError:
+            declared = None  # The version is gone; scoring types it, or fails, later.
+        try:
+            value = typed(correction.corrected_value, declared)
+        except ValueError:
+            # The path only: the value is what a reviewer typed from the document.
+            return JSONResponse(
+                status_code=422,
+                content={"error": "invalid_value", "detail": correction.field_path},
+            )
+        correction = correction.model_copy(update={"corrected_value": value})
+
+    if correction.confirmed and correction.location is None:
+        # A tick carries no location of its own: it is where the run read
+        # the value from, which is what the run's grounding says.
+        store_for_tenant, _ = deployment.stores_for(tenant_id)
+        correction = correction.model_copy(
+            update={
+                "location": _grounded_location(
+                    store_for_tenant, run.processing_id, correction.field_path
+                )
+            }
+        )
+
+    at = now()
+    # **A check is an answer and answers never expire.** The run it was made
+    # on is pinned by it, so the run outlives neither.
+    expires_at = ANSWERS_NEVER_EXPIRE
+
+    correction_id = store.record(
+        correction,
+        tenant_id=tenant_id,
+        run_id=identity,
+        blob_id=run.blob_id,
+        schema_name=run.schema_identity.split("@")[0],
+        at=at,
+        expires_at=expires_at,
+    )
+    return JSONResponse(
+        status_code=201,
+        content={
+            "correction_id": str(correction_id),
+            "run_id": str(identity),
+            "field_path": correction.field_path,
+            "expires_at": expires_at.isoformat(),
+        },
+    )
+
+
+def list_checks(request: Request, run_id: str, tenant_id: str) -> Any:
+    """The tenant's checks against one run."""
+    from uuid import UUID
+
+    deployment = _deployment_of(request)
+    store = deployment.corrections()
+    if store is None:
+        return _unknown_run(run_id)
+
+    try:
+        identity = UUID(run_id)
+    except ValueError:
+        return _unknown_run(run_id)
+
+    return {
+        "corrections": [
+            correction.model_dump(mode="json")
+            for correction in store.for_run(tenant_id=tenant_id, run_id=identity)
+        ]
+    }
 
 
 def _granted_priority(requested: Any, *, tenant_id: str) -> int | None:
@@ -780,16 +782,7 @@ def _routing_for(request: Request, run: Any) -> Any:
     if validation is None:
         return None
 
-    from docdoc.grounding.result import GroundingResult
-    from docdoc.pipeline.stages import Stage, spec_for
-
-    grounding = None
-    if store is not None:
-        grounding = store.get(
-            validation.provenance.grounding_artifact_id,
-            model=GroundingResult,
-            artifact_format_version=spec_for(Stage.GROUND).artifact_format_version,
-        )
+    grounding = None if store is None else _grounding_of(store, validation)
 
     # `StoredResult` and **not** a fabricated `PipelineResult`. This line built
     # one, with `outcomes=()` and `provenance=validation.provenance` — and those
@@ -801,6 +794,49 @@ def _routing_for(request: Request, run: Any) -> Any:
     # is not a run, and assembling one that claims to be is how a type gets
     # satisfied by a fiction.
     return decide(StoredResult(grounding=grounding, validation=validation), policy)
+
+
+def _grounded_location(store: Any, processing_id: str | None, field_path: str) -> Any:
+    """Where the run read this field from, or ``None`` when it is ungrounded."""
+    from docdoc.evaluation.labels import ExpectedLocation
+
+    validation = _terminal(store, processing_id) if processing_id else None
+    if validation is None:
+        return None
+    grounding = _grounding_of(store, validation)
+    # Gone or unreadable: the check is stored without a location, not refused.
+    outcome = None if grounding is None else grounding.outcomes.get(field_path)
+    if outcome is None or not outcome.geometry:
+        return None
+    geometry = outcome.geometry[0]
+    return ExpectedLocation(page=geometry.page_index, bbox=geometry.bbox)
+
+
+def _grounding_of(store: Any, validation: Any) -> Any:
+    """The grounding artifact a validation result was derived from."""
+    from docdoc.grounding.result import GroundingResult
+    from docdoc.pipeline.stages import Stage, spec_for
+
+    return store.get(
+        validation.provenance.grounding_artifact_id,
+        model=GroundingResult,
+        artifact_format_version=spec_for(Stage.GROUND).artifact_format_version,
+    )
+
+
+def _limit_refusal(verdict: Any) -> JSONResponse:
+    """The 429 for a tenant over its limits; shared by every route that queues runs."""
+    return JSONResponse(
+        status_code=429,
+        headers={"Retry-After": str(verdict.retry_after_seconds)},
+        content={
+            "error": "limit_exceeded",
+            "limit": verdict.limit,
+            "observed": verdict.observed,
+            "allowed": verdict.permitted,
+            "retry_after_seconds": verdict.retry_after_seconds,
+        },
+    )
 
 
 def _run_erased(stone: Any) -> JSONResponse:

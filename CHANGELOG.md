@@ -9,6 +9,24 @@ API may change in any release. `document_id` derivation is versioned separately 
 
 ## [Unreleased]
 
+### Added — quality on a tenant's own documents (ADR-0026)
+
+- A correction can say a value is **correct**. Checks are stored as answers that never expire; the
+  newest check per document and field wins.
+- `POST /v1/evaluations?schema=` re-runs the checked documents with the current configuration and
+  scores them into a report; `GET /v1/evaluations`, `GET /v1/evaluations/{id}` and `GET /v1/answers`
+  read them. Refused with `409 no_answers`, `409 evaluation_in_progress`, or `429`. The console gets
+  a field-check table on the extraction run and a Quality area, over `/v1/console` routes.
+- Erasing a document removes it from stored answers and reports and keeps their aggregates and
+  `report_id`, counting it in `erased_documents`.
+- The console serves page images for succeeded extraction runs, not only OCR runs (amends ADR-0023
+  §4). Constitution 1.13.0.
+
+### Removed
+
+- `DOCDOC_CORRECTION_RETENTION_DAYS`. Answers do not expire, and a run that carries one is not swept.
+  Setting it now does nothing.
+
 ### Changed — native PDF parsing on PDFium (ADR-0025)
 
 - `pdf-text` parses with `pypdfium2` (Apache-2.0/BSD-3) instead of PyMuPDF (AGPL-3.0). PyMuPDF and

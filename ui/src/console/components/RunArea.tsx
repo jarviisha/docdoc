@@ -21,6 +21,8 @@ import { describe, type Failure } from "../model/failure.ts";
 import { toDelivery, type Delivery } from "../model/delivery.ts";
 import { duration, shortId, when } from "../model/format.ts";
 import { toResultPages, type ResultPage } from "../model/result.ts";
+import { checkBody, fieldPages, reportIdOf, saveFailure, toFieldRows, toSave, type Draft } from "../model/fields.ts";
+import { FieldCheckTable } from "./FieldCheckTable.tsx";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { CopyableId } from "./CopyableId.tsx";
 import { DataTable } from "./DataTable.tsx";
@@ -57,6 +59,7 @@ import {
   toPage,
   refetchAfterCancel,
   resultNotice,
+  showsFields,
   showsResult,
   toRecord,
   type ListingState,
@@ -348,6 +351,14 @@ function RunDetail({
   const [resultProblem, setResultProblem] = useState<ReturnType<typeof resultNotice> | null>(null);
   // Bumped to read the run again, e.g. after a `409` says the one shown is stale.
   const [reads, setReads] = useState(0);
+  // An extraction run's result and checks, the operator's unsaved marks, and the hovered field.
+  const [result, setResult] = useState<unknown>(null);
+  const [checks, setChecks] = useState<unknown>(null);
+  const [checkReads, setCheckReads] = useState(0);
+  const [drafts, setDrafts] = useState<Record<string, Draft>>({});
+  const [hoveredField, setHoveredField] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveProblem, setSaveProblem] = useState<string | null>(null);
 
   /**
    * A failure worth saying out loud. `removed` has its own banner, and
@@ -413,6 +424,7 @@ function RunDetail({
   usePolling(pollDetail, detailPolls(run));
 
   // Read once, the first time the run is seen to have a result to show.
+  const hasFields = showsFields(run);
   const hasResult = showsResult(run);
   useEffect(() => {
     if (!hasResult) return;
@@ -421,6 +433,10 @@ function RunDetail({
       if (!current) return;
       if (!answer.ok) {
         setResultProblem(resultNotice(answer.failure));
+        return;
+      }
+      if (hasFields) {
+        setResult(answer.body);
         return;
       }
       try {
@@ -436,7 +452,45 @@ function RunDetail({
     return () => {
       current = false;
     };
-  }, [request, runId, hasResult]);
+  }, [request, runId, hasResult, hasFields]);
+
+  // An extraction run's checks, read again after every save.
+  useEffect(() => {
+    if (!hasFields) return;
+    let current = true;
+    void request({ type: "run-checks", runId }).then((answer) => {
+      if (!current) return;
+      if (answer.ok) setChecks(answer.body);
+      else setProblem(describe(answer.failure));
+    });
+    return () => {
+      current = false;
+    };
+  }, [request, runId, hasFields, checkReads]);
+
+  const rows = result === null || checks === null ? null : toFieldRows(result, checks);
+  const hoveredRow = rows?.find((row) => row.path === hoveredField) ?? null;
+
+  /** One `record-check` per changed row; a mark whose save failed stays to be saved again. */
+  const save = async () => {
+    if (rows === null) return;
+    setSaving(true);
+    const kept: Record<string, Draft> = {};
+    const failed: { path: string; problem: string }[] = [];
+    for (const row of toSave(rows, drafts)) {
+      const draft = drafts[row.path]!;
+      const body = checkBody(row, draft.verdict, draft, reportIdOf(result));
+      const answer = await request({ type: "record-check", runId }, JSON.stringify(body));
+      if (!answer.ok) {
+        kept[row.path] = draft;
+        failed.push({ path: row.path, problem: describe(answer.failure) });
+      }
+    }
+    setDrafts(kept);
+    setSaveProblem(saveFailure(failed));
+    setSaving(false);
+    setCheckReads((n) => n + 1);
+  };
 
   const download = async () => {
     const answer = await request({ type: "run-result", runId });
@@ -504,6 +558,12 @@ function RunDetail({
         {pending === null ? null : (
           <Alert variant="info">
             <AlertTitle>{pending}</AlertTitle>
+          </Alert>
+        )}
+        {saveProblem === null ? null : (
+          <Alert variant="destructive">
+            <AlertTitle>Some checks could not be saved</AlertTitle>
+            <AlertDescription>{saveProblem}</AlertDescription>
           </Alert>
         )}
         {resultProblem === null ? null : (
@@ -614,6 +674,33 @@ function RunDetail({
 
           {pages === null ? null : (
             <ResultViewer runId={runId} pages={pages} request={requestImage} />
+          )}
+
+          {rows === null ? null : (
+            <ResultViewer
+              runId={runId}
+              pages={fieldPages(rows)}
+              request={requestImage}
+              highlight={hoveredRow?.location ?? null}
+              aside={
+                <FieldCheckTable
+                  rows={rows}
+                  drafts={drafts}
+                  onDraft={(path, draft) =>
+                    setDrafts((previous) => {
+                      const next = { ...previous };
+                      if (draft === null) delete next[path];
+                      else next[path] = draft;
+                      return next;
+                    })
+                  }
+                  hovered={hoveredField}
+                  onHover={setHoveredField}
+                  saving={saving}
+                  onSave={() => void save()}
+                />
+              }
+            />
           )}
         </>
       )}

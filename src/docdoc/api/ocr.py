@@ -16,9 +16,10 @@ from docdoc.api.deps import (
     _unknown_run,
 )
 from docdoc.api.models import ParserChoice, ParserListing, RunStateResponse
-from docdoc.api.runs import _UNKNOWN_CALLBACK, _requested_callback, _run_erased, _RunSpec
+from docdoc.api.runs import _UNKNOWN_CALLBACK, _requested_callback, _run_erased
 from docdoc.api.settings import RUN_DATABASE_URL_ENV
 from docdoc.runs.model import Priority
+from docdoc.runs.queue import Submission as _RunSpec
 
 #: How long a refused OCR submission is told to wait (ADR-0022). Short, and
 #: for the reason `concurrent_runs` gives: what frees a slot is a run finishing,

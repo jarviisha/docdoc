@@ -34,6 +34,7 @@ import { SubmitArea } from "./SubmitArea.tsx";
 import { ParsersArea } from "./ParsersArea.tsx";
 import { TenantsArea } from "./TenantsArea.tsx";
 import { CallbacksArea } from "./CallbacksArea.tsx";
+import { QualityArea } from "./QualityArea.tsx";
 
 /** A sidebar group: real areas, and the ones still to come, which go nowhere yet. */
 type NavEntry = { name: Area; label: string; danger?: boolean } | { soon: string };
@@ -45,6 +46,7 @@ const NAV: { heading: string | null; entries: NavEntry[] }[] = [
     entries: [
       { name: "runs", label: "Runs" },
       { name: "submit", label: "Submit OCR" },
+      { name: "quality", label: "Quality" },
     ],
   },
   { heading: "Build", entries: [{ soon: "Schemas" }] },
@@ -314,6 +316,16 @@ export function Shell() {
           {area === "submit" ? (
             <SubmitArea
               request={request}
+              onOpenRun={(runId) => {
+                setOpenRunId(runId);
+                setArea("runs");
+              }}
+            />
+          ) : null}
+          {area === "quality" ? (
+            <QualityArea
+              request={request}
+              presetTenant={presetTenant}
               onOpenRun={(runId) => {
                 setOpenRunId(runId);
                 setArea("runs");

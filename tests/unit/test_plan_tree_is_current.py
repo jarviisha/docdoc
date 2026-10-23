@@ -94,6 +94,10 @@ EXTRA_PLANS: tuple[pathlib.Path, ...] = (
     # parse path files the angles, so an import graph attributes it to
     # `extraction`; the plan that introduced it is the one that traces it.
     pathlib.Path("docs/superpowers/plans/2026-10-21-ocr-page-orientation.md"),
+    # Tenant quality evaluation. Its route tests build an extraction registry, so
+    # an import graph attributes them to `extraction`; the plan that introduced
+    # them traces them.
+    pathlib.Path("docs/superpowers/plans/2026-10-22-tenant-quality-evaluation.md"),
 )
 
 #: `docdoc.recording` is deliberately **not** listed, though it is a layer and it

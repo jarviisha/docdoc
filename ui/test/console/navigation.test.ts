@@ -21,3 +21,7 @@ test("the tenant jumps are runs, credentials, callbacks, and erasure, in that or
     { area: "erasure", label: "Erase…" },
   ]);
 });
+
+test("quality is an area", () => {
+  assert.deepEqual(jumpTo("quality", "acme"), { area: "quality", tenant: "acme" });
+});

@@ -1,7 +1,9 @@
-"""`GET /v1/console/runs/{run_id}/pages/{page}`: an OCR run's page images (019).
+"""`GET /v1/console/runs/{run_id}/pages/{page}`: a run's page images (019).
 
 PNG and JPEG are served as stored, page 0 only; a PDF page is rendered to PNG
-with its longer edge capped at 2000 px. Extraction runs have no page images.
+with its longer edge capped at 2000 px. A succeeded extraction run's pages are
+served too, so a field can be checked beside the page it was read from
+(ADR-0026 amends ADR-0023 §4); an unfinished one has nothing to check yet.
 """
 
 from __future__ import annotations
@@ -167,19 +169,37 @@ def test_console_page_of_a_pdf_without_pypdfium2_is_503(
     }
 
 
-def test_console_page_of_an_extraction_run_is_409(
+def test_console_page_of_an_extraction_run_is_served(
+    signed_in: tuple[TestClient, dict[str, str]],
+    queue: InMemoryRunQueue,
+    deployment: _Deployment,
+) -> None:
+    """ADR-0026 amends ADR-0023 §4: the page beside the fields an operator checks.
+
+    Operators already see OCR runs' page images, so this exposes no new kind of data.
+    """
+    client, cookie = signed_in
+    run = _run(queue, _stored(deployment, IMAGE), kind=RunKind.EXTRACTION)
+
+    r = client.get(f"/v1/console/runs/{run.run_id}/pages/0", headers=cookie)
+
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("image/")
+
+
+def test_console_page_of_an_unfinished_extraction_run_is_409(
     signed_in: tuple[TestClient, dict[str, str]],
     queue: InMemoryRunQueue,
     deployment: _Deployment,
 ) -> None:
     client, cookie = signed_in
     run = _run(queue, _stored(deployment, IMAGE), kind=RunKind.EXTRACTION)
+    queue._runs[run.run_id] = run.model_copy(update={"status": RunStatus.RUNNING})
 
     r = client.get(f"/v1/console/runs/{run.run_id}/pages/0", headers=cookie)
 
     assert r.status_code == 409
-    assert r.json()["error"] == "no_page_images"
-    assert r.json()["detail"]
+    assert r.json()["error"] == "run_not_succeeded"
 
 
 def test_console_page_of_an_unknown_run_or_missing_blob_is_404(

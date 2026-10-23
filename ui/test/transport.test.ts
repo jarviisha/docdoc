@@ -82,7 +82,7 @@ test("sendForBlob reports no blob when the deployment refused the request", asyn
 
 test("sendForBlob hands a refusal's JSON body back so it can say why", async () => {
   original = globalThis.fetch;
-  const refusal = { error: "no_page_images", detail: "extraction run" };
+  const refusal = { error: "run_not_succeeded", status: "running" };
   globalThis.fetch = (async () => new Response(JSON.stringify(refusal), { status: 409 })) as typeof fetch;
 
   const result = await sendForBlob(GET_PLAN);

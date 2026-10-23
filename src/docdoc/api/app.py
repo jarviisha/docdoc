@@ -54,6 +54,7 @@ from docdoc.api.deps import (
 )
 from docdoc.api.documents import jobs_routes
 from docdoc.api.documents import routes as document_routes
+from docdoc.api.evaluations import routes as evaluation_routes
 from docdoc.api.ocr import routes as ocr_routes
 from docdoc.api.runs import routes as run_routes
 from docdoc.api.settings import (
@@ -191,6 +192,7 @@ class _Deployment:
             else _configured_cap(OCR_QUEUE_TOTAL_ENV, DEFAULT_OCR_QUEUE_TOTAL)
         )
         self._corrections = corrections
+        self._evaluations: Any = None
         self._console = console
         #: The console's idle bound (ADR-0023 §1), read once like every other
         #: configuration value here rather than per gated request.
@@ -326,6 +328,19 @@ class _Deployment:
 
         self._corrections = PostgresCorrectionStore(execute=execute)
         return self._corrections
+
+    def evaluations(self) -> Any:
+        """The evaluation store, or ``None`` with no database, built once like `corrections`."""
+        if self._evaluations is not None:
+            return self._evaluations
+        execute = getattr(self._runs, "_execute", None)
+        if execute is None:
+            return None
+
+        from docdoc.runs.evaluations import PostgresEvaluationStore
+
+        self._evaluations = PostgresEvaluationStore(execute=execute)
+        return self._evaluations
 
     def console_accounts(self) -> Any:
         """The console accounts store, or ``None``, built once (ADR-0023 §1).
@@ -892,6 +907,7 @@ def _router() -> APIRouter:
     router.include_router(document_routes())
     router.include_router(ocr_routes())
     router.include_router(run_routes())
+    router.include_router(evaluation_routes())
     router.include_router(jobs_routes())
     router.include_router(admin_routes())
     return router

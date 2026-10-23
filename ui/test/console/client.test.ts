@@ -121,7 +121,7 @@ test("an identifier with a slash in it cannot escape its path segment", () => {
   assert.ok(isAllowed(plan));
 });
 
-test("the writes are exactly the session, run, credential, callback, erasure, and OCR submission actions", () => {
+test("the writes are exactly the session, run, credential, callback, erasure, OCR submission, check, and evaluation actions", () => {
   const written = allIntents()
     .map(requestFor)
     .filter((plan) => plan.method !== "GET")
@@ -136,8 +136,10 @@ test("the writes are exactly the session, run, credential, callback, erasure, an
     "DELETE /v1/console/tenants/t",
     "DELETE /v1/console/tenants/t/documents/b",
     "POST /v1/console/credentials",
+    "POST /v1/console/runs/r/corrections",
     "POST /v1/console/session",
     "POST /v1/console/tenants/acme/callbacks",
+    "POST /v1/console/tenants/t/evaluations",
     "POST /v1/console/tenants/t/ocr",
   ]);
 });
@@ -207,4 +209,30 @@ test("an OCR submission names its tenant in the path, encoded like any other", (
     requestFor({ type: "submit-ocr", tenantId: "a/../b" }).path,
     "/v1/console/tenants/a%2F..%2Fb/ocr",
   );
+});
+
+test("checks, answers, and evaluations are allowed console requests", () => {
+  const plans = [
+    requestFor({ type: "run-checks", runId: "r" }),
+    requestFor({ type: "record-check", runId: "r" }),
+    requestFor({ type: "tenant-answers", tenantId: "acme" }),
+    requestFor({ type: "start-evaluation", tenantId: "acme", schema: "invoice" }),
+    requestFor({ type: "list-evaluations", tenantId: "acme" }),
+    requestFor({ type: "list-evaluations", tenantId: "acme", schema: "invoice" }),
+    requestFor({ type: "evaluation", tenantId: "acme", evaluationId: "e" }),
+  ];
+  for (const plan of plans) assert.ok(isAllowed(plan), plan.path);
+  assert.deepEqual(plans.map((p) => `${p.method} ${p.path}`), [
+    "GET /v1/console/runs/r/corrections",
+    "POST /v1/console/runs/r/corrections",
+    "GET /v1/console/tenants/acme/answers",
+    "POST /v1/console/tenants/acme/evaluations",
+    "GET /v1/console/tenants/acme/evaluations",
+    "GET /v1/console/tenants/acme/evaluations",
+    "GET /v1/console/tenants/acme/evaluations/e",
+  ]);
+  assert.equal(plans[1]!.hasBody, true);
+  assert.deepEqual(plans[3]!.query, { schema: "invoice" });
+  assert.deepEqual(plans[4]!.query, {});
+  assert.deepEqual(plans[5]!.query, { schema: "invoice" });
 });

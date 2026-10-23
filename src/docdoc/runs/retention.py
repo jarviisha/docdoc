@@ -318,6 +318,14 @@ def _purge(
         # goes is what belonged to the runs over that document, and those rows
         # are keyed by `run_id`.
         counts = queue.purge_rows_for([run.run_id for run in runs])
+        # And out of every stored answer set and report that included it.
+        execute = getattr(queue, "_execute", None)
+        if execute is not None:
+            from docdoc.runs.evaluations import PostgresEvaluationStore
+
+            counts["evaluations"] = PostgresEvaluationStore(execute).forget_document(
+                tenant_id=tenant_id, blob_id=blob_id
+            )
     else:
         counts = queue.purge_tenant_rows(tenant_id)
     return SweepReport(rows=sum(counts.values()))

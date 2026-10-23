@@ -259,6 +259,7 @@ tests/
 │   ├── test_base_install_excludes_evaluation_data.py  # FR-059 — datasets/ outside the wheel
 │   ├── test_comparison_judgements.py         # FR-045, FR-047, FR-049, SC-014, SC-015
 │   ├── test_corrections.py                   # FR-050 … FR-053, SC-019, SC-020
+│   ├── test_confirmed_correction.py          # a check may confirm; becomes a label of the predicted value
 │   ├── test_evaluation_has_no_document_type_code.py  # Principle VI, extending Milestone 3's test
 │   ├── test_data_model_matches_the_code.py   # EVA-19, EVA-23 — the field tables describe real models
 │   └── test_scorer_version_snapshot.py       # EVA-24, the change detector

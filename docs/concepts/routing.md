@@ -178,9 +178,8 @@ expresses.
 | Variable | Meaning | Default |
 |---|---|---|
 | `DOCDOC_ROUTING_POLICY` | path to the policy document | **unset — no `routing` block at all** |
-| `DOCDOC_CORRECTION_RETENTION_DAYS` | how long a correction is kept | unset — as long as its run |
 
-Neither has a flag. A decision records the policy version that produced it, so a
+It has no flag. A decision records the policy version that produced it, so a
 per-invocation override would make two processes disagree about what `default@1`
 means.
 
