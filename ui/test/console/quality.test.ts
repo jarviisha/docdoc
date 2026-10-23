@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { historyRows, rerunWarning, toFieldTable, toStatStrip } from "../../src/console/model/quality.ts";
+import { historyRows, rerunWarning, shownEvaluation, stillRunning, toAnswers, toFieldTable, toStatStrip } from "../../src/console/model/quality.ts";
 
 const e = { documents: 1, erased_documents: 0 };
 const m = (name: string, numerator: number, denominator: number) => ({
@@ -58,7 +58,7 @@ test("the field table counts per path and names the documents that missed", () =
       { document_id: "d3", run_id: "r3", outcomes: [{ field_path: "total", kind: "missing" }] },
     ],
   });
-  assert.deepEqual(table, [{ path: "total", correct: 1, wrong: 1, missing: 1, documents: ["d2", "d3"] }]);
+  assert.deepEqual(table, [{ path: "total", correct: 1, wrong: 1, missing: 1, documents: [{ documentId: "d2", runId: "r2" }, { documentId: "d3", runId: "r3" }] }]);
 });
 
 test("a running evaluation has an empty field table", () => {
@@ -90,4 +90,38 @@ test("the re-run warning names the document count", () => {
     rerunWarning(3),
     "This re-runs 3 document(s) with the current configuration. Unchanged steps are reused; changed ones may call paid providers.",
   );
+});
+
+test("history marks say what changed against the run before", () => {
+  const rows = historyRows([
+    { ...e, evaluation_id: "e3", created_at: "2026-03-01T00:00:00Z", schema_identity: "s@2", golden_set_id: "b", metrics: null, status: "running" },
+    { ...e, evaluation_id: "e2", created_at: "2026-02-01T00:00:00Z", schema_identity: "s@1", golden_set_id: "a", metrics: null },
+    { ...e, evaluation_id: "e1", created_at: "2026-01-01T00:00:00Z", schema_identity: "s@1", golden_set_id: "a", metrics: null },
+  ]);
+  assert.deepEqual(rows.map((r) => r.marks), [["running", "schema changed", "not comparable"], [], []]);
+});
+
+test("the newest finished evaluation is shown unless one is chosen", () => {
+  const list = [
+    { evaluation_id: "e3", status: "running" },
+    { evaluation_id: "e2", status: "finished" },
+    { evaluation_id: "e1", status: "finished" },
+  ] as const;
+  assert.equal(shownEvaluation([...list], null), "e2");
+  assert.equal(shownEvaluation([...list], "e1"), "e1");
+  assert.equal(shownEvaluation([...list], "gone"), "e2");
+  assert.equal(shownEvaluation([{ evaluation_id: "e1", status: "running" as const }], null), null);
+});
+
+test("the list polls while its newest evaluation runs", () => {
+  assert.equal(stillRunning([{ status: "running" as const }, { status: "finished" as const }]), true);
+  assert.equal(stillRunning([{ status: "finished" as const }, { status: "running" as const }]), false);
+  assert.equal(stillRunning([]), false);
+});
+
+test("answers read as schema choices with their document counts", () => {
+  assert.deepEqual(toAnswers({ schemas: [{ schema_name: "invoice", documents: 3, fields: 12 }] }), [
+    { value: "invoice", label: "invoice · 3 documents", documents: 3 },
+  ]);
+  assert.deepEqual(toAnswers(null), []);
 });

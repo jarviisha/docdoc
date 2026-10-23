@@ -16,6 +16,7 @@ export interface EvaluationSummary {
   erased_documents: number;
   metrics: Metrics;
   golden_set_id: string;
+  status?: "running" | "finished";
 }
 
 export interface EvaluationDetail {
@@ -62,7 +63,13 @@ export function toStatStrip(
 
 export function toFieldTable(
   detail: EvaluationDetail,
-): { path: string; correct: number; wrong: number; missing: number; documents: string[] }[] {
+): {
+  path: string;
+  correct: number;
+  wrong: number;
+  missing: number;
+  documents: { documentId: string; runId: string | null }[];
+}[] {
   return Object.entries(detail.per_field ?? {}).map(([path, metrics]) => ({
     path,
     correct: metrics.field_accuracy?.numerator ?? 0,
@@ -70,7 +77,7 @@ export function toFieldTable(
     missing: metrics.missing_rate?.numerator ?? 0,
     documents: detail.documents
       .filter((d) => d.outcomes.some((o) => o.field_path === path && o.kind !== "correct"))
-      .map((d) => d.document_id),
+      .map((d) => ({ documentId: d.document_id, runId: d.run_id ?? null })),
   }));
 }
 
@@ -81,19 +88,53 @@ export function historyRows(list: EvaluationSummary[]): {
   accuracy: string;
   schemaChanged: boolean;
   comparable: boolean;
+  /** Tags against the run before: "running", "schema changed", "not comparable". */
+  marks: string[];
 }[] {
   return list.map((e, i) => {
     const older = list[i + 1];
+    const schemaChanged = older !== undefined && older.schema_identity !== e.schema_identity;
+    const comparable = older !== undefined && older.golden_set_id === e.golden_set_id;
     return {
       evaluationId: e.evaluation_id,
       when: when(e.created_at),
       accuracy: share(e.metrics?.field_accuracy).value,
-      schemaChanged: older !== undefined && older.schema_identity !== e.schema_identity,
-      comparable: older !== undefined && older.golden_set_id === e.golden_set_id,
+      schemaChanged,
+      comparable,
+      marks: [
+        ...(e.status === "running" ? ["running"] : []),
+        ...(schemaChanged ? ["schema changed"] : []),
+        ...(older !== undefined && !comparable ? ["not comparable"] : []),
+      ],
     };
   });
 }
 
 export function rerunWarning(documents: number): string {
   return `This re-runs ${documents} document(s) with the current configuration. Unchanged steps are reused; changed ones may call paid providers.`;
+}
+
+/** The evaluation the report shows: the one chosen if still listed, else the newest finished. */
+export function shownEvaluation(
+  list: Pick<EvaluationSummary, "evaluation_id" | "status">[],
+  chosen: string | null,
+): string | null {
+  if (chosen !== null && list.some((e) => e.evaluation_id === chosen)) return chosen;
+  return list.find((e) => e.status !== "running")?.evaluation_id ?? null;
+}
+
+/** Whether the list is read again: its newest evaluation has not settled. */
+export function stillRunning(list: Pick<EvaluationSummary, "status">[]): boolean {
+  return list[0]?.status === "running";
+}
+
+/** `tenant-answers` as schema choices, each with the documents it would re-run. */
+export function toAnswers(body: unknown): { value: string; label: string; documents: number }[] {
+  const schemas = (body as { schemas?: unknown } | null)?.schemas;
+  if (!Array.isArray(schemas)) return [];
+  return schemas.map((s: { schema_name: string; documents: number }) => ({
+    value: s.schema_name,
+    label: `${s.schema_name} · ${s.documents} documents`,
+    documents: s.documents,
+  }));
 }

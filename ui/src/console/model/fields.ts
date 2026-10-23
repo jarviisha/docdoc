@@ -6,6 +6,8 @@
  * mark; an older one is history the route still keeps.
  */
 
+import type { ResultPage } from "./result.ts";
+
 export interface FieldRow {
   path: string;
   /** What the table shows; empty when the field was not found. */
@@ -98,4 +100,75 @@ export function checkBody(
 
 export function rowsToCheck(rows: FieldRow[]): { checked: number; total: number } {
   return { checked: rows.filter((r) => r.check !== null).length, total: rows.length };
+}
+
+/** An unsaved mark on one row: what the operator clicked and typed. */
+export interface Draft {
+  verdict: "correct" | "wrong";
+  value: string;
+  absent: boolean;
+  reason: string;
+}
+
+/** Why a mark cannot be saved yet, or `null`. The route refuses a "wrong" that names no answer. */
+export function draftProblem(draft: Draft): string | null {
+  return draft.verdict === "wrong" && !draft.absent && draft.value.trim() === ""
+    ? "Type the right value, or mark it not in the document."
+    : null;
+}
+
+/** Whether a mark says something the newest saved check does not. */
+function changes(row: FieldRow, draft: Draft): boolean {
+  if (draft.verdict !== row.check) return true;
+  if (draft.verdict === "correct") return false;
+  return draft.absent ? row.correctedValue !== null : draft.value !== row.correctedValue;
+}
+
+/** The rows a save posts a check for, in table order. */
+export function toSave(rows: FieldRow[], drafts: Record<string, Draft>): FieldRow[] {
+  return rows.filter((r) => drafts[r.path] !== undefined && changes(r, drafts[r.path]!));
+}
+
+export function canSave(rows: FieldRow[], drafts: Record<string, Draft>): boolean {
+  const saving = toSave(rows, drafts);
+  return saving.length > 0 && saving.every((r) => draftProblem(drafts[r.path]!) === null);
+}
+
+/** "Save check (N of M fields)": N counts the fields checked once this save lands. */
+export function saveLabel(rows: FieldRow[], drafts: Record<string, Draft>): string {
+  const checked = rows.filter((r) => r.check !== null || drafts[r.path] !== undefined).length;
+  return `Save check (${checked} of ${rows.length} fields)`;
+}
+
+export function shownValue(row: FieldRow): string {
+  return row.found ? row.value : "— not found";
+}
+
+/** The newest saved check, as the row says it. */
+export function checkText(row: FieldRow): string {
+  if (row.check === null) return "";
+  if (row.check === "correct") return "Correct";
+  return row.correctedValue === null ? "Wrong, not in the document" : `Wrong, should be ${row.correctedValue}`;
+}
+
+/** A check names the result it was made against: the run's processing id. */
+export function reportIdOf(result: unknown): string {
+  const id = isObj(result) ? result.job_id : undefined;
+  return typeof id === "string" ? id : "";
+}
+
+/**
+ * Pages for the page view: 0 through the last page a field was located on.
+ * The result carries no page count or size; the image's own size frames it.
+ */
+// ponytail: pages past the last located field are not offered; a page count in the result would fix it.
+export function fieldPages(rows: FieldRow[]): ResultPage[] {
+  const last = Math.max(0, ...rows.map((r) => r.location?.page ?? 0));
+  return Array.from({ length: last + 1 }, (_, index) => ({ index, width: 1, height: 1, lines: [], angle: null }));
+}
+
+/** Where page `index` sits among `pages`, or `null` if it is not there. */
+export function pagePosition(pages: ResultPage[], index: number): number | null {
+  const at = pages.findIndex((p) => p.index === index);
+  return at === -1 ? null : at;
 }

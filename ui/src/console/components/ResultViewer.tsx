@@ -1,7 +1,8 @@
 /**
  * A succeeded OCR run's result: the page image with each line's box drawn
  * over it, beside the recognised text. Hovering either side highlights the
- * other. Every decision — which page comes next, whether a page was turned,
+ * other. An extraction run passes its own `aside` (the field table) and the
+ * hovered field's box as `highlight`. Every decision — which page comes next, whether a page was turned,
  * how a confidence reads — is `console/model/result.ts`'s.
  *
  * Page images are fetched as each page is first shown, held as blob URLs,
@@ -9,7 +10,7 @@
  * asked for again.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,7 @@ import {
   viewFrame,
   type ResultPage,
 } from "../model/result.ts";
+import { pagePosition } from "../model/fields.ts";
 
 export type ImageRequest = (
   intent: Intent,
@@ -36,11 +38,15 @@ interface Props {
   runId: string;
   pages: ResultPage[];
   request: ImageRequest;
+  /** A box to draw from outside (an extraction field's location); its page is turned to. */
+  highlight?: { page: number; bbox: [number, number, number, number] } | null;
+  /** Shown beside the page instead of the recognised text. */
+  aside?: ReactNode;
 }
 
 type Image = { url: string } | { failure: Failure };
 
-export function ResultViewer({ runId, pages, request }: Props) {
+export function ResultViewer({ runId, pages, request, highlight = null, aside }: Props) {
   const [shown, setShown] = useState(0);
   const [images, setImages] = useState<Map<number, Image>>(new Map());
   const [sizes, setSizes] = useState<Map<number, { width: number; height: number }>>(new Map());
@@ -82,6 +88,12 @@ export function ResultViewer({ runId, pages, request }: Props) {
       current = false;
     };
   }, [request, runId, pageIndex, fetched]);
+
+  // The highlighted box's page is the one shown.
+  const highlightAt = highlight === null ? null : pagePosition(pages, highlight.page);
+  useEffect(() => {
+    if (highlightAt !== null) setShown(highlightAt);
+  }, [highlightAt]);
 
   if (page === undefined) return null;
 
@@ -210,13 +222,26 @@ export function ResultViewer({ runId, pages, request }: Props) {
                     />
                   ),
                 )}
+                {highlight !== null && highlight.page === page.index ? (
+                  <rect
+                    x={highlight.bbox[0]}
+                    y={highlight.bbox[1]}
+                    width={highlight.bbox[2] - highlight.bbox[0]}
+                    height={highlight.bbox[3] - highlight.bbox[1]}
+                    fill="#2563eb"
+                    fillOpacity={0.25}
+                    stroke="#2563eb"
+                    strokeWidth={2.5}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                ) : null}
               </svg>
             </div>
           ) : null}
         </div>
 
         <div style={{ flex: "1 1 0", minWidth: 0 }}>
-          <Card className="py-0">
+          {aside ?? <Card className="py-0">
             <ul
               ref={list}
               aria-label={`Recognised text, page ${shown + 1}`}
@@ -260,7 +285,7 @@ export function ResultViewer({ runId, pages, request }: Props) {
                 </li>
               ) : null}
             </ul>
-          </Card>
+          </Card>}
         </div>
       </div>
     </div>
