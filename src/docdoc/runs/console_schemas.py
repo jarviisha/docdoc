@@ -113,10 +113,15 @@ def merged_registry(files: SchemaRegistry, store: SchemaStore) -> SchemaRegistry
     for row in store.all():
         try:
             schema = parse_schema(row.document, path=row.identity)
+            if schema.identity != row.identity:
+                _log.warning(
+                    "skipping console schema %s: its document is %s", row.identity, schema.identity
+                )
+                continue
             good.append((schema, prompt_from_text(schema, row.prompt, path=row.identity)))
         except SchemaError as exc:
             _log.warning("skipping console schema %s: %s", row.identity, exc)
     merged = files.with_console(good)
-    for identity in merged.shadowed:
+    for identity in merged.shadowed[len(files.shadowed) :]:
         _log.warning("console schema %s replaces the file of the same identity", identity)
     return merged

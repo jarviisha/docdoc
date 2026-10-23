@@ -73,3 +73,13 @@ def test_merged_registry_logs_a_shadowed_file(store, caplog):
         merged = merged_registry(SchemaRegistry.from_paths([SCHEMAS]), store)
     assert merged.shadowed == ("invoice@1",)
     assert "invoice@1" in caplog.text
+
+
+def test_merged_registry_skips_a_row_whose_document_names_another_identity(store, caplog):
+    store.insert(row("a", 1, document=row("b", 1).document))
+    store.insert(row("b", 1))
+    with caplog.at_level(logging.WARNING, logger="docdoc.runs"):
+        merged = merged_registry(SchemaRegistry.from_paths([SCHEMAS]), store)
+    assert "a@1" not in merged
+    assert "b@1" in merged
+    assert "a@1" in caplog.text
