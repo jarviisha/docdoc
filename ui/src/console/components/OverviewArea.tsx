@@ -8,68 +8,45 @@
  * good answer on screen and says so, rather than blanking the page.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
-
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card } from "@/components/ui/card";
 
-import type { Intent } from "../model/client.ts";
-import { describe, type Failure } from "../model/failure.ts";
+import { describe } from "../model/failure.ts";
 import { duration, shortId, when } from "../model/format.ts";
-import { toOverview, type Overview } from "../model/overview.ts";
-import { isNewer } from "../model/polling.ts";
+import { toOverview } from "../model/overview.ts";
+import { POLL_MS } from "../model/polling.ts";
 import { kindLabel, reasonLabel, timeline, type RunSummary } from "../model/runs.ts";
 import { CopyableId } from "./CopyableId.tsx";
 import { DataTable } from "./DataTable.tsx";
 import { SectionHeading } from "./SectionHeading.tsx";
 import { Time } from "./Time.tsx";
 import { StatStrip } from "./StatStrip.tsx";
-import { usePolling } from "./usePolling.ts";
-
-type Request = (
-  intent: Intent,
-  body?: BodyInit,
-) => Promise<{ ok: true; body: unknown } | { ok: false; failure: Failure }>;
+import { useIntent } from "./useIntent.ts";
 
 interface Props {
-  request: Request;
   onOpenRun: (runId: string) => void;
 }
 
-export function OverviewArea({ request, onOpenRun }: Props) {
-  const [overview, setOverview] = useState<Overview | null>(null);
+/** `toOverview` throws on a body it cannot read; a query's error is a `Failure`, so say it as one. */
+function readOverview(body: unknown) {
+  try {
+    return toOverview(body);
+  } catch (error) {
+    throw { kind: "transport", message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+export function OverviewArea({ onOpenRun }: Props) {
+  // The last good answer stays on screen while a refresh fails (`keepPrevious`
+  // only covers a changed key; a failed refetch keeps `data` by itself).
+  const { data: overview, error, dataUpdatedAt } = useIntent(
+    { type: "overview" },
+    { select: readOverview, refetchInterval: POLL_MS, keepPrevious: true },
+  );
+  const problem = error === null ? null : describe(error);
   // When the shown answer arrived: the "last refreshed" line, and the `now`
   // a running run's time is measured against.
-  const [refreshedAt, setRefreshedAt] = useState<number | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
-
-  // Requests are numbered as they are sent; only an answer newer than the one
-  // shown is applied, so a slow answer arriving late cannot put older data back.
-  const sent = useRef(0);
-  const shown = useRef<number | null>(null);
-
-  const refresh = useCallback(async () => {
-    const number = ++sent.current;
-    const answer = await request({ type: "overview" });
-    if (!isNewer(number, shown.current)) return;
-    if (!answer.ok) {
-      setProblem(describe(answer.failure));
-      return;
-    }
-    try {
-      setOverview(toOverview(answer.body));
-      shown.current = number;
-      setRefreshedAt(Date.now());
-      setProblem(null);
-    } catch (error) {
-      setProblem(error instanceof Error ? error.message : String(error));
-    }
-  }, [request]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-  usePolling(refresh, true);
+  const refreshedAt = overview === undefined ? null : dataUpdatedAt;
 
   // No `href`: a `<button>` styled as a link.
   const openButton = (run: RunSummary) => (
@@ -79,7 +56,7 @@ export function OverviewArea({ request, onOpenRun }: Props) {
   return (
     <div className="flex flex-col gap-3">
       <div role="status" aria-live="polite" className="empty:-mb-3">
-        {overview === null && problem === null ? <p className="text-sm">Loading…</p> : null}
+        {overview === undefined && problem === null ? <p className="text-sm">Loading…</p> : null}
         {problem === null ? null : (
           <Alert variant="destructive">
             <AlertTitle>The overview could not be refreshed</AlertTitle>
@@ -94,7 +71,7 @@ export function OverviewArea({ request, onOpenRun }: Props) {
         </p>
       )}
 
-      {overview === null ? null : (
+      {overview === undefined ? null : (
         <>
           <StatStrip cards={overview.cards} />
 

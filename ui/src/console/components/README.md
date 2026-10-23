@@ -30,3 +30,9 @@ wrappers over them.
 **No decision belongs here.** If a component is deciding something — when a
 credential expires, whether an erasure is armed, which page comes next — the
 decision belongs in `../model/`, where a test can reach it.
+
+**Routes and data.** `../routes.tsx` is the route tree and the signed-in frame;
+an area is mounted by a route and reads its filters from the route's search
+(ADR-0028). Areas load through `useIntent` and `useAct` (`useIntent.ts`),
+never `fetch` or a hand-rolled poll; `usePolling` is gone. Which key a read
+has and what a write makes stale is decided in `../model/queries.ts`.

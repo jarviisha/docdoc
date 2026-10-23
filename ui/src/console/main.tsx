@@ -14,8 +14,27 @@ import "../styles.css";
 
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { Shell } from "./components/Shell.tsx";
+
+/**
+ * The one cache of server answers, in memory only: no persister, so nothing
+ * comes to rest in the browser (specs/011 FR-007). A failure is shown, not
+ * retried behind the operator's back, and a hidden tab does not poll.
+ */
+const queryClient = new QueryClient({
+  // No refetch on focus or reconnect: a result is read once, and a later list
+  // page must not shift under the reader. Polled reads opt back in (`useIntent`).
+  defaultOptions: {
+    queries: {
+      retry: false,
+      refetchIntervalInBackground: false,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+    },
+  },
+});
 
 const container = document.getElementById("root");
 
@@ -25,6 +44,8 @@ if (container === null) {
 
 createRoot(container).render(
   <StrictMode>
-    <Shell />
+    <QueryClientProvider client={queryClient}>
+      <Shell />
+    </QueryClientProvider>
   </StrictMode>,
 );

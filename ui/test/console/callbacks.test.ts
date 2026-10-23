@@ -11,10 +11,7 @@ import { test } from "node:test";
 import {
   canRegister,
   canRevoke,
-  choosing,
-  listFailedFor,
   listProblem,
-  listedFor,
   registerBody,
   toCallbacks,
   unavailableNote,
@@ -80,38 +77,19 @@ test("a row missing a required field is dropped, not guessed at", () => {
   assert.deepEqual(toCallbacks(null), []);
 });
 
-test("a list answer for the tenant shown fills the table", () => {
-  const listing = listedFor(choosing("a"), "a", [ROW]);
-  assert.deepEqual(listing.callbacks, [ROW]);
-  assert.equal(listProblem(listing), null);
-  assert.equal(unavailableNote(listing), null);
-});
-
-test("a late answer for a tenant no longer shown is ignored, success or failure", () => {
-  const onB = choosing("b");
-  assert.deepEqual(listedFor(onB, "a", [ROW]), onB);
-  assert.deepEqual(listFailedFor(onB, "a", { kind: "absent" }), onB);
-  assert.deepEqual(
-    listFailedFor(onB, "a", { kind: "unavailable", message: "no callbacks" }),
-    onB,
-  );
-});
-
-test("choosing a tenant drops the previous tenant's rows and failure", () => {
-  const failed = listFailedFor(choosing("a"), "a", { kind: "absent" });
-  assert.deepEqual(choosing("b"), { tenant: "b", callbacks: null, failure: null });
-  assert.notDeepEqual(failed, choosing("b"));
-});
-
 test("a 503 is said in place of the table, not as a problem", () => {
-  const listing = listFailedFor(choosing("a"), "a", { kind: "unavailable", message: "no callbacks" });
-  assert.equal(unavailableNote(listing), "no callbacks");
-  assert.equal(listProblem(listing), null);
-  assert.equal(listing.callbacks, null);
+  const failure = { kind: "unavailable", message: "no callbacks" } as const;
+  assert.equal(unavailableNote(failure), "no callbacks");
+  assert.equal(listProblem(failure), null);
 });
 
 test("any other list failure is a problem, said in the deployment's words", () => {
-  const listing = listFailedFor(choosing("a"), "a", { kind: "absent" });
-  assert.equal(listProblem(listing), "this deployment does not offer that.");
-  assert.equal(unavailableNote(listing), null);
+  const failure = { kind: "absent" } as const;
+  assert.equal(listProblem(failure), "this deployment does not offer that.");
+  assert.equal(unavailableNote(failure), null);
+});
+
+test("no failure says neither", () => {
+  assert.equal(unavailableNote(null), null);
+  assert.equal(listProblem(null), null);
 });

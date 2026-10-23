@@ -6,45 +6,22 @@
  * `console/model/navigation.ts`.
  */
 
-import { useEffect, useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
-import type { Intent } from "../model/client.ts";
-import { describe, type Failure } from "../model/failure.ts";
-import { TENANT_JUMPS, jumpTo, type Jump } from "../model/navigation.ts";
+import { describe } from "../model/failure.ts";
+import { TENANT_JUMPS, jumpTo } from "../model/navigation.ts";
 import { toTenants } from "../model/submit.ts";
 import { DataTable } from "./DataTable.tsx";
+import { useIntent } from "./useIntent.ts";
 
-type Request = (
-  intent: Intent,
-  body?: BodyInit,
-) => Promise<{ ok: true; body: unknown } | { ok: false; failure: Failure }>;
-
-interface Props {
-  request: Request;
-  onJump: (jump: Jump) => void;
-}
-
-export function TenantsArea({ request, onJump }: Props) {
-  const [tenants, setTenants] = useState<string[] | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
-
-  useEffect(() => {
-    let current = true;
-    void request({ type: "list-tenants" }).then((answer) => {
-      if (!current) return;
-      if (answer.ok) setTenants(toTenants(answer.body));
-      else {
-        setTenants([]);
-        setProblem(describe(answer.failure));
-      }
-    });
-    return () => {
-      current = false;
-    };
-  }, [request]);
+export function TenantsArea() {
+  const { data, error } = useIntent({ type: "list-tenants" }, { select: toTenants });
+  const problem = error === null ? null : describe(error);
+  // A failed read shows as no tenants, with the failure beside it.
+  const tenants = data ?? (error === null ? null : []);
 
   return (
     <div className="flex flex-col gap-3">
@@ -83,9 +60,9 @@ export function TenantsArea({ request, onJump }: Props) {
                 cell: (tenant) => (
                   <div className="flex gap-2">
                     {TENANT_JUMPS.map(({ area, label }) => (
-                      <Button key={area} variant="outline" size="sm" onClick={() => onJump(jumpTo(area, tenant))}>
+                      <Link key={area} {...jumpTo(area, tenant)} className={buttonVariants({ variant: "outline", size: "sm" })}>
                         {label}
-                      </Button>
+                      </Link>
                     ))}
                   </div>
                 ),

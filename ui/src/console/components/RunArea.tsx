@@ -10,16 +10,19 @@
  * filter that resets when you page.
  */
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
+import { getRouteApi, Link } from "@tanstack/react-router";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 
-import { RUN_STATUSES, type Intent, type RunStatus } from "../model/client.ts";
+import { RUN_STATUSES, type RunStatus } from "../model/client.ts";
 import { describe, type Failure } from "../model/failure.ts";
-import { toDelivery, type Delivery } from "../model/delivery.ts";
+import { toDelivery } from "../model/delivery.ts";
 import { duration, shortId, when } from "../model/format.ts";
+import { POLL_MS } from "../model/polling.ts";
+import { runsSearch } from "../model/search.ts";
 import { toResultPages, type ResultPage } from "../model/result.ts";
 import { checkBody, fieldPages, reportIdOf, saveFailure, toFieldRows, toSave, type Draft } from "../model/fields.ts";
 import { FieldCheckTable } from "./FieldCheckTable.tsx";
@@ -30,30 +33,22 @@ import { DeliveryRecord } from "./DeliveryRecord.tsx";
 import { SelectField, TextField } from "./fields.tsx";
 import { LiveStatStrip } from "./StatStrip.tsx";
 import { Time } from "./Time.tsx";
-import { ResultViewer, type ImageRequest } from "./ResultViewer.tsx";
-import { usePolling } from "./usePolling.ts";
+import { ResultViewer } from "./ResultViewer.tsx";
+import type { ImageRequest, Request } from "./RequestContext.tsx";
+import { useAct, useIntent } from "./useIntent.ts";
 import {
   autoRefreshes,
   back,
-  byKind,
   canGoBack,
-  canGoForward,
   currentCursor,
   emptyNotice,
-  failed,
-  filtered,
-  forTenant,
   forward,
-  initialListing,
   cancelNotice,
   detailPolls,
   isCancellable,
-  isEmpty,
   kindLabel,
-  loaded,
-  polled,
+  listIntent,
   reasonLabel,
-  reloaded,
   timeline,
   toFailure,
   toPage,
@@ -62,31 +57,12 @@ import {
   showsFields,
   showsResult,
   toRecord,
-  type ListingState,
-  type RunFailure,
+  type RunFilters,
   type RunKind,
-  type RunRecord,
-  type RunSummary,
 } from "../model/runs.ts";
 
-type Request = (
-  intent: Intent,
-  body?: BodyInit,
-) => Promise<{ ok: true; body: unknown } | { ok: false; failure: Failure }>;
-
-interface Props {
-  request: Request;
-  /** `request` for a page image, so the session ending is still the shell's to act on. */
-  requestImage: ImageRequest;
-  onFailure: (failure: Failure) => void;
-  /** The run whose detail is shown, held by the shell so the overview can open one. */
-  openRunId: string | null;
-  onOpenRun: (runId: string | null) => void;
-  /** The tenant a jump from Tenants opened this area for, applied as the filter on mount. */
-  presetTenant: string | null;
-  /** Opens Submit: the list's own primary action. */
-  onSubmit: () => void;
-}
+/** The run list's URL: its filters are the search params, so Back and a shared link restore them. */
+const runsApi = getRouteApi("/runs");
 
 /** The state's colour, and the word that must always be beside it. */
 const TONE: Record<RunStatus, "success" | "error" | "warning" | "neutral" | "info"> = {
@@ -105,93 +81,41 @@ const KINDS: { value: RunKind; label: string }[] = [
   { value: "extraction", label: "Extraction" },
 ];
 
-/** The request for the listing's current page and filters. */
-function listIntent(
-  state: Pick<ListingState, "tenant" | "status" | "kind">,
-  cursor: string | undefined,
-): Intent {
-  return {
-    type: "list-runs",
-    ...(state.tenant === null ? {} : { tenant: state.tenant }),
-    ...(state.status === null ? {} : { status: state.status }),
-    ...(state.kind === null ? {} : { kind: state.kind }),
-    ...(cursor === undefined ? {} : { cursor }),
-  };
-}
-
-export function RunArea({
-  request,
-  requestImage,
-  onFailure,
-  openRunId,
-  onOpenRun,
-  presetTenant,
-  onSubmit,
-}: Props) {
-  const [state, setState] = useState(() => forTenant(initialListing(), presetTenant ?? ""));
+/**
+ * The list under the URL's filters. The route keys this by those filters, so
+ * a filter change mounts it afresh on page one: the cursor stack is local and
+ * never carried into a different ordering.
+ */
+export function RunArea({ onOpenRun }: { onOpenRun: (runId: string) => void }) {
+  const filters = runsApi.useSearch();
+  const navigate = runsApi.useNavigate();
+  const [stack, setStack] = useState<string[]>([]);
   // What is typed, apart from what is applied: the list reloads on Enter or
   // Apply, not on every keystroke.
-  const [tenantInput, setTenantInput] = useState(presetTenant ?? "");
-  // A failed background refresh, said here and cleared by the next success:
-  // a notice in the shell would outlive the failure it reports.
-  const [pollProblem, setPollProblem] = useState<string | null>(null);
+  const [tenantInput, setTenantInput] = useState(filters.tenant ?? "");
 
-  const cursor = currentCursor(state);
-  const { status, tenant, kind } = state;
-  const loading = state.listing.state === "loading";
+  // Rows stay while the next page loads, and a failed background refresh keeps
+  // them and says so; only a page that never arrived reads as a failure.
+  const list = useIntent(listIntent(filters, currentCursor(stack)), {
+    select: toPage,
+    keepPrevious: true,
+    refetchInterval: autoRefreshes(stack) ? POLL_MS : false,
+  });
+  const page = list.data;
+  const rows = page?.runs ?? [];
 
-  // Every transition that wants a page — paging, a filter, Refresh — sets the
-  // listing to loading, and loading is what fetches.
-  useEffect(() => {
-    if (!loading) return;
-    let current = true;
-    void request(listIntent({ tenant, status, kind }, cursor)).then((answer) => {
-      if (!current) return;
-      if (answer.ok) {
-        setState((previous) => loaded(previous, toPage(answer.body)));
-      } else {
-        setState((previous) => failed(previous, answer.failure));
-        onFailure(answer.failure);
-      }
-    });
-    return () => {
-      current = false;
-    };
-  }, [request, onFailure, loading, tenant, status, kind, cursor]);
+  /**
+   * Push a history entry with one filter changed: Back undoes it. Parsed as
+   * the URL is, so a blank or `undefined` filter leaves the URL.
+   */
+  const setFilter = (change: { [K in keyof RunFilters]?: RunFilters[K] | undefined }) =>
+    void navigate({ search: (previous) => runsSearch({ ...previous, ...change }) });
 
-  // A background refresh replaces page one in place, without the loading
-  // state, so rows are never blanked under the reader. A failed one keeps the
-  // rows and says so locally, as the overview does.
-  const poll = useCallback(async () => {
-    const askedFor = state;
-    const answer = await request(listIntent(askedFor, currentCursor(askedFor)));
-    if (answer.ok) {
-      setState((previous) => polled(previous, askedFor, toPage(answer.body)));
-      setPollProblem(null);
-    } else {
-      setPollProblem(describe(answer.failure));
-    }
-  }, [request, state]);
-  usePolling(poll, autoRefreshes(state) && openRunId === null);
-
-  if (openRunId !== null) {
-    return (
-      <RunDetail
-        runId={openRunId}
-        request={request}
-        requestImage={requestImage}
-        onBack={() => onOpenRun(null)}
-      />
-    );
-  }
-
-  const rows = state.listing.state === "loaded" ? state.listing.page.runs : [];
-
-  const applyTenant = () => setState((previous) => forTenant(previous, tenantInput));
+  const applyTenant = () => setFilter({ tenant: tenantInput });
 
   return (
     <div className="flex flex-col gap-3">
-      <LiveStatStrip request={request} />
+      <LiveStatStrip />
 
       {/* One row, bottom-aligned: the labels sit above and the boxes and
           buttons share a baseline. */}
@@ -211,56 +135,53 @@ export function RunArea({
           label="Kind"
           className="w-[160px]"
           options={[{ value: ALL, label: "All" }, ...KINDS]}
-          value={state.kind ?? ALL}
-          onChange={(chosen) =>
-            setState((previous) => byKind(previous, chosen === ALL ? null : (chosen as RunKind)))
-          }
+          value={filters.kind ?? ALL}
+          onChange={(chosen) => setFilter({ kind: chosen === ALL ? undefined : (chosen as RunKind) })}
         />
         <SelectField
           label="State"
           className="w-[160px]"
           options={[{ value: ALL, label: "All" }, ...RUN_STATUSES]}
-          value={state.status ?? ALL}
-          onChange={(chosen) =>
-            setState((previous) => filtered(previous, chosen === ALL ? null : (chosen as RunStatus)))
-          }
+          value={filters.status ?? ALL}
+          onChange={(chosen) => setFilter({ status: chosen === ALL ? undefined : (chosen as RunStatus) })}
         />
-        <Button variant="outline" disabled={loading} onClick={() => setState(reloaded)}>
+        <Button variant="outline" disabled={list.isPending} onClick={() => void list.refetch()}>
           Refresh
         </Button>
         <div className="flex-1" />
-        <Button onClick={onSubmit}>Submit</Button>
+        <Link to="/submit" className={buttonVariants()}>
+          Submit
+        </Link>
       </div>
 
       {/* FR-045b: a list loading, and a list that failed, reach a screen reader
           rather than only the eye. `polite` and not `assertive` — an operator
           reading a row should not be interrupted by a page they asked for. */}
       <div role="status" aria-live="polite">
-        {state.listing.state === "loading" ? <p className="text-sm">Loading…</p> : null}
+        {list.isPending ? <p className="text-sm">Loading…</p> : null}
 
-        {state.listing.state === "failed" ? (
+        {list.isError && page === undefined ? (
           // Not an empty list. An empty tenant and a refused request read
           // identically if this branch does not exist (Edge Cases).
           <Alert variant="destructive">
             <AlertTitle>The run list could not be read</AlertTitle>
-            <AlertDescription>{describe(state.listing.failure)}</AlertDescription>
+            <AlertDescription>{describe(list.error)}</AlertDescription>
           </Alert>
         ) : null}
 
-        {isEmpty(state) ? (
+        {page !== undefined && rows.length === 0 ? (
           <Alert variant="info">
-            <AlertTitle>{emptyNotice(state)}</AlertTitle>
+            <AlertTitle>{emptyNotice(filters)}</AlertTitle>
           </Alert>
         ) : null}
 
-        {pollProblem === null ? null : (
+        {list.isError && page !== undefined ? (
           <Alert variant="warning">
             <AlertTitle>The run list could not be refreshed</AlertTitle>
-            <AlertDescription>{pollProblem}</AlertDescription>
+            <AlertDescription>{describe(list.error)}</AlertDescription>
           </Alert>
-        )}
+        ) : null}
       </div>
-
       {rows.length > 0 ? (
         <Card className="py-0">
           <DataTable
@@ -315,10 +236,15 @@ export function RunArea({
       ) : null}
 
       <div className="flex gap-2">
-        <Button variant="outline" disabled={!canGoBack(state)} onClick={() => setState(back)}>
+        <Button variant="outline" disabled={!canGoBack(stack)} onClick={() => setStack(back)}>
           Previous
         </Button>
-        <Button variant="outline" disabled={!canGoForward(state)} onClick={() => setState(forward)}>
+        {/* Not while the last page's rows stand in: their cursor is the one already used. */}
+        <Button
+          variant="outline"
+          disabled={page?.next_cursor == null || list.isPlaceholderData}
+          onClick={() => setStack((previous) => forward(previous, page?.next_cursor ?? null))}
+        >
           Next
         </Button>
       </div>
@@ -326,149 +252,85 @@ export function RunArea({
   );
 }
 
-function RunDetail({
+export function RunDetail({
   runId,
   request,
   requestImage,
-  onBack,
 }: {
   runId: string;
   request: Request;
   requestImage: ImageRequest;
-  onBack: () => void;
 }) {
-  const [loading, setLoading] = useState(true);
-  const [run, setRun] = useState<RunRecord | null>(null);
-  const [delivery, setDelivery] = useState<Delivery | null>(null);
-  const [routing, setRouting] = useState<string | null>(null);
-  const [failure, setFailure] = useState<RunFailure | null>(null);
-  const [removed, setRemoved] = useState<{ deletedAt: string; policy: string } | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
+  const act = useAct();
   const [confirming, setConfirming] = useState(false);
   const [cancelProblem, setCancelProblem] = useState<string | null>(null);
   const [cancelAccepted, setCancelAccepted] = useState(false);
-  const [pages, setPages] = useState<ResultPage[] | null>(null);
-  const [resultProblem, setResultProblem] = useState<ReturnType<typeof resultNotice> | null>(null);
-  // Bumped to read the run again, e.g. after a `409` says the one shown is stale.
-  const [reads, setReads] = useState(0);
-  // An extraction run's result and checks, the operator's unsaved marks, and the hovered field.
-  const [result, setResult] = useState<unknown>(null);
-  const [checks, setChecks] = useState<unknown>(null);
-  const [checkReads, setCheckReads] = useState(0);
+  const [downloadProblem, setDownloadProblem] = useState<string | null>(null);
+  // The operator's unsaved marks, and the hovered field.
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [hoveredField, setHoveredField] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveProblem, setSaveProblem] = useState<string | null>(null);
 
+  // While the run can still change, read it again. A failed re-read leaves the
+  // run shown as last read — unless the run is gone (`410`), which no later
+  // read will undo, so polling stops.
+  const detail = useIntent(
+    { type: "run-detail", runId },
+    {
+      select: toRecord,
+      refetchInterval: (shown, error) => (error?.kind !== "removed" && detailPolls(shown ?? null) ? POLL_MS : false),
+    },
+  );
+  const delivery = useIntent({ type: "run-delivery", runId }, { select: toDelivery });
+
+  // The model classified the `410` and read the tombstone; this only shows
+  // what it found (T075, FR-023).
+  const removed = detail.error?.kind === "removed" ? detail.error : null;
+  const run = removed === null ? (detail.data ?? null) : null;
+  // `toRecord` keeps the body's other fields. Absent, not empty: the route
+  // omits `routing` when no policy is configured rather than sending null,
+  // and a section headed "Routing" with nothing under it is a second way of
+  // saying "not configured".
+  const routing = (run as { routing?: { outcome?: string } } | null)?.routing?.outcome ?? null;
+  // Why it failed: read in the model, like the tombstone, so the requirement
+  // has coverage (US2 scenario 7, SC-015).
+  const failure = toFailure(run);
+
+  // Read the first time the run is seen to have a result to show.
+  const hasFields = showsFields(run);
+  const hasResult = showsResult(run);
+  const result = useIntent(hasResult ? { type: "run-result", runId } : null);
+  // An extraction run's checks, read again after every save (`record-check` makes them stale).
+  const checks = useIntent(hasFields ? { type: "run-checks", runId } : null);
+
+  const pages = useMemo((): { pages: ResultPage[] } | { problem: string } | null => {
+    if (hasFields || result.data === undefined) return null;
+    try {
+      return { pages: toResultPages(result.data) };
+    } catch (error) {
+      return { problem: error instanceof Error ? error.message : "the result could not be read" };
+    }
+  }, [hasFields, result.data]);
+  const resultProblem: ReturnType<typeof resultNotice> | null =
+    result.error !== null
+      ? resultNotice(result.error)
+      : pages !== null && "problem" in pages
+        ? { status: "error", title: "The result could not be shown", description: pages.problem }
+        : null;
+
   /**
    * A failure worth saying out loud. `removed` has its own banner, and
    * `absent` is a run with no delivery record, which is not a fault.
    */
-  const report = (answer: Failure) => {
-    if (answer.kind !== "removed" && answer.kind !== "absent") setProblem(describe(answer));
-  };
+  const report = (answer: Failure | null) =>
+    answer === null || answer.kind === "removed" || answer.kind === "absent" ? null : describe(answer);
+  const problem =
+    report(detail.error) ?? report(delivery.error) ?? (checks.error === null ? null : describe(checks.error)) ?? downloadProblem;
+  const loading = detail.isPending || delivery.isPending;
 
-  /** Show a `run-detail` answer: the run, its routing, and why it failed. */
-  const showDetail = useCallback((body: unknown) => {
-    setRun(toRecord(body));
-    // Absent, not empty: the route omits `routing` when no policy is
-    // configured rather than sending null, and a section headed "Routing"
-    // with nothing under it is a second way of saying "not configured".
-    setRouting((body as { routing?: { outcome?: string } }).routing?.outcome ?? null);
-    // Why it failed: read in the model, like the tombstone below, so the
-    // requirement has coverage (US2 scenario 7, SC-015).
-    setFailure(toFailure(body));
-  }, []);
-
-  useEffect(() => {
-    let current = true;
-    const detail = request({ type: "run-detail", runId }).then((answer) => {
-      if (!current) return;
-      if (answer.ok) {
-        showDetail(answer.body);
-        return;
-      }
-      // The model classified the `410` and read the tombstone; this only shows
-      // what it found (T075, FR-023).
-      if (answer.failure.kind === "removed") {
-        setRemoved({ deletedAt: answer.failure.deletedAt, policy: answer.failure.policy });
-      }
-      report(answer.failure);
-    });
-
-    const record = request({ type: "run-delivery", runId }).then((answer) => {
-      if (!current) return;
-      if (answer.ok) setDelivery(toDelivery(answer.body));
-      else report(answer.failure);
-    });
-
-    void Promise.all([detail, record]).then(() => {
-      if (current) setLoading(false);
-    });
-    return () => {
-      current = false;
-    };
-  }, [request, runId, reads, showDetail]);
-
-  // While the run can still change, read it again. A failed re-read is left
-  // for the next one: the run shown is still the last one read — unless the
-  // run is gone (`410`), which no later read will undo, so polling stops.
-  const pollDetail = useCallback(async () => {
-    const answer = await request({ type: "run-detail", runId });
-    if (answer.ok) return showDetail(answer.body);
-    if (answer.failure.kind === "removed") {
-      setRun(null);
-      setRemoved({ deletedAt: answer.failure.deletedAt, policy: answer.failure.policy });
-    }
-  }, [request, runId, showDetail]);
-  usePolling(pollDetail, detailPolls(run));
-
-  // Read once, the first time the run is seen to have a result to show.
-  const hasFields = showsFields(run);
-  const hasResult = showsResult(run);
-  useEffect(() => {
-    if (!hasResult) return;
-    let current = true;
-    void request({ type: "run-result", runId }).then((answer) => {
-      if (!current) return;
-      if (!answer.ok) {
-        setResultProblem(resultNotice(answer.failure));
-        return;
-      }
-      if (hasFields) {
-        setResult(answer.body);
-        return;
-      }
-      try {
-        setPages(toResultPages(answer.body));
-      } catch (error) {
-        setResultProblem({
-          status: "error",
-          title: "The result could not be shown",
-          description: error instanceof Error ? error.message : "the result could not be read",
-        });
-      }
-    });
-    return () => {
-      current = false;
-    };
-  }, [request, runId, hasResult, hasFields]);
-
-  // An extraction run's checks, read again after every save.
-  useEffect(() => {
-    if (!hasFields) return;
-    let current = true;
-    void request({ type: "run-checks", runId }).then((answer) => {
-      if (!current) return;
-      if (answer.ok) setChecks(answer.body);
-      else setProblem(describe(answer.failure));
-    });
-    return () => {
-      current = false;
-    };
-  }, [request, runId, hasFields, checkReads]);
-
-  const rows = result === null || checks === null ? null : toFieldRows(result, checks);
+  const rows =
+    !hasFields || result.data === undefined || checks.data === undefined ? null : toFieldRows(result.data, checks.data);
   const hoveredRow = rows?.find((row) => row.path === hoveredField) ?? null;
 
   /** One `record-check` per changed row; a mark whose save failed stays to be saved again. */
@@ -479,8 +341,8 @@ function RunDetail({
     const failed: { path: string; problem: string }[] = [];
     for (const row of toSave(rows, drafts)) {
       const draft = drafts[row.path]!;
-      const body = checkBody(row, draft.verdict, draft, reportIdOf(result));
-      const answer = await request({ type: "record-check", runId }, JSON.stringify(body));
+      const body = checkBody(row, draft.verdict, draft, reportIdOf(result.data));
+      const answer = await act({ type: "record-check", runId }, JSON.stringify(body));
       if (!answer.ok) {
         kept[row.path] = draft;
         failed.push({ path: row.path, problem: describe(answer.failure) });
@@ -489,7 +351,6 @@ function RunDetail({
     setDrafts(kept);
     setSaveProblem(saveFailure(failed));
     setSaving(false);
-    setCheckReads((n) => n + 1);
   };
 
   const download = async () => {
@@ -497,9 +358,10 @@ function RunDetail({
     if (!answer.ok) {
       // Every kind: an expired result (`410 result_expired`) arrives as a
       // `reported` failure saying so, and a button that does nothing says less.
-      setProblem(describe(answer.failure));
+      setDownloadProblem(describe(answer.failure));
       return;
     }
+    setDownloadProblem(null);
     // `send` already parsed the body; written back out as the same JSON.
     const blob = new Blob([JSON.stringify(answer.body, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -512,18 +374,17 @@ function RunDetail({
     setTimeout(() => URL.revokeObjectURL(url), 0);
   };
 
-  /** The answer is the run as it now stands, and replaces the one shown; a `409` says why not. */
+  /** A success makes the run stale and it is read again; a `409` says why not. */
   const cancel = async () => {
-    const answer = await request({ type: "cancel-run", runId });
+    const answer = await act({ type: "cancel-run", runId });
     setConfirming(false);
     if (answer.ok) {
-      setRun(toRecord(answer.body));
       setCancelProblem(null);
       setCancelAccepted(true);
     } else {
       setCancelProblem(describe(answer.failure));
       setCancelAccepted(false);
-      if (refetchAfterCancel(answer.failure)) setReads((n) => n + 1);
+      if (refetchAfterCancel(answer.failure)) void detail.refetch();
     }
   };
 
@@ -533,9 +394,10 @@ function RunDetail({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
-        <Button variant="ghost" onClick={onBack}>
+        {/* `exact`: the router would otherwise mark it the current page, since a run's path is under it. */}
+        <Link to="/runs" activeOptions={{ exact: true }} className={buttonVariants({ variant: "ghost" })}>
           ← Runs
-        </Button>
+        </Link>
         {run === null ? null : <Badge variant={TONE[run.status]}>{run.status}</Badge>}
       </div>
 
@@ -672,8 +534,8 @@ function RunDetail({
             </div>
           ) : null}
 
-          {pages === null ? null : (
-            <ResultViewer runId={runId} pages={pages} request={requestImage} />
+          {pages === null || !("pages" in pages) ? null : (
+            <ResultViewer runId={runId} pages={pages.pages} request={requestImage} />
           )}
 
           {rows === null ? null : (
@@ -705,7 +567,7 @@ function RunDetail({
         </>
       )}
 
-      {delivery === null ? null : <DeliveryRecord delivery={delivery} />}
+      {delivery.data === undefined ? null : <DeliveryRecord delivery={delivery.data} />}
     </div>
   );
 }

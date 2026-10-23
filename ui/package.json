@@ -16,6 +16,8 @@
     "licenses": "node scripts/check-licenses.mjs"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.104.5",
+    "@tanstack/react-router": "^1.170.46",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.61.0",

@@ -5,7 +5,7 @@ description: House style and patterns for docdoc's operations console (`ui/`). U
 
 # Console UI
 
-The console is a **dense operations tool**: an operator scans many rows, filters, opens one, acts, and leaves. Every rule below serves _scanning_. Look and decisions are recorded in [ADR-0024](../../../docs/adr/0024-console-ui-on-shadcn.md). Where these patterns came from is in [SOURCES.md](SOURCES.md). Read it before borrowing from one of those repos, because several are not copyable (licence).
+The console is a **dense operations tool**: an operator scans many rows, filters, opens one, acts, and leaves. Every rule below serves _scanning_. Look is recorded in [ADR-0024](../../../docs/adr/0024-console-ui-on-shadcn.md), URLs and data loading in [ADR-0028](../../../docs/adr/0028-console-routing-and-data-layer.md). Where these patterns came from is in [SOURCES.md](SOURCES.md). Read it before borrowing from one of those repos, because several are not copyable (licence).
 
 ## Where things live
 
@@ -16,8 +16,11 @@ The console is a **dense operations tool**: an operator scans many rows, filters
   - `DataTable.tsx`
   - `ConfirmDialog.tsx`
   - `StatStrip.tsx`
+  - `useIntent.ts`: `useIntent(intent, options)` is one read, `useAct()` is one write. Both go through the shell's `request`.
 
   Reach for these before a raw primitive.
+- **Routes:** `ui/src/console/routes.tsx`. One code-based route per area under `/console`, plus the signed-in frame (sidebar, top bar). The sidebar list lives there too.
+- **URL and cache decisions:** `model/search.ts` (`validateSearch` functions), `model/navigation.ts` (`AREA_PATHS`, tenant jumps), `model/queries.ts` (`keyOf`, `invalidatedBy`).
 - **Every decision** (formatting, what is armed, which page comes next) lives in `ui/src/console/model/`, where `node --test` reaches it. Ids, times and durations are formatted there (`format.ts`: `shortId`, `when`, `duration`). A component only renders.
 - **Done means `make ui` is green.** It runs typecheck, tests, the boundary, persistence and a11y guards, licences and the build.
 
@@ -48,7 +51,7 @@ The console is a **dense operations tool**: an operator scans many rows, filters
 - **Ids:** short form (`shortId`) in mono. The full value goes in `title` and is copyable. When adding copy, follow the copy-on-hover pattern: an icon button with `opacity-0 group-hover:opacity-100`, plus an `aria-label`.
 - **Time:** absolute local time from `when`, with UTC and local in a `title` tooltip. Durations come from `duration` (`4 s`, `2 min 05 s`). An empty value is `—`.
 - **Status:** an outlined uppercase tag (`Badge` variants `success | info | warning | error | neutral`). The word is always present; colour sits beside it.
-- **Refresh:** polling replaces rows in place. Never blank the table to show a spinner, and say a failed refresh in an `Alert` above it.
+- **Refresh:** a polled `useIntent` (`refetchInterval`) replaces rows in place; pass `keepPrevious` for filtered lists. Never blank the table to show a spinner, and say a failed refresh in an `Alert` above it.
 - **Pager:** cursor-based, Previous and Next only, with no page numbers, because the API returns no total.
 
 ## States
@@ -100,3 +103,13 @@ The sidebar is hand-built (shadcn's writes a cookie, which the persistence guard
 - **Selected item:** `bg-indigo-100 text-indigo-800` with `aria-current="page"`.
 - **Unbuilt areas:** shown as non-interactive "soon" entries, never as dead buttons.
 - **Group order:** Overview, Operate, Build, Manage, Settings. Erase… is last, in red.
+
+## Adding a screen
+
+1. Add the intent(s) to `model/client.ts` with their request plans. Test them.
+2. Add the screen's decisions to a model file: search params, what polls, what a write invalidates (`invalidatedBy`). Test them.
+3. Add the route in `routes.tsx` with `validateSearch` from step 2. Filters live in search params, not `useState`. A filter change pushes history. The cursor stays out of the URL.
+4. Write the component. Read with `useIntent`, write with `useAct`, render the four states. Never call `fetch` directly, and call `request` only for a one-off uncached action such as a download (`RunDetail.download` is the example).
+5. Add the sidebar entry in `NAV`, or replace its "soon".
+
+Never use `lazyRouteComponent`, scroll restoration or a persister: they write to browser storage. A route path may not contain a review-platform noun.

@@ -7,92 +7,87 @@
  * cannot be undone and the button sits beside every active key.
  */
 
-import { useCallback, useEffect, useState } from "react";
-import { Alert, AlertTitle } from "@/components/ui/alert";
+import { useEffect, useState } from "react";
+import { getRouteApi } from "@tanstack/react-router";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
-import type { Intent } from "../model/client.ts";
 import {
   DISCLOSURE_WARNING,
   SELF_REVOCATION_WARNING,
   acknowledged,
   disclosureFrom,
+  initialCredentials,
   issueBody,
   isActive,
-  listedFor,
-  listFailedFor,
   listingNote,
   needsWarning,
-  presetCredentials,
   scopesOf,
-  showing,
   toRecords,
   warned,
   withDisclosure,
 } from "../model/credentials.ts";
-import type { CredentialRecord } from "../model/credentials.ts";
-import type { Failure } from "../model/failure.ts";
+import { describe } from "../model/failure.ts";
 import { shortId } from "../model/format.ts";
+import { tenantSearch } from "../model/search.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { CopyableId } from "./CopyableId.tsx";
 import { DataTable } from "./DataTable.tsx";
 import { TextField } from "./fields.tsx";
 import { SectionHeading } from "./SectionHeading.tsx";
 import { Time } from "./Time.tsx";
+import { useAct, useIntent } from "./useIntent.ts";
 
-type Request = (
-  intent: Intent,
-  body?: BodyInit,
-) => Promise<{ ok: true; body: unknown } | { ok: false; failure: Failure }>;
+const credentialsApi = getRouteApi("/credentials");
 
-interface Props {
-  request: Request;
-  onFailure: (failure: Failure) => void;
-  /** The tenant a jump from Tenants opened this area for: preset, then shown. */
-  presetTenant: string | null;
-}
-
-export function CredentialArea({ request, onFailure, presetTenant }: Props) {
-  const [state, setState] = useState(() => presetCredentials(presetTenant));
-  const [tenant, setTenant] = useState(presetTenant ?? "");
+/** The tenant in the URL is the one listed; Show pushes it, so Back returns to the last one. */
+export function CredentialArea() {
+  const shown = credentialsApi.useSearch().tenant ?? "";
+  const navigate = credentialsApi.useNavigate();
+  const act = useAct();
+  const [state, setState] = useState(initialCredentials);
+  // The issue form starts from the listed tenant and is its own afterwards.
+  const [tenant, setTenant] = useState(shown);
   const [label, setLabel] = useState("");
-
-  // Which tenant's credentials to list: typed, then shown on Show — the route
-  // requires one, and listing on every keystroke asks about tenants nobody meant.
-  const [listing, setListing] = useState(presetTenant ?? "");
-  const shown = state.shown;
+  // What is typed in the Show field, apart from what is listed; it follows the
+  // URL when Back or a link changes it.
+  const [listing, setListing] = useState(shown);
+  useEffect(() => setListing(shown), [shown]);
   // The row awaiting "Revoke this key?", by credential id.
   const [confirming, setConfirming] = useState<string | null>(null);
+  // An issue or a revoke that failed; a listing failure is the query's.
+  const [writeProblem, setWriteProblem] = useState<string | null>(null);
 
-  const load = useCallback(
-    async (which: string) => {
-      if (which === "") return;
-      const answer = await request({ type: "list-credentials", tenant: which });
-      if (answer.ok) setState((previous) => listedFor(previous, which, toRecords(answer.body)));
-      else {
-        setState((previous) => listFailedFor(previous, which));
-        onFailure(answer.failure);
-      }
-    },
-    [request, onFailure],
-  );
+  const list = useIntent(shown === "" ? null : { type: "list-credentials", tenant: shown }, {
+    select: toRecords,
+  });
+  const records = list.data ?? [];
+  const problem = writeProblem ?? (list.isError ? describe(list.error) : null);
+  const note = listingNote(shown, list.isError ? "failed" : list.isPending ? "pending" : "loaded", records);
 
-  // A jump's own Show: the listing is already pending for the preset tenant.
-  // `load` ignores "", so a sidebar visit asks for nothing.
-  useEffect(() => {
-    void load(presetTenant ?? "");
-  }, [load, presetTenant]);
+  const show = () => {
+    if (listing.trim() === "") return;
+    setConfirming(null);
+    void navigate({ search: (previous) => tenantSearch({ ...previous, tenant: listing }) });
+  };
 
   const revoke = async (credentialId: string) => {
     // The warning shows before the first revocation and the action still
     // proceeds: a leaked key is very often the one somebody is still using.
     setState(warned);
-    const answer = await request({ type: "revoke-credential", credentialId });
+    setWriteProblem(null);
+    const answer = await act({ type: "revoke-credential", credentialId });
     setConfirming(null);
-    if (!answer.ok) onFailure(answer.failure);
-    void load(shown);
+    if (!answer.ok) setWriteProblem(describe(answer.failure));
+  };
+
+  const issue = async () => {
+    setWriteProblem(null);
+    const answer = await act({ type: "issue-credential" }, issueBody(tenant.trim(), label));
+    if (!answer.ok) return setWriteProblem(describe(answer.failure));
+    setState((previous) => withDisclosure(previous, disclosureFrom(answer.body)));
   };
 
   return (
@@ -118,15 +113,7 @@ export function CredentialArea({ request, onFailure, presetTenant }: Props) {
         <div className="flex gap-2">
           <Button
             disabled={tenant.trim() === ""}
-            onClick={() => {
-              void request({ type: "issue-credential" }, issueBody(tenant.trim(), label)).then(
-                (answer) => {
-                  if (!answer.ok) return onFailure(answer.failure);
-                  setState((previous) => withDisclosure(previous, disclosureFrom(answer.body)));
-                  void load(shown);
-                },
-              );
-            }}
+            onClick={() => void issue()}
           >
             Issue
           </Button>
@@ -142,17 +129,9 @@ export function CredentialArea({ request, onFailure, presetTenant }: Props) {
             className="w-[280px]"
             value={listing}
             onChange={setListing}
+            onEnter={show}
           />
-          <Button
-            variant="outline"
-            disabled={listing.trim() === ""}
-            onClick={() => {
-              const which = listing.trim();
-              setConfirming(null);
-              setState((previous) => showing(previous, which));
-              void load(which);
-            }}
-          >
+          <Button variant="outline" disabled={listing.trim() === ""} onClick={show}>
             Show
           </Button>
         </div>
@@ -163,12 +142,21 @@ export function CredentialArea({ request, onFailure, presetTenant }: Props) {
           </Alert>
         ) : null}
 
-        {listingNote(state) !== null ? (
-          <p className="text-sm">{listingNote(state)}</p>
+        <div role="status" aria-live="polite" className="empty:-mb-2">
+          {problem === null ? null : (
+            <Alert variant="destructive">
+              <AlertTitle>The credentials request failed</AlertTitle>
+              <AlertDescription>{problem}</AlertDescription>
+            </Alert>
+          )}
+        </div>
+
+        {note !== null ? (
+          <p className="text-sm">{note}</p>
         ) : (
           <Card className="py-0">
             <DataTable
-              rows={state.records}
+              rows={records}
               rowKey={(record) => record.credential_id}
               label="Issued credentials. Keys are never shown here."
               columns={[

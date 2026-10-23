@@ -182,3 +182,9 @@ export function toAnswers(body: unknown): { value: string; label: string; docume
     documents: s.documents,
   }));
 }
+
+/** The schema shown: the URL's if it is one of the answers, else the first answer's. Never written back to the URL. */
+export function shownSchema(answers: { value: string }[], fromUrl: string | undefined): string {
+  if (fromUrl !== undefined && answers.some((a) => a.value === fromUrl)) return fromUrl;
+  return answers[0]?.value ?? "";
+}
