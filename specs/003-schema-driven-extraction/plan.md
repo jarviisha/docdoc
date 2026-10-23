@@ -285,6 +285,7 @@ tests/
 ├── contract/
 │   ├── test_console_schemas.py        # the console lists, reads and creates schemas over HTTP
 │   ├── test_tenant_adapter.py         # synchronous extraction uses the caller's tenant's adapter
+│   ├── test_console_providers.py      # the console reads, configures and tests providers over HTTP
 │   └── test_model_adapter_contract.py # every ModelAdapter must satisfy EXT-15…EXT-18,
 │                                      #   run against all three including the real one
 ├── property/

@@ -104,6 +104,12 @@ CONSOLE_ADDED = {
     ("/v1/console/schemas", "GET"),
     ("/v1/console/schemas", "POST"),
     ("/v1/console/schemas/{identity}", "GET"),
+    # Console providers: read, order, configure, reset and test the model adapters.
+    ("/v1/console/providers", "GET"),
+    ("/v1/console/providers", "DELETE"),
+    ("/v1/console/providers/priority", "PUT"),
+    ("/v1/console/providers/{adapter_id}", "PUT"),
+    ("/v1/console/providers/{adapter_id}/test", "POST"),
     ("/v1/console/tenants/{tenant_id}/ocr", "POST"),
     # Console extraction submit, through the same `submit_extraction` the run
     # route's shared part serves.

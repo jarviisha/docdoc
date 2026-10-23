@@ -163,6 +163,12 @@ ROUTES = {
     ("GET", "/v1/console/schemas"),
     ("POST", "/v1/console/schemas"),
     ("GET", "/v1/console/schemas/{identity}"),
+    # Console providers: read, order, configure, reset and test the model adapters.
+    ("GET", "/v1/console/providers"),
+    ("DELETE", "/v1/console/providers"),
+    ("PUT", "/v1/console/providers/priority"),
+    ("PUT", "/v1/console/providers/{adapter_id}"),
+    ("POST", "/v1/console/providers/{adapter_id}/test"),
     ("POST", "/v1/console/tenants/{tenant_id}/ocr"),
     # Console extraction submit: the two Bearer calls (store, then submit) in one,
     # through the same `submit_extraction`; session-only.
