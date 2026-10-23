@@ -22,6 +22,7 @@ from docdoc.api.documents import _terminal
 from docdoc.api.models import RunAcceptedResponse, RunListResponse, RunStateResponse, RunSummary
 from docdoc.api.paging import DEFAULT_RUN_PAGE, MAX_RUN_PAGE
 from docdoc.api.settings import PRIORITY_CEILING_ENV, RUN_DATABASE_URL_ENV
+from docdoc.runs.queue import Submission as _RunSpec
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -640,58 +641,6 @@ def routes() -> APIRouter:
         }
 
     return router
-
-
-class _RunSpec:
-    """What a submission carries before it is a run.
-
-    A plain object rather than a pydantic model: `RunQueue.submit` takes a
-    structural `RunSpec`, and building a validated model here would validate the
-    same five strings twice — once at the HTTP boundary and once on the way to a
-    database that has its own constraints.
-    """
-
-    __slots__ = (
-        "blob_id",
-        "callback_id",
-        "idempotency_key",
-        "kind",
-        "ocr_language",
-        "ocr_parser",
-        "priority",
-        "request_id",
-        "schema_identity",
-        "tenant_id",
-    )
-
-    def __init__(
-        self,
-        *,
-        tenant_id: str,
-        blob_id: str,
-        schema_identity: str | None,
-        request_id: str | None,
-        idempotency_key: str | None,
-        #: The **granted** priority, already clamped to the tenant's ceiling.
-        #: Clamping happens at this boundary and nowhere below it, so nothing
-        #: further down can be used to escalate past another tenant's queue.
-        priority: int = 0,
-        callback_id: Any = None,
-        #: 014 (ADR-0022): an OCR run names a parser and a language, not a schema.
-        kind: str = "extraction",
-        ocr_parser: str | None = None,
-        ocr_language: str | None = None,
-    ) -> None:
-        self.kind = kind
-        self.ocr_parser = ocr_parser
-        self.ocr_language = ocr_language
-        self.tenant_id = tenant_id
-        self.blob_id = blob_id
-        self.schema_identity = schema_identity
-        self.request_id = request_id
-        self.idempotency_key = idempotency_key
-        self.priority = priority
-        self.callback_id = callback_id
 
 
 #: Returned by `_requested_callback` for a callback that is unknown, malformed,

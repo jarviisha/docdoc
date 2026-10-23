@@ -191,6 +191,7 @@ class _Deployment:
             else _configured_cap(OCR_QUEUE_TOTAL_ENV, DEFAULT_OCR_QUEUE_TOTAL)
         )
         self._corrections = corrections
+        self._evaluations: Any = None
         self._console = console
         #: The console's idle bound (ADR-0023 §1), read once like every other
         #: configuration value here rather than per gated request.
@@ -326,6 +327,19 @@ class _Deployment:
 
         self._corrections = PostgresCorrectionStore(execute=execute)
         return self._corrections
+
+    def evaluations(self) -> Any:
+        """The evaluation store, or ``None`` with no database, built once like `corrections`."""
+        if self._evaluations is not None:
+            return self._evaluations
+        execute = getattr(self._runs, "_execute", None)
+        if execute is None:
+            return None
+
+        from docdoc.runs.evaluations import PostgresEvaluationStore
+
+        self._evaluations = PostgresEvaluationStore(execute=execute)
+        return self._evaluations
 
     def console_accounts(self) -> Any:
         """The console accounts store, or ``None``, built once (ADR-0023 §1).

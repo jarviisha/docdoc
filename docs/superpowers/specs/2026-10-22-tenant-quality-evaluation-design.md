@@ -225,3 +225,20 @@ checking table beside the page and the Quality screen with a stat strip and a pe
 - **Whether the Quality screen is a new console area** or lives inside an existing one.
 - **Concurrency.** A re-run started while a previous one for the same tenant and schema is still
   running. Pick refuse or supersede and say which.
+
+## `evaluations`
+
+One row per re-run of a tenant's answer set (migration `0012_evaluations.sql`).
+
+| Column | Type | Meaning |
+|---|---|---|
+| `evaluation_id` | `uuid` | Primary key. |
+| `tenant_id`, `schema_name` | `text` | Whose answers, for which schema name. At most one row per pair has no report. |
+| `schema_identity` | `text` | The newest registered version the answer set was stamped to and re-run under. |
+| `golden` | `jsonb` | The stamped `GoldenSet`. |
+| `run_ids`, `document_ids` | `uuid[]`, `text[]` | Parallel: the run submitted for each document. |
+| `report` | `jsonb` | The `EvaluationReport`; NULL until every run is terminal. Written once. |
+| `erased_documents` | `integer` | Documents erased since: removed from `golden` and from the report's `outcomes` and `document_scores`; aggregates and `report_id` kept. |
+| `created_at`, `settled_at` | `timestamptz` | Started; scored. |
+
+Erasing the tenant deletes its rows.

@@ -91,6 +91,7 @@ __all__ = [
     "new_credential_id",
     "new_delivery_id",
     "new_erasure_id",
+    "new_evaluation_id",
     "new_key_secret",
     "new_password_salt",
     "new_run_id",
@@ -287,6 +288,11 @@ def new_delivery_id() -> uuid.UUID:
 
 def new_correction_id() -> uuid.UUID:
     """A fresh correction identity."""
+    return uuid.uuid4()
+
+
+def new_evaluation_id() -> uuid.UUID:
+    """A fresh evaluation identity."""
     return uuid.uuid4()
 
 
