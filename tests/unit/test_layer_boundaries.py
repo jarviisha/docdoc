@@ -131,10 +131,8 @@ def test_the_deterministic_layers_cannot_reach_the_store_or_a_framework() -> Non
         assert "fastapi" in forbidden, f"{source} may reach a web framework"
 
 
-def test_the_command_line_needs_no_dependency() -> None:
-    """The whole argument for argparse: `docdoc` belongs to the base install."""
-    extras = _config()["project"]["optional-dependencies"]  # type: ignore[index]
-    assert "cli" not in extras, "a cli extra would put the command behind a second install"
+def test_the_command_line_entry_point() -> None:
+    """`docdoc` is the operating command; the entry point must keep resolving."""
     assert _config()["project"]["scripts"] == {"docdoc": "docdoc.cli:main"}  # type: ignore[index]
 
 

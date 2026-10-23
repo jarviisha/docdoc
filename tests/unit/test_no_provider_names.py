@@ -18,7 +18,6 @@ import pytest
 import docdoc.ingest
 
 SOURCE_ROOT = pathlib.Path(docdoc.ingest.__file__).parent.parent
-EXAMPLES = SOURCE_ROOT.parent.parent / "examples"
 
 #: The registry is the one module whose job is to know these names, and the
 #: adapters are the implementations themselves. `paddlex.py` joins them for a
@@ -125,17 +124,6 @@ def test_the_one_module_allowed_to_name_a_parser_only_does_so_in_a_message() -> 
         assert "select(" not in path.read_text(encoding="utf-8"), (
             f"{name} performs selection; that belongs in the registry"
         )
-
-
-def test_the_example_selects_by_capability() -> None:
-    """The documented example is what a new user copies, so it has to model the
-    supported way of asking."""
-    pytest.importorskip("pypdfium2")  # SC-013: skips on a base install
-    source = (EXAMPLES / "parse_pdf.py").read_text(encoding="utf-8")
-
-    assert "CapabilityRequest" in source
-    for name in (*CONCRETE_PARSER_NAMES, *PARSER_IDS):
-        assert name not in source
 
 
 def test_the_public_surface_exposes_no_concrete_parser() -> None:

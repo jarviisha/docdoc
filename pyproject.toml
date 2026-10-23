@@ -213,7 +213,6 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel", "typing.NamedTuple"]
 "tests/unit/test_match_view.py" = ["RUF001"]
 "tests/unit/test_dehyphenation.py" = ["RUF001"]
 "tests/property/test_offset_map_properties.py" = ["RUF001", "RUF002"]
-"examples/ground_invoice.py" = ["RUF001"]
 "tests/*" = [
     "S101",   # asserts are the point of a test
     "TC001",  # test helpers use these types at runtime via fixtures

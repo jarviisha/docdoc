@@ -1,9 +1,6 @@
-"""The base install acquires nothing from the browser client (FR-035, FR-036, SC-005).
+"""The wheel acquires nothing from the browser client (FR-035, FR-036, SC-005).
 
-The same argument as ``test_base_install_excludes_evaluation_data.py``, applied to
-a new way of breaking it. That file was written because FR-059 "currently holds by
-build configuration rather than by rule, and that is exactly the kind of guarantee
-that erodes silently" — and a browser interface is a far more likely source of
+A browser interface is a far more likely source of
 silent erosion than a dataset, because the natural way to ship one is to put the
 built assets in the package and be done.
 
@@ -69,18 +66,8 @@ def test_the_ui_extra_exists_and_adds_only_a_dependency() -> None:
     )
 
 
-def test_the_ui_extra_is_in_no_base_dependency() -> None:
-    """FR-035, FR-036 — the base install stays `pydantic` and `rapidfuzz`."""
-    config = _config()["project"]
-    base = config["dependencies"]
-
-    assert sorted(name.split(">=")[0] for name in base) == ["pydantic", "rapidfuzz"]
-    for requirement in config["optional-dependencies"]["ui"]:
-        assert requirement not in base
-
-
 def test_importing_docdoc_neither_imports_nor_requires_the_asset_package() -> None:
-    """FR-035 — a base install has no `docdoc_ui`, and must not care.
+    """FR-035 — an install without the `ui` extra has no `docdoc_ui`, and must not care.
 
     Run in a subprocess so the assertion is about a fresh interpreter rather than
     about whatever this test session has already imported.

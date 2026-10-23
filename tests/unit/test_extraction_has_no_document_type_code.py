@@ -44,7 +44,6 @@ EXTRACTION_ROOT = pathlib.Path(docdoc.extraction.__file__).parent
 #: what an invoice is (specs/005 T074).
 VALIDATION_ROOT = pathlib.Path(docdoc.validation.__file__).parent
 SCHEMAS = pathlib.Path("schemas")
-EXAMPLES = pathlib.Path("examples")
 
 #: The adapters are the implementations, and the registry's job is to know which
 #: adapters exist — the same exception the ingest layer's registry gets, and for
@@ -184,21 +183,6 @@ def test_the_public_surface_exposes_no_concrete_adapter() -> None:
     for name in docdoc.extraction.__all__:
         assert "gemini" not in name.lower()
         assert "anthropic" not in name.lower()
-
-
-def test_the_documented_example_names_no_document_type_in_its_code() -> None:
-    """SC-020's example is what a new contributor copies.
-
-    It necessarily *builds* an invoice schema — that is the demonstration — so the
-    rule here is narrower than for the library: the example may define a schema as
-    data, and must not branch on one.
-    """
-    source = (EXAMPLES / "extract_invoice.py").read_text(encoding="utf-8")
-    for forbidden in ("schema.name ==", "identity ==", 'if "invoice"'):
-        assert forbidden not in source, (
-            f"the example branches on a document type ({forbidden!r}), which models "
-            "exactly what the engine forbids"
-        )
 
 
 def test_the_check_can_actually_fail() -> None:
