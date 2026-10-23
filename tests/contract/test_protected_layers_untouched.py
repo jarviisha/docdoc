@@ -57,6 +57,13 @@ must not move a value, a verdict, a location, or an identity.
 guard-the-guard check moved to `src/docdoc/cli/commands/parse.py`, which this
 work deletes. The protected set is unchanged: retiring a front end must not move
 a value, a verdict, a location, or an identity.
+
+**Re-pointed at console-authored schemas (ADR-0029,
+`docs/superpowers/specs/2026-10-23-console-schemas-design.md`), 2026-10-23.**
+The work stores schemas in the run database and merges them into the registry,
+so the guard-the-guard check moved to `src/docdoc/runs/console_schemas.py`. The
+protected set is unchanged: where a schema is kept must not move a value, a
+verdict, a location, or an identity.
 """
 
 from __future__ import annotations
@@ -226,7 +233,7 @@ def test_the_diff_is_not_empty() -> None:
     changed = _changed()
 
     assert changed, "the diff against `main` is empty, so nothing above was checked"
-    assert "src/docdoc/cli/commands/parse.py" in changed, (
-        "this milestone's work is retiring the document-processing CLI, and the diff "
-        "shows none of it. The comparison is against the wrong ref"
+    assert "src/docdoc/runs/console_schemas.py" in changed, (
+        "this milestone's work is console-authored schemas, and the diff shows none "
+        "of it. The comparison is against the wrong ref"
     )

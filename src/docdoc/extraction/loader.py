@@ -20,7 +20,14 @@ from pydantic import ValidationError
 from docdoc.extraction.errors import SchemaError
 from docdoc.extraction.schema import Schema
 
-__all__ = ["PromptTemplate", "load_prompt", "load_schema", "prompt_path_for"]
+__all__ = [
+    "PromptTemplate",
+    "load_prompt",
+    "load_schema",
+    "parse_schema",
+    "prompt_from_text",
+    "prompt_path_for",
+]
 
 _SCHEMA_SUFFIX = ".json"
 _PROMPT_SUFFIX = ".md"
@@ -62,16 +69,25 @@ def load_schema(path: Path) -> Schema:
             path=str(path),
         ) from exc
 
+    return parse_schema(payload, path=str(path))
+
+
+def parse_schema(payload: object, *, path: str | None = None) -> Schema:
+    """Validate schema data already in hand: a parsed file or a console row.
+
+    The one place the checks live, so a schema authored in the console is held to
+    exactly what a schema file is.
+    """
     if not isinstance(payload, dict):
         raise SchemaError(
             f"schema file must contain a JSON object, got {type(payload).__name__}",
-            path=str(path),
+            path=path,
         )
 
     try:
         return Schema.model_validate(_normalise(payload))
     except ValidationError as exc:
-        raise SchemaError(_describe(exc), path=str(path)) from exc
+        raise SchemaError(_describe(exc), path=path, problems=_problems(exc)) from exc
 
 
 def _normalise(payload: dict[str, Any]) -> dict[str, Any]:
@@ -89,11 +105,14 @@ def _describe(exc: ValidationError) -> str:
     A caller reading "1 validation error for Schema" learns nothing; the point of
     rejecting at load time is that the message says which field and why.
     """
-    parts: list[str] = []
-    for error in exc.errors():
-        location = ".".join(str(item) for item in error["loc"]) or "<root>"
-        parts.append(f"{location}: {error['msg']}")
-    return "invalid schema -- " + "; ".join(parts)
+    return "invalid schema -- " + "; ".join(f"{loc}: {msg}" for loc, msg in _problems(exc))
+
+
+def _problems(exc: ValidationError) -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (".".join(str(item) for item in error["loc"]) or "<root>", error["msg"])
+        for error in exc.errors()
+    )
 
 
 def prompt_path_for(schema_path: Path) -> Path:
@@ -117,11 +136,16 @@ def load_prompt(schema: Schema, path: Path) -> PromptTemplate:
             identity=schema.identity,
             path=str(path),
         ) from exc
+    return prompt_from_text(schema, text, path=str(path))
+
+
+def prompt_from_text(schema: Schema, text: str, *, path: str | None = None) -> PromptTemplate:
+    """Wrap prompt text already in hand, refusing a blank one."""
     if not text.strip():
         raise SchemaError(
             f"prompt for schema {schema.identity!r} is empty",
             identity=schema.identity,
-            path=str(path),
+            path=path,
         )
     return PromptTemplate(identity=schema.identity, text=text)
 

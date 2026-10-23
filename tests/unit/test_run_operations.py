@@ -593,7 +593,7 @@ def test_the_worker_command_builds_a_worker_and_runs_it(
         def store(self) -> object:
             return "store"
 
-        def registry(self) -> object:
+        def registry(self, console: object = None) -> object:
             return "registry"
 
         def adapter(self) -> object:

@@ -18,6 +18,8 @@ const STALE: [Intent, readonly (readonly [Intent["type"]])[] | "all"][] = [
   [{ type: "revoke-callback", tenantId: "t", callbackId: "c" }, [["list-callbacks"]]],
   [{ type: "record-check", runId: "r" }, [["run-checks"]]],
   [{ type: "start-evaluation", tenantId: "t", schema: "s" }, [["list-evaluations"]]],
+  [{ type: "create-schema" }, [["list-schemas"], ["schema-detail"]]],
+  [{ type: "schema-detail", identity: "a@1" }, []],
   [{ type: "erase-tenant", tenantId: "t" }, "all"],
   [{ type: "erase-document", tenantId: "t", blobId: "b" }, "all"],
   [{ type: "list-runs" }, []],

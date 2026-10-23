@@ -154,6 +154,10 @@ def run(args: argparse.Namespace, settings: Settings) -> Rendering:
 
     queue = PostgresRunQueue(lambda: psycopg.connect(dsn, connect_timeout=CONNECT_TIMEOUT_SECONDS))
 
+    from docdoc.runs.console_schemas import PostgresSchemaStore
+
+    schemas = PostgresSchemaStore(execute=queue._execute)
+
     worker = Worker(
         # `connect_timeout` matters more here than on the API, which already sets
         # it. A black-holed database — a security group change, a failover that
@@ -165,7 +169,12 @@ def run(args: argparse.Namespace, settings: Settings) -> Rendering:
         queue=queue,
         blobs=settings.blobs(),
         store=settings.store(),
-        registry=settings.registry(),
+        registry=settings.registry(schemas),
+        # A schema authored in the console after this worker started: re-read
+        # when a claimed run names one the registry lacks. Strict: an unreachable
+        # database raises, so the claim loop lets the lease lapse and retries
+        # instead of failing the run on a schema it could not see.
+        reload_registry=lambda: settings.registry(schemas, strict=True),
         adapter=settings.adapter(),
         worker_id=_worker_id(),
         lease=configured_lease(getattr(args, "lease_seconds", None)),

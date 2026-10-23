@@ -254,6 +254,8 @@ QUALITY_DESIGN = pathlib.Path(
     "docs/superpowers/specs/2026-10-22-tenant-quality-evaluation-design.md"
 )
 
+SCHEMAS_DESIGN = pathlib.Path("docs/superpowers/specs/2026-10-23-console-schemas-design.md")
+
 RUNS_MIGRATION = pathlib.Path("src/docdoc/runs/migrations/0001_runs.sql")
 
 #: A column definition in the `CREATE TABLE runs` body: four leading spaces, a
@@ -466,6 +468,8 @@ def test_the_table_scan_finds_all_three() -> None:
         "console_sessions",
         # Tenant quality evaluation.
         "evaluations",
+        # Console-authored schemas.
+        "console_schemas",
     }, (
         f"the migrations create {sorted(tables)}; the scan or the migrations "
         f"changed, and the check below is now describing something else"
@@ -496,6 +500,7 @@ TABLE_SECTIONS = {
     "console_users": "## `console_users`",
     "console_sessions": "## `console_sessions`",
     "evaluations": "## `evaluations`",
+    "console_schemas": "## `console_schemas`",
 }
 
 SECTION_DOCUMENTS = {
@@ -511,6 +516,7 @@ SECTION_DOCUMENTS = {
     "deliveries": OPERATIONS_DATA_MODEL,
     "corrections": OPERATIONS_DATA_MODEL,
     "evaluations": QUALITY_DESIGN,
+    "console_schemas": SCHEMAS_DESIGN,
 }
 
 

@@ -137,6 +137,7 @@ test("the writes are exactly the session, run, credential, callback, erasure, OC
     "DELETE /v1/console/tenants/t/documents/b",
     "POST /v1/console/credentials",
     "POST /v1/console/runs/r/corrections",
+    "POST /v1/console/schemas",
     "POST /v1/console/session",
     "POST /v1/console/tenants/acme/callbacks",
     "POST /v1/console/tenants/t/evaluations",

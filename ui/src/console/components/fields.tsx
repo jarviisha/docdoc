@@ -129,3 +129,31 @@ export function FileField({ label, value, onChange, accept, className }: FileFie
     </div>
   );
 }
+
+interface TextAreaFieldProps {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  rows?: number;
+  className?: string;
+}
+
+/** A multi-line text box: a prompt, a JSON document. Mono, because what it holds is machine text. */
+export function TextAreaField({ label, value, onChange, rows = 16, className }: TextAreaFieldProps) {
+  const id = useId();
+  return (
+    <div className={cn("flex flex-col gap-1", className)}>
+      <Label htmlFor={id} className={LABEL_CLASS}>
+        {label}
+      </Label>
+      <textarea
+        id={id}
+        rows={rows}
+        spellCheck={false}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full rounded-md border border-input bg-white px-2 py-1 font-mono text-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+      />
+    </div>
+  );
+}

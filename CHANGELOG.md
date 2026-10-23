@@ -9,6 +9,22 @@ API may change in any release. `document_id` derivation is versioned separately 
 
 ## [Unreleased]
 
+### Added — Schemas in the console (ADR-0029)
+
+- Build / Schemas lists every registered schema (file or console), shows one read-only, and lets an
+  operator author a new version from a base or from blank. A schema identity is immutable: editing
+  `invoice@2` saves `invoice@3`, never changes `invoice@2`.
+- Console schemas live in the run database (`console_schemas`, migration 0014). The API and the
+  already-running workers pick a saved schema up at once, with no restart. File schemas work as
+  before; without a run database schemas stay file-only.
+- `GET /v1/console/schemas` now returns a list (identity, source, field count, who and when);
+  new `GET /v1/console/schemas/{identity}` and `POST /v1/console/schemas`. `GET /v1/schemas` lists
+  console schemas too.
+- The server picks the version: highest existing version of the name across both sources, plus one.
+  A save goes through the same validation as a file and answers `422` with the field path when it
+  is refused. If an identity exists in both sources, the console row wins and the file is skipped
+  and logged.
+
 ### Removed — docdoc is a service, not an installable library (ADR-0027)
 
 - The CLI commands `parse`, `extract`, `inspect`, `explain` and `eval`. Documents reach docdoc

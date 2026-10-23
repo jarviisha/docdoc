@@ -176,10 +176,12 @@ export type SubmitKind = "ocr" | "extraction";
 /** Read the schema identities from a listing body, dropping anything that is not a string. */
 export function toSchemas(body: unknown): string[] {
   if (typeof body !== "object" || body === null) return [];
-  const schemas = (body as { schemas?: unknown }).schemas;
-  return Array.isArray(schemas)
-    ? schemas.filter((schema): schema is string => typeof schema === "string")
-    : [];
+  const entries = (body as { entries?: unknown }).entries;
+  if (!Array.isArray(entries)) return [];
+  return entries.flatMap((entry) => {
+    const identity = (entry as { identity?: unknown } | null)?.identity;
+    return typeof identity === "string" ? [identity] : [];
+  });
 }
 
 export interface SubmitForm {

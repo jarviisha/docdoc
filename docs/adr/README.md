@@ -34,6 +34,7 @@ it would be decided explicitly rather than settled by whichever code landed firs
 | [0026](0026-tenant-quality-evaluation.md) | Tenant quality evaluation: checks, answers that never expire, and re-run reports | Accepted; requires constitution v1.13.0; amends 0023 §4 | — |
 | [0027](0027-service-only-surface.md) | docdoc is a service, not an installable library | Accepted; requires constitution v2.0.0; amends 0020 in part | — |
 | [0028](0028-console-routing-and-data-layer.md) | The console has real URLs and loads through one data layer | Accepted; relates to 0019, 0023, 0024 | — |
+| [0029](0029-console-authored-schemas.md) | Schemas are authored in the console and stored in the run database | Accepted; relates to 0023, 0028 | — |
 
 ## Conventions
 

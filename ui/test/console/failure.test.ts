@@ -194,3 +194,15 @@ test("overloaded shows the server's sentence", () => {
   assert.equal(failure.kind, "unavailable");
   assert.equal(describe(failure), "the system is overloaded; please send again later");
 });
+
+test("an invalid schema carries its problems; other 422s do not", () => {
+  const problems = [{ path: "fields.0.constraints", message: "bad" }];
+  const f = failureOf({
+    ok: false,
+    status: 422,
+    body: { error: "invalid_schema", message: "no", problems: [...problems, { path: 1 }] },
+  });
+  assert.deepEqual(f, { kind: "reported", status: 422, message: "no", problems });
+  const other = failureOf({ ok: false, status: 422, body: { error: "x", message: "m", problems } });
+  assert.deepEqual(other, { kind: "reported", status: 422, message: "m" });
+});
