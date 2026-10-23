@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
+from docdoc.artifacts import ArtifactError
 from docdoc.evaluation import (
     DocumentOrigin,
     DocumentPrediction,
@@ -64,7 +65,11 @@ def answer_set(answers: Sequence[Answer], *, tenant_id: str, schema: Any) -> Gol
 def prediction_for(store: Any, run: Run, document_id: str) -> DocumentPrediction:
     """What `run` predicted, from the tenant's artifact store, or how it failed."""
     if run.status is RunStatus.SUCCEEDED:
-        loaded = _load(store, run.processing_id)
+        try:
+            loaded = _load(store, run.processing_id)
+        except ArtifactError:
+            # One corrupt artifact must not abort the whole evaluation.
+            return _failed(document_id, Stage.VALIDATE, "artifact_unreadable")
         if loaded is not None:
             return DocumentPrediction(document_id=document_id, **loaded)
         return _failed(document_id, Stage.VALIDATE, "artifact_missing")
@@ -99,6 +104,10 @@ def _load(store: Any, processing_id: str | None) -> dict[str, Any] | None:
             artifact_format_version=spec_for(stage).artifact_format_version,
         )
 
+    # Only a validation artifact is a run's result; an OCR run's id is a parse.
+    envelope = store.envelope(processing_id)
+    if envelope is not None and envelope.stage != PipelineStage.VALIDATE.value:
+        return None
     validation = get(processing_id, ValidationResult, PipelineStage.VALIDATE)
     if validation is None:
         return None

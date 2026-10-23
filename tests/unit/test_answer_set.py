@@ -98,3 +98,62 @@ def test_evaluate_accepts_the_pair():
     failed = DocumentPrediction(document_id=BLOB, failed_stage=Stage.EXTRACT, failure_reason="X")
     report = evaluate(golden, PredictionSet(predictions={BLOB: failed}))
     assert "field_accuracy" in report.metrics.micro
+
+
+def _stored_run(tmp_path):
+    from docdoc.artifacts import FileArtifactStore
+    from docdoc.extraction.adapters.echo import EchoAdapter
+    from docdoc.pipeline import run as run_pipeline
+
+    store = FileArtifactStore(tmp_path)
+    result = run_pipeline(
+        (REPO / "tests/fixtures/pdf/digital_invoice.pdf").read_bytes(),
+        schema="invoice@1",
+        registry=SchemaRegistry.from_paths([REPO / "schemas"]),
+        adapter=EchoAdapter.from_fixtures(REPO / "tests/fixtures/echo"),
+        store=store,
+    )
+    return store, result
+
+
+def test_a_succeeded_run_becomes_its_stored_prediction(tmp_path):
+    store, result = _stored_run(tmp_path)
+    the_run = run(RunStatus.SUCCEEDED, processing_id=result.validation.artifact_id)
+    prediction = prediction_for(store, the_run, BLOB)
+    assert prediction.failed_stage is None
+    assert prediction.validation.artifact_id == result.validation.artifact_id
+    assert prediction.extraction.artifact_id == result.extraction.artifact_id
+    assert prediction.grounding.artifact_id == result.grounding.artifact_id
+    assert prediction.parser_id
+    assert prediction.parser_version
+
+
+def test_a_succeeded_run_with_a_missing_artifact_is_a_failed_prediction(tmp_path):
+    store, _ = _stored_run(tmp_path)
+    the_run = run(RunStatus.SUCCEEDED, processing_id="sha256:" + "f" * 64)
+    prediction = prediction_for(store, the_run, BLOB)
+    assert prediction.failed_stage is Stage.VALIDATE
+    assert prediction.failure_reason == "artifact_missing"
+
+
+def test_a_non_validation_id_is_a_failed_prediction(tmp_path):
+    store, result = _stored_run(tmp_path)
+    the_run = run(RunStatus.SUCCEEDED, processing_id=result.extraction.artifact_id)
+    prediction = prediction_for(store, the_run, BLOB)
+    assert prediction.failed_stage is Stage.VALIDATE
+    assert prediction.failure_reason == "artifact_missing"
+
+
+def test_an_unreadable_artifact_is_a_failed_prediction():
+    from docdoc.artifacts import ArtifactError
+
+    class Corrupt:
+        def envelope(self, artifact_id):
+            return None
+
+        def get(self, artifact_id, *, model, artifact_format_version):
+            raise ArtifactError("bad", reason="integrity", artifact_id=artifact_id, root="/x")
+
+    prediction = prediction_for(Corrupt(), run(RunStatus.SUCCEEDED, processing_id="p"), BLOB)
+    assert prediction.failed_stage is Stage.VALIDATE
+    assert prediction.failure_reason == "artifact_unreadable"
