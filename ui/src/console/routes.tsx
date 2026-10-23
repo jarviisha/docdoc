@@ -276,15 +276,7 @@ const credentialsRoute = createRoute({
   path: "/credentials",
   validateSearch: tenantSearch,
   component: function Credentials() {
-    const search = credentialsRoute.useSearch();
-    return (
-      <CredentialArea
-        key={JSON.stringify(search)}
-        request={useRequest().request}
-        onFailure={useFrame().onFailure}
-        presetTenant={search.tenant ?? null}
-      />
-    );
+    return <CredentialArea />;
   },
 });
 
@@ -293,14 +285,7 @@ const callbacksRoute = createRoute({
   path: "/callbacks",
   validateSearch: tenantSearch,
   component: function Callbacks() {
-    const search = callbacksRoute.useSearch();
-    return (
-      <CallbacksArea
-        key={JSON.stringify(search)}
-        request={useRequest().request}
-        presetTenant={search.tenant ?? null}
-      />
-    );
+    return <CallbacksArea />;
   },
 });
 
@@ -317,15 +302,7 @@ const erasureRoute = createRoute({
   path: "/erasure",
   validateSearch: tenantSearch,
   component: function Erasure() {
-    const search = erasureRoute.useSearch();
-    return (
-      <EraseArea
-        key={JSON.stringify(search)}
-        request={useRequest().request}
-        onFailure={useFrame().onFailure}
-        presetTenant={search.tenant ?? null}
-      />
-    );
+    return <EraseArea />;
   },
 });
 

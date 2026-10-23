@@ -68,51 +68,12 @@ export function canRevoke(sending: boolean): boolean {
   return !sending;
 }
 
-/**
- * The list as the area holds it: whose it is, its rows (`null` until one
- * answers), and the failure that answered instead.
- *
- * The tenant travels with the rows so a late answer for a tenant no longer
- * chosen is recognised and dropped, as `credentials.ts`'s `listedFor` does —
- * otherwise switching A → B quickly lets A's rows land under B's name.
- */
-export interface CallbackListing {
-  tenant: string;
-  callbacks: CallbackRecord[] | null;
-  failure: Failure | null;
-}
-
-/** A tenant chosen: its list is on its way, and the previous tenant's rows and failure go. */
-export function choosing(tenant: string): CallbackListing {
-  return { tenant, callbacks: null, failure: null };
-}
-
-/** A list answered. Ignored when it is for a tenant no longer chosen. */
-export function listedFor(
-  listing: CallbackListing,
-  tenant: string,
-  callbacks: CallbackRecord[],
-): CallbackListing {
-  return tenant === listing.tenant ? { ...listing, callbacks, failure: null } : listing;
-}
-
-/** A list failed. Ignored, like `listedFor`, when it is for a tenant no longer chosen. */
-export function listFailedFor(
-  listing: CallbackListing,
-  tenant: string,
-  failure: Failure,
-): CallbackListing {
-  return tenant === listing.tenant ? { ...listing, callbacks: null, failure } : listing;
-}
-
 /** The 503's sentence — this deployment delivers no callbacks — said in place of the table. */
-export function unavailableNote(listing: CallbackListing): string | null {
-  return listing.failure?.kind === "unavailable" ? describe(listing.failure) : null;
+export function unavailableNote(failure: Failure | null): string | null {
+  return failure?.kind === "unavailable" ? describe(failure) : null;
 }
 
 /** Any other list failure, in the deployment's own words. */
-export function listProblem(listing: CallbackListing): string | null {
-  return listing.failure === null || listing.failure.kind === "unavailable"
-    ? null
-    : describe(listing.failure);
+export function listProblem(failure: Failure | null): string | null {
+  return failure === null || failure.kind === "unavailable" ? null : describe(failure);
 }

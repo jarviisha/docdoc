@@ -9,7 +9,8 @@
  * and cleared; no answer carries it back (FR-066).
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
+import { getRouteApi } from "@tanstack/react-router";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -17,94 +18,64 @@ import { Card, CardContent } from "@/components/ui/card";
 import {
   canRegister,
   canRevoke,
-  choosing,
-  listFailedFor,
   listProblem,
-  listedFor,
   registerBody,
   toCallbacks,
   unavailableNote,
 } from "../model/callbacks.ts";
 import { describe } from "../model/failure.ts";
+import { tenantSearch } from "../model/search.ts";
 import { toTenants } from "../model/submit.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { DataTable } from "./DataTable.tsx";
 import { SelectField, TextField } from "./fields.tsx";
 import { SectionHeading } from "./SectionHeading.tsx";
 import { Time } from "./Time.tsx";
-import type { Request } from "./RequestContext.tsx";
+import { useAct, useIntent } from "./useIntent.ts";
 
-interface Props {
-  request: Request;
-  presetTenant: string | null;
-}
+const callbacksApi = getRouteApi("/callbacks");
 
-export function CallbacksArea({ request, presetTenant }: Props) {
-  const [tenants, setTenants] = useState<string[]>([]);
-  // Whose list is shown, with its rows or the failure that answered instead.
-  const [listing, setListing] = useState(() => choosing(presetTenant ?? ""));
-  const { tenant, callbacks } = listing;
+/** The tenant in the URL is the one listed; choosing one pushes it, so Back returns to the last. */
+export function CallbacksArea() {
+  const tenant = callbacksApi.useSearch().tenant ?? "";
+  const navigate = callbacksApi.useNavigate();
+  const act = useAct();
+  const tenants = useIntent({ type: "list-tenants" }, { select: toTenants });
+  const list = useIntent(tenant === "" ? null : { type: "list-callbacks", tenantId: tenant }, {
+    select: toCallbacks,
+  });
+  const callbacks = list.data ?? null;
   // A 503: this deployment delivers no callbacks, said in place of the table.
-  const unavailable = unavailableNote(listing);
+  const unavailable = unavailableNote(list.error);
   // A register or a revoke that failed; a callback-list failure is `listProblem`.
   const [writeProblem, setWriteProblem] = useState<string | null>(null);
-  const problem = writeProblem ?? listProblem(listing);
+  const problem = writeProblem ?? listProblem(list.error);
   // The tenant list failed to load. Its own wording: it is not a callbacks
   // request, and reusing that title would blame the wrong request.
-  const [tenantsProblem, setTenantsProblem] = useState<string | null>(null);
+  const tenantsProblem = tenants.isError ? describe(tenants.error) : null;
   const [url, setUrl] = useState("");
   const [secret, setSecret] = useState("");
   const [sending, setSending] = useState(false);
   // The row awaiting "Revoke this callback?", by callback id.
   const [confirming, setConfirming] = useState<string | null>(null);
 
-  useEffect(() => {
-    let current = true;
-    void request({ type: "list-tenants" }).then((answer) => {
-      if (!current) return;
-      if (answer.ok) setTenants(toTenants(answer.body));
-      else setTenantsProblem(describe(answer.failure));
-    });
-    return () => {
-      current = false;
-    };
-  }, [request]);
-
-  const load = useCallback(
-    async (which: string) => {
-      const answer = await request({ type: "list-callbacks", tenantId: which });
-      // A late answer for a tenant no longer chosen is dropped by the model.
-      if (answer.ok) setListing((previous) => listedFor(previous, which, toCallbacks(answer.body)));
-      else setListing((previous) => listFailedFor(previous, which, answer.failure));
-    },
-    [request],
-  );
-
-  useEffect(() => {
-    if (tenant !== "") void load(tenant);
-  }, [tenant, load]);
-
   const register = () => {
     setWriteProblem(null);
     setSending(true);
-    void request({ type: "register-callback", tenantId: tenant }, registerBody(url, secret)).then(
-      (answer) => {
-        setSending(false);
-        if (!answer.ok) return setWriteProblem(describe(answer.failure));
-        setSecret("");
-        void load(tenant);
-      },
-    );
+    void act({ type: "register-callback", tenantId: tenant }, registerBody(url, secret)).then((answer) => {
+      setSending(false);
+      if (!answer.ok) return setWriteProblem(describe(answer.failure));
+      setSecret("");
+    });
   };
 
   const revoke = async (callbackId: string) => {
     setWriteProblem(null);
     setSending(true);
-    const answer = await request({ type: "revoke-callback", tenantId: tenant, callbackId });
+    const answer = await act({ type: "revoke-callback", tenantId: tenant, callbackId });
     setSending(false);
     setConfirming(null);
     if (!answer.ok) setWriteProblem(describe(answer.failure));
-    void load(tenant);
   };
 
   return (
@@ -113,12 +84,12 @@ export function CallbacksArea({ request, presetTenant }: Props) {
         label="Tenant"
         placeholder="Choose a tenant"
         className="w-[280px]"
-        options={tenants}
+        options={tenants.data ?? []}
         value={tenant}
         onChange={(chosen) => {
           setWriteProblem(null);
           setConfirming(null);
-          setListing(choosing(chosen));
+          void navigate({ search: (previous) => tenantSearch({ ...previous, tenant: chosen }) });
         }}
       />
 

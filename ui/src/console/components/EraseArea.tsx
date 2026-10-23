@@ -15,6 +15,7 @@
  */
 
 import { useState } from "react";
+import { getRouteApi } from "@tanstack/react-router";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 
@@ -29,30 +30,29 @@ import {
   type ErasureIntent,
   type Target,
 } from "../model/erasure.ts";
-import type { Failure } from "../model/failure.ts";
+import { describe } from "../model/failure.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { TextField } from "./fields.tsx";
-import type { Request } from "./RequestContext.tsx";
+import { useAct } from "./useIntent.ts";
 
-interface Props {
-  request: Request;
-  onFailure: (failure: Failure) => void;
-  /** The tenant in the URL (a jump from Tenants, or a link): prefilled, never confirmed for you. */
-  presetTenant: string | null;
-}
+const erasureApi = getRouteApi("/erasure");
 
-export function EraseArea({ request, onFailure, presetTenant }: Props) {
+export function EraseArea() {
+  // The URL's tenant only pre-fills; Continue still asks for the identifier typed again.
+  const presetTenant = erasureApi.useSearch().tenant ?? null;
+  const act = useAct();
   const [kind, setKind] = useState<Target["kind"]>("tenant");
-  // Prefilled only; Continue still asks for the identifier typed again.
   const [identifier, setIdentifier] = useState(presetTenant ?? "");
   // A document is erased within its tenant; the route names both.
   const [documentTenant, setDocumentTenant] = useState("");
   const [intent, setIntent] = useState<ErasureIntent | null>(null);
   const [outcome, setOutcome] = useState<string | null>(null);
+  // An erasure the deployment refused.
+  const [problem, setProblem] = useState<string | null>(null);
 
   const erase = async (current: ErasureIntent) => {
     const target = current.target;
-    const answer = await request(
+    const answer = await act(
       target.kind === "tenant"
         ? { type: "erase-tenant", tenantId: target.id }
         : { type: "erase-document", tenantId: target.tenantId, blobId: target.id },
@@ -60,7 +60,7 @@ export function EraseArea({ request, onFailure, presetTenant }: Props) {
     // Closed either way, so a refusal is read on the page, not behind the dialog.
     setIntent(null);
     if (!answer.ok) {
-      onFailure(answer.failure);
+      setProblem(describe(answer.failure));
       return;
     }
     setOutcome(outcomeNotice(removedFrom(answer.body)));
@@ -80,6 +80,12 @@ export function EraseArea({ request, onFailure, presetTenant }: Props) {
           that is: the operator just destroyed data and the counts are the only
           report of what went. */}
       <div role="status" aria-live="assertive">
+        {problem === null ? null : (
+          <Alert variant="destructive">
+            <AlertTitle>The erasure failed</AlertTitle>
+            <AlertDescription>{problem}</AlertDescription>
+          </Alert>
+        )}
         {outcome === null ? null : (
           <Alert variant="info">
             <AlertTitle>Erasure complete</AlertTitle>
@@ -127,6 +133,7 @@ export function EraseArea({ request, onFailure, presetTenant }: Props) {
             disabled={identifier.trim() === "" || (kind === "document" && documentTenant.trim() === "")}
             onClick={() => {
               setOutcome(null);
+              setProblem(null);
               setIntent(
                 intendedFor(
                   kind === "tenant"
