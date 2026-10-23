@@ -18,6 +18,7 @@ export type Area =
   | "tenants"
   | "credentials"
   | "callbacks"
+  | "schemas"
   | "erasure"
   | "quality";
 
@@ -29,6 +30,7 @@ export type AreaPath =
   | "/tenants"
   | "/credentials"
   | "/callbacks"
+  | "/schemas"
   | "/parsers"
   | "/erasure";
 
@@ -41,6 +43,7 @@ export const AREA_PATHS: { readonly [A in Area]: AreaPath } = {
   tenants: "/tenants",
   credentials: "/credentials",
   callbacks: "/callbacks",
+  schemas: "/schemas",
   parsers: "/parsers",
   erasure: "/erasure",
 };

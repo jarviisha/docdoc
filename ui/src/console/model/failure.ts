@@ -24,7 +24,13 @@ import { TransportError, type Response } from "../../transport.ts";
 
 export type Failure =
   /** The deployment answered, and said no. Its own typed error is carried. */
-  | { kind: "reported"; status: number; message: string }
+  | {
+      kind: "reported";
+      status: number;
+      message: string;
+      /** A schema the server refused, one entry per problem (`invalid_schema`). */
+      problems?: { path: string; message: string }[];
+    }
   /** No session, or one the gate would not accept. The session signs out. */
   | { kind: "unauthenticated"; message: string }
   /** The run-state database the console needs is absent (`ConsoleUnavailable`). */
@@ -82,6 +88,18 @@ function messageOf(body: unknown): string {
     }
   }
   return "the deployment reported a failure and gave no message";
+}
+
+/** `{"error":"invalid_schema","problems":[{path,message}]}`'s problems, else null. */
+function problemsOf(body: unknown): { path: string; message: string }[] | null {
+  if (typeof body !== "object" || body === null) return null;
+  const { error, problems } = body as { error?: unknown; problems?: unknown };
+  if (error !== "invalid_schema" || !Array.isArray(problems)) return null;
+  return problems.flatMap((p: { path?: unknown; message?: unknown } | null) =>
+    typeof p?.path === "string" && typeof p.message === "string"
+      ? [{ path: p.path, message: p.message }]
+      : [],
+  );
 }
 
 /** The console's typed error class, as `{"error":{"class": ...}}` carries it. */
@@ -178,7 +196,13 @@ export function failureOf(response: Response): Failure {
     };
   }
   if (response.status === 404) return { kind: "absent" };
-  return { kind: "reported", status: response.status, message: messageOf(response.body) };
+  const problems = problemsOf(response.body);
+  return {
+    kind: "reported",
+    status: response.status,
+    message: messageOf(response.body),
+    ...(problems === null ? {} : { problems }),
+  };
 }
 
 /** Classify a thrown error. Only `TransportError` is expected here. */

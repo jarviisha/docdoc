@@ -37,3 +37,8 @@ test("the tenant jumps are runs, credentials, callbacks, and erasure, in that or
 test("quality is an area", () => {
   assert.deepEqual(jumpTo("quality", "acme"), { to: "/quality", search: { tenant: "acme" } });
 });
+
+test("schemas is an area at /schemas", () => {
+  assert.equal(AREA_PATHS.schemas, "/schemas");
+  assert.equal(areaOf("/console/schemas"), "schemas");
+});

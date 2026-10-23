@@ -53,6 +53,8 @@ export type Intent =
   | { type: "list-tenants" }
   | { type: "list-parsers" }
   | { type: "list-schemas" }
+  | { type: "schema-detail"; identity: string }
+  | { type: "create-schema" }
   | { type: "list-callbacks"; tenantId: string }
   | { type: "register-callback"; tenantId: string }
   | { type: "revoke-callback"; tenantId: string; callbackId: string }
@@ -93,6 +95,7 @@ const ALLOWED = [
   /^\/v1\/console\/tenants\/[^/]+\/ocr$/,
   /^\/v1\/console\/parsers$/,
   /^\/v1\/console\/schemas$/,
+  /^\/v1\/console\/schemas\/[^/]+$/,
   /^\/v1\/console\/tenants\/[^/]+\/extractions$/,
   /^\/v1\/console\/tenants\/[^/]+\/callbacks$/,
   /^\/v1\/console\/tenants\/[^/]+\/callbacks\/[^/]+$/,
@@ -257,6 +260,17 @@ export function requestFor(intent: Intent): RequestPlan {
     case "list-schemas":
       return { method: "GET", path: "/v1/console/schemas", query: {}, hasBody: false };
 
+    case "schema-detail":
+      return {
+        method: "GET",
+        path: `/v1/console/schemas/${encodeURIComponent(intent.identity)}`,
+        query: {},
+        hasBody: false,
+      };
+
+    case "create-schema":
+      return { method: "POST", path: "/v1/console/schemas", query: {}, hasBody: true };
+
     case "submit-extraction":
       return {
         method: "POST",
@@ -354,6 +368,8 @@ export function allIntents(): Intent[] {
     { type: "revoke-callback", tenantId: "acme", callbackId: "c" },
     { type: "submit-ocr", tenantId: "t" },
     { type: "list-schemas" },
+    { type: "schema-detail", identity: "invoice@2" },
+    { type: "create-schema" },
     { type: "submit-extraction", tenantId: "t", schema: "s" },
   ];
 }

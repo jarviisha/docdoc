@@ -287,6 +287,15 @@ const parsersRoute = createRoute({
   },
 });
 
+// Registered so `/schemas` is a known path; the screen replaces this in the next task.
+const schemasRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/schemas",
+  component: function Schemas() {
+    return null;
+  },
+});
+
 const erasureRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/erasure",
@@ -306,6 +315,7 @@ const routeTree = rootRoute.addChildren([
   credentialsRoute,
   callbacksRoute,
   parsersRoute,
+  schemasRoute,
   erasureRoute,
 ]);
 
