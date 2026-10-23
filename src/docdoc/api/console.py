@@ -598,25 +598,24 @@ def console_router() -> APIRouter:
 
     @router.get("/runs/{run_id}/pages/{page}")
     def run_page(request: Request, run_id: str, page: int, operator: Operator) -> Any:
-        """Page `page` (0-based) of an OCR run's source document, as an image (019).
+        """Page `page` (0-based) of a run's source document, as an image (019).
 
         PNG and JPEG are served as stored, page 0 only; a PDF page is rendered
         to PNG, longer edge at most 2000 px. An out-of-range page and a missing
         blob are the one 404 an unknown run gets. Plain `def`: rendering blocks.
         """
         from docdoc.api.pages import page_image
-        from docdoc.runs.model import RunKind
+        from docdoc.runs.model import RunKind, RunStatus
 
         refusal, owner, run = _run(request, run_id)
         if refusal is not None:
             return refusal
-        if run.kind is not RunKind.OCR:
+        # A succeeded extraction run's pages too: its fields are checked beside
+        # the page they were read from (ADR-0026 amends ADR-0023 §4).
+        if run.kind is RunKind.EXTRACTION and run.status is not RunStatus.SUCCEEDED:
             return JSONResponse(
                 status_code=409,
-                content={
-                    "error": "no_page_images",
-                    "detail": "page images are served for OCR runs only",
-                },
+                content={"error": "run_not_succeeded", "status": str(run.status)},
             )
         _, blobs = request.app.state.deployment.stores_for(owner)
         data = None if blobs is None else blobs.get(run.blob_id)
