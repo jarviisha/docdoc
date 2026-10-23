@@ -22,102 +22,111 @@ def routes() -> APIRouter:
     @router.get("/answers")
     async def answers(request: Request, principal: Caller) -> Any:
         """How many documents and fields this tenant has checked, per schema."""
-        store = _deployment_of(request).corrections()
-        if store is None:
-            return _not_found()
-        return {
-            "schemas": [
-                {"schema_name": name, "documents": documents, "fields": fields}
-                for name, documents, fields in store.answer_summary(tenant_id=principal.tenant_id)
-            ]
-        }
+        return answers_of(request, principal.tenant_id)
 
     @router.post("/evaluations", status_code=202)
     async def start_evaluation(request: Request, schema: str, principal: Caller) -> Any:
-        from docdoc.runs.evaluations import EvaluationUnavailable, start
-        from docdoc.runs.identity import now
-
-        deployment = _deployment_of(request)
-        if deployment.corrections() is None or deployment.evaluations() is None:
-            return _not_found()
-        try:
-            evaluation = start(
-                deployment, tenant_id=principal.tenant_id, schema_name=schema, at=now()
-            )
-        except EvaluationUnavailable as refused:
-            if refused.code == "rate_limited":
-                return _limit_refusal(refused.verdict)
-            if refused.code == "unknown_schema":
-                return JSONResponse(
-                    status_code=404,
-                    content={
-                        "error": {
-                            "class": "SchemaError",
-                            "message": "schema is not configured here",
-                        }
-                    },
-                )
-            return JSONResponse(
-                status_code=409, content={"error": refused.code, "detail": _DETAIL[refused.code]}
-            )
-        return JSONResponse(
-            status_code=202,
-            content={
-                "evaluation_id": str(evaluation.evaluation_id),
-                "schema_identity": evaluation.schema_identity,
-                "documents": len(evaluation.document_ids),
-                "status": "running",
-            },
-        )
+        return start_evaluation_of(request, principal.tenant_id, schema)
 
     @router.get("/evaluations")
     async def list_evaluations(
         request: Request, principal: Caller, schema: str | None = None, limit: int = 20
     ) -> Any:
-        store = _deployment_of(request).evaluations()
-        if store is None:
-            return _not_found()
-        found = store.list(
-            tenant_id=principal.tenant_id, schema_name=schema, limit=max(1, min(limit, 100))
-        )
-        from docdoc.runs.evaluations import settled_safely
-        from docdoc.runs.identity import now
-
-        deployment = _deployment_of(request)
-        return {
-            "evaluations": [
-                _summary(e if e.finished else settled_safely(deployment, e, at=now()))
-                for e in found
-            ]
-        }
+        return list_evaluations_of(request, principal.tenant_id, schema, limit)
 
     @router.get("/evaluations/{evaluation_id}")
     async def read_evaluation(request: Request, evaluation_id: str, principal: Caller) -> Any:
-        from docdoc.runs.evaluations import settled
-        from docdoc.runs.identity import now
-
-        deployment = _deployment_of(request)
-        store = deployment.evaluations()
-        if store is None:
-            return _not_found()
-        try:
-            identity = UUID(evaluation_id)
-        except ValueError:
-            return _not_found()
-        evaluation = store.get(identity, tenant_id=principal.tenant_id)
-        if evaluation is None:
-            return _not_found()
-        evaluation = settled(deployment, evaluation, at=now())
-        report = evaluation.report
-        return {
-            **_summary(evaluation),
-            "per_field": (
-                None if report is None else jsonable_encoder(report.metrics.per_field_path)
-            ),
-            "documents": _documents(deployment, evaluation),
-        }
+        return read_evaluation_of(request, principal.tenant_id, evaluation_id)
 
     return router
+
+
+# The bodies below serve the tenant's routes and the console's alike.
+
+
+def answers_of(request: Request, tenant_id: str) -> Any:
+    store = _deployment_of(request).corrections()
+    if store is None:
+        return _not_found()
+    return {
+        "schemas": [
+            {"schema_name": name, "documents": documents, "fields": fields}
+            for name, documents, fields in store.answer_summary(tenant_id=tenant_id)
+        ]
+    }
+
+
+def start_evaluation_of(request: Request, tenant_id: str, schema: str) -> Any:
+    from docdoc.runs.evaluations import EvaluationUnavailable, start
+    from docdoc.runs.identity import now
+
+    deployment = _deployment_of(request)
+    if deployment.corrections() is None or deployment.evaluations() is None:
+        return _not_found()
+    try:
+        evaluation = start(deployment, tenant_id=tenant_id, schema_name=schema, at=now())
+    except EvaluationUnavailable as refused:
+        if refused.code == "rate_limited":
+            return _limit_refusal(refused.verdict)
+        if refused.code == "unknown_schema":
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "error": {"class": "SchemaError", "message": "schema is not configured here"}
+                },
+            )
+        return JSONResponse(
+            status_code=409, content={"error": refused.code, "detail": _DETAIL[refused.code]}
+        )
+    return JSONResponse(
+        status_code=202,
+        content={
+            "evaluation_id": str(evaluation.evaluation_id),
+            "schema_identity": evaluation.schema_identity,
+            "documents": len(evaluation.document_ids),
+            "status": "running",
+        },
+    )
+
+
+def list_evaluations_of(request: Request, tenant_id: str, schema: str | None, limit: int) -> Any:
+    from docdoc.runs.evaluations import settled_safely
+    from docdoc.runs.identity import now
+
+    deployment = _deployment_of(request)
+    store = deployment.evaluations()
+    if store is None:
+        return _not_found()
+    found = store.list(tenant_id=tenant_id, schema_name=schema, limit=max(1, min(limit, 100)))
+    return {
+        "evaluations": [
+            _summary(e if e.finished else settled_safely(deployment, e, at=now())) for e in found
+        ]
+    }
+
+
+def read_evaluation_of(request: Request, tenant_id: str, evaluation_id: str) -> Any:
+    from docdoc.runs.evaluations import settled
+    from docdoc.runs.identity import now
+
+    deployment = _deployment_of(request)
+    store = deployment.evaluations()
+    if store is None:
+        return _not_found()
+    try:
+        identity = UUID(evaluation_id)
+    except ValueError:
+        return _not_found()
+    evaluation = store.get(identity, tenant_id=tenant_id)
+    if evaluation is None:
+        return _not_found()
+    evaluation = settled(deployment, evaluation, at=now())
+    report = evaluation.report
+    return {
+        **_summary(evaluation),
+        "per_field": None if report is None else jsonable_encoder(report.metrics.per_field_path),
+        "documents": _documents(deployment, evaluation),
+    }
 
 
 _DETAIL = {

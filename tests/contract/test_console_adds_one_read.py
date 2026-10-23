@@ -117,6 +117,12 @@ EVALUATIONS_ADDED = {
     ("/v1/evaluations", "POST"),
     ("/v1/evaluations", "GET"),
     ("/v1/evaluations/{evaluation_id}", "GET"),
+    ("/v1/console/runs/{run_id}/corrections", "POST"),
+    ("/v1/console/runs/{run_id}/corrections", "GET"),
+    ("/v1/console/tenants/{tenant_id}/answers", "GET"),
+    ("/v1/console/tenants/{tenant_id}/evaluations", "POST"),
+    ("/v1/console/tenants/{tenant_id}/evaluations", "GET"),
+    ("/v1/console/tenants/{tenant_id}/evaluations/{evaluation_id}", "GET"),
 }
 
 #: Everything this interface has added over Milestone 10's own surface, as of

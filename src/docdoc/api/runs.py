@@ -413,125 +413,12 @@ def routes() -> APIRouter:
         every reviewer's corrections is the ordinary case rather than the strange
         one.
         """
-        from uuid import UUID
-
-        from docdoc.evaluation.corrections import Correction
-        from docdoc.runs.corrections import ANSWERS_NEVER_EXPIRE
-        from docdoc.runs.identity import now
-        from docdoc.runs.model import RunStatus
-
-        deployment = _deployment_of(request)
-        store = deployment.corrections()
-        if store is None or not deployment.has_runs:
-            return _unknown_run(run_id)
-
-        try:
-            identity = UUID(run_id)
-        except ValueError:
-            return _unknown_run(run_id)
-
-        # Tenant-scoped in the query rather than checked after the fetch, which
-        # is what makes another tenant's run indistinguishable from one that
-        # never existed (FR-079).
-        run = deployment.runs().get(identity, principal.tenant_id)
-        if run is None:
-            stone = deployment.runs().tombstone(identity, principal.tenant_id)
-            if stone is None:
-                return _unknown_run(run_id)
-            # `410` and not `404`, and naming which: an annotation against
-            # something that is gone is uninterpretable, and a reviewer who typed
-            # the right identifier should not be told they typed a wrong one
-            # (FR-082).
-            return _run_erased(stone)
-
-        if run.schema_identity is None:
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "error": "run_has_no_fields",
-                    "detail": "an OCR run extracts no fields, so there is nothing to check",
-                },
-            )
-
-        if run.status is not RunStatus.SUCCEEDED:
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "error": "run_has_no_result",
-                    "detail": f"this run is {run.status} and has no result to correct",
-                    "status": str(run.status),
-                },
-            )
-
-        body = await _read_json(request)
-        try:
-            correction = Correction.model_validate(body)
-        except Exception as error:
-            # The class and the field, never the body: a validation message from
-            # a correction quotes the value a reviewer typed, which is document
-            # content by another route.
-            return JSONResponse(
-                status_code=422,
-                content={"error": "invalid_correction", "detail": type(error).__name__},
-            )
-
-        if correction.confirmed and correction.location is None:
-            # A tick carries no location of its own: it is where the run read
-            # the value from, which is what the run's grounding says.
-            store_for_tenant, _ = deployment.stores_for(principal.tenant_id)
-            correction = correction.model_copy(
-                update={
-                    "location": _grounded_location(
-                        store_for_tenant, run.processing_id, correction.field_path
-                    )
-                }
-            )
-
-        at = now()
-        # **A check is an answer and answers never expire.** The run it was made
-        # on is pinned by it, so the run outlives neither.
-        expires_at = ANSWERS_NEVER_EXPIRE
-
-        correction_id = store.record(
-            correction,
-            tenant_id=principal.tenant_id,
-            run_id=identity,
-            blob_id=run.blob_id,
-            schema_name=run.schema_identity.split("@")[0],
-            at=at,
-            expires_at=expires_at,
-        )
-        return JSONResponse(
-            status_code=201,
-            content={
-                "correction_id": str(correction_id),
-                "run_id": str(identity),
-                "field_path": correction.field_path,
-                "expires_at": expires_at.isoformat(),
-            },
-        )
+        return await record_check(request, run_id, principal.tenant_id)
 
     @router.get("/runs/{run_id}/corrections")
     async def list_corrections(request: Request, run_id: str, principal: Caller) -> Any:
         """This tenant's corrections against this run, and nobody else's (FR-079)."""
-        from uuid import UUID
-
-        deployment = _deployment_of(request)
-        store = deployment.corrections()
-        if store is None:
-            return _unknown_run(run_id)
-
-        try:
-            identity = UUID(run_id)
-        except ValueError:
-            return _unknown_run(run_id)
-
-        return {
-            "corrections": [
-                correction.model_dump(mode="json")
-                for correction in store.for_run(tenant_id=principal.tenant_id, run_id=identity)
-            ]
-        }
+        return list_checks(request, run_id, principal.tenant_id)
 
     # -- callbacks (ADR-0018) -----------------------------------------------
 
@@ -637,6 +524,138 @@ def routes() -> APIRouter:
 #: or another tenant's. A sentinel rather than `None`, because `None` is the
 #: ordinary answer — most submissions ask to be notified about nothing.
 _UNKNOWN_CALLBACK = object()
+
+
+async def record_check(
+    request: Request, run_id: str, tenant_id: str, annotator: str | None = None
+) -> Any:
+    """Record one check on a run: the Bearer route's body, and the console's.
+
+    `annotator`, when given, overrides the body's (the console records the
+    signed-in operator).
+    """
+    from uuid import UUID
+
+    from docdoc.evaluation.corrections import Correction
+    from docdoc.runs.corrections import ANSWERS_NEVER_EXPIRE
+    from docdoc.runs.identity import now
+    from docdoc.runs.model import RunStatus
+
+    deployment = _deployment_of(request)
+    store = deployment.corrections()
+    if store is None or not deployment.has_runs:
+        return _unknown_run(run_id)
+
+    try:
+        identity = UUID(run_id)
+    except ValueError:
+        return _unknown_run(run_id)
+
+    # Tenant-scoped in the query rather than checked after the fetch, which
+    # is what makes another tenant's run indistinguishable from one that
+    # never existed (FR-079).
+    run = deployment.runs().get(identity, tenant_id)
+    if run is None:
+        stone = deployment.runs().tombstone(identity, tenant_id)
+        if stone is None:
+            return _unknown_run(run_id)
+        # `410` and not `404`, and naming which: an annotation against
+        # something that is gone is uninterpretable, and a reviewer who typed
+        # the right identifier should not be told they typed a wrong one
+        # (FR-082).
+        return _run_erased(stone)
+
+    if run.schema_identity is None:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": "run_has_no_fields",
+                "detail": "an OCR run extracts no fields, so there is nothing to check",
+            },
+        )
+
+    if run.status is not RunStatus.SUCCEEDED:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": "run_has_no_result",
+                "detail": f"this run is {run.status} and has no result to correct",
+                "status": str(run.status),
+            },
+        )
+
+    body = await _read_json(request)
+    try:
+        correction = Correction.model_validate(body)
+    except Exception as error:
+        # The class and the field, never the body: a validation message from
+        # a correction quotes the value a reviewer typed, which is document
+        # content by another route.
+        return JSONResponse(
+            status_code=422,
+            content={"error": "invalid_correction", "detail": type(error).__name__},
+        )
+
+    if annotator is not None:
+        correction = correction.model_copy(update={"annotator": annotator})
+
+    if correction.confirmed and correction.location is None:
+        # A tick carries no location of its own: it is where the run read
+        # the value from, which is what the run's grounding says.
+        store_for_tenant, _ = deployment.stores_for(tenant_id)
+        correction = correction.model_copy(
+            update={
+                "location": _grounded_location(
+                    store_for_tenant, run.processing_id, correction.field_path
+                )
+            }
+        )
+
+    at = now()
+    # **A check is an answer and answers never expire.** The run it was made
+    # on is pinned by it, so the run outlives neither.
+    expires_at = ANSWERS_NEVER_EXPIRE
+
+    correction_id = store.record(
+        correction,
+        tenant_id=tenant_id,
+        run_id=identity,
+        blob_id=run.blob_id,
+        schema_name=run.schema_identity.split("@")[0],
+        at=at,
+        expires_at=expires_at,
+    )
+    return JSONResponse(
+        status_code=201,
+        content={
+            "correction_id": str(correction_id),
+            "run_id": str(identity),
+            "field_path": correction.field_path,
+            "expires_at": expires_at.isoformat(),
+        },
+    )
+
+
+def list_checks(request: Request, run_id: str, tenant_id: str) -> Any:
+    """The tenant's checks against one run."""
+    from uuid import UUID
+
+    deployment = _deployment_of(request)
+    store = deployment.corrections()
+    if store is None:
+        return _unknown_run(run_id)
+
+    try:
+        identity = UUID(run_id)
+    except ValueError:
+        return _unknown_run(run_id)
+
+    return {
+        "corrections": [
+            correction.model_dump(mode="json")
+            for correction in store.for_run(tenant_id=tenant_id, run_id=identity)
+        ]
+    }
 
 
 def _granted_priority(requested: Any, *, tenant_id: str) -> int | None:

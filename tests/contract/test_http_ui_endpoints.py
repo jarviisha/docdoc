@@ -119,6 +119,12 @@ ROUTES = {
     ("POST", "/v1/evaluations"),
     ("GET", "/v1/evaluations"),
     ("GET", "/v1/evaluations/{evaluation_id}"),
+    ("POST", "/v1/console/runs/{run_id}/corrections"),
+    ("GET", "/v1/console/runs/{run_id}/corrections"),
+    ("GET", "/v1/console/tenants/{tenant_id}/answers"),
+    ("POST", "/v1/console/tenants/{tenant_id}/evaluations"),
+    ("GET", "/v1/console/tenants/{tenant_id}/evaluations"),
+    ("GET", "/v1/console/tenants/{tenant_id}/evaluations/{evaluation_id}"),
     # The OCR gateway (ADR-0021, Task 5). `POST /v1/ocr` is the ingest layer's
     # own output with no schema on top; `?parser=<id>` names a configured parser
     # rather than leaving the choice to capability matching. `GET /v1/parsers`

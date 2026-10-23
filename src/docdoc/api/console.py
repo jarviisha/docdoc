@@ -32,6 +32,12 @@ from pydantic import BaseModel, Field
 from docdoc.api.admin import _audit, _erase
 from docdoc.api.deps import _iso, _read_capped, _read_json, _unknown_run
 from docdoc.api.documents import _stored_result, _terminal
+from docdoc.api.evaluations import (
+    answers_of,
+    list_evaluations_of,
+    read_evaluation_of,
+    start_evaluation_of,
+)
 from docdoc.api.models import (
     ConsoleRunListResponse,
     ConsoleRunSummary,
@@ -51,6 +57,8 @@ from docdoc.api.runs import (
     _routing_for,
     _run_erased,
     _summary_fields,
+    list_checks,
+    record_check,
 )
 from docdoc.artifacts.paths import root_tenant
 from docdoc.runs import identity
@@ -346,6 +354,15 @@ def _run(request: Request, run_id: str) -> tuple[JSONResponse | None, str, Any]:
         stone = queue.tombstone(identity, owner)
         return (_unknown_run(run_id) if stone is None else _run_erased(stone)), owner, None
     return None, owner, run
+
+
+def _for_tenant(request: Request, tenant_id: str, call: Any) -> Any:
+    """A tenant-path read: the tenant id is validated, and no database is a 503."""
+    if not TENANT_PATTERN.match(tenant_id):
+        return JSONResponse(status_code=422, content={"error": "invalid_tenant_id"})
+    if not request.app.state.deployment.has_runs:
+        return _no_runs()
+    return call()
 
 
 def console_router() -> APIRouter:
@@ -757,6 +774,57 @@ def console_router() -> APIRouter:
             operator, tenant_id=tenant_id, run_id=body["run_id"], status=response.status_code
         )
         return JSONResponse(status_code=response.status_code, content=body)
+
+    # -- checks and evaluations (ADR-0023 §3) --------------------------------
+    #
+    # The tenant's own bodies, on a named tenant's behalf. A check made here is
+    # the operator's: `annotator` is the signed-in username, whatever the body says.
+
+    @router.post("/runs/{run_id}/corrections", status_code=201)
+    async def record_run_check(request: Request, run_id: str, operator: Operator) -> Any:
+        refusal, owner, _ = _owner(request, run_id)
+        if refusal is not None:
+            return refusal
+        return await record_check(request, run_id, owner, annotator=operator)
+
+    @router.get("/runs/{run_id}/corrections")
+    def list_run_checks(request: Request, run_id: str, operator: Operator) -> Any:
+        refusal, owner, _ = _owner(request, run_id)
+        if refusal is not None:
+            return refusal
+        return list_checks(request, run_id, owner)
+
+    @router.get("/tenants/{tenant_id}/answers")
+    def tenant_answers(request: Request, tenant_id: str, operator: Operator) -> Any:
+        return _for_tenant(request, tenant_id, lambda: answers_of(request, tenant_id))
+
+    @router.post("/tenants/{tenant_id}/evaluations", status_code=202)
+    def start_tenant_evaluation(
+        request: Request, tenant_id: str, schema: str, operator: Operator
+    ) -> Any:
+        return _for_tenant(
+            request, tenant_id, lambda: start_evaluation_of(request, tenant_id, schema)
+        )
+
+    @router.get("/tenants/{tenant_id}/evaluations")
+    def list_tenant_evaluations(
+        request: Request,
+        tenant_id: str,
+        operator: Operator,
+        schema: str | None = None,
+        limit: int = 20,
+    ) -> Any:
+        return _for_tenant(
+            request, tenant_id, lambda: list_evaluations_of(request, tenant_id, schema, limit)
+        )
+
+    @router.get("/tenants/{tenant_id}/evaluations/{evaluation_id}")
+    def read_tenant_evaluation(
+        request: Request, tenant_id: str, evaluation_id: str, operator: Operator
+    ) -> Any:
+        return _for_tenant(
+            request, tenant_id, lambda: read_evaluation_of(request, tenant_id, evaluation_id)
+        )
 
     # -- callbacks, per tenant (ADR-0018, ADR-0023 §3) -----------------------
     #
