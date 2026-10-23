@@ -230,13 +230,14 @@ export function detailPolls(run: RunRecord | null): boolean {
   return run !== null && (run.status === "queued" || run.status === "running");
 }
 
-/**
- * Whether the detail view reads and shows the run's result: a succeeded OCR
- * run only. An extraction result has no page images to sit beside, and keeps
- * only Download result.
- */
+/** Whether the detail view reads and shows the run's result: any succeeded run. */
 export function showsResult(run: RunRecord | null): boolean {
-  return run !== null && run.status === "succeeded" && run.kind === "ocr";
+  return run !== null && run.status === "succeeded";
+}
+
+/** Whether the detail view lists extracted fields to check: a succeeded extraction run. */
+export function showsFields(run: RunRecord | null): boolean {
+  return showsResult(run) && run!.kind === "extraction";
 }
 
 /**

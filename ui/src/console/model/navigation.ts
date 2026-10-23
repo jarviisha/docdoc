@@ -18,7 +18,8 @@ export type Area =
   | "tenants"
   | "credentials"
   | "callbacks"
-  | "erasure";
+  | "erasure"
+  | "quality";
 
 /** One tenant row's jump: which area to show, and which tenant to show it for. */
 export interface Jump {

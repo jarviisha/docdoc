@@ -585,6 +585,9 @@ async def record_check(
         )
 
     body = await _read_json(request)
+    if annotator is not None and isinstance(body, dict):
+        # Set before validating: the body of a console check carries none.
+        body = {**body, "annotator": annotator}
     try:
         correction = Correction.model_validate(body)
     except Exception as error:
@@ -595,9 +598,6 @@ async def record_check(
             status_code=422,
             content={"error": "invalid_correction", "detail": type(error).__name__},
         )
-
-    if annotator is not None:
-        correction = correction.model_copy(update={"annotator": annotator})
 
     if correction.confirmed and correction.location is None:
         # A tick carries no location of its own: it is where the run read

@@ -42,6 +42,12 @@ export type Intent =
   | { type: "list-credentials"; tenant: string }
   | { type: "issue-credential" }
   | { type: "revoke-credential"; credentialId: string }
+  | { type: "run-checks"; runId: string }
+  | { type: "record-check"; runId: string }
+  | { type: "tenant-answers"; tenantId: string }
+  | { type: "start-evaluation"; tenantId: string; schema: string }
+  | { type: "list-evaluations"; tenantId: string; schema?: string }
+  | { type: "evaluation"; tenantId: string; evaluationId: string }
   | { type: "erase-tenant"; tenantId: string }
   | { type: "erase-document"; tenantId: string; blobId: string }
   | { type: "list-tenants" }
@@ -73,6 +79,10 @@ const ALLOWED = [
   /^\/v1\/console\/runs\/[^/]+\/delivery$/,
   /^\/v1\/console\/runs\/[^/]+\/result$/,
   /^\/v1\/console\/runs\/[^/]+\/pages\/\d+$/,
+  /^\/v1\/console\/runs\/[^/]+\/corrections$/,
+  /^\/v1\/console\/tenants\/[^/]+\/answers$/,
+  /^\/v1\/console\/tenants\/[^/]+\/evaluations$/,
+  /^\/v1\/console\/tenants\/[^/]+\/evaluations\/[^/]+$/,
   /^\/v1\/console\/credentials$/,
   /^\/v1\/console\/credentials\/[^/]+$/,
   /^\/v1\/console\/tenants$/,
@@ -142,6 +152,49 @@ export function requestFor(intent: Intent): RequestPlan {
       return {
         method: "GET",
         path: `/v1/console/runs/${encodeURIComponent(intent.runId)}/pages/${intent.page}`,
+        query: {},
+        hasBody: false,
+      };
+
+    case "run-checks":
+    case "record-check":
+      return {
+        method: intent.type === "run-checks" ? "GET" : "POST",
+        path: `/v1/console/runs/${encodeURIComponent(intent.runId)}/corrections`,
+        query: {},
+        hasBody: intent.type === "record-check",
+      };
+
+    case "tenant-answers":
+      return {
+        method: "GET",
+        path: `/v1/console/tenants/${encodeURIComponent(intent.tenantId)}/answers`,
+        query: {},
+        hasBody: false,
+      };
+
+    case "start-evaluation":
+      return {
+        method: "POST",
+        path: `/v1/console/tenants/${encodeURIComponent(intent.tenantId)}/evaluations`,
+        query: { schema: intent.schema },
+        hasBody: false,
+      };
+
+    case "list-evaluations":
+      return {
+        method: "GET",
+        path: `/v1/console/tenants/${encodeURIComponent(intent.tenantId)}/evaluations`,
+        query: intent.schema === undefined ? {} : { schema: intent.schema },
+        hasBody: false,
+      };
+
+    case "evaluation":
+      return {
+        method: "GET",
+        path:
+          `/v1/console/tenants/${encodeURIComponent(intent.tenantId)}` +
+          `/evaluations/${encodeURIComponent(intent.evaluationId)}`,
         query: {},
         hasBody: false,
       };
@@ -267,6 +320,13 @@ export function allIntents(): Intent[] {
     { type: "list-credentials", tenant: "acme" },
     { type: "issue-credential" },
     { type: "revoke-credential", credentialId: "c" },
+    { type: "run-checks", runId: "r" },
+    { type: "record-check", runId: "r" },
+    { type: "tenant-answers", tenantId: "t" },
+    { type: "start-evaluation", tenantId: "t", schema: "s" },
+    { type: "list-evaluations", tenantId: "t" },
+    { type: "list-evaluations", tenantId: "t", schema: "s" },
+    { type: "evaluation", tenantId: "t", evaluationId: "e" },
     { type: "erase-tenant", tenantId: "t" },
     { type: "erase-document", tenantId: "t", blobId: "b" },
     { type: "list-tenants" },
