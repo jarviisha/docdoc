@@ -19,3 +19,10 @@ by decision (`specs/008`), so this directory is the entire tested surface. A
 decision that drifts into a component is a requirement that silently loses its
 coverage — which is why the erasure confirmation's comparison and the idle
 bound's expiry both live here rather than in the components that display them.
+
+**URLs and caching are decided here too** (ADR-0028), without importing the
+router or Query. `search.ts` turns raw URL search into typed filters and drops
+what is invalid; `navigation.ts` holds the areas, their paths and the tenant
+jumps; `queries.ts` holds each read's cache key and which writes make which
+reads stale. `polling.ts` is only the overview's interval: Query does the
+rest of polling.
