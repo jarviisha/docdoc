@@ -255,6 +255,7 @@ QUALITY_DESIGN = pathlib.Path(
 )
 
 SCHEMAS_DESIGN = pathlib.Path("docs/superpowers/specs/2026-10-23-console-schemas-design.md")
+PROVIDERS_DESIGN = pathlib.Path("docs/superpowers/specs/2026-10-23-console-providers-design.md")
 
 RUNS_MIGRATION = pathlib.Path("src/docdoc/runs/migrations/0001_runs.sql")
 
@@ -470,6 +471,9 @@ def test_the_table_scan_finds_all_three() -> None:
         "evaluations",
         # Console-authored schemas.
         "console_schemas",
+        # Console-managed providers.
+        "provider_priorities",
+        "provider_settings",
     }, (
         f"the migrations create {sorted(tables)}; the scan or the migrations "
         f"changed, and the check below is now describing something else"
@@ -501,6 +505,8 @@ TABLE_SECTIONS = {
     "console_sessions": "## `console_sessions`",
     "evaluations": "## `evaluations`",
     "console_schemas": "## `console_schemas`",
+    "provider_priorities": "## `provider_priorities`",
+    "provider_settings": "## `provider_settings`",
 }
 
 SECTION_DOCUMENTS = {
@@ -517,6 +523,8 @@ SECTION_DOCUMENTS = {
     "corrections": OPERATIONS_DATA_MODEL,
     "evaluations": QUALITY_DESIGN,
     "console_schemas": SCHEMAS_DESIGN,
+    "provider_priorities": PROVIDERS_DESIGN,
+    "provider_settings": PROVIDERS_DESIGN,
 }
 
 

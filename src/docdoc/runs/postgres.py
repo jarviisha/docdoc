@@ -225,6 +225,8 @@ class PostgresRunQueue:
             "callbacks",
             "deliveries",
             "limit_counters",
+            "provider_priorities",
+            "provider_settings",
         ):
             rows = self._execute(
                 # The table name is interpolated and the tenant is a parameter.
