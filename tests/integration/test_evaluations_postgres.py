@@ -49,24 +49,26 @@ def _checked(deployment, *paths: Path) -> list[str]:
     blob_ids = []
     for path in paths:
         blob_id = blobs.put(path.read_bytes())
-        deployment.corrections().record(
-            Correction(
-                report_id=PID,
-                document_id=blob_id,
-                field_path="total",
-                predicted_value="1240.00",
-                annotator="ana",
-                timestamp=datetime(2026, 9, 9, tzinfo=UTC),
-                reason="looked right",
-                confirmed=True,
-            ),
-            tenant_id=TENANT,
-            run_id=uuid4(),
-            blob_id=blob_id,
-            schema_name="invoice",
-            at=datetime.now(UTC),
-            expires_at=ANSWERS_NEVER_EXPIRE,
-        )
+        # A repeating-group field too, so a report carries group outcomes.
+        for field, value in (("total", "1240.00"), ("line_items[0].description", "Widget, large")):
+            deployment.corrections().record(
+                Correction(
+                    report_id=PID,
+                    document_id=blob_id,
+                    field_path=field,
+                    predicted_value=value,
+                    annotator="ana",
+                    timestamp=datetime(2026, 9, 9, tzinfo=UTC),
+                    reason="looked right",
+                    confirmed=True,
+                ),
+                tenant_id=TENANT,
+                run_id=uuid4(),
+                blob_id=blob_id,
+                schema_name="invoice",
+                at=datetime.now(UTC),
+                expires_at=ANSWERS_NEVER_EXPIRE,
+            )
         blob_ids.append(blob_id)
     return blob_ids
 
@@ -190,14 +192,86 @@ def test_erasing_a_document_strips_it_and_keeps_the_aggregates(deployment) -> No
         now=datetime.now(UTC),
     )
 
+    assert any(g.document_id == erased for g in before.report.metrics.group_outcomes)
     after = deployment.evaluations().get(before.evaluation_id, tenant_id=TENANT)
     assert after.erased_documents == 1
     assert [d.document_id for d in after.golden.documents] == [kept]
     assert erased not in after.golden.labels
-    assert all(o.document_id != erased for o in after.report.outcomes)
     assert [s.document_id for s in after.report.document_scores] == [kept]
-    assert after.report.metrics == before.report.metrics
+    assert erased not in after.report.model_dump_json()
+    assert erased not in after.golden.model_dump_json()
+    assert erased not in after.document_ids
+    for aggregate in ("counts", "micro", "macro", "per_field_path", "validation_verdicts"):
+        assert getattr(after.report.metrics, aggregate) == getattr(before.report.metrics, aggregate)
     assert after.report.report_id == before.report.report_id
+
+
+def test_two_erasures_of_one_evaluation_both_stick(deployment) -> None:
+    """Two erases that read the same row: the second write must not undo the first."""
+    blob_ids = _checked(deployment, *PDFS, Path("tests/fixtures/pdf/unicode_text.pdf"))
+    evaluation = start(deployment, tenant_id=TENANT, schema_name="invoice", at=datetime.now(UTC))
+    _drain(deployment)
+    evaluation = settled(deployment, evaluation, at=datetime.now(UTC))
+    store = deployment.evaluations()
+    a, b, kept = blob_ids
+
+    assert store._strip(evaluation, a) == 1
+    # B read the row before A's write landed; its stale write is refused.
+    assert store._strip(evaluation, b) == 0
+    # The retry loop re-reads and lands B on top of A.
+    assert store.forget_document(tenant_id=TENANT, blob_id=b) == 1
+
+    after = store.get(evaluation.evaluation_id, tenant_id=TENANT)
+    assert after.erased_documents == 2
+    assert after.document_ids == (kept,)
+    for erased in (a, b):
+        assert erased not in after.golden.model_dump_json()
+        assert erased not in after.report.model_dump_json()
+
+
+class _Refusing:
+    def __init__(self) -> None:
+        self.recorded = 0
+
+    def check(self, *, tenant_id, now):
+        from docdoc.runs.limits import LimitVerdict
+
+        return LimitVerdict(
+            allowed=False, limit="runs_per_period", observed=5, permitted=5, retry_after_seconds=60
+        )
+
+    def record_submission(self, *, tenant_id, now) -> None:
+        self.recorded += 1
+
+
+class _Counting(_Refusing):
+    def check(self, *, tenant_id, now):
+        from docdoc.runs.limits import LimitVerdict
+
+        return LimitVerdict()
+
+
+def test_a_refused_tenant_cannot_start_an_evaluation(deployment) -> None:
+    _checked(deployment, *PDFS)
+    deployment.limiter = _Refusing()
+
+    with pytest.raises(EvaluationUnavailable) as raised:
+        start(deployment, tenant_id=TENANT, schema_name="invoice", at=datetime.now(UTC))
+
+    assert raised.value.code == "rate_limited"
+    assert raised.value.verdict.limit == "runs_per_period"
+    assert raised.value.verdict.retry_after_seconds == 60
+    assert deployment.runs().runs_for(TENANT, limit=10) == ()
+    assert deployment.evaluations().list(tenant_id=TENANT, schema_name=None, limit=10) == ()
+
+
+def test_every_submitted_run_is_counted_against_the_tenant(deployment) -> None:
+    _checked(deployment, *PDFS)
+    deployment.limiter = _Counting()
+
+    start(deployment, tenant_id=TENANT, schema_name="invoice", at=datetime.now(UTC))
+
+    assert deployment.limiter.recorded == 2
 
 
 def test_erasing_a_tenant_removes_its_evaluations(deployment) -> None:

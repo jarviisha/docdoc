@@ -42,13 +42,17 @@ __all__ = [
 
 
 class EvaluationUnavailable(RunError):  # noqa: N818 - the name the routes answer with
-    """Why an evaluation cannot start."""
+    """Why an evaluation cannot start. `verdict` is the limiter's refusal for `rate_limited`."""
 
     def __init__(
-        self, code: Literal["no_answers", "evaluation_in_progress", "unknown_schema"]
+        self,
+        code: Literal["no_answers", "evaluation_in_progress", "unknown_schema", "rate_limited"],
+        *,
+        verdict: Any = None,
     ) -> None:
         super().__init__(code)
         self.code = code
+        self.verdict = verdict
 
 
 @dataclass(frozen=True)
@@ -152,9 +156,11 @@ class PostgresEvaluationStore:
     def forget_document(self, *, tenant_id: str, blob_id: str) -> int:
         """Remove one document from every evaluation of this tenant's that holds it.
 
-        Aggregates and `report_id` stay: they describe a computation that happened.
-        Each write is guarded on `settled_at`, so a report settled between the read
-        and the write is not overwritten; that evaluation is read again.
+        Every per-document entry goes (outcomes, scores, group outcomes, the
+        partial declaration's skipped list); aggregates and `report_id` stay, since
+        they describe a computation that happened. Each write is guarded on
+        `settled_at` and `erased_documents`, so neither a concurrent settle nor a
+        concurrent erase is overwritten; that evaluation is read again.
         """
         touched = 0
         while rows := self.execute(
@@ -177,12 +183,30 @@ class PostgresEvaluationStore:
         )
         report = evaluation.report
         if report is not None:
+            partial = report.partial
+            if partial is not None:
+                partial = partial.model_copy(
+                    update={
+                        "skipped_documents": tuple(
+                            d for d in partial.skipped_documents if d != blob_id
+                        )
+                    }
+                )
+            metrics = report.metrics.model_copy(
+                update={
+                    "group_outcomes": tuple(
+                        g for g in report.metrics.group_outcomes if g.document_id != blob_id
+                    )
+                }
+            )
             report = report.model_copy(
                 update={
                     "outcomes": tuple(o for o in report.outcomes if o.document_id != blob_id),
                     "document_scores": tuple(
                         s for s in report.document_scores if s.document_id != blob_id
                     ),
+                    "metrics": metrics,
+                    "partial": partial,
                 }
             )
         kept = [
@@ -194,7 +218,7 @@ class PostgresEvaluationStore:
             "UPDATE evaluations SET golden = %s::jsonb, report = %s::jsonb, run_ids = %s, "
             "document_ids = %s, erased_documents = erased_documents + 1 "
             "WHERE evaluation_id = %s AND settled_at IS NOT DISTINCT FROM %s "
-            "RETURNING evaluation_id",
+            "AND erased_documents = %s RETURNING evaluation_id",
             (
                 golden.model_dump_json(),
                 None if report is None else report.model_dump_json(),
@@ -202,6 +226,7 @@ class PostgresEvaluationStore:
                 [document_id for _, document_id in kept],
                 evaluation.evaluation_id,
                 evaluation.settled_at,
+                evaluation.erased_documents,
             ),
             fetch="all",
         )
@@ -253,6 +278,11 @@ def start(deployment: Any, *, tenant_id: str, schema_name: str, at: datetime) ->
     store: PostgresEvaluationStore = deployment.evaluations()
     if store.unfinished(tenant_id=tenant_id, schema_name=schema_name) is not None:
         raise EvaluationUnavailable("evaluation_in_progress")
+    # The tenant's limits, as `POST /v1/documents/{blob_id}/runs` applies them.
+    # ponytail: one check for N runs; the limiter has no count to check against.
+    verdict = deployment.limiter.check(tenant_id=tenant_id, now=at)
+    if not verdict.allowed:
+        raise EvaluationUnavailable("rate_limited", verdict=verdict)
 
     queue = deployment.runs()
     document_ids = tuple(document.document_id for document in golden.documents)
@@ -285,6 +315,8 @@ def start(deployment: Any, *, tenant_id: str, schema_name: str, at: datetime) ->
         created_at=at,
         settled_at=None,
     )
+    for _ in runs:
+        deployment.limiter.record_submission(tenant_id=tenant_id, now=at)
     try:
         store.create(evaluation)
     except EvaluationUnavailable:
