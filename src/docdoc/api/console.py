@@ -771,6 +771,11 @@ def console_router() -> APIRouter:
         """`GET /v1/parsers`'s body, behind a session. Blocking: it probes."""
         return parser_listing(request.app.state.deployment)
 
+    @router.get("/schemas")
+    def list_schemas(request: Request, operator: Operator) -> Any:
+        """`GET /v1/schemas`'s identities, behind a session."""
+        return {"schemas": list(request.app.state.deployment.registry().identities())}
+
     @router.post("/tenants/{tenant_id}/ocr", status_code=202)
     async def submit_tenant_ocr(
         request: Request,

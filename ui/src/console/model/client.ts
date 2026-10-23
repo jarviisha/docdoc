@@ -52,6 +52,7 @@ export type Intent =
   | { type: "erase-document"; tenantId: string; blobId: string }
   | { type: "list-tenants" }
   | { type: "list-parsers" }
+  | { type: "list-schemas" }
   | { type: "list-callbacks"; tenantId: string }
   | { type: "register-callback"; tenantId: string }
   | { type: "revoke-callback"; tenantId: string; callbackId: string }
@@ -62,7 +63,8 @@ export type Intent =
       language?: string;
       /** Sent as `Idempotency-Key`, so a resend after a lost answer replays the run. */
       idempotencyKey?: string;
-    };
+    }
+  | { type: "submit-extraction"; tenantId: string; schema: string; idempotencyKey?: string };
 
 /**
  * Every path shape this console knows. Anything else is a defect, not a feature.
@@ -90,6 +92,8 @@ const ALLOWED = [
   /^\/v1\/console\/tenants\/[^/]+\/documents\/[^/]+$/,
   /^\/v1\/console\/tenants\/[^/]+\/ocr$/,
   /^\/v1\/console\/parsers$/,
+  /^\/v1\/console\/schemas$/,
+  /^\/v1\/console\/tenants\/[^/]+\/extractions$/,
   /^\/v1\/console\/tenants\/[^/]+\/callbacks$/,
   /^\/v1\/console\/tenants\/[^/]+\/callbacks\/[^/]+$/,
 ];
@@ -250,6 +254,20 @@ export function requestFor(intent: Intent): RequestPlan {
     case "list-parsers":
       return { method: "GET", path: "/v1/console/parsers", query: {}, hasBody: false };
 
+    case "list-schemas":
+      return { method: "GET", path: "/v1/console/schemas", query: {}, hasBody: false };
+
+    case "submit-extraction":
+      return {
+        method: "POST",
+        path: `/v1/console/tenants/${encodeURIComponent(intent.tenantId)}/extractions`,
+        query: { schema: intent.schema },
+        hasBody: true,
+        ...(intent.idempotencyKey === undefined
+          ? {}
+          : { headers: { "Idempotency-Key": intent.idempotencyKey } }),
+      };
+
     case "list-callbacks":
       return {
         method: "GET",
@@ -335,5 +353,7 @@ export function allIntents(): Intent[] {
     { type: "register-callback", tenantId: "acme" },
     { type: "revoke-callback", tenantId: "acme", callbackId: "c" },
     { type: "submit-ocr", tenantId: "t" },
+    { type: "list-schemas" },
+    { type: "submit-extraction", tenantId: "t", schema: "s" },
   ];
 }

@@ -100,6 +100,8 @@ CONSOLE_ADDED = {
     # same `submit_ocr` `POST /v1/ocr` calls.
     ("/v1/console/tenants", "GET"),
     ("/v1/console/parsers", "GET"),
+    # The registered schema identities, for the extraction submit's picker.
+    ("/v1/console/schemas", "GET"),
     ("/v1/console/tenants/{tenant_id}/ocr", "POST"),
     # Console extraction submit, through the same `submit_extraction` the run
     # route's shared part serves.

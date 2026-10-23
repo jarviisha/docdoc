@@ -191,3 +191,23 @@ def test_bearer_cannot_reach_it(
 
     assert r.status_code == 401
     assert queue.page_all_runs(tenant_id="acme", status=None, before=None, limit=10) == ()
+
+
+def test_the_console_lists_schemas(signed_in: tuple[TestClient, dict[str, str]]) -> None:
+    client, cookie = signed_in
+
+    r = client.get("/v1/console/schemas", headers=cookie)
+    tenant = client.get("/v1/schemas", headers={"Authorization": f"Bearer {PLAIN_KEY}"})
+
+    assert r.status_code == 200
+    assert r.json() == {"schemas": [s["identity"] for s in tenant.json()["schemas"]]}
+    assert "invoice@1" in r.json()["schemas"]
+
+
+def test_listing_schemas_needs_a_session(signed_in: tuple[TestClient, dict[str, str]]) -> None:
+    client, _ = signed_in
+    client.cookies.clear()
+
+    r = client.get("/v1/console/schemas", headers={"Authorization": f"Bearer {ADMIN_KEY}"})
+
+    assert r.status_code == 401

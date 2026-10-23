@@ -159,6 +159,8 @@ ROUTES = {
     # 018 (console submit OCR plan, Task 1): tenants, parsers, and OCR submission.
     ("GET", "/v1/console/tenants"),
     ("GET", "/v1/console/parsers"),
+    # The registered schema identities, for the extraction submit's picker.
+    ("GET", "/v1/console/schemas"),
     ("POST", "/v1/console/tenants/{tenant_id}/ocr"),
     # Console extraction submit: the two Bearer calls (store, then submit) in one,
     # through the same `submit_extraction`; session-only.

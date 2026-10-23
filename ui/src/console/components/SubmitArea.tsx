@@ -24,9 +24,12 @@ import {
   parserChoices,
   submitIntent,
   submittedRunId,
+  switchKind,
+  toSchemas,
   toParsers,
   toTenants,
   type ParserOption,
+  type SubmitKind,
   type SubmitForm,
 } from "../model/submit.ts";
 import { FileField, SelectField } from "./fields.tsx";
@@ -41,12 +44,20 @@ interface Props {
   onOpenRun: (runId: string) => void;
 }
 
+const KINDS = [
+  { value: "ocr", label: "OCR" },
+  { value: "extraction", label: "Extraction" },
+];
+
 export function SubmitArea({ request, onOpenRun }: Props) {
   const [tenants, setTenants] = useState<string[]>([]);
   const [parsers, setParsers] = useState<ParserOption[]>([]);
+  const [schemas, setSchemas] = useState<string[]>([]);
   const [loadProblem, setLoadProblem] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [form, setForm] = useState<SubmitForm>({
+    kind: "ocr",
+    schema: "",
     tenant: "",
     parser: AUTOMATIC,
     language: "",
@@ -65,6 +76,11 @@ export function SubmitArea({ request, onOpenRun }: Props) {
     void request({ type: "list-parsers" }).then((answer) => {
       if (!current) return;
       if (answer.ok) setParsers(toParsers(answer.body));
+      else setLoadProblem(describe(answer.failure));
+    });
+    void request({ type: "list-schemas" }).then((answer) => {
+      if (!current) return;
+      if (answer.ok) setSchemas(toSchemas(answer.body));
       else setLoadProblem(describe(answer.failure));
     });
     return () => {
@@ -90,7 +106,9 @@ export function SubmitArea({ request, onOpenRun }: Props) {
         <div role="status" aria-live="polite">
           {loadProblem === null ? null : (
             <Alert variant="destructive">
-              <AlertTitle>Tenants or parsers could not be loaded</AlertTitle>
+              <AlertTitle>
+                Tenants, parsers or schemas could not be loaded
+              </AlertTitle>
               <AlertDescription>{loadProblem}</AlertDescription>
             </Alert>
           )}
@@ -103,6 +121,13 @@ export function SubmitArea({ request, onOpenRun }: Props) {
         </div>
 
         <SelectField
+          label="Submit as"
+          options={KINDS}
+          value={form.kind}
+          onChange={(kind) => setForm((f) => switchKind(f, kind as SubmitKind))}
+        />
+
+        <SelectField
           label="Tenant"
           placeholder="Choose a tenant"
           options={tenants}
@@ -110,19 +135,33 @@ export function SubmitArea({ request, onOpenRun }: Props) {
           onChange={(tenant) => setForm((f) => ({ ...f, tenant }))}
         />
 
-        <SelectField
-          label="Parser"
-          options={parserChoices(parsers)}
-          value={form.parser}
-          onChange={(parser) => setForm((f) => ({ ...f, parser, language: "" }))}
-        />
+        {form.kind === "extraction" ? (
+          <SelectField
+            label="Schema"
+            placeholder="Choose a schema"
+            options={schemas}
+            value={form.schema}
+            onChange={(schema) => setForm((f) => ({ ...f, schema }))}
+          />
+        ) : (
+          <>
+            <SelectField
+              label="Parser"
+              options={parserChoices(parsers)}
+              value={form.parser}
+              onChange={(parser) =>
+                setForm((f) => ({ ...f, parser, language: "" }))
+              }
+            />
 
-        <SelectField
-          label="Language"
-          options={languageChoices(parsers, form.parser)}
-          value={form.language}
-          onChange={(language) => setForm((f) => ({ ...f, language }))}
-        />
+            <SelectField
+              label="Language"
+              options={languageChoices(parsers, form.parser)}
+              value={form.language}
+              onChange={(language) => setForm((f) => ({ ...f, language }))}
+            />
+          </>
+        )}
 
         <FileField
           label="Document"
@@ -130,8 +169,9 @@ export function SubmitArea({ request, onOpenRun }: Props) {
           // `getRandomValues`, not `randomUUID`: the latter exists only in a
           // secure context, and a console reached over plain http is not one.
           onChange={(file) => {
-            const key = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
-              b.toString(16).padStart(2, "0"),
+            const key = Array.from(
+              crypto.getRandomValues(new Uint8Array(16)),
+              (b) => b.toString(16).padStart(2, "0"),
             ).join("");
             setForm((f) => chooseFile(f, file, key));
           }}

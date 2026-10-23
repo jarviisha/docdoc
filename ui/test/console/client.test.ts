@@ -140,6 +140,7 @@ test("the writes are exactly the session, run, credential, callback, erasure, OC
     "POST /v1/console/session",
     "POST /v1/console/tenants/acme/callbacks",
     "POST /v1/console/tenants/t/evaluations",
+    "POST /v1/console/tenants/t/extractions",
     "POST /v1/console/tenants/t/ocr",
   ]);
 });
@@ -209,6 +210,29 @@ test("an OCR submission names its tenant in the path, encoded like any other", (
     requestFor({ type: "submit-ocr", tenantId: "a/../b" }).path,
     "/v1/console/tenants/a%2F..%2Fb/ocr",
   );
+});
+
+test("submitting an extraction posts the file with its schema in the query", () => {
+  const plan = requestFor({
+    type: "submit-extraction",
+    tenantId: "acme",
+    schema: "invoice@1",
+    idempotencyKey: "k",
+  });
+  assert.deepEqual(plan, {
+    method: "POST",
+    path: "/v1/console/tenants/acme/extractions",
+    query: { schema: "invoice@1" },
+    hasBody: true,
+    headers: { "Idempotency-Key": "k" },
+  });
+  assert.equal(isAllowed(plan), true);
+});
+
+test("listing schemas is an allowed console read", () => {
+  const plan = requestFor({ type: "list-schemas" });
+  assert.deepEqual(plan, { method: "GET", path: "/v1/console/schemas", query: {}, hasBody: false });
+  assert.equal(isAllowed(plan), true);
 });
 
 test("checks, answers, and evaluations are allowed console requests", () => {
