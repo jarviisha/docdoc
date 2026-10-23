@@ -32,7 +32,7 @@ a default location would be docdoc choosing where somebody's documents pile up
 (FR-017, FR-044). ``--no-store`` therefore names the behaviour you already have;
 ``--store`` is the opt-in.
 
-**Six settings are deliberately environment-only**, and the exclusions are
+**Seven settings are deliberately environment-only**, and the exclusions are
 listed here rather than left to be noticed, because FR-031 as first written read
 as though every variable gained a flag and two documents went on to say so. The
 amendment of 2026-08-25 narrows it to the settings that can change an
@@ -66,6 +66,10 @@ invocation's outcome, and these six cannot:
     Says where the operations console's built assets are. The command line serves
     none, so the flag would name a directory nothing reads — the same shape of
     exclusion as ``DOCDOC_MAX_REQUEST_BYTES``.
+
+``DOCDOC_SECRETS_KEY``
+    The Fernet master key that seals provider API keys stored through the
+    console. A credential, so no flag; and unset it simply disables storing keys.
 
 ``DOCDOC_GCV_CREDENTIALS``
     Per-provider, and a credential. On most deployments it names a file rather
@@ -284,6 +288,10 @@ ENVIRONMENT_ONLY: dict[str, str] = {
         "process that authenticates must agree on it, so it belongs to the "
         "deployment rather than to an invocation -- and the command line "
         "authenticates nothing in any configuration (FR-069)"
+    ),
+    "DOCDOC_SECRETS_KEY": (
+        "the master key sealing provider keys stored by the console; a credential, "
+        "and argv is readable by any process on the host (FR-042)"
     ),
     _GCV_CREDENTIALS_ENV: (
         "a credential; argv is readable by any process on the host (FR-042). It "

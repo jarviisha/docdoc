@@ -108,7 +108,7 @@ ui = ["docdoc-ui==0.1.0"]
 # handful of statements, and the claim query needs `FOR UPDATE SKIP LOCKED` --
 # which an ORM obscures rather than helps. SQLAlchemy would be the largest
 # dependency in the project, arriving to manage one table (research R6, R7).
-postgres = ["psycopg[binary,pool]>=3.1"]
+postgres = ["psycopg[binary,pool]>=3.1", "cryptography>=42"]
 # Shared object storage, so that two workers can reuse each other's artifacts.
 # Without it, each worker has a private `DOCDOC_STORE_ROOT` and scaling produces
 # correct results while silently re-paying for every parse -- the failure mode
@@ -564,6 +564,7 @@ type = "forbidden"
 source_modules = [
     "docdoc.runs.retention",
     "docdoc.runs.keys",
+    "docdoc.runs.secrets",
     "docdoc.runs.limits",
     "docdoc.runs.routing",
     "docdoc.runs.corrections",
