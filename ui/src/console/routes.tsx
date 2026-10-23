@@ -251,15 +251,7 @@ const qualityRoute = createRoute({
   path: "/quality",
   validateSearch: qualitySearch,
   component: function Quality() {
-    const search = qualityRoute.useSearch();
-    return (
-      <QualityArea
-        key={JSON.stringify(search)}
-        request={useRequest().request}
-        onOpenRun={useOpenRun()}
-        presetTenant={search.tenant ?? null}
-      />
-    );
+    return <QualityArea onOpenRun={useOpenRun()} />;
   },
 });
 

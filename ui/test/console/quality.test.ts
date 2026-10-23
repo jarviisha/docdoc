@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { configurationOf, historyRows, rerunWarning, shownEvaluation, stillRunning, toAnswers, toFieldTable, toStatStrip } from "../../src/console/model/quality.ts";
+import { configurationOf, historyRows, rerunWarning, shownEvaluation, shownSchema, stillRunning, toAnswers, toFieldTable, toStatStrip } from "../../src/console/model/quality.ts";
 
 const e = { documents: 1, erased_documents: 0 };
 const m = (name: string, numerator: number, denominator: number) => ({
@@ -177,4 +177,12 @@ test("a history row names the model and parser that produced it", () => {
   assert.equal(rows[0]!.configuration, "echo 1 · pdfplumber 0.11, tesseract 5.3");
   assert.equal(rows[1]!.configuration, "—");
   assert.equal(configurationOf(provenance), "echo 1 · pdfplumber 0.11, tesseract 5.3");
+});
+
+test("the schema shown is the URL's if it is an answer, else the first, else none", () => {
+  const answers = [{ value: "invoice" }, { value: "receipt" }];
+  assert.equal(shownSchema(answers, "receipt"), "receipt");
+  assert.equal(shownSchema(answers, "gone"), "invoice");
+  assert.equal(shownSchema(answers, undefined), "invoice");
+  assert.equal(shownSchema([], "receipt"), "");
 });

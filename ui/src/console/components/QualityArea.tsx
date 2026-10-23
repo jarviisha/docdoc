@@ -7,7 +7,8 @@
  * are `console/model/quality.ts`'s.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
+import { getRouteApi } from "@tanstack/react-router";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,10 +16,12 @@ import { Card } from "@/components/ui/card";
 
 import { describe } from "../model/failure.ts";
 import { shortId } from "../model/format.ts";
+import { POLL_MS } from "../model/polling.ts";
 import {
   historyRows,
   rerunWarning,
   shownEvaluation,
+  shownSchema,
   stillRunning,
   toAnswers,
   toFieldTable,
@@ -26,19 +29,19 @@ import {
   type EvaluationDetail,
   type EvaluationSummary,
 } from "../model/quality.ts";
+import { qualitySearch } from "../model/search.ts";
 import { toTenants } from "../model/submit.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { CopyableId } from "./CopyableId.tsx";
 import { DataTable } from "./DataTable.tsx";
 import { SelectField } from "./fields.tsx";
 import { SectionHeading } from "./SectionHeading.tsx";
-import { usePolling } from "./usePolling.ts";
-import type { Request } from "./RequestContext.tsx";
+import { useAct, useIntent } from "./useIntent.ts";
+
+const qualityApi = getRouteApi("/quality");
 
 interface Props {
-  request: Request;
   onOpenRun: (runId: string) => void;
-  presetTenant: string | null;
 }
 
 /** A history mark's colour; the word is always beside it. */
@@ -52,88 +55,46 @@ const MARK_TONE: Record<string, "info" | "warning" | "neutral"> = {
 const evaluationsOf = (body: unknown): EvaluationSummary[] =>
   (body as { evaluations?: EvaluationSummary[] } | null)?.evaluations ?? [];
 
-export function QualityArea({ request, onOpenRun, presetTenant }: Props) {
-  const [tenants, setTenants] = useState<string[] | null>(null);
-  const [tenant, setTenant] = useState(presetTenant ?? "");
-  const [answers, setAnswers] = useState<ReturnType<typeof toAnswers> | null>(null);
-  const [schema, setSchema] = useState("");
-  const [list, setList] = useState<EvaluationSummary[] | null>(null);
-  const [listReads, setListReads] = useState(0);
-  const [chosen, setChosen] = useState<string | null>(null);
-  const [detail, setDetail] = useState<(EvaluationSummary & EvaluationDetail) | null>(null);
-  const [openPath, setOpenPath] = useState<string | null>(null);
+/**
+ * The tenant, schema and evaluation in the URL are the ones shown; each pick
+ * pushes, so Back walks back through them. A schema the URL does not name is
+ * the first answer's, and stays out of the URL until the operator picks one.
+ */
+export function QualityArea({ onOpenRun }: Props) {
+  const search = qualityApi.useSearch();
+  const navigate = qualityApi.useNavigate();
+  const act = useAct();
+  const tenant = search.tenant ?? "";
+  const tenants = useIntent({ type: "list-tenants" }, { select: toTenants });
+  const answersRead = useIntent(tenant === "" ? null : { type: "tenant-answers", tenantId: tenant }, {
+    select: toAnswers,
+  });
+  const answers = answersRead.data ?? null;
+  const schema = answers === null ? "" : shownSchema(answers, search.schema);
+  const listRead = useIntent(schema === "" ? null : { type: "list-evaluations", tenantId: tenant, schema }, {
+    select: evaluationsOf,
+    refetchInterval: (list) => (list && stillRunning(list) ? POLL_MS : false),
+  });
+  const list = listRead.data ?? null;
+  const shownId = list === null ? null : shownEvaluation(list, search.evaluation ?? null);
+  const detailRead = useIntent(shownId === null ? null : { type: "evaluation", tenantId: tenant, evaluationId: shownId }, {
+    select: (body) => body as EvaluationSummary & EvaluationDetail,
+  });
+  const detail = detailRead.data ?? null;
+  // The field whose documents are open, remembered with the evaluation it was opened on.
+  const [open, setOpen] = useState<{ evaluationId: string | null; path: string } | null>(null);
+  const openPath = open !== null && open.evaluationId === shownId ? open.path : null;
   const [confirming, setConfirming] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
-
-  useEffect(() => {
-    let current = true;
-    void request({ type: "list-tenants" }).then((answer) => {
-      if (!current) return;
-      setTenants(answer.ok ? toTenants(answer.body) : []);
-      if (!answer.ok) setProblem(describe(answer.failure));
-    });
-    return () => {
-      current = false;
-    };
-  }, [request]);
-
-  useEffect(() => {
-    if (tenant === "") return;
-    let current = true;
-    setAnswers(null);
-    void request({ type: "tenant-answers", tenantId: tenant }).then((answer) => {
-      if (!current) return;
-      const found = answer.ok ? toAnswers(answer.body) : [];
-      if (!answer.ok) setProblem(describe(answer.failure));
-      setAnswers(found);
-      setSchema(found[0]?.value ?? "");
-    });
-    return () => {
-      current = false;
-    };
-  }, [request, tenant]);
-
-  const readList = useCallback(async () => {
-    if (tenant === "" || schema === "") return;
-    const answer = await request({ type: "list-evaluations", tenantId: tenant, schema });
-    if (answer.ok) setList(evaluationsOf(answer.body));
-    else setProblem(describe(answer.failure));
-  }, [request, tenant, schema]);
-
-  useEffect(() => {
-    setList(null);
-    setChosen(null);
-    void readList();
-  }, [readList, listReads]);
-  usePolling(readList, list !== null && stillRunning(list));
-
-  const shownId = list === null ? null : shownEvaluation(list, chosen);
-  useEffect(() => {
-    setDetail(null);
-    setOpenPath(null);
-    if (shownId === null) return;
-    let current = true;
-    void request({ type: "evaluation", tenantId: tenant, evaluationId: shownId }).then((answer) => {
-      if (!current) return;
-      if (answer.ok) setDetail(answer.body as EvaluationSummary & EvaluationDetail);
-      else setProblem(describe(answer.failure));
-    });
-    return () => {
-      current = false;
-    };
-  }, [request, tenant, shownId]);
+  const [writeProblem, setWriteProblem] = useState<string | null>(null);
+  const failure = tenants.error ?? answersRead.error ?? listRead.error ?? detailRead.error;
+  const problem = writeProblem ?? (failure === null ? null : describe(failure));
 
   const documents = answers?.find((a) => a.value === schema)?.documents ?? 0;
 
   const start = async () => {
-    const answer = await request({ type: "start-evaluation", tenantId: tenant, schema });
+    const answer = await act({ type: "start-evaluation", tenantId: tenant, schema });
     setConfirming(false);
-    if (answer.ok) {
-      setProblem(null);
-      setListReads((n) => n + 1);
-    } else {
-      setProblem(describe(answer.failure));
-    }
+    setWriteProblem(answer.ok ? null : describe(answer.failure));
   };
 
   const fields = detail === null ? [] : toFieldTable(detail);
@@ -147,9 +108,12 @@ export function QualityArea({ request, onOpenRun, presetTenant }: Props) {
           label="Tenant"
           className="w-[220px]"
           placeholder="Choose a tenant"
-          options={tenants ?? []}
+          options={tenants.data ?? []}
           value={tenant}
-          onChange={setTenant}
+          onChange={(chosen) => {
+            setWriteProblem(null);
+            void navigate({ search: qualitySearch({ tenant: chosen }) });
+          }}
         />
         <SelectField
           label="Schema"
@@ -157,9 +121,12 @@ export function QualityArea({ request, onOpenRun, presetTenant }: Props) {
           placeholder="No checked schema"
           options={answers ?? []}
           value={schema}
-          onChange={setSchema}
+          onChange={(chosen) => {
+            setWriteProblem(null);
+            void navigate({ search: (previous) => qualitySearch({ tenant: previous.tenant, schema: chosen }) });
+          }}
         />
-        <Button variant="outline" disabled={schema === ""} onClick={() => setListReads((n) => n + 1)}>
+        <Button variant="outline" disabled={schema === ""} onClick={() => void listRead.refetch()}>
           Refresh
         </Button>
         <div className="flex-1" />
@@ -169,14 +136,14 @@ export function QualityArea({ request, onOpenRun, presetTenant }: Props) {
       </div>
 
       <div role="status" aria-live="polite" className="empty:-mb-3">
-        {tenants === null || (tenant !== "" && answers === null) ? <p className="text-sm">Loading…</p> : null}
+        {tenants.isLoading || answersRead.isLoading ? <p className="text-sm">Loading…</p> : null}
         {problem === null ? null : (
           <Alert variant="destructive">
             <AlertTitle>Quality could not be read</AlertTitle>
             <AlertDescription>{problem}</AlertDescription>
           </Alert>
         )}
-        {tenant === "" && tenants !== null ? (
+        {tenant === "" && tenants.data !== undefined ? (
           <Alert variant="info">
             <AlertTitle>Choose a tenant to see how well its extractions read.</AlertTitle>
           </Alert>
@@ -246,7 +213,7 @@ export function QualityArea({ request, onOpenRun, presetTenant }: Props) {
                         variant="link"
                         className="h-auto p-0 text-xs"
                         aria-expanded={openPath === f.path}
-                        onClick={() => setOpenPath(openPath === f.path ? null : f.path)}
+                        onClick={() => setOpen(openPath === f.path ? null : { evaluationId: shownId, path: f.path })}
                       >
                         See the {f.documents.length} document(s) →
                       </Button>
@@ -321,7 +288,9 @@ export function QualityArea({ request, onOpenRun, presetTenant }: Props) {
                     <CopyableId
                       value={row.evaluationId}
                       display={shortId(row.evaluationId)}
-                      onOpen={() => setChosen(row.evaluationId)}
+                      onOpen={() =>
+                        void navigate({ search: (previous) => qualitySearch({ ...previous, evaluation: row.evaluationId }) })
+                      }
                     />
                   ),
                 },
