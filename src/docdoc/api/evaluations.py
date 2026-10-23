@@ -76,7 +76,8 @@ def start_evaluation_of(request: Request, tenant_id: str, schema: str) -> Any:
                 },
             )
         return JSONResponse(
-            status_code=409, content={"error": refused.code, "detail": _DETAIL[refused.code]}
+            status_code=409,
+            content={"error": refused.code, "detail": _DETAIL.get(refused.code, refused.code)},
         )
     return JSONResponse(
         status_code=202,

@@ -261,6 +261,38 @@ def test_an_unparseable_value_is_refused(client, deployment, blob) -> None:
     assert "two" not in posted.text
 
 
+def test_a_confirmed_check_without_grounding_stores_no_location(client, deployment, blob) -> None:
+    from uuid import UUID
+
+    from docdoc.api.runs import _terminal
+
+    (document,) = _scored(client, deployment)["documents"]
+    path = f"/v1/runs/{document['run_id']}/corrections"
+    tick = {
+        "report_id": PID,
+        "document_id": blob,
+        "annotator": "ana",
+        "timestamp": "2026-09-09T00:00:00Z",
+        "reason": "",
+        "confirmed": True,
+    }
+
+    # `total` is ungrounded in the echo fixture.
+    ungrounded = client.post(path, json={**tick, "field_path": "total"}, headers=A)
+    # And with the run's grounding artifact gone, nothing is grounded.
+    run = deployment.runs().get(UUID(document["run_id"]), TENANT)
+    store, _ = deployment.stores_for(TENANT)
+    store.delete(_terminal(store, run.processing_id).provenance.grounding_artifact_id)
+    unreadable = client.post(path, json={**tick, "field_path": "currency"}, headers=A)
+
+    assert (ungrounded.status_code, unreadable.status_code) == (201, 201)
+    listed = client.get(path, headers=A).json()["corrections"]
+    assert [(c["field_path"], c["location"]) for c in listed] == [
+        ("total", None),
+        ("currency", None),
+    ]
+
+
 def test_a_rate_limited_start_is_429(deployment, blob, monkeypatch) -> None:
     from docdoc.api.app import _Deployment, build_app
 

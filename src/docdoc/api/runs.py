@@ -803,7 +803,9 @@ def _grounded_location(store: Any, processing_id: str | None, field_path: str) -
     validation = _terminal(store, processing_id) if processing_id else None
     if validation is None:
         return None
-    outcome = _grounding_of(store, validation).outcomes.get(field_path)
+    grounding = _grounding_of(store, validation)
+    # Gone or unreadable: the check is stored without a location, not refused.
+    outcome = None if grounding is None else grounding.outcomes.get(field_path)
     if outcome is None or not outcome.geometry:
         return None
     geometry = outcome.geometry[0]
