@@ -142,6 +142,8 @@ def test_recording_a_correction_changes_nothing_about_the_run(
         _correction(),
         tenant_id=TENANT,
         run_id=run.run_id,
+        blob_id=run.blob_id,
+        schema_name="invoice",
         at=at,
         expires_at=at + timedelta(days=60),
     )
@@ -163,7 +165,13 @@ def test_the_correction_comes_back_whole(
     original = _correction()
 
     store.record(
-        original, tenant_id=TENANT, run_id=run.run_id, at=at, expires_at=at + timedelta(days=60)
+        original,
+        tenant_id=TENANT,
+        run_id=run.run_id,
+        blob_id=run.blob_id,
+        schema_name="invoice",
+        at=at,
+        expires_at=at + timedelta(days=60),
     )
 
     stored = store.for_run(tenant_id=TENANT, run_id=run.run_id)
@@ -180,6 +188,8 @@ def test_another_tenants_correction_is_invisible(
         _correction(),
         tenant_id=TENANT,
         run_id=run.run_id,
+        blob_id=run.blob_id,
+        schema_name="invoice",
         at=at,
         expires_at=at + timedelta(days=60),
     )
@@ -207,6 +217,8 @@ def test_a_correction_moves_no_metric_until_it_is_promoted(
         _correction(),
         tenant_id=TENANT,
         run_id=run.run_id,
+        blob_id=run.blob_id,
+        schema_name="invoice",
         at=at,
         expires_at=at + timedelta(days=60),
     )
@@ -233,6 +245,8 @@ def test_the_export_is_ordered_so_two_runs_of_it_agree(
             _correction(field=field),
             tenant_id=TENANT,
             run_id=run.run_id,
+            blob_id=run.blob_id,
+            schema_name="invoice",
             at=at,
             expires_at=at + timedelta(days=60),
         )
@@ -281,6 +295,8 @@ def test_a_run_carrying_a_live_correction_survives_the_sweep(
         _correction(),
         tenant_id=TENANT,
         run_id=run.run_id,
+        blob_id=run.blob_id,
+        schema_name="invoice",
         at=at,
         # The correction outlives the run's own deadline, which is the case
         # FR-013 is about: where the two disagree, the longer wins.
@@ -308,6 +324,8 @@ def test_it_goes_once_the_correction_itself_expires(
         _correction(),
         tenant_id=TENANT,
         run_id=run.run_id,
+        blob_id=run.blob_id,
+        schema_name="invoice",
         at=at - timedelta(days=30),
         expires_at=at - timedelta(hours=1),  # already expired
     )

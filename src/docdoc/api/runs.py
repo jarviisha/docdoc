@@ -425,7 +425,8 @@ def routes() -> APIRouter:
         from uuid import UUID
 
         from docdoc.evaluation.corrections import Correction
-        from docdoc.runs.identity import configured_correction_retention, now
+        from docdoc.runs.corrections import ANSWERS_NEVER_EXPIRE
+        from docdoc.runs.identity import now
         from docdoc.runs.model import RunStatus
 
         deployment = _deployment_of(request)
@@ -452,6 +453,15 @@ def routes() -> APIRouter:
             # (FR-082).
             return _run_erased(stone)
 
+        if run.schema_identity is None:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": "run_has_no_fields",
+                    "detail": "an OCR run extracts no fields, so there is nothing to check",
+                },
+            )
+
         if run.status is not RunStatus.SUCCEEDED:
             return JSONResponse(
                 status_code=409,
@@ -474,18 +484,29 @@ def routes() -> APIRouter:
                 content={"error": "invalid_correction", "detail": type(error).__name__},
             )
 
+        if correction.confirmed and correction.location is None:
+            # A tick carries no location of its own: it is where the run read
+            # the value from, which is what the run's grounding says.
+            store_for_tenant, _ = deployment.stores_for(principal.tenant_id)
+            correction = correction.model_copy(
+                update={
+                    "location": _grounded_location(
+                        store_for_tenant, run.processing_id, correction.field_path
+                    )
+                }
+            )
+
         at = now()
-        period = configured_correction_retention()
-        # **The longer of the two deadlines wins** (FR-013). A correction is
-        # evidence about a result, so a policy that expired it before the result
-        # would leave the result unexplained; one that expired the result first
-        # is prevented by `pinned_runs`.
-        expires_at = max(run.expires_at, at + period) if period else run.expires_at
+        # **A check is an answer and answers never expire.** The run it was made
+        # on is pinned by it, so the run outlives neither.
+        expires_at = ANSWERS_NEVER_EXPIRE
 
         correction_id = store.record(
             correction,
             tenant_id=principal.tenant_id,
             run_id=identity,
+            blob_id=run.blob_id,
+            schema_name=run.schema_identity.split("@")[0],
             at=at,
             expires_at=expires_at,
         )
@@ -780,16 +801,7 @@ def _routing_for(request: Request, run: Any) -> Any:
     if validation is None:
         return None
 
-    from docdoc.grounding.result import GroundingResult
-    from docdoc.pipeline.stages import Stage, spec_for
-
-    grounding = None
-    if store is not None:
-        grounding = store.get(
-            validation.provenance.grounding_artifact_id,
-            model=GroundingResult,
-            artifact_format_version=spec_for(Stage.GROUND).artifact_format_version,
-        )
+    grounding = None if store is None else _grounding_of(store, validation)
 
     # `StoredResult` and **not** a fabricated `PipelineResult`. This line built
     # one, with `outcomes=()` and `provenance=validation.provenance` — and those
@@ -801,6 +813,32 @@ def _routing_for(request: Request, run: Any) -> Any:
     # is not a run, and assembling one that claims to be is how a type gets
     # satisfied by a fiction.
     return decide(StoredResult(grounding=grounding, validation=validation), policy)
+
+
+def _grounded_location(store: Any, processing_id: str | None, field_path: str) -> Any:
+    """Where the run read this field from, or ``None`` when it is ungrounded."""
+    from docdoc.evaluation.labels import ExpectedLocation
+
+    validation = _terminal(store, processing_id) if processing_id else None
+    if validation is None:
+        return None
+    outcome = _grounding_of(store, validation).outcomes.get(field_path)
+    if outcome is None or not outcome.geometry:
+        return None
+    geometry = outcome.geometry[0]
+    return ExpectedLocation(page=geometry.page_index, bbox=geometry.bbox)
+
+
+def _grounding_of(store: Any, validation: Any) -> Any:
+    """The grounding artifact a validation result was derived from."""
+    from docdoc.grounding.result import GroundingResult
+    from docdoc.pipeline.stages import Stage, spec_for
+
+    return store.get(
+        validation.provenance.grounding_artifact_id,
+        model=GroundingResult,
+        artifact_format_version=spec_for(Stage.GROUND).artifact_format_version,
+    )
 
 
 def _run_erased(stone: Any) -> JSONResponse:

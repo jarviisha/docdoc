@@ -446,12 +446,11 @@ export DOCDOC_OTLP_HEADERS='authorization=Bearer …'
 The bridge is installed only when docdoc's observer slot is empty, so an exporter cannot take it from
 whatever you had there. No collector is added to the composition; if you run one, it is yours.
 
-Two configure routing and corrections, and both are unset by default — with no policy there is no
+One configures routing, and it is unset by default — with no policy there is no
 `routing` block on a run at all:
 
 ```sh
 export DOCDOC_ROUTING_POLICY=/etc/docdoc/routing.json
-export DOCDOC_CORRECTION_RETENTION_DAYS=365       # unset means "as long as the run"
 ```
 
 A routing decision reads grounding status and score, validation severity and verdict, and schema

@@ -23,7 +23,7 @@
   - The run status set stays the closed five.
 - **`docdoc.evaluation` is not modified**, apart from Task 1's `Correction` change: `evaluate`, `compare`, redaction, tiers and metrics stay as they are.
 - **Tenant scoping** is in the query, never checked after a fetch. Another tenant's run, answer or evaluation answers 404, exactly like one that does not exist.
-- **Answers never expire** (spec, settled call 3). A check row's `expires_at` is `datetime.max` with UTC, and `DOCDOC_CORRECTION_RETENTION_DAYS` is retired.
+- **Answers never expire** (spec, settled call 3). A check row's `expires_at` is `datetime.max` with UTC, and the correction-retention-days setting is retired.
 - **One answer per (tenant, schema name, `blob_id`, field path):** the newest check on any run of that document wins.
 - **Tenant documents are `Tier.RESTRICTED`**, with `OriginKind.RESTRICTED` and basis `"submitted by tenant {tenant_id} for processing"`.
 - **Erasure.**
@@ -100,8 +100,8 @@ Expected: PASS. If a snapshot or identity pin moves only because the serialized 
 - Create: `src/docdoc/runs/migrations/0011_answers.sql`
 - Modify: `src/docdoc/runs/corrections.py` (`CorrectionStore` protocol, `NullCorrectionStore`, `PostgresCorrectionStore`)
 - Modify: `src/docdoc/api/runs.py` (`record_correction`)
-- Modify: `src/docdoc/runs/identity.py`, `src/docdoc/api/settings.py`, and docs that name `DOCDOC_CORRECTION_RETENTION_DAYS` (`README.md`, `docs/concepts/retention.md`, `docs/concepts/routing.md`). Retire the setting and update `tests/unit/test_configured_tunings.py` and `tests/unit/test_documented_api_references_resolve.py` accordingly. `tests/contract/test_milestone_9_deployment_unchanged.py` names it too: read why before changing it.
-- Test: `tests/integration/test_answers_postgres.py` (mark `postgres`), plus additions to the existing corrections route tests.
+- Modify: `src/docdoc/runs/identity.py`, `src/docdoc/api/settings.py`, and docs that name the correction-retention-days setting (`README.md`, `docs/concepts/retention.md`, `docs/concepts/routing.md`). Retire the setting and update `tests/unit/test_configured_tunings.py` and `tests/unit/test_documented_api_references_resolve.py` accordingly. `tests/contract/test_milestone_9_deployment_unchanged.py` names it too: read why before changing it.
+- Test: `tests/integration/test_answers_postgres.py` (mark `postgres`), plus additions to the existing corrections route tests in `tests/integration/test_review_routes_http.py`.
 
 **Interfaces:**
 - Migration `0011_answers.sql`:
@@ -132,7 +132,7 @@ Expected: PASS. If a snapshot or identity pin moves only because the serialized 
 
 - [ ] **Step 2: Run them and confirm they fail.** Command: `make test` (the postgres tests need the DSN). Expected: failures on the missing `answers` method and the missing columns.
 
-- [ ] **Step 3: Implement** the migration, the store methods, the route changes, and the retirement of `DOCDOC_CORRECTION_RETENTION_DAYS`. Grep for every mention: `grep -rn CORRECTION_RETENTION --exclude-dir=.venv --exclude-dir=specs .`. CHANGELOG gets an entry in Task 9.
+- [ ] **Step 3: Implement** the migration, the store methods, the route changes, and the retirement of the correction-retention-days setting. Grep for every mention: `grep -rn CORRECTION_RETENTION --exclude-dir=.venv --exclude-dir=specs .`. CHANGELOG gets an entry in Task 9.
 
 - [ ] **Step 4: `make test && make lint`.** Expected: green.
 
@@ -354,7 +354,7 @@ test("a schema change is marked in the history", () => {
 - Modify: `docs/adr/README.md` (index row).
 - Modify: `docs/constitution.md`, if and only if its console paragraph in MVP Scope Constraints, "Deferred technology", does not already permit corrections and evaluation in the console. If an amendment is needed, add a record (1.12.1 → 1.13.0, MINOR: permitted list widened) in the file's own format.
 - Create: `docs/concepts/quality.md`. It covers checking, answers, re-runs, reports, schema-version behaviour, cost and erasure. Add it to the docs index wherever `docs/concepts/*.md` are listed (`grep -rn "concepts/runs.md" README.md docs`).
-- Modify: `README.md` (the API section gains the evaluation routes), `CHANGELOG.md` (Unreleased: the feature, plus the retired `DOCDOC_CORRECTION_RETENTION_DAYS`).
+- Modify: `README.md` (the API section gains the evaluation routes), `CHANGELOG.md` (Unreleased: the feature, plus the retired correction-retention-days setting).
 
 - [ ] **Step 1: Write the docs.** Run `uv run pytest -n0 tests/unit/test_documented_api_references_resolve.py tests/unit/test_plan_tree_is_current.py tests/unit/test_convergence_gaps.py`. Expected: PASS. A new doc naming a `DOCDOC_*` setting goes in that test's recorded list.
 - [ ] **Step 2: `make test && make lint && make ui`.** Expected: green.

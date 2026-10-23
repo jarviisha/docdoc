@@ -25,7 +25,6 @@ __all__ = [
     "API_KEYS_FILE_ENV",
     "CONSOLE_IDLE_ENV",
     "CONSOLE_ROOT_ENV",
-    "CORRECTION_RETENTION_DAYS_ENV",
     "DEFAULT_MAX_REQUEST_BYTES",
     "DEFAULT_OCR_QUEUE_PER_TENANT",
     "DEFAULT_OCR_QUEUE_TOTAL",
@@ -200,9 +199,6 @@ PRIORITY_CEILING_ENV = "DOCDOC_PRIORITY_CEILING"
 #: so `GET /v1/runs/{id}` carries no `routing` block at all rather than one
 #: saying nothing (FR-075).
 ROUTING_POLICY_ENV = "DOCDOC_ROUTING_POLICY"
-
-#: How long a correction is kept, independently of its run (FR-013).
-CORRECTION_RETENTION_DAYS_ENV = _identity.CORRECTION_RETENTION_DAYS_ENV
 
 #: How often a worker ticks, and how long one tick may take. Read by the worker
 #: and named here for the reason the lease pair is: they are part of "how run

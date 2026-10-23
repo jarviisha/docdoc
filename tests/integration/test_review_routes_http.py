@@ -489,3 +489,91 @@ def test_a_deployment_with_no_signing_secret_registers_no_callbacks(
     # Still `204`: revoking something that cannot exist changed nothing, which
     # is what idempotent revocation means.
     assert revoked.status_code == 204
+
+
+# -- confirming a value, and checks being answers ----------------------------
+
+
+def test_a_confirmed_check_takes_the_location_it_was_read_from(
+    tmp_path, queue: PostgresRunQueue, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A tick on a grounded value stores where it sits, from the run's grounding."""
+    from pathlib import Path
+
+    from docdoc.api.app import _Deployment, build_app
+    from docdoc.artifacts import BlobStore, FileArtifactStore
+    from docdoc.extraction import SchemaRegistry
+    from docdoc.extraction.adapters.echo import EchoAdapter
+    from docdoc.runs.model import DEFAULT_TENANT
+    from docdoc.runs.worker import execute_one
+
+    keys = tmp_path / "keys.json"
+    keys.write_text(
+        json.dumps({"keys": [{"sha256": digest_of(OWNER_KEY), "tenant_id": DEFAULT_TENANT}]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DOCDOC_API_KEYS_FILE", str(keys))
+    root = tmp_path / "store"
+    blobs = BlobStore(root)
+    blob_id = blobs.put(Path("tests/fixtures/pdf/digital_invoice.pdf").read_bytes())
+    at = datetime.now(UTC)
+    spec = Spec(tenant_id=DEFAULT_TENANT, blob_id=blob_id)
+    submitted = queue.submit(
+        spec,  # type: ignore[arg-type]
+        run_id=new_run_id(),
+        now=at,
+        expires_at=at + timedelta(days=30),
+    )
+    claimed = queue.claim(worker_id="w", now=at, lease=timedelta(minutes=5), max_attempts=3)
+    assert claimed is not None
+    execute_one(
+        claimed,
+        queue=queue,
+        blobs=blobs,
+        store=FileArtifactStore(root),
+        registry=SchemaRegistry.from_paths([Path("schemas")]),
+        adapter=EchoAdapter.from_fixtures("tests/fixtures/echo"),
+        now=at,
+    )
+    client = TestClient(build_app(_Deployment(runs=queue, store_root=root)))
+
+    body = _correction_body(field="invoice_number") | {"confirmed": True}
+    del body["corrected_value"], body["reason"]
+    response = client.post(
+        f"/v1/runs/{submitted.run_id}/corrections", json=body, headers=_headers()
+    )
+
+    assert response.status_code == 201, response.text
+    (stored,) = client.get(f"/v1/runs/{submitted.run_id}/corrections", headers=_headers()).json()[
+        "corrections"
+    ]
+    assert stored["location"]["page"] == 0
+
+
+def test_an_ocr_run_cannot_be_checked(client: TestClient, queue: PostgresRunQueue) -> None:
+    @dataclass
+    class OcrSpec(Spec):
+        schema_identity: str | None = None  # type: ignore[assignment]
+        kind: str = "ocr"
+        ocr_parser: str | None = "paddle"
+        ocr_language: str | None = "vie"
+
+    at = datetime.now(UTC)
+    run = queue.submit(
+        OcrSpec(),  # type: ignore[arg-type]
+        run_id=new_run_id(),
+        now=at,
+        expires_at=at + timedelta(days=30),
+    )
+    queue.finish(
+        run.run_id,
+        RunOutcome(status=RunStatus.SUCCEEDED, processing_id=PROCESSING_ID),
+        now=at,
+    )
+
+    response = client.post(
+        f"/v1/runs/{run.run_id}/corrections", json=_correction_body(), headers=_headers()
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"] == "run_has_no_fields"

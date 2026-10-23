@@ -286,7 +286,6 @@ CONFIG_MODULES = {
         "OTLP_HEADERS_ENV",
         "PRIORITY_CEILING_ENV",
         "ROUTING_POLICY_ENV",
-        "CORRECTION_RETENTION_DAYS_ENV",
         "MAINTENANCE_INTERVAL_ENV",
         "MAINTENANCE_BUDGET_ENV",
         # ADR-0023's idle bound.
@@ -421,6 +420,10 @@ CONFIG_DOCUMENTS = (
     # argument that now includes `pdf`.
     "docs/superpowers/specs/2026-10-22-pdfium-parser-design.md",
     "docs/superpowers/plans/2026-10-22-pdfium-parser.md",
+    # The tenant quality evaluation design and plan name the `DOCDOC_*` settings
+    # the evaluation adds, ahead of the tasks that define them.
+    "docs/superpowers/specs/2026-10-22-tenant-quality-evaluation-design.md",
+    "docs/superpowers/plans/2026-10-22-tenant-quality-evaluation.md",
 )
 
 #: Requires at least one character after the prefix, so the `DOCDOC_*` wildcard
