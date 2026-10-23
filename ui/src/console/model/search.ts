@@ -60,3 +60,22 @@ export function qualitySearch(raw: Record<string, unknown>): QualitySearch {
     evaluation: text(raw.evaluation),
   });
 }
+
+/**
+ * The router's default parser JSON-decodes each value, so `?tenant=123` would
+ * arrive as a number and `text()` would drop it. Tenant ids such as `123`,
+ * `null` or `1e5` are valid, so every value stays the string the URL held.
+ */
+export function parseQuery(search: string): Record<string, string> {
+  return Object.fromEntries(new URLSearchParams(search));
+}
+
+/** The inverse of `parseQuery`: no JSON quoting, empty and undefined values left out. */
+export function stringifyQuery(params: Record<string, unknown>): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== "") query.set(key, String(value));
+  }
+  const text = query.toString();
+  return text === "" ? "" : `?${text}`;
+}

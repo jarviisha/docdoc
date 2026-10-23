@@ -39,7 +39,27 @@ export function invalidatedBy(intent: Intent): readonly (readonly [Intent["type"
     case "erase-tenant":
     case "erase-document":
       return "all";
-    default:
+    case "evaluation":
+    case "list-callbacks":
+    case "list-credentials":
+    case "list-evaluations":
+    case "list-parsers":
+    case "list-runs":
+    case "list-schemas":
+    case "list-tenants":
+    case "overview":
+    case "run-checks":
+    case "run-delivery":
+    case "run-detail":
+    case "run-page":
+    case "run-result":
+    case "sign-in":
+    case "sign-out":
+    case "tenant-answers":
+    case "who-am-i":
       return [];
+    default:
+      // A new intent fails to compile here until it is classified as a read or a write above.
+      return intent satisfies never;
   }
 }

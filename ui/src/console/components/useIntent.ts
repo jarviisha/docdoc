@@ -72,7 +72,8 @@ export function useAct(): (intent: Intent, body?: BodyInit) => Promise<Answer> {
       const answer = await request(intent, body);
       if (answer.ok) {
         const stale = invalidatedBy(intent);
-        if (stale === "all") void queryClient.invalidateQueries();
+        // Reset, not invalidate: invalidated data is still shown from cache on Back, and erased data must not be.
+        if (stale === "all") void queryClient.resetQueries();
         else for (const queryKey of stale) void queryClient.invalidateQueries({ queryKey });
       }
       return answer;

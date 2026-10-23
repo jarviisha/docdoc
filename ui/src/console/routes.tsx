@@ -27,7 +27,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 import { AREA_PATHS, areaOf, type Area } from "./model/navigation.ts";
-import { qualitySearch, runsSearch, tenantSearch } from "./model/search.ts";
+import { parseQuery, qualitySearch, runsSearch, stringifyQuery, tenantSearch } from "./model/search.ts";
 import { useRequest } from "./components/RequestContext.tsx";
 import { CallbacksArea } from "./components/CallbacksArea.tsx";
 import { CredentialArea } from "./components/CredentialArea.tsx";
@@ -274,7 +274,8 @@ const callbacksRoute = createRoute({
   path: "/callbacks",
   validateSearch: tenantSearch,
   component: function Callbacks() {
-    return <CallbacksArea />;
+    // Keyed by tenant: a write error or open confirm for one tenant never shows on another after Back.
+    return <CallbacksArea key={callbacksRoute.useSearch().tenant ?? ""} />;
   },
 });
 
@@ -308,7 +309,13 @@ const routeTree = rootRoute.addChildren([
   erasureRoute,
 ]);
 
-export const router = createRouter({ routeTree, basepath: "/console", scrollRestoration: false });
+export const router = createRouter({
+  routeTree,
+  basepath: "/console",
+  scrollRestoration: false,
+  parseSearch: parseQuery,
+  stringifySearch: stringifyQuery,
+});
 
 declare module "@tanstack/react-router" {
   interface Register {

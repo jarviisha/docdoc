@@ -109,7 +109,7 @@ The sidebar is hand-built (shadcn's writes a cookie, which the persistence guard
 1. Add the intent(s) to `model/client.ts` with their request plans. Test them.
 2. Add the screen's decisions to a model file: search params, what polls, what a write invalidates (`invalidatedBy`). Test them.
 3. Add the route in `routes.tsx` with `validateSearch` from step 2. Filters live in search params, not `useState`. A filter change pushes history. The cursor stays out of the URL.
-4. Write the component. Read with `useIntent`, write with `useAct`, render the four states. Never call `fetch` or `request` directly.
+4. Write the component. Read with `useIntent`, write with `useAct`, render the four states. Never call `fetch` directly, and call `request` only for a one-off uncached action such as a download (`RunDetail.download` is the example).
 5. Add the sidebar entry in `NAV`, or replace its "soon".
 
 Never use `lazyRouteComponent`, scroll restoration or a persister: they write to browser storage. A route path may not contain a review-platform noun.
