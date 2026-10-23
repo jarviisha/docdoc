@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+import pytest
+
 from docdoc.evaluation import DocumentPrediction, PredictionSet, Stage, Tier, evaluate
 from docdoc.extraction.registry import SchemaRegistry
 from docdoc.runs.answers import answer_set, prediction_for
@@ -101,6 +103,8 @@ def test_evaluate_accepts_the_pair():
 
 
 def _stored_run(tmp_path):
+    # SC-013: a real parse needs the native PDF reader, which the base install lacks.
+    pytest.importorskip("pypdfium2", reason="a real parse is what gets stored")
     from docdoc.artifacts import FileArtifactStore
     from docdoc.extraction.adapters.echo import EchoAdapter
     from docdoc.pipeline import run as run_pipeline
