@@ -27,9 +27,9 @@ being removed**.
 
 The rejected form is one word away in English. "Delete every artifact no
 surviving run references" is a *complement*, and it deletes every artifact
-`docdoc extract` ever wrote from the command line, everything a library caller
-produced, and every artifact the recorder wrote — because none of those has a run
-row. They are unreferenced by construction.
+the synchronous job route (`POST /v1/documents/{blob_id}/extract`) wrote, every
+artifact the recorder wrote, and everything an older release's `docdoc extract`
+wrote — because none of those has a run row. They are unreferenced by construction.
 
 That is the most dangerous bug available in this feature and it is designed out
 rather than tested for. `tests/unit/test_sweep_is_a_difference.py` exists to fail
@@ -83,7 +83,7 @@ in its own table.
 With authentication off there is one implicit tenant, and its namespace is the
 store root itself — not `t/default/`. So "erase the default tenant" and "empty
 the entire store" are the same operation, including everything written before
-authentication was enabled and everything the command line ever wrote.
+authentication was enabled and everything written outside a run.
 
 Therefore:
 

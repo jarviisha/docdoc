@@ -32,6 +32,36 @@ if TYPE_CHECKING:
     from docdoc.pipeline import PipelineResult
 
 
+def store_blob(request: Request, tenant_id: str, data: bytes) -> SubmissionResponse:
+    """Validate `data` and put it in `tenant_id`'s namespace.
+
+    The one storage path: `POST /v1/documents` and the console's extraction submit
+    both come through here, so the caps and the media-type check are not copied.
+    """
+    from docdoc.ingest.source import SourceFile, detect_media_type
+
+    deployment = _deployment_of(request)
+    if not deployment.has_store:
+        # Accepting bytes we cannot keep, and handing back an identity that
+        # will never resolve, is the worse answer (FR-068).
+        raise _no_store_configured()
+
+    # From the bytes, never from a client-declared type. A `Content-Type`
+    # header is an assertion by the sender and this is a check.
+    media_type = detect_media_type(data)
+    file = SourceFile.from_bytes(data, limits=deployment.limits)
+    file.check_limits(deployment.limits or _default_limits())
+
+    _, blobs = deployment.stores_for(tenant_id)
+    assert blobs is not None
+    blob_id = blobs.put(data)
+    return SubmissionResponse(
+        blob_id=blob_id,
+        size_bytes=len(data),
+        media_type=media_type or file.media_type,
+    )
+
+
 def routes() -> APIRouter:
     """`/documents*` and `/extract`, registered before the OCR and run routes."""
     router = APIRouter()
@@ -49,30 +79,14 @@ def routes() -> APIRouter:
         ADR-0014 §4's forfeited cross-tenant reuse being paid for here, in the
         one place it is visible.
         """
-        from docdoc.ingest.source import SourceFile, detect_media_type
-
         deployment = _deployment_of(request)
         if not deployment.has_store:
-            # Accepting bytes we cannot keep, and handing back an identity that
-            # will never resolve, is the worse answer (FR-068).
+            # Refused before the body is read (FR-039); `store_blob` checks again
+            # for the callers that do not go through here.
             raise _no_store_configured()
 
         data = await _read_capped(request, deployment.max_request_bytes)
-
-        # From the bytes, never from a client-declared type. A `Content-Type`
-        # header is an assertion by the sender and this is a check.
-        media_type = detect_media_type(data)
-        file = SourceFile.from_bytes(data, limits=deployment.limits)
-        file.check_limits(deployment.limits or _default_limits())
-
-        _, blobs = _stores_of(request, principal)
-        assert blobs is not None
-        blob_id = blobs.put(data)
-        return SubmissionResponse(
-            blob_id=blob_id,
-            size_bytes=len(data),
-            media_type=media_type or file.media_type,
-        )
+        return store_blob(request, principal.tenant_id, data)
 
     @router.get("/documents/{blob_id}", response_model=BlobMetadata)
     async def document(request: Request, blob_id: str, principal: Caller) -> Any:

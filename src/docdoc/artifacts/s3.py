@@ -160,7 +160,7 @@ def s3_client(
         from botocore.config import Config
     except ImportError as exc:  # pragma: no cover - guarded by the extra
         raise ArtifactError(
-            "boto3 is not installed; object storage needs `pip install docdoc[s3]`",
+            "boto3 is not installed; object storage needs the `s3` extra",
             reason="unavailable",
         ) from exc
 

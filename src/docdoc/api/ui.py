@@ -1,11 +1,11 @@
 """Finding the operations console's built assets, or explaining their absence.
 
-The console is optional twice over: the ``api`` extra installs the interface, and
-the ``ui`` extra installs the assets it serves. Neither is in the base install and
-neither ever will be — ``specs/008`` FR-035 says the base install acquires no
-static asset, and a Python extra can add a dependency but cannot add files to a
-wheel everyone already has. That is why the assets live in a separate
-``docdoc-ui`` distribution (``specs/008`` research R7) rather than in this one.
+The Docker image carries the console's build and points ``DOCDOC_CONSOLE_ROOT``
+at it (ADR-0027). Outside the image, the ``ui`` extra installs the assets, and the
+main wheel still carries none: ``specs/008`` FR-035 keeps static assets out of it,
+and a Python extra can add a dependency but cannot add files to a wheel everyone
+already has. That is why the installed assets live in a separate ``docdoc-ui``
+distribution (``specs/008`` research R7) rather than in this one.
 
 **The absence has two shapes and they need different sentences** (FR-037). A
 checkout where nobody has run the build yet is fixed by running it; an
@@ -199,6 +199,8 @@ def absence_reason() -> str:
         )
 
     return (
-        "the console is not installed. Run `pip install 'docdoc[ui]'`, which "
-        "brings the docdoc-ui distribution. The API is fully functional without it."
+        "the console is not built into this installation. The Docker image carries it: "
+        "rebuild the image (`docker compose -f packaging/docker/compose.yml up -d --build`). "
+        "From a source checkout, run `npm ci && npm run build` in ui/. "
+        "The API is fully functional without it."
     )

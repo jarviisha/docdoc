@@ -75,10 +75,7 @@ jobs:
       - name: Import boundaries
         run: uv run lint-imports
 
-  # The browser client. A separate job because it is a separate toolchain, and
-  # separate on purpose: `base-install` must never gain a Node step, since its
-  # entire argument is that the base install needs none. If these two jobs ever
-  # share a setup step, FR-035 has been reversed by accident.
+  # The browser client. A separate job because it is a separate toolchain.
   #
   # `npm test` covers the view model and nothing else. The rendered interface
   # carries no automated test at all, by the first clarification of 2026-08-25 —
@@ -260,71 +257,3 @@ jobs:
       - name: Stop the infrastructure
         if: always()
         run: docker compose -f packaging/docker/compose.yml down -v
-
-  # The base install must stay usable with no provider SDK at all (SC-010).
-  # Verified separately because the job above installs every extra.
-  base-install:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-
-      # Into a fresh environment, not the runner's system Python: that one is
-      # externally managed (PEP 668) and refuses `--system`. A clean venv is also
-      # a truer reproduction of what a user gets, since it starts with nothing.
-      - name: Install the base package only
-        run: |
-          uv venv .venv-base
-          uv pip install --python .venv-base .
-
-      - name: Every deterministic layer imports with pydantic alone
-        run: .venv-base/bin/python -c "import docdoc.kernel, docdoc.artifacts, docdoc.ingest, docdoc.extraction, docdoc.grounding, docdoc.validation, docdoc.pipeline, docdoc.evaluation, docdoc.cli"
-
-      # The command belongs to the base install, which is the whole argument for
-      # argparse over a CLI framework. If this step ever needs an extra, that
-      # decision was reversed by accident.
-      - name: The docdoc command works without any extra
-        run: .venv-base/bin/docdoc --help > /dev/null
-
-      - name: No provider SDK and no web framework came with it
-        run: |
-          if .venv-base/bin/python -c "import pypdfium2" 2>/dev/null; then
-            echo "pypdfium2 is installed by the base package; it must be an extra" >&2
-            exit 1
-          fi
-          if .venv-base/bin/python -c "import azure.ai.documentintelligence" 2>/dev/null; then
-            echo "the azure SDK is installed by the base package; it must be an extra" >&2
-            exit 1
-          fi
-          if .venv-base/bin/python -c "import google.genai" 2>/dev/null; then
-            echo "the google-genai SDK is installed by the base package; it must be an extra" >&2
-            exit 1
-          fi
-          if .venv-base/bin/python -c "import fastapi" 2>/dev/null; then
-            echo "fastapi is installed by the base package; it must be the api extra" >&2
-            exit 1
-          fi
-
-      # FR-053 and SC-013: the base install must not merely import, it must run
-      # the offline suite. A layer that imports and then needs an extra to do
-      # anything has moved the dependency rather than removed it.
-      - name: The offline suite passes on the base install
-        run: |
-          uv pip install --python .venv-base pytest pytest-xdist hypothesis
-          .venv-base/bin/python -m pytest tests/unit tests/property tests/contract -q
-
-      # An absence check passes trivially if the import name is wrong, so prove
-      # the same commands do detect a provider SDK when one is present.
-      - name: The absence check can actually fail
-        run: |
-          uv pip install --python .venv-base pypdfium2
-          if .venv-base/bin/python -c "import pypdfium2" 2>/dev/null; then
-            echo "detection works"
-          else
-            echo "the check cannot see pypdfium2 even when installed; it proves nothing" >&2
-            exit 1
-          fi

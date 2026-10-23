@@ -6,7 +6,7 @@ in CI -- the same arrangement, and the same reasoning, as
 ``tests/fixtures/make_fixtures.py``.
 
 **Scoring the committed dataset needs none of this.** ``uv sync --extra dev`` is
-enough to run ``examples/evaluate_golden_set.py`` and every test, because the
+enough to run every test, because the
 predictions are committed and replayed. The ``--extra pdf`` above is needed only
 to *regenerate*, because regeneration parses the documents with pypdfium2 (and
 writes them with reportlab, from the ``dev`` extra). That asymmetry is the point

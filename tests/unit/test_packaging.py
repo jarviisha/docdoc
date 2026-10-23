@@ -15,10 +15,7 @@ because none of them looks at what is committed.
 **So these tests read git and the build, not the filesystem.** They are the only
 checks here that can see the difference between "it works for me" and "it works".
 
-The CI base-install job (`.github/workflows/ci.yml`) is the belt to this braces
-and is strictly better — it installs without extras and runs the offline suite.
-It is also a job that has to be *reached*: on a branch nobody has pushed, it
-proves nothing. These run in the default suite, in under a second.
+These run in the default suite, in under a second.
 """
 
 from __future__ import annotations
@@ -169,7 +166,7 @@ def wheel_packages(tmp_path_factory: pytest.TempPathFactory) -> set[str]:
 
 
 def test_a_built_wheel_contains_every_package(wheel_packages: set[str]) -> None:
-    """The end of the chain: what ``pip install docdoc`` actually gets.
+    """The end of the chain: what the image's ``uv pip install .[extras]`` actually gets.
 
     The one assertion in this repository that would have caught the untracked
     artifacts layer without anybody thinking to look for it.
@@ -177,29 +174,13 @@ def test_a_built_wheel_contains_every_package(wheel_packages: set[str]) -> None:
     missing = sorted(_packages() - wheel_packages)
     assert not missing, (
         f"the wheel does not contain {[f'docdoc.{m}' for m in missing]}, so "
-        "`pip install docdoc` produces an installation that cannot import them. "
+        "installing the package (as the image does) produces one that cannot import them. "
         f"Shipped: {sorted(wheel_packages)}"
     )
 
 
-def test_the_wheel_carries_no_provider_sdk_and_no_web_framework(
-    wheel_packages: set[str],
-) -> None:
-    """SC-013's other half, checked against the artefact rather than the tree.
-
-    The base install must stay usable with no provider SDK at all. The adapter
-    *packages* ship — they have to, since they are how a provider is reached once
-    its extra is installed — and what must not ship is a hard dependency on one,
-    which `pyproject.toml`'s `dependencies` list is the place to check.
-    """
-    config = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
-    required = " ".join(config["project"]["dependencies"]).lower()
-
-    for forbidden in ("fastapi", "uvicorn", "pymupdf", "pypdfium2", "google-genai", "azure"):
-        assert forbidden not in required, (
-            f"{forbidden} is a hard dependency of the base install; it belongs in "
-            "an optional extra (FR-053, SC-013)"
-        )
-
+def test_the_wheel_ships_the_adapter_and_parser_packages(wheel_packages: set[str]) -> None:
+    """The adapter packages ship: they are how a provider is reached once its extra
+    is installed, and the Docker image is built from this wheel."""
     assert "extraction/adapters" in wheel_packages
     assert "ingest/parsers" in wheel_packages

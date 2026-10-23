@@ -5,6 +5,7 @@
 - **Implements**: Milestone 10 (`specs/010-operations-and-corrections/spec.md`), FR-001 – FR-016, FR-086, FR-103
 - **Relates to**: [ADR-0003](0003-content-addressed-artifact-chain.md) (artifact chain), [ADR-0010](0010-artifact-store-and-job-model.md) (store layout, §5 immutability), [ADR-0013](0013-asynchronous-run-model.md) (the run record), [ADR-0014](0014-tenant-scoping-and-store-namespacing.md) (namespacing, and the warning this ADR answers)
 - **Principles engaged**: VIII (Reproducibility, provenance, and versioning), X (Layer direction), XI (MVP discipline)
+- **Superseded usage**: `docdoc extract`, named below as a writer of content outside any run, was removed in [ADR-0027](0027-service-only-surface.md); the synchronous job route `POST /v1/documents/{blob_id}/extract` and the recorder still write such content, so the decision stands.
 
 ## Context
 

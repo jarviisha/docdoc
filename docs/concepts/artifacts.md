@@ -73,9 +73,10 @@ corruption or **a processor whose output moved without its version moving** — 
 assigns to human review because the system generally cannot detect it. This is the one place it can,
 and the evidence exists for exactly one moment, so the store refuses to discard it.
 
-`run(..., verify=True)` — `docdoc extract --verify-cache` — executes every stage and still writes, so
-that check fires on results that would otherwise have been read back. Without it, a drifted processor
-is only ever caught by a cache miss that happens not to occur.
+`run(..., verify=True)` executes every stage and still writes, so that check fires on results that
+would otherwise have been read back. It is an internal parameter of `docdoc.pipeline.run`; the
+`--verify-cache` flag that exposed it went with the document commands (ADR-0027). Without it, a
+drifted processor is only ever caught by a cache miss that happens not to occur.
 
 Concurrency is benign without coordination because the entry is immutable and content-addressed: the
 store links a completed temporary file into place, which is atomic *and* refuses an existing target,
@@ -99,36 +100,29 @@ Nothing about correctness depends on the store being present.
 ## Explaining an identity
 
 ADR-0003 accepted that cache keys "cannot be computed by hand or eyeballed in logs" on one explicit
-condition: that something would explain them.
+condition: that something would explain them. Every write leaves a derivation record beside the
+artifact, and `docdoc.artifacts.derivation.derivation_chain` reads it back. (The `docdoc explain`
+command that printed it was removed with the other document commands in
+[ADR-0027](../adr/0027-service-only-surface.md); the records are still written.)
 
-```bash
-docdoc explain sha256:3a1ede… --chain --store ./store
-```
-
-The output names the stage, the input artifact id, the processor and its version, and the **names**
+A record names the stage, the input artifact id, the processor and its version, and the **names**
 of the inputs folded into the options hash — walking back to the source blob in four hops. It carries
 no payload, no extracted value, no prompt body, and no credential: it explains identities, not
 documents. "prompt_hash" is a name; the prompt is a document.
 
 A derivation is *read* from the record a write left behind. A run with no store configured produces
-identities that were never recorded, and the tool says so rather than reconstructing something
+identities that were never recorded, and a reader says so rather than reconstructing something
 plausible — a reconstruction would be a guess wearing the costume of a record.
 
 ## Reading a result back
 
-```bash
-docdoc inspect --result sha256:3a1ede… --store ./store
-```
-
-Three lookups rather than a re-run. The validation artifact records its grounding input, which
-records its extraction input, so the whole result is reachable from the terminal identity alone —
-which is the reachability this milestone owes a future collector, paying for itself early. The HTTP
-interface does the same walk for `GET /v1/jobs/{id}/result`.
+`GET /v1/jobs/{id}/result` does three lookups rather than a re-run. The validation artifact records
+its grounding input, which records its extraction input, so the whole result is reachable from the
+terminal identity alone.
 
 A result that is not in the store is reported absent and **never recomputed**: the inputs may have
 moved since, and producing a different result under the same identity would break the one promise
-that identity makes. That is not a failure — the command was asked a question and answered it — so it
-exits `0`.
+that identity makes.
 
 ## What is out of scope
 

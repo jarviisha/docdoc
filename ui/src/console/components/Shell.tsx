@@ -45,7 +45,7 @@ const NAV: { heading: string | null; entries: NavEntry[] }[] = [
     heading: "Operate",
     entries: [
       { name: "runs", label: "Runs" },
-      { name: "submit", label: "Submit OCR" },
+      { name: "submit", label: "Submit" },
       { name: "quality", label: "Quality" },
     ],
   },

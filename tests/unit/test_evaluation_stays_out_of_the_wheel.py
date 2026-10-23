@@ -1,22 +1,21 @@
-"""T091 — the base install carries no golden set and no new dependency (FR-059).
+"""T091 — the wheel carries no golden set, and the scorer imports no provider SDK (FR-059).
 
 FR-059 currently holds **by build configuration rather than by rule**, and that is
 exactly the kind of guarantee that erodes silently. Nothing today stops somebody
 adding ``datasets`` to the wheel's packages, or reaching for a plotting library
 to render a report, and the failure is invisible: the wheel gets bigger, the
-install grows a dependency, and the only person who notices is a user wondering
-why a document-processing library ships invoices.
+install grows a dependency, and the only person who notices is an operator wondering
+why a document-processing image ships invoices.
 
 Two properties, checked against ``pyproject.toml`` and against the import graph:
 
 **``datasets/`` is not in the wheel.** It is evaluation data, useful in a
 checkout and pointless in a deployment. Shipping it would also mean shipping
-documents — synthetic here, but the *shape* is the thing: a library that vendors
+documents — synthetic here, but the *shape* is the thing: a package that vendors
 a corpus invites the next dataset to be a real one.
 
-**Importing the scorer pulls in no provider SDK and no new runtime dependency.**
-The base install is ``pydantic`` plus ``rapidfuzz``, and this milestone added
-neither a third nor an optional extra that quietly became required.
+**Importing the scorer pulls in no provider SDK.** Scoring is a deterministic
+computation over recorded facts; no optional extra may quietly become required.
 """
 
 from __future__ import annotations
@@ -49,21 +48,6 @@ def test_datasets_is_outside_the_wheel() -> None:
     assert not any("dataset" in entry for entry in packages)
 
 
-def test_the_runtime_dependencies_are_unchanged() -> None:
-    """Milestone 6 added no runtime dependency, and this is where that stays true.
-
-    Pinned as a set rather than "at most N", because the useful question is not
-    how many there are but which ones — a swap would leave a count check green.
-    """
-    dependencies = _config()["project"]["dependencies"]
-    names = {entry.split(">")[0].split("=")[0].split("[")[0].strip() for entry in dependencies}
-
-    assert names == {"pydantic", "rapidfuzz"}, (
-        f"the base install now requires {sorted(names)}. Scoring is a deterministic "
-        "computation over recorded facts; it needs nothing a document parser does not"
-    )
-
-
 def test_no_new_optional_extra_was_added_for_evaluation() -> None:
     """An ``[evaluation]`` extra would make the feature opt-in, which it is not.
 
@@ -73,19 +57,20 @@ def test_no_new_optional_extra_was_added_for_evaluation() -> None:
     extras = set(_config()["project"].get("optional-dependencies", {}))
 
     # `api` was added by Milestone 7 for the HTTP interface, which is genuinely
-    # optional — the library and the command line are complete without it. `gcv`
+    # optional — the workers and the operating commands run without it. `gcv`
     # was added with the Cloud Vision parser, and is optional for the reason every
-    # provider extra is: Principle IV forbids the base install pulling in an OCR
-    # engine. The claim this test makes is unchanged and still holds: there is no
-    # `evaluation` extra, and none of the others gates scoring. Note also the
-    # absence of a `cli` extra, which is not an oversight: the command line is
-    # argparse, so there is nothing to keep out of the base install.
+    # provider extra is: provider SDKs and OCR engines stay behind extras, which
+    # is how the image composes what it installs (ADR-0027). The claim this test
+    # makes is unchanged and still holds: there is no `evaluation` extra, and
+    # none of the others gates scoring. Note also the absence of a `cli` extra,
+    # which is not an oversight: the command line is argparse, so there is
+    # nothing to keep out of an install.
     #
     # `ui` was added by Milestone 8 and is the odd one: it pulls no SDK and no
     # framework, only the built browser client as a separate distribution. It is
     # an extra for the reason FR-035 gives — a Python extra can add a dependency
     # but cannot add *files* to a wheel everyone already installs, so opting in
-    # is the only way the base install can stay free of static assets. Scoring is
+    # is the only way an install without it stays free of static assets. Scoring is
     # not gated by it either, which is what this test is actually about.
     # `otel` was added by Milestone 10 and belongs to the same category as
     # `postgres` and `s3`: infrastructure the sanctioned stack names, opted into by
@@ -132,7 +117,7 @@ def test_importing_the_scorer_pulls_in_no_provider_sdk() -> None:
     assert result.stdout.strip() == "[]", (
         f"importing docdoc.evaluation loaded {result.stdout.strip()}. A provider SDK in "
         "the scorer's import graph is the FR-007 contract broken, and it means the "
-        "base install now depends on one"
+        "every install now depends on one"
     )
 
 

@@ -131,10 +131,8 @@ def test_the_deterministic_layers_cannot_reach_the_store_or_a_framework() -> Non
         assert "fastapi" in forbidden, f"{source} may reach a web framework"
 
 
-def test_the_command_line_needs_no_dependency() -> None:
-    """The whole argument for argparse: `docdoc` belongs to the base install."""
-    extras = _config()["project"]["optional-dependencies"]  # type: ignore[index]
-    assert "cli" not in extras, "a cli extra would put the command behind a second install"
+def test_the_command_line_entry_point() -> None:
+    """`docdoc` is the operating command; the entry point must keep resolving."""
     assert _config()["project"]["scripts"] == {"docdoc": "docdoc.cli:main"}  # type: ignore[index]
 
 
@@ -147,25 +145,22 @@ def test_the_http_interface_stays_behind_an_extra() -> None:
 
 # -- FR-030: the command line contains no stage logic ------------------------
 
-#: The three stage entry points the CLI must reach only through the pipeline.
+#: The four stage entry points the CLI must reach only through the pipeline.
 #: Names rather than modules, because a module-level ban would be wrong: the CLI
 #: legitimately imports ``ExtractionResult``, ``GroundingResult``, and
 #: ``ValidationResult`` from these same modules to *render* a result, which is
 #: precisely what FR-030 permits — "it parses arguments, calls the pipeline, and
 #: formats a result".
 _STAGE_ENTRY_POINTS = {
+    # Included since the `parse` command went: it was the one front end with a
+    # reason to call `ingest.parse` directly, and no operating command has one.
+    "docdoc.ingest": {"parse"},
+    "docdoc.ingest.parse": {"parse"},
     "docdoc.extraction.extract": {"extract"},
     "docdoc.grounding": {"ground"},
     "docdoc.grounding.ground": {"ground"},
     "docdoc.validation": {"validate"},
 }
-
-#: ``docdoc.ingest.parse`` is deliberately absent from the set above. ``docdoc
-#: parse FILE`` is one of the six commands FR-026 names, and there is no pipeline
-#: entry point for a bare parse — the pipeline runs four stages or none. So the
-#: parse command calls ``ingest.parse`` directly, and that is the front end doing
-#: its job rather than containing a stage's logic.
-_PARSE_IS_A_COMMAND = "docdoc.ingest"
 
 
 def _cli_modules() -> list[Path]:
@@ -206,19 +201,6 @@ def test_the_command_line_reaches_no_stage_except_through_the_pipeline(path: Pat
             "FR-009 and SC-014 exist to prevent. Importing a *result model* from "
             "the same module is fine and is what formatting a result needs."
         )
-
-
-def test_the_parse_command_may_call_ingest_directly() -> None:
-    """The deliberate exception, asserted so it stays deliberate.
-
-    ``docdoc parse`` is one of the six commands FR-026 names and the pipeline has
-    no entry point for a bare parse — it runs four stages or none. If this ever
-    fails because the exception was removed, the parse command needs somewhere
-    else to go before the rule above tightens.
-    """
-    assert _PARSE_IS_A_COMMAND not in _STAGE_ENTRY_POINTS
-    parse_command = Path("src/docdoc/cli/commands/parse.py")
-    assert "from docdoc.ingest import parse" in parse_command.read_text(encoding="utf-8")
 
 
 # -- T119: the run layer's public surface, and the one name kept out of it ----

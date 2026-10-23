@@ -15,6 +15,24 @@
 # Build from the repository root, not from this directory:
 #   docker build -f packaging/docker/Dockerfile -t docdoc .
 
+# The operations console, built from `ui/` (ADR-0027). Node lives in this stage
+# only; the runtime image carries the built files and no Node. Until ADR-0027 the
+# image carried no console and compose mounted a host build, which made Node a
+# prerequisite of the quickstart. The wheel still carries no assets (FR-035):
+# the build is copied beside the installed package, not into it.
+#
+# `--include=optional` because rolldown's native binding is an optional
+# dependency, and an npm configured to omit optional dependencies otherwise
+# installs a toolchain that cannot build.
+FROM node:24-bookworm-slim AS console
+WORKDIR /ui
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci --include=optional --no-audit --no-fund
+COPY ui/ ./
+RUN npm run build
+
+# ---------------------------------------------------------------------------
+
 FROM python:3.11-slim-bookworm AS builder
 
 # uv resolves and installs; it is not in the runtime image.
@@ -59,6 +77,10 @@ RUN useradd --create-home --uid 10001 docdoc
 # A module invocation needs no entry in any list.
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin/docdoc /usr/local/bin/docdoc
+# The console's build, and the setting `docdoc.api.ui` reads first. Overriding
+# `DOCDOC_CONSOLE_ROOT` (to a mounted build, or to an empty directory) still
+# wins, as it does everywhere else.
+COPY --from=console /ui/dist /opt/docdoc/console
 
 USER docdoc
 WORKDIR /home/docdoc
@@ -68,7 +90,8 @@ WORKDIR /home/docdoc
 # image that picked one would be making it for them — silently, inside a
 # container layer that disappears on restart.
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    DOCDOC_CONSOLE_ROOT=/opt/docdoc/console
 
 EXPOSE 8000
 

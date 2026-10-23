@@ -18,7 +18,7 @@ from docdoc.api.deps import (
     _stores_of,
     _unknown_run,
 )
-from docdoc.api.documents import _terminal
+from docdoc.api.documents import _terminal, store_blob
 from docdoc.api.models import RunAcceptedResponse, RunListResponse, RunStateResponse, RunSummary
 from docdoc.api.paging import DEFAULT_RUN_PAGE, MAX_RUN_PAGE
 from docdoc.api.settings import PRIORITY_CEILING_ENV, RUN_DATABASE_URL_ENV
@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from docdoc.api.app import _Deployment
+    from docdoc.runs.model import Priority
 
 
 def routes() -> APIRouter:
@@ -51,46 +52,14 @@ def routes() -> APIRouter:
         from stage outputs (ADR-0013 §1). That is the whole reason this is a new
         resource rather than a ``pending`` status on ``GET /v1/jobs``.
         """
-        from docdoc.runs.errors import RunStateUnavailableError
-        from docdoc.runs.identity import DEFAULT_RETENTION, deadline, new_run_id, now
-
         deployment = _deployment_of(request)
-        if not deployment.has_runs:
-            # No `Retry-After`: this one is *not* retryable. Nothing will change
-            # until an operator configures a database, and telling a client to
-            # come back in a second would make it poll a decision nobody is
-            # making. The two 503s on this route mean different things and say so.
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "error": {
-                        "class": "RunStateUnavailableError",
-                        "message": (
-                            "this deployment accepts no asynchronous runs; set "
-                            f"{RUN_DATABASE_URL_ENV} and apply `docdoc migrate`"
-                        ),
-                    }
-                },
-            )
-        if not deployment.has_store:
-            raise _no_store_configured()
-
         # Every run records its owning tenant at creation (FR-062), which is why
         # `tenant_id` is a column the first migration creates rather than one a
         # later one adds: a backfill would have to invent an owner for every row.
         tenant = principal.tenant_id
-
-        # **Before the store is touched and before any row exists** (FR-044). A
-        # refused submission costs the deployment one counter read: no run, no
-        # queue position, no blob lookup.
-        #
-        # After authentication, deliberately. A limit is a fact about a tenant,
-        # so there has to be one; and an unauthenticated caller learning which
-        # tenant is over quota would be a disclosure the 429 body is careful not
-        # to make to anyone else.
-        verdict = deployment.limiter.check(tenant_id=tenant, now=now())
-        if not verdict.allowed:
-            return _limit_refusal(verdict)
+        refusal = _gate(deployment, tenant)
+        if refusal is not None:
+            return refusal
 
         _, blobs = _stores_of(request, principal)
         assert blobs is not None
@@ -127,12 +96,7 @@ def routes() -> APIRouter:
             )
 
         if schema not in deployment.registry().identities():
-            return JSONResponse(
-                status_code=422,
-                content={
-                    "error": {"class": "SchemaError", "message": "schema is not configured here"}
-                },
-            )
+            return _unknown_schema()
 
         # **Two optional inputs, and an empty body is the Milestone 9 request.**
         # Read after the limit check and after the blob lookup, so a refused
@@ -159,74 +123,13 @@ def routes() -> APIRouter:
                 content={"error": {"class": "UnknownCallback", "message": "no such callback here"}},
             )
 
-        spec = _RunSpec(
-            tenant_id=tenant,
+        return _enqueue(
+            request,
+            tenant=tenant,
             blob_id=blob_id,
-            schema_identity=schema,
-            request_id=request.headers.get("x-request-id"),
-            idempotency_key=request.headers.get("idempotency-key"),
+            schema=schema,
             priority=granted,
             callback_id=callback_id,
-        )
-        started = now()
-        allocated = new_run_id()
-        try:
-            run = deployment.runs().submit(
-                spec,
-                run_id=allocated,
-                now=started,
-                expires_at=deadline(started, DEFAULT_RETENTION),
-            )
-        except RunStateUnavailableError as exc:
-            # Refused rather than accepted and dropped (FR-057). A run that
-            # cannot be recorded is work that will never be done and never be
-            # reported, which is the silent failure this status exists to avoid.
-            #
-            # `Retry-After` is what makes "retryable" a fact a client can act on
-            # rather than a word in a specification. This is the transient case:
-            # the database is configured and unreachable, so coming back is the
-            # correct thing to do.
-            return JSONResponse(
-                status_code=503,
-                content={"error": {"class": type(exc).__name__, "message": str(exc)}},
-                headers={"Retry-After": "1"},
-            )
-
-        # **202 for a new run, 200 for one this key already produced**, per
-        # contracts/runs-http-api.md. The two codes carry the distinction the
-        # body cannot: 202 says work was queued, 200 says the caller is looking
-        # at a run that already existed. A client retrying through a flaky
-        # network learns whether its first attempt landed — which is the entire
-        # reason it sent an idempotency key.
-        #
-        # Read off the identity rather than from a flag the queue returns: the
-        # run that comes back carries the id it was created with, so a run whose
-        # id is not the one just allocated is a run that predates this request.
-        # That works identically for both queue implementations and needs no
-        # second return value to keep in step with the first.
-        replayed = run.run_id != allocated
-        if not replayed:
-            # Counted **after** the row exists, and only for a run that is new.
-            # A replayed idempotency key is one submission the caller already
-            # paid for, and counting it twice would make a client retrying
-            # through a flaky network spend its allowance on a run it already
-            # has (FR-011).
-            deployment.limiter.record_submission(tenant_id=tenant, now=started)
-
-        return JSONResponse(
-            status_code=200 if replayed else 202,
-            content=RunAcceptedResponse(
-                run_id=str(run.run_id),
-                status=str(run.status),
-                created_at=run.created_at.isoformat(),
-                # From the run and not from `granted`: on an idempotent replay
-                # the caller is looking at a run that already existed, and what
-                # they need to know is the priority *that* run carries rather
-                # than the one this request asked for and did not get.
-                # The **name**, because that is what the request used. See
-                # `Priority.label`.
-                priority=run.priority.label,
-            ).model_dump(mode="json"),
         )
 
     @router.get("/runs", response_model=RunListResponse)
@@ -854,6 +757,169 @@ def _run_erased(stone: Any) -> JSONResponse:
             "deleted_at": stone.deleted_at.isoformat(),
             "policy": stone.policy,
         },
+    )
+
+
+def _gate(deployment: _Deployment, tenant: str) -> JSONResponse | None:
+    """Why this deployment or tenant accepts no run submission now, or `None`.
+
+    Shared by `POST /v1/documents/{blob_id}/runs` and the console's extraction
+    submit, so the 503s and the limiter refusal (FR-044) are one code path.
+    """
+    from docdoc.runs.identity import now
+
+    if not deployment.has_runs:
+        # No `Retry-After`: this one is *not* retryable. Nothing will change
+        # until an operator configures a database, and telling a client to
+        # come back in a second would make it poll a decision nobody is
+        # making. The two 503s on this route mean different things and say so.
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": {
+                    "class": "RunStateUnavailableError",
+                    "message": (
+                        "this deployment accepts no asynchronous runs; set "
+                        f"{RUN_DATABASE_URL_ENV} and apply `docdoc migrate`"
+                    ),
+                }
+            },
+        )
+    if not deployment.has_store:
+        raise _no_store_configured()
+
+    # **Before the store is touched and before any row exists** (FR-044). A
+    # refused submission costs the deployment one counter read: no run, no
+    # queue position, no blob lookup.
+    #
+    # After authentication, deliberately. A limit is a fact about a tenant,
+    # so there has to be one; and an unauthenticated caller learning which
+    # tenant is over quota would be a disclosure the 429 body is careful not
+    # to make to anyone else.
+    verdict = deployment.limiter.check(tenant_id=tenant, now=now())
+    if not verdict.allowed:
+        return _limit_refusal(verdict)
+    return None
+
+
+def _unknown_schema() -> JSONResponse:
+    return JSONResponse(
+        status_code=422,
+        content={"error": {"class": "SchemaError", "message": "schema is not configured here"}},
+    )
+
+
+def _enqueue(
+    request: Request,
+    *,
+    tenant: str,
+    blob_id: str,
+    schema: str,
+    priority: Any,
+    callback_id: Any,
+) -> JSONResponse:
+    """Record the run for a stored blob and answer 202, or 200 on an idempotent replay."""
+    from docdoc.runs.errors import RunStateUnavailableError
+    from docdoc.runs.identity import DEFAULT_RETENTION, deadline, new_run_id, now
+
+    deployment = _deployment_of(request)
+    spec = _RunSpec(
+        tenant_id=tenant,
+        blob_id=blob_id,
+        schema_identity=schema,
+        request_id=request.headers.get("x-request-id"),
+        idempotency_key=request.headers.get("idempotency-key"),
+        priority=priority,
+        callback_id=callback_id,
+    )
+    started = now()
+    allocated = new_run_id()
+    try:
+        run = deployment.runs().submit(
+            spec,
+            run_id=allocated,
+            now=started,
+            expires_at=deadline(started, DEFAULT_RETENTION),
+        )
+    except RunStateUnavailableError as exc:
+        # Refused rather than accepted and dropped (FR-057). A run that
+        # cannot be recorded is work that will never be done and never be
+        # reported, which is the silent failure this status exists to avoid.
+        #
+        # `Retry-After` is what makes "retryable" a fact a client can act on
+        # rather than a word in a specification. This is the transient case:
+        # the database is configured and unreachable, so coming back is the
+        # correct thing to do.
+        return JSONResponse(
+            status_code=503,
+            content={"error": {"class": type(exc).__name__, "message": str(exc)}},
+            headers={"Retry-After": "1"},
+        )
+
+    # **202 for a new run, 200 for one this key already produced**, per
+    # contracts/runs-http-api.md. The two codes carry the distinction the
+    # body cannot: 202 says work was queued, 200 says the caller is looking
+    # at a run that already existed. A client retrying through a flaky
+    # network learns whether its first attempt landed — which is the entire
+    # reason it sent an idempotency key.
+    #
+    # Read off the identity rather than from a flag the queue returns: the
+    # run that comes back carries the id it was created with, so a run whose
+    # id is not the one just allocated is a run that predates this request.
+    # That works identically for both queue implementations and needs no
+    # second return value to keep in step with the first.
+    replayed = run.run_id != allocated
+    if not replayed:
+        # Counted **after** the row exists, and only for a run that is new.
+        # A replayed idempotency key is one submission the caller already
+        # paid for, and counting it twice would make a client retrying
+        # through a flaky network spend its allowance on a run it already
+        # has (FR-011).
+        deployment.limiter.record_submission(tenant_id=tenant, now=started)
+
+    return JSONResponse(
+        status_code=200 if replayed else 202,
+        content=RunAcceptedResponse(
+            run_id=str(run.run_id),
+            status=str(run.status),
+            created_at=run.created_at.isoformat(),
+            # From the run and not from `granted`: on an idempotent replay
+            # the caller is looking at a run that already existed, and what
+            # they need to know is the priority *that* run carries rather
+            # than the one this request asked for and did not get.
+            # The **name**, because that is what the request used. See
+            # `Priority.label`.
+            priority=run.priority.label,
+        ).model_dump(mode="json"),
+    )
+
+
+async def submit_extraction(
+    request: Request, *, tenant_id: str, data: bytes, schema: str, priority: Priority
+) -> JSONResponse:
+    """Store `data` as a blob and submit an extraction run for it.
+
+    `POST /v1/documents` then `POST /v1/documents/{blob_id}/runs` in one call, for
+    the console. Storage is `documents.store_blob`; the gate, refusals, idempotency
+    (`Idempotency-Key` off `request.headers`) and deadline are the run route's own.
+    """
+    from fastapi.concurrency import run_in_threadpool
+
+    deployment = _deployment_of(request)
+    refusal = _gate(deployment, tenant_id)
+    if refusal is not None:
+        return refusal
+    # Before the blob is written, so a bad schema leaves nothing behind.
+    if schema not in deployment.registry().identities():
+        return _unknown_schema()
+    stored = await run_in_threadpool(store_blob, request, tenant_id, data)
+    return _enqueue(
+        request,
+        tenant=tenant_id,
+        blob_id=stored.blob_id,
+        schema=schema,
+        priority=priority,
+        callback_id=None,
     )
 
 

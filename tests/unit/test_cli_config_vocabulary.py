@@ -20,7 +20,6 @@ fails here.
 from __future__ import annotations
 
 import argparse
-import json
 import os
 from pathlib import Path
 
@@ -28,6 +27,8 @@ import pytest
 
 from docdoc.cli import EXIT_BAD_INVOCATION, build_parser, main
 from docdoc.cli.config import COMMAND_SCOPED, ENVIRONMENT_ONLY, FLAG_FOR_SETTING, Settings
+from docdoc.ingest import parse
+from docdoc.ingest.errors import UnsupportedDocumentError
 
 # The canonical list of every configuration name the code reads. Imported rather
 # than restated: a third copy of this list is how the second and third would
@@ -109,10 +110,10 @@ def test_every_mapped_flag_exists_on_the_root_parser() -> None:
 
 @pytest.mark.parametrize(
     "command",
-    ["parse", "extract", "inspect", "explain", "eval", "migrate"],
+    ["migrate", "worker", "sweep"],
 )
 def test_every_mapped_flag_exists_on_each_subcommand(command: str) -> None:
-    """`docdoc extract --store` must work as readily as `docdoc --store extract`.
+    """`docdoc worker --store` must work as readily as `docdoc --store worker`.
 
     The flags are added per-subparser for that reason, and a flag added to the
     common set but reached only from the root would be a puzzle rather than a
@@ -135,8 +136,8 @@ def test_every_mapped_flag_exists_on_each_subcommand(command: str) -> None:
     assert not missing, f"`docdoc {command}` is missing {missing}"
 
     # The other half: a scoped flag must not leak onto commands it means nothing
-    # to. `--run-database-url` on `docdoc parse` would be a flag that does
-    # nothing to the command carrying it.
+    # to. `--default-tenant` on `docdoc worker` would let one process disagree
+    # with the others about where content lives.
     leaked = sorted(
         flag
         for setting, flag in FLAG_FOR_SETTING.items()
@@ -158,7 +159,7 @@ def test_the_limit_defaults_are_the_documented_ones(monkeypatch: pytest.MonkeyPa
     monkeypatch.delenv("DOCDOC_MAX_DOCUMENT_BYTES", raising=False)
     monkeypatch.delenv("DOCDOC_MAX_PAGES", raising=False)
 
-    limits = _settings(["parse", FIXTURE]).limits()
+    limits = _settings(["worker"]).limits()
 
     assert limits.max_size_bytes == 50 * 1024 * 1024
     assert limits.max_pages == 1000
@@ -168,7 +169,7 @@ def test_the_environment_moves_the_limits(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv("DOCDOC_MAX_DOCUMENT_BYTES", "4096")
     monkeypatch.setenv("DOCDOC_MAX_PAGES", "7")
 
-    limits = _settings(["parse", FIXTURE]).limits()
+    limits = _settings(["worker"]).limits()
 
     assert limits.max_size_bytes == 4096
     assert limits.max_pages == 7
@@ -184,7 +185,7 @@ def test_the_flag_beats_the_environment(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setenv("DOCDOC_MAX_DOCUMENT_BYTES", "4096")
     monkeypatch.setenv("DOCDOC_MAX_PAGES", "7")
 
-    limits = _settings(["parse", FIXTURE, "--max-pages", "3"]).limits()
+    limits = _settings(["worker", "--max-pages", "3"]).limits()
 
     assert limits.max_pages == 3
     assert limits.max_size_bytes == 4096
@@ -194,16 +195,25 @@ def test_the_flag_answers_with_no_environment_at_all(monkeypatch: pytest.MonkeyP
     monkeypatch.delenv("DOCDOC_MAX_DOCUMENT_BYTES", raising=False)
     monkeypatch.delenv("DOCDOC_MAX_PAGES", raising=False)
 
-    limits = _settings(["parse", FIXTURE, "--max-document-bytes", "1024"]).limits()
+    limits = _settings(["worker", "--max-document-bytes", "1024"]).limits()
 
     assert limits.max_size_bytes == 1024
 
 
 # -- the flags actually reach the parse, and a bad one is an invocation error --
+#
+# The worker hands `Settings.limits()` to every parse it runs, so the resolved
+# limits are handed to `docdoc.ingest.parse` here exactly as the worker does.
+
+
+def _parse(path: str, *flags: str) -> str:
+    """Parse with the limits `docdoc worker <flags>` resolves; the document's id."""
+    limits = _settings(["worker", *flags]).limits()
+    return parse(Path(path).read_bytes(), limits=limits).id
 
 
 def test_an_undersized_limit_refuses_the_document_before_it_is_parsed(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The point of the flag: an operator can set the limit FR-039 promises.
 
@@ -214,31 +224,23 @@ def test_an_undersized_limit_refuses_the_document_before_it_is_parsed(
     monkeypatch.delenv("DOCDOC_MAX_DOCUMENT_BYTES", raising=False)
     size = Path(FIXTURE).stat().st_size
 
-    code = main(["parse", FIXTURE, "--max-document-bytes", str(size - 1), "--json"])
-
-    assert code != 0
-    assert "UnsupportedDocumentError" in capsys.readouterr().out
+    with pytest.raises(UnsupportedDocumentError):
+        _parse(FIXTURE, "--max-document-bytes", str(size - 1))
 
 
 def test_the_same_document_passes_under_a_sufficient_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Guards the guard: the refusal above must be the limit, not the fixture.
-
-    This one needs a parser that can actually read a PDF; the refusal above does
-    not, because the size check runs before a parser is selected. That asymmetry
-    is FR-039's "before parsing it and before contacting any provider" showing up
-    as a property of the test suite.
-    """
-    pytest.importorskip("pypdfium2")  # SC-013: skips on a base install
+    """Guards the guard: the refusal above must be the limit, not the fixture."""
+    pytest.importorskip("pypdfium2")
     monkeypatch.delenv("DOCDOC_MAX_DOCUMENT_BYTES", raising=False)
     size = Path(FIXTURE).stat().st_size
 
-    assert main(["parse", FIXTURE, "--max-document-bytes", str(size), "--json"]) == 0
+    assert _parse(FIXTURE, "--max-document-bytes", str(size)).startswith("sha256:")
 
 
 def test_the_page_limit_refuses_a_document_with_too_many_pages(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The other flag, against a fixture that actually has pages to exceed.
 
@@ -247,29 +249,21 @@ def test_the_page_limit_refuses_a_document_with_too_many_pages(
     known — after routing, before the parser runs — which is the earliest point
     it can (ING-2).
     """
-    pytest.importorskip("pypdfium2")  # SC-013: skips on a base install
+    pytest.importorskip("pypdfium2")
     monkeypatch.delenv("DOCDOC_MAX_PAGES", raising=False)
 
-    refused = main(["parse", MULTIPAGE, "--max-pages", "2", "--json"])
-    assert refused != 0
-    assert "UnsupportedDocumentError" in capsys.readouterr().out
+    with pytest.raises(UnsupportedDocumentError):
+        _parse(MULTIPAGE, "--max-pages", "2")
 
-    assert main(["parse", MULTIPAGE, "--max-pages", "3", "--json"]) == 0
-
-
-def _document_id(argv: list[str], capsys: pytest.CaptureFixture[str]) -> str:
-    assert main(argv) == 0
-    return json.loads(capsys.readouterr().out)["document_id"]
+    assert _parse(MULTIPAGE, "--max-pages", "3").startswith("sha256:")
 
 
-def test_moving_a_limit_moves_no_identity(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_moving_a_limit_moves_no_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     """FR-060, for the lever T137 opened — and the reason it needed one.
 
     `tests/unit/test_stage_identity.py` asserts the *shape*: no options-hash
-    function accepts a limit. This asserts the *behaviour* through the command a
-    user actually runs, because the two can diverge — a limit could reach an
+    function accepts a limit. This asserts the *behaviour* through the call the
+    worker actually makes, because the two can diverge — a limit could reach an
     identity by being folded into the parse options mapping rather than by
     appearing in a signature, and the shape test would not see it.
 
@@ -279,21 +273,15 @@ def test_moving_a_limit_moves_no_identity(
     deployments with different caps would share a store and reuse nothing from
     each other, and neither could tell.
     """
-    pytest.importorskip("pypdfium2")  # SC-013: skips on a base install
+    pytest.importorskip("pypdfium2")
     monkeypatch.delenv("DOCDOC_MAX_DOCUMENT_BYTES", raising=False)
     monkeypatch.delenv("DOCDOC_MAX_PAGES", raising=False)
     size = Path(MULTIPAGE).stat().st_size
 
-    unbounded = _document_id(["parse", MULTIPAGE, "--json"], capsys)
-    generous = _document_id(
-        ["parse", MULTIPAGE, "--json", "--max-pages", "500", "--max-document-bytes", str(size * 4)],
-        capsys,
-    )
+    unbounded = _parse(MULTIPAGE)
+    generous = _parse(MULTIPAGE, "--max-pages", "500", "--max-document-bytes", str(size * 4))
     # Exactly at both limits: still accepted, and still the same document.
-    exact = _document_id(
-        ["parse", MULTIPAGE, "--json", "--max-pages", "3", "--max-document-bytes", str(size)],
-        capsys,
-    )
+    exact = _parse(MULTIPAGE, "--max-pages", "3", "--max-document-bytes", str(size))
 
     assert unbounded == generous == exact, (
         "the document's identity moved with a limit that only decided whether to accept it; "
@@ -302,7 +290,7 @@ def test_moving_a_limit_moves_no_identity(
 
 
 def test_the_environment_form_of_a_limit_moves_no_identity_either(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The flag and the variable are one setting, so both directions are checked.
 
@@ -310,12 +298,12 @@ def test_the_environment_form_of_a_limit_moves_no_identity_either(
     through `Settings.limits()`, the variable through the field's own default
     factory — and only one of them was exercised above.
     """
-    pytest.importorskip("pypdfium2")  # SC-013: skips on a base install
+    pytest.importorskip("pypdfium2")
     monkeypatch.delenv("DOCDOC_MAX_PAGES", raising=False)
-    plain = _document_id(["parse", MULTIPAGE, "--json"], capsys)
+    plain = _parse(MULTIPAGE)
 
     monkeypatch.setenv("DOCDOC_MAX_PAGES", "3")
-    bounded = _document_id(["parse", MULTIPAGE, "--json"], capsys)
+    bounded = _parse(MULTIPAGE)
 
     assert plain == bounded
 
@@ -331,7 +319,7 @@ def test_a_non_positive_limit_is_an_invocation_error(
     ``max_size_bytes`` — a field nobody typed — and would be classed as an
     untyped exception on the way out.
     """
-    code = main(["parse", FIXTURE, flag, value])
+    code = main(["worker", flag, value])
 
     assert code == EXIT_BAD_INVOCATION
     assert flag in capsys.readouterr().err
@@ -340,7 +328,7 @@ def test_a_non_positive_limit_is_an_invocation_error(
 def test_a_non_integer_limit_does_not_reach_a_traceback() -> None:
     """argparse owns this one; it must still not raise past the caller."""
     with pytest.raises(SystemExit):
-        main(["parse", FIXTURE, "--max-pages", "lots"])
+        main(["worker", "--max-pages", "lots"])
 
 
 # -- the exclusions are true ---------------------------------------------------
@@ -440,18 +428,15 @@ def test_the_fixtures_are_where_this_file_thinks_they_are() -> None:
         assert os.path.getsize(path) > 0, path
 
 
-def test_the_multipage_fixture_still_has_pages_to_exceed(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
+def test_the_multipage_fixture_still_has_pages_to_exceed() -> None:
     """Guards the page-limit tests against a fixture that was regenerated flat.
 
     A one-page `mixed_pages.pdf` would make the refusal test pass for the wrong
     reason only if the cap were also wrong — but it would make the *acceptance*
     half assert nothing at all, which is the quieter failure.
     """
-    pytest.importorskip("pypdfium2")  # SC-013: skips on a base install
-    assert main(["parse", MULTIPAGE, "--json"]) == 0
-    assert json.loads(capsys.readouterr().out)["pages"] == 3
+    pytest.importorskip("pypdfium2")
+    assert len(parse(Path(MULTIPAGE).read_bytes()).pages) == 3
 
 
 # -- the other blind spot: a flag with no setting behind it (T102) -------------
@@ -475,12 +460,7 @@ def test_the_multipage_fixture_still_has_pages_to_exceed(
 FLAGS_WITHOUT_A_SETTING: dict[str, str] = {
     "--json": "an output form, chosen per invocation; there is nothing to configure",
     "--no-store": "the negation of --store, not a second setting",
-    "--verify-cache": "a per-invocation mode, like --json",
-    "--schema": "the schema this invocation runs; the *search path* is the setting",
-    "--result": "an identity to read back, which is an argument and not a setting",
-    "--chain": "a per-invocation mode",
     "--stage": "which subset of the store to clear; an argument",
-    "--predictions": "where one evaluation's predictions are; an argument",
     "--check": "a per-invocation mode: report rather than apply",
     "--tenant": "whose data to erase, or whose credentials to list; an argument",
     "--label": "what a credential is for; an argument recorded beside it",
@@ -602,7 +582,7 @@ def test_the_default_tenant_flag_is_scoped_to_migrate() -> None:
         if isinstance(action, argparse._SubParsersAction)
     )
     assert "--default-tenant" in _option_strings(subparsers.choices["migrate"])
-    for command in ("parse", "extract", "worker"):
+    for command in ("worker", "sweep", "erase"):
         assert "--default-tenant" not in _option_strings(subparsers.choices[command]), (
             f"`docdoc {command}` can override where every other process looks for "
             f"content, which is the disagreement DOCDOC_DEFAULT_TENANT prevents"

@@ -1,7 +1,7 @@
 # Quality on your own documents
 
-`docdoc eval` scores a committed golden set. This is the other half: a tenant measures docdoc on
-*its own* documents, with no dataset files, and sees whether a change made things better or worse.
+The committed golden set `datasets/mvp` is the project's regression net, scored from the tests. This
+is the other half: a tenant measures docdoc on *its own* documents, with no dataset files, and sees whether a change made things better or worse.
 The decision is [ADR-0026](../adr/0026-tenant-quality-evaluation.md); the metrics are the ones
 [evaluation](evaluation.md) defines, unchanged.
 
@@ -58,7 +58,7 @@ Refusals:
 
 ## Schema versions
 
-The library will not score or compare across a schema identity or hash change. So before each
+The scorer will not score or compare across a schema identity or hash change. So before each
 evaluation the answers are **restamped** to the newest version: fields that no longer exist are
 dropped from the stamped copy (not from storage), and new fields count as unchecked. The stamped
 set has its own `golden_set_id`, so two reports over different answers or versions are visibly not

@@ -7,8 +7,9 @@ credential requirement they have no way to satisfy. Every test of the HTTP layer
 still passes, because the HTTP layer *does* supply one.
 
 So the test is deliberately blunt: with `DOCDOC_API_KEYS_FILE` **set**, every CLI
-subcommand and every in-process entry point still runs, with no credential
-supplied anywhere. If authentication ever leaks below the request boundary, this
+subcommand parses and every in-process entry point the worker calls -- the parse
+and the pipeline, with a store -- still runs, with no credential supplied
+anywhere. If authentication ever leaks below the request boundary, this
 is what says so.
 
 `docdoc worker` and `docdoc migrate` are exercised through their argument
@@ -67,9 +68,15 @@ def _subcommands() -> list[str]:
 
 def test_the_parser_has_the_subcommands_this_file_expects() -> None:
     """Guards the enumeration: a renamed command must not silently drop out."""
-    assert {"parse", "extract", "inspect", "explain", "eval", "store", "migrate", "worker"} <= set(
-        _subcommands()
-    )
+    assert {
+        "migrate",
+        "worker",
+        "sweep",
+        "credential",
+        "console-user",
+        "erase",
+        "store",
+    } <= set(_subcommands())
 
 
 @pytest.mark.parametrize("command", _subcommands())
@@ -108,19 +115,31 @@ def test_no_subcommand_offers_a_credential_flag() -> None:
 
 
 def test_parse_runs_with_authentication_configured() -> None:
-    """A real command doing real work, which `--help` cannot prove."""
+    """The parse every run starts with, doing real work, which `--help` cannot prove."""
     pytest.importorskip("pypdfium2")
+    from docdoc.ingest import parse
 
-    assert main(["parse", FIXTURE, "--json"]) == 0
+    assert parse(Path(FIXTURE).read_bytes()).id.startswith("sha256:")
 
 
-def test_extract_runs_with_authentication_configured(tmp_path: Path) -> None:
-    """The command that reaches a model adapter and a store."""
+def test_the_pipeline_runs_against_a_store_with_authentication_configured(tmp_path: Path) -> None:
+    """The call the worker makes: it reaches a model adapter and a store."""
     pytest.importorskip("pypdfium2")
+    from docdoc.artifacts import FileArtifactStore
+    from docdoc.extraction import SchemaRegistry
+    from docdoc.extraction.adapters.echo import EchoAdapter
+    from docdoc.pipeline import run
 
-    code = main(["extract", FIXTURE, "--schema", SCHEMA, "--store", str(tmp_path), "--json"])
+    result = run(
+        Path(FIXTURE).read_bytes(),
+        schema=SCHEMA,
+        registry=SchemaRegistry.from_paths([Path("schemas")]),
+        adapter=EchoAdapter.from_fixtures("tests/fixtures/echo"),
+        store=FileArtifactStore(tmp_path),
+    )
 
-    assert code in (0, 1), "0 is valid, 1 is an invalid document — neither is a refusal"
+    assert result.failed_stage is None, "a run is valid or invalid, never refused"
+    assert result.processing_id is not None
 
 
 def test_the_library_entry_point_takes_no_credential() -> None:

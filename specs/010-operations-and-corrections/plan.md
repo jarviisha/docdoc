@@ -294,6 +294,7 @@ tests/
 │   ├── test_milestone_9_deployment_unchanged.py # SC-002 — scenario 0, as a suite
 │   ├── test_erased_run_responses.py      # SC-005 — 410 to the owner, 404 to everyone else
 │   ├── test_limit_refusal_shape.py       # FR-043/FR-044 — names the limit; creates nothing
+│   ├── test_console_extraction_submit.py # console submits a file and an extraction run in one call
 │   ├── test_admin_surface_is_invisible.py # a tenant key gets 404, never 403
 │   ├── test_priority_ceiling.py          # SC-026 — accepted at the ceiling, never refused
 │   ├── test_no_review_platform.py        # FR-083/FR-084 — the absence is the contract

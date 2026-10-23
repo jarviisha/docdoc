@@ -54,7 +54,7 @@ def run(args: argparse.Namespace, settings: Settings) -> Rendering:
         import psycopg
     except ImportError as exc:
         raise RunStateUnavailableError(
-            "psycopg is not installed; run state needs `pip install docdoc[postgres]`"
+            "psycopg is not installed; run state needs the `postgres` extra"
         ) from exc
 
     try:

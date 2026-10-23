@@ -91,9 +91,9 @@ Emptying the root outright is a separate flag, and it exists at no URL:
 docdoc erase --tenant default --purge-store-root      # removes EVERYTHING
 ```
 
-That includes every artifact `docdoc extract` ever wrote from the command line,
-everything a library caller produced, and every other tenant's content if the
-store is shared. It is a flag somebody has to type on purpose.
+That includes every artifact written outside a run — by
+`POST /v1/documents/{blob_id}/extract`, by the recorder, or by an older release's
+`docdoc extract` — and every other tenant's content if the store is shared. It is a flag somebody has to type on purpose.
 
 ## Verifying
 

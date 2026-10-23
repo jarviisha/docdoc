@@ -173,7 +173,7 @@ tests/
 │   ├── test_storeless_extract.py       # writes nothing, with and without a store (SC-007/008)
 │   └── test_ui_endpoint_logging.py     # no document content in the logs (FR-033, SC-009)
 └── unit/
-    └── test_base_install_excludes_ui.py  # FR-035, FR-036 — extends the existing guard
+    └── test_ui_stays_out_of_the_wheel.py  # FR-035, FR-036 — extends the existing guard
 
 specs/007-pipeline-api-cli/contracts/http-api.md   # corrected per FR-007
 ```

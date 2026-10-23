@@ -8,10 +8,10 @@ The sweep's deletion set is a **difference**:
 
 The rejected form is one word away in English and a catastrophe away in
 behaviour: *"delete every artifact no surviving run references"* is a
-**complement**, and it removes everything `docdoc extract` ever wrote from the
-command line, everything a library caller produced, and every artifact the
-recorder wrote — because none of those has a run row, so all of them are
-unreferenced by construction.
+**complement**, and it removes everything the synchronous job route
+(`POST /v1/documents/{blob_id}/extract`) wrote, every artifact the recorder
+wrote, and everything an older release's `docdoc extract` wrote — because none
+of those has a run row, so all of them are unreferenced by construction.
 
 That version passes a test suite whose fixtures only ever create runs. This file
 creates content the way the command line does — with no run at all — and then
@@ -93,9 +93,9 @@ def _exists(root: pathlib.Path, tenant_id: str, artifact_id: str) -> bool:
 
 
 def test_content_with_no_run_row_survives_the_sweep(tmp_path: pathlib.Path) -> None:
-    """The CLI hazard, exactly as an operator would meet it.
+    """The hazard, exactly as an operator would meet it.
 
-    `docdoc extract` writes artifacts and creates no run. A complement deletes
+    `POST /v1/documents/{blob_id}/extract` writes artifacts and creates no run. A complement deletes
     them on the first sweep the deployment ever performs; a difference cannot
     reach them, because an artifact becomes a candidate only by being named by a
     run that is being removed.

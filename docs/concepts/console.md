@@ -5,7 +5,10 @@ credentials exist, and what to erase. It is not a review platform and holds no p
 queue, no workload, no review state, no disposition. That boundary is ADR-0019's and it is enforced
 by a build check rather than by review (`npm run lint:boundaries`).
 
-Install it with `pip install 'docdoc[api,ui]'` and serve it the way you already serve the API:
+The Docker image carries the console's build, so the compose stack serves it at
+`http://localhost:8000/console`; the [README quickstart](../../README.md#quickstart) walks it.
+Outside compose, the API serves it from the `docdoc-ui` distribution (the `ui` extra) or from a
+checkout's `ui/dist`:
 
 ```bash
 uvicorn --factory docdoc.api.app:create_app --host 127.0.0.1 --port 8000
@@ -71,7 +74,7 @@ locked account, and a disabled one. Five failures in a row lock an account for f
 
 ## What it does
 
-The page is a left sidebar — **Overview**, **Runs**, **Submit OCR**, **Parsers**, then under "Admin"
+The page is a left sidebar — **Overview**, **Runs**, **Submit**, **Quality**, **Parsers**, then under "Admin"
 **Tenants**, **Credentials**, **Callbacks** and **Erasure**, with the username and **Sign out** at the bottom — and the chosen area on the right.
 It opens on the Overview.
 
@@ -132,9 +135,13 @@ phone photo's EXIF orientation needs no turn of its own: PaddleX and the browser
 image that cannot be fetched is replaced by an error, and its text still shows. A failed run requests
 no result, and an extraction run keeps **Download result** only.
 
-**Submit OCR** sends one document for OCR on a tenant's behalf, through
+**Submit** sends one document on a tenant's behalf, **as OCR** or **as an extraction** ("Submit
+as"). An extraction goes through `POST /v1/console/tenants/{id}/extractions?schema=<identity>`,
+which stores the bytes and submits an extraction run through the same path, limits and
+`Idempotency-Key` handling as `POST /v1/documents/{blob_id}/runs` with that tenant's key; pick a
+tenant and a schema (from `GET /v1/console/schemas`) and the document. OCR goes through
 `POST /v1/console/tenants/{id}/ocr` — the same path, caps and validation as `POST /v1/ocr` with
-that tenant's key. Pick a tenant (from `GET /v1/console/tenants`), a parser (Automatic, or one from
+that tenant's key. For OCR, pick a tenant (from `GET /v1/console/tenants`), a parser (Automatic, or one from
 `GET /v1/console/parsers`; an unavailable parser is listed but cannot be chosen, one failing its
 health check is marked "not responding"), a language (the parser's default, or one of that parser's
 languages; changing the parser resets it), and the document. A refusal is shown in the form; an
@@ -180,9 +187,9 @@ preferred in this order:
 
 | Order | Root | Used when |
 |---|---|---|
-| 1 | `DOCDOC_CONSOLE_ROOT` | you named a directory, so you meant it |
+| 1 | `DOCDOC_CONSOLE_ROOT` | you named a directory, so you meant it; the Docker image sets it to the build it carries |
 | 2 | the checkout's `ui/dist` | you are running from a source tree that has been built |
-| 3 | the installed `docdoc-ui` distribution | everything else, which is every real deployment |
+| 3 | the installed `docdoc-ui` distribution | a deployment outside the Docker image that installed the `ui` extra |
 
 **A checkout's own build wins over an installed copy**, and it did not always. On any machine that
 has run `packaging/docdoc-ui/build.sh` or synced the `ui` extra, both exist — and the installed one
@@ -210,13 +217,14 @@ handler, so docdoc's structured events fall to `logging.lastResort`, which drops
 `WARNING`. That is true of every structured event docdoc emits, not only this one; making a library
 visible by default is the application's decision and not one this package takes on its behalf.
 
-**If there is no build at all, `/console` answers `501`** naming what is missing and the one command
-that fixes it — a missing build and a missing distribution get different sentences, because telling a
-developer to `pip install` what they have the source for is unhelpful accuracy. It never serves a
+**If there is no build at all, `/console` answers `501`** naming what is missing and the one step
+that fixes it: in a source checkout, `npm ci && npm run build` in `ui/`; with the Docker image, which
+carries the build since ADR-0027, rebuild the image (`docker compose … up -d --build`) or unset a
+`DOCDOC_CONSOLE_ROOT` override that points somewhere empty. It never serves a
 blank page, and an empty `ui/dist` left behind by a failed build is not mistaken for a build: the
 entry point has to be there.
 
-**The distribution**, which is what `pip install 'docdoc[ui]'` actually delivers:
+**The distribution**, which is what the `ui` extra installs, for a deployment outside the image:
 
 ```bash
 ./packaging/docdoc-ui/build.sh       # builds the console, copies ui/dist, produces the wheel
@@ -226,7 +234,9 @@ The order inside that script is the point: assets are copied in immediately befo
 and are never committed, so a checkout holds no build output at any moment. That is why `git status`
 is a meaningful check in CI rather than a formality, and why the assets live in a second distribution
 at all — a Python extra can add a dependency but cannot add files to a wheel everyone already
-installs, and the base install must acquire no static asset.
+installs, and the main wheel carries no static asset (FR-035). The Docker image is a different
+artifact: its `console` stage builds `ui/` and copies the result beside the installed package, not
+into the wheel (ADR-0027).
 
 ## Nothing comes to rest in the browser
 

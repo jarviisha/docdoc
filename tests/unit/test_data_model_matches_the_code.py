@@ -677,10 +677,10 @@ def test_every_documented_queue_signature_matches_the_protocol(method: str) -> N
 # documents.
 #
 # Compared against `argparse` rather than against `--help` text, so the check does
-# not depend on how help happens to be formatted. Shared flags are subtracted by
-# comparing against a third subcommand: anything `worker`, `migrate` *and*
-# `extract` all carry is inherited, and the contract says on purpose that it is
-# describing what these two add rather than what they inherit.
+# not depend on how help happens to be formatted. Shared flags are subtracted:
+# anything `add_common_arguments` gives every subcommand is inherited, and the
+# contract says on purpose that it is describing what these two add rather than
+# what they inherit.
 
 
 def _command_specific_flags() -> dict[str, set[str]]:
@@ -699,7 +699,18 @@ def _command_specific_flags() -> dict[str, set[str]]:
             if option.startswith("--")
         }
 
-    shared = options("worker") & options("migrate") & options("extract")
+    import argparse
+
+    from docdoc.cli.config import add_common_arguments
+
+    common = argparse.ArgumentParser()
+    add_common_arguments(common)
+    shared = {
+        option
+        for action in common._actions
+        for option in action.option_strings
+        if option.startswith("--")
+    }
     return {"worker": options("worker") - shared, "migrate": options("migrate") - shared}
 
 

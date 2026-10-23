@@ -170,7 +170,22 @@ export function languageChoices(
   return choices;
 }
 
+/** What the Submit screen sends: an OCR run, or an extraction against a schema. */
+export type SubmitKind = "ocr" | "extraction";
+
+/** Read the schema identities from a listing body, dropping anything that is not a string. */
+export function toSchemas(body: unknown): string[] {
+  if (typeof body !== "object" || body === null) return [];
+  const schemas = (body as { schemas?: unknown }).schemas;
+  return Array.isArray(schemas)
+    ? schemas.filter((schema): schema is string => typeof schema === "string")
+    : [];
+}
+
 export interface SubmitForm {
+  kind: SubmitKind;
+  /** The extraction's schema identity; `""` until one is chosen. */
+  schema: string;
   tenant: string;
   parser: string;
   language: string;
@@ -190,8 +205,40 @@ export function chooseFile(form: SubmitForm, file: File | null, key: string): Su
   return { ...form, file, key: file === null ? "" : key };
 }
 
-/** Whether Submit may be pressed: a tenant, a file, and no request already under way. */
+/** A fresh `key` for a form that has a file; `""` with none. */
+function rekeyed(form: SubmitForm, key: string): string {
+  return form.file === null ? "" : key;
+}
+
+/**
+ * Change the kind. The other kind's choices are cleared, so a parser left
+ * over from OCR is never sent with an extraction; tenant and file stay. The
+ * key is fresh: idempotency is scoped to (tenant, key), so keeping it would
+ * replay the other kind's run for the same file.
+ */
+export function switchKind(form: SubmitForm, kind: SubmitKind, key: string): SubmitForm {
+  if (kind === form.kind) return form;
+  return { ...form, kind, parser: AUTOMATIC, language: "", schema: "", key: rekeyed(form, key) };
+}
+
+/** Choose the extraction's schema; a different one gets a fresh key, for the reason above. */
+export function chooseSchema(form: SubmitForm, schema: string, key: string): SubmitForm {
+  if (schema === form.schema) return form;
+  return { ...form, schema, key: rekeyed(form, key) };
+}
+
+/** Choose the OCR parser; a different one gets a fresh key and the language resets. */
+export function chooseParser(form: SubmitForm, parser: string, key: string): SubmitForm {
+  if (parser === form.parser) return form;
+  return { ...form, parser, language: "", key: rekeyed(form, key) };
+}
+
+/**
+ * Whether Submit may be pressed: a tenant, a file, a schema when extracting,
+ * and no request already under way.
+ */
 export function canSubmit(form: SubmitForm): boolean {
+  if (form.kind === "extraction" && form.schema === "") return false;
   return form.tenant !== "" && form.file !== null && !form.sending;
 }
 
@@ -201,6 +248,14 @@ export function canSubmit(form: SubmitForm): boolean {
  * that saw `parser=` would have to decide what nothing after the `=` means.
  */
 export function submitIntent(form: SubmitForm): Intent {
+  if (form.kind === "extraction") {
+    return {
+      type: "submit-extraction",
+      tenantId: form.tenant,
+      schema: form.schema,
+      ...(form.key === "" ? {} : { idempotencyKey: form.key }),
+    };
+  }
   return {
     type: "submit-ocr",
     tenantId: form.tenant,

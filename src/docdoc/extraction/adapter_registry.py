@@ -165,7 +165,7 @@ class AdapterRegistry:
     def _explain(self) -> str:
         if not self._entries:
             return (
-                "no model adapter is registered. Install one — `pip install docdoc[google]` — "
+                "no model adapter is registered. Install one (the `docdoc[google]` extra) "
                 "or pass an adapter explicitly"
             )
         lines = [
@@ -194,7 +194,7 @@ def default_adapter_registry(priority: Sequence[str] | None = None) -> AdapterRe
         from docdoc.extraction.adapters.gemini import GeminiAdapter
     except ImportError:  # pragma: no cover - the module has no import-time SDK use
         registry.register_unavailable(
-            "gemini", reason="extra not installed; run `pip install docdoc[google]`"
+            "gemini", reason="extra not installed; install the `docdoc[google]` extra"
         )
     else:
         registry.register(GeminiAdapter())

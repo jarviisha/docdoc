@@ -59,6 +59,7 @@ from docdoc.api.runs import (
     _summary_fields,
     list_checks,
     record_check,
+    submit_extraction,
 )
 from docdoc.artifacts.paths import root_tenant
 from docdoc.runs import identity
@@ -245,6 +246,24 @@ def _log_ocr_submit(operator: str, *, tenant_id: str, run_id: str, status: int) 
                 "actor": f"console:{operator}",
                 "tenant_id": tenant_id,
                 "run_id": run_id,
+                "status": status,
+            }
+        )
+    )
+
+
+def _log_extract_submit(
+    operator: str, *, tenant_id: str, run_id: str, schema: str, status: int
+) -> None:
+    """One structured event per accepted console extraction, as `_log_ocr_submit` does."""
+    logging.getLogger("docdoc.api").info(
+        json.dumps(
+            {
+                "event": "console.extract_submit",
+                "actor": f"console:{operator}",
+                "tenant_id": tenant_id,
+                "run_id": run_id,
+                "schema": schema,
                 "status": status,
             }
         )
@@ -752,6 +771,11 @@ def console_router() -> APIRouter:
         """`GET /v1/parsers`'s body, behind a session. Blocking: it probes."""
         return parser_listing(request.app.state.deployment)
 
+    @router.get("/schemas")
+    def list_schemas(request: Request, operator: Operator) -> Any:
+        """`GET /v1/schemas`'s identities, behind a session."""
+        return {"schemas": list(request.app.state.deployment.registry().identities())}
+
     @router.post("/tenants/{tenant_id}/ocr", status_code=202)
     async def submit_tenant_ocr(
         request: Request,
@@ -791,6 +815,45 @@ def console_router() -> APIRouter:
         body = _owned(json.loads(bytes(response.body)), tenant_id)
         _log_ocr_submit(
             operator, tenant_id=tenant_id, run_id=body["run_id"], status=response.status_code
+        )
+        return JSONResponse(status_code=response.status_code, content=body)
+
+    @router.post("/tenants/{tenant_id}/extractions", status_code=202)
+    async def submit_tenant_extraction(
+        request: Request, tenant_id: str, operator: Operator, schema: str
+    ) -> Any:
+        """Store the body as a document and submit an extraction run, for a named tenant.
+
+        `POST /v1/documents` and `POST /v1/documents/{blob_id}/runs` in one
+        session-only call, through the same `submit_extraction`, so the caps, the
+        limiter and idempotency are the tenant's own.
+        """
+        if not TENANT_PATTERN.match(tenant_id):
+            return JSONResponse(status_code=422, content={"error": "invalid_tenant_id"})
+        deployment = request.app.state.deployment
+        if not deployment.has_runs:
+            return _no_runs()
+        data = await _read_capped(request, deployment.max_request_bytes)
+        response = await submit_extraction(
+            request,
+            tenant_id=tenant_id,
+            data=data,
+            schema=schema,
+            # An operator submitting here is waiting at the screen (019).
+            priority=Priority.URGENT,
+        )
+        if response.status_code not in (200, 202):
+            return response
+        # The accepted body (`run_id`, `status`, `created_at`, `priority`) plus the
+        # tenant. `_owned` wants a full run state, which a submission does not
+        # return; the run's detail is one `GET /v1/console/runs/{run_id}` away.
+        body = {**json.loads(bytes(response.body)), "tenant_id": tenant_id}
+        _log_extract_submit(
+            operator,
+            tenant_id=tenant_id,
+            run_id=body["run_id"],
+            schema=schema,
+            status=response.status_code,
         )
         return JSONResponse(status_code=response.status_code, content=body)
 

@@ -256,7 +256,7 @@ tests/
 │   ├── test_model_confidence_unread.py       # FR-028 — untrusted upstream, unread here
 │   ├── test_grounding_rate_reused.py         # FR-033 — Milestone 4's counts, not a second rate
 │   ├── test_scores_never_averaged.py         # FR-039 — exact and fuzzy never pooled
-│   ├── test_base_install_excludes_evaluation_data.py  # FR-059 — datasets/ outside the wheel
+│   ├── test_evaluation_stays_out_of_the_wheel.py  # FR-059 — datasets/ outside the wheel
 │   ├── test_comparison_judgements.py         # FR-045, FR-047, FR-049, SC-014, SC-015
 │   ├── test_corrections.py                   # FR-050 … FR-053, SC-019, SC-020
 │   ├── test_confirmed_correction.py          # a check may confirm; becomes a label of the predicted value

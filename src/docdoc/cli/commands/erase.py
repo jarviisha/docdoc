@@ -4,7 +4,8 @@
 
 The default tenant's namespace is the store root (ADR-0014 §3), so erasing it by
 prefix removes everything written before authentication was enabled and
-everything ``docdoc extract`` ever wrote. ADR-0014 predicted this milestone would
+everything written outside a run (the synchronous job route, the recorder, and
+the ``docdoc extract`` command before ADR-0027 removed it). ADR-0014 predicted this milestone would
 build the naive version and said why the correct semantics cannot be the default
 behaviour: an operator erasing "the default tenant" on a deployment that never
 enabled authentication is not erasing a customer.
@@ -67,8 +68,9 @@ def run(args: argparse.Namespace, settings: Settings) -> Rendering:
         lines.append(
             "the default tenant's namespace is the store root, so only its "
             "run-derived content was removed. Content written outside a run -- by "
-            "`docdoc extract`, by a library caller, by the recorder -- is "
-            "untouched. --purge-store-root removes the whole store"
+            "POST /v1/documents/{blob_id}/extract, by the recorder, or by an "
+            "older release's `docdoc extract` -- is untouched. --purge-store-root "
+            "removes the whole store"
         )
     if report.degraded:
         lines = ["the store could not be reached; nothing was removed"]

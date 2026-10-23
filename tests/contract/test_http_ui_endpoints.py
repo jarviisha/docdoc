@@ -159,7 +159,12 @@ ROUTES = {
     # 018 (console submit OCR plan, Task 1): tenants, parsers, and OCR submission.
     ("GET", "/v1/console/tenants"),
     ("GET", "/v1/console/parsers"),
+    # The registered schema identities, for the extraction submit's picker.
+    ("GET", "/v1/console/schemas"),
     ("POST", "/v1/console/tenants/{tenant_id}/ocr"),
+    # Console extraction submit: the two Bearer calls (store, then submit) in one,
+    # through the same `submit_extraction`; session-only.
+    ("POST", "/v1/console/tenants/{tenant_id}/extractions"),
     # 019 (console OCR result plan, Task 1): an OCR run's page images.
     ("GET", "/v1/console/runs/{run_id}/pages/{page}"),
     # 021 (console admin screens plan, Task 1): callbacks, per tenant --
@@ -490,7 +495,7 @@ def test_the_viewer_is_gone(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
         ("configured", "DOCDOC_CONSOLE_ROOT"),
         ("installed-but-empty", "built wrongly"),
         ("checkout", "npm run build"),
-        ("absent", "docdoc[ui]"),
+        ("absent", "rebuild the image"),
     ],
 )
 def test_each_kind_of_absence_gets_its_own_sentence(

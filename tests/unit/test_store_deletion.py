@@ -15,7 +15,7 @@ prediction, as a test.
 What it removes is narrower than an early draft of ADR-0015 claimed and is still
 the whole store from a deployment's point of view: `<root>/artifacts/` and
 `<root>/blobs/`, which is everything written before authentication was enabled
-and everything `docdoc extract` ever wrote. Other tenants live under `<root>/t/`
+and everything written outside a run. Other tenants live under `<root>/t/`
 and survive — asserted below, because that is a property of the layout worth
 knowing is true rather than assuming.
 """

@@ -25,13 +25,14 @@ it would be decided explicitly rather than settled by whichever code landed firs
 | [0017](0017-confidence-routing-policy.md) | Routing reads trusted signals only, and has two outcomes | Accepted | — (Milestone 10 design) |
 | [0018](0018-webhook-delivery-semantics.md) | Webhook delivery: at-least-once, signed, and pinned to a validated address | Accepted | — (Milestone 10 design) |
 | [0019](0019-operations-console-boundary.md) | An operations console is permitted; a review platform stays deferred | Accepted; requires constitution v1.9.0; partly superseded by ADR-0023 | — (Milestone 11 design) |
-| [0020](0020-retire-the-grounding-viewer.md) | The grounding viewer is retired; `ui/` builds the console only | Accepted; retires `specs/011` FR-022b, FR-040, SC-012; partly superseded by ADR-0023 | — |
+| [0020](0020-retire-the-grounding-viewer.md) | The grounding viewer is retired; `ui/` builds the console only | Accepted; retires `specs/011` FR-022b, FR-040, SC-012; partly superseded by ADR-0023; amended in part by ADR-0027 | — |
 | [0021](0021-caller-named-parsers-and-ocr-endpoints.md) | A request may name a configured parser; OCR endpoints are configured, not coded | Accepted; requires constitution v1.10.0 | — |
 | [0022](0022-asynchronous-ocr-through-a-bounded-queue.md) | OCR is a run kind, accepted into a bounded queue | Accepted; requires constitution v1.11.0; amends 0021 | — |
 | [0023](0023-console-login-and-cross-tenant-operations.md) | Console login and cross-tenant operations | Accepted; requires constitution v1.12.0; supersedes 0019 §3–§4 in part, 0020 in part; §4 amended in part by ADR-0026 | — |
 | [0024](0024-console-ui-on-shadcn.md) | The console's UI is built on shadcn/ui | Accepted; replaces Astryx (`specs/008` R2) | — |
 | [0025](0025-native-pdf-parsing-on-pdfium.md) | Native PDF parsing on PDFium | Accepted; supersedes 0001's choice of PyMuPDF | — |
 | [0026](0026-tenant-quality-evaluation.md) | Tenant quality evaluation: checks, answers that never expire, and re-run reports | Accepted; requires constitution v1.13.0; amends 0023 §4 | — |
+| [0027](0027-service-only-surface.md) | docdoc is a service, not an installable library | Accepted; requires constitution v2.0.0; amends 0020 in part | — |
 
 ## Conventions
 

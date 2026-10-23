@@ -22,7 +22,7 @@ Setting                        Flag                       Default
 
 The four marked *scoped* live on the subcommands that can use them rather than
 on every one, and ``COMMAND_SCOPED`` below records which. A
-``--run-database-url`` on ``docdoc parse`` would be a flag that does nothing to
+``--run-database-url`` on ``docdoc store clear`` would be a flag that does nothing to
 the command carrying it, which is the second vocabulary FR-031 forbids arriving
 from the other direction.
 
@@ -105,7 +105,6 @@ __all__ = [
     "STORE_URL_ENV",
     "Settings",
     "add_common_arguments",
-    "empty_registry_message",
 ]
 
 #: New in Milestone 7, and named in the style of the two that already existed
@@ -204,11 +203,11 @@ FLAG_FOR_SETTING: dict[str, str] = {
 #: Settings whose flag lives on some commands and not all of them.
 #:
 #: Every setting before Milestone 9 was global -- `--store` is as meaningful to
-#: `docdoc parse` as to `docdoc extract` -- so `add_common_arguments` put each on
+#: `docdoc worker` as to `docdoc store clear` -- so `add_common_arguments` put each on
 #: every subcommand and the parity check asserted exactly that.
 #:
 #: `DOCDOC_RUN_DATABASE_URL` is the first that is not. Only commands that touch
-#: run state can use it, and putting `--run-database-url` on `docdoc parse` would
+#: run state can use it, and putting `--run-database-url` on `docdoc store clear` would
 #: add a flag that does nothing to the command it appears on -- which is the
 #: "second vocabulary" FR-031 exists to prevent, arriving from the other
 #: direction. So the map records the scope rather than the setting pretending to
@@ -293,8 +292,7 @@ ENVIRONMENT_ONLY: dict[str, str] = {
     # Milestone 10, Phase 7. Delivery is configured by the deployment and
     # performed by whichever worker ticks, so every one of these must be the same
     # in every process -- and none of them is meaningful to a command a person
-    # types. `docdoc sweep` delivers nothing and `docdoc extract` has no run to
-    # notify anybody about.
+    # types. `docdoc sweep` delivers nothing.
     "DOCDOC_DELIVERY_MAX_ATTEMPTS": (
         "how many times one delivery is attempted before it comes to rest at "
         "`failed` (FR-057). Read by whichever process ticks, and it must be the "
@@ -375,8 +373,8 @@ ENVIRONMENT_ONLY: dict[str, str] = {
 def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     """The flags every command shares.
 
-    Added per-subparser rather than only on the root, so that ``docdoc extract
-    --json`` works as readily as ``docdoc --json extract``. A user who has to
+    Added per-subparser rather than only on the root, so that ``docdoc sweep
+    --json`` works as readily as ``docdoc --json sweep``. A user who has to
     remember which side of the subcommand a flag lives on has been given a
     puzzle rather than a tool.
     """
@@ -423,17 +421,12 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="run with no store even if one is configured in the environment",
     )
-    parser.add_argument(
-        "--verify-cache",
-        action="store_true",
-        help="execute every stage and still write, so a drifted processor surfaces",
-    )
     # FR-039 requires a configurable maximum document size, and until now it was
     # configurable only by a caller importing the library or setting a variable.
     # `type=int` rather than a validating callable: argparse turns an
     # ArgumentTypeError into its own exit 2, and the invocation errors here owe
     # the caller 64 (FR-028). The positivity check therefore lives beside the
-    # other one argparse cannot express, in `cli.__init__._usage_error`.
+    # other one argparse cannot express, in `cli.__init__._limit_usage_error`.
     parser.add_argument(
         "--max-document-bytes",
         type=int,
@@ -467,7 +460,6 @@ class Settings:
     #: directory. Wins over ``store_root`` when both are given, and ``--no-store``
     #: still beats both.
     store_url: str | None = None
-    verify_cache: bool = False
     echo_fixtures: Path | None = None
     #: ``None`` means "no flag was given", not "no limit". The environment and
     #: the documented default are applied by ``Limits`` itself, which is what
@@ -492,7 +484,6 @@ class Settings:
             adapters=_names(getattr(args, "adapter", None), os.environ.get(_ADAPTERS_ENV, "")),
             store_root=_store_root(args),
             store_url=_store_url(args),
-            verify_cache=bool(getattr(args, "verify_cache", False)),
             echo_fixtures=_one_path(
                 getattr(args, "echo_fixtures", None), os.environ.get(_ECHO_FIXTURES_ENV, "")
             ),
@@ -614,7 +605,7 @@ class Settings:
             import psycopg
         except ImportError as exc:  # pragma: no cover - guarded by the extra
             raise RunStateUnavailableError(
-                "psycopg is not installed; run state needs `pip install docdoc[postgres]`"
+                "psycopg is not installed; run state needs the `postgres` extra"
             ) from exc
 
         from docdoc.runs.postgres import PostgresRunQueue
@@ -702,18 +693,3 @@ def _names(flag: list[str] | None, env: str) -> tuple[str, ...]:
     if flag:
         return tuple(flag)
     return tuple(item.strip() for item in env.split(",") if item.strip())
-
-
-def empty_registry_message(settings: Settings) -> str | None:
-    """The message for a schema that could not be resolved, when it is *this*.
-
-    Returns ``None`` when the registry has schemas in it, in which case the
-    unresolvable-schema error the extraction layer already raises is the right
-    one and this must not replace it.
-    """
-    if settings.schema_paths:
-        return None
-    return (
-        "the schema registry is empty: docdoc ships no schemas, and no search path "
-        f"is configured. Set ${_SCHEMA_PATHS_ENV} or pass --schema-path DIR."
-    )

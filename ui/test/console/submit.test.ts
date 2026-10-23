@@ -18,6 +18,10 @@ import {
   parserStatus,
   parsersRefreshLabel,
   submitIntent,
+  toSchemas,
+  switchKind,
+  chooseSchema,
+  chooseParser,
   submittedRunId,
   toParsers,
   toTenants,
@@ -166,7 +170,7 @@ test("parser choices mark unavailable and unhealthy", () => {
 });
 
 test("cannot submit while sending", () => {
-  const f = { tenant: "acme", parser: "", language: "", file: new File(["x"], "a.png"), key: "k", sending: true };
+  const f = { kind: "ocr" as const, schema: "", tenant: "acme", parser: "", language: "", file: new File(["x"], "a.png"), key: "k", sending: true };
   assert.equal(canSubmit(f), false);
   assert.equal(canSubmit({ ...f, sending: false }), true);
   assert.equal(canSubmit({ ...f, sending: false, file: null }), false);
@@ -175,12 +179,12 @@ test("cannot submit while sending", () => {
 
 test("submit intent omits empty parser and language", () => {
   assert.deepEqual(
-    requestFor(submitIntent({ tenant: "acme", parser: "", language: "", file: null, key: "", sending: false }))
+    requestFor(submitIntent({ kind: "ocr" as const, schema: "", tenant: "acme", parser: "", language: "", file: null, key: "", sending: false }))
       .query,
     {},
   );
   assert.deepEqual(
-    requestFor(submitIntent({ tenant: "acme", parser: "paddle-vl", language: "vi", file: null, key: "", sending: false })),
+    requestFor(submitIntent({ kind: "ocr" as const, schema: "", tenant: "acme", parser: "paddle-vl", language: "vi", file: null, key: "", sending: false })),
     { method: "POST", path: "/v1/console/tenants/acme/ocr", query: { parser: "paddle-vl", language: "vi" }, hasBody: true },
   );
 });
@@ -192,7 +196,7 @@ test("a submitted run's id is read from the console detail body", () => {
 });
 
 test("a newly chosen file gets a new key; the same file keeps its own", () => {
-  const empty = { tenant: "acme", parser: "", language: "", file: null, key: "", sending: false };
+  const empty = { kind: "ocr" as const, schema: "", tenant: "acme", parser: "", language: "", file: null, key: "", sending: false };
   const a = new File(["a"], "a.png");
   const b = new File(["b"], "b.png");
 
@@ -204,7 +208,7 @@ test("a newly chosen file gets a new key; the same file keeps its own", () => {
 });
 
 test("a submission carries its file's key as Idempotency-Key", () => {
-  const form = { tenant: "acme", parser: "", language: "", file: new File(["a"], "a.png"), key: "k1", sending: false };
+  const form = { kind: "ocr" as const, schema: "", tenant: "acme", parser: "", language: "", file: new File(["a"], "a.png"), key: "k1", sending: false };
   assert.deepEqual(requestFor(submitIntent(form)).headers, { "Idempotency-Key": "k1" });
 });
 
@@ -214,4 +218,71 @@ test("capabilities read as the true ones, comma-joined, or a dash when none", ()
     "text, geometry, handwriting",
   );
   assert.equal(capabilityList(NO_CAPABILITIES), "—");
+});
+
+const FILE = new File(["x"], "a.pdf");
+const FORM = {
+  kind: "ocr" as const,
+  tenant: "acme",
+  parser: "",
+  language: "",
+  schema: "",
+  file: FILE,
+  key: "k",
+  sending: false,
+};
+
+test("schemas are read from the listing, ignoring anything that is not an identity", () => {
+  assert.deepEqual(toSchemas({ schemas: ["invoice@1", 3, null, "receipt@2"] }), [
+    "invoice@1",
+    "receipt@2",
+  ]);
+  assert.deepEqual(toSchemas({}), []);
+  assert.deepEqual(toSchemas({ schemas: "x" }), []);
+  assert.deepEqual(toSchemas(null), []);
+});
+
+test("an extraction needs a schema and a file", () => {
+  const extraction = { ...FORM, kind: "extraction" as const };
+  assert.equal(canSubmit(extraction), false);
+  assert.equal(canSubmit({ ...extraction, schema: "invoice@1", file: null }), false);
+  assert.equal(canSubmit({ ...extraction, schema: "invoice@1" }), true);
+  assert.equal(canSubmit({ ...extraction, schema: "invoice@1", sending: true }), false);
+  assert.equal(canSubmit({ ...extraction, schema: "invoice@1", tenant: "" }), false);
+});
+
+test("OCR does not need a schema", () => {
+  assert.equal(canSubmit(FORM), true);
+});
+
+test("switching kind clears the other kind's choices and keeps tenant and file", () => {
+  const ocr = { ...FORM, parser: "paddle", language: "vi", schema: "invoice@1" };
+  const extraction = switchKind(ocr, "extraction", "k2");
+  assert.equal(extraction.kind, "extraction");
+  assert.equal(extraction.parser, "");
+  assert.equal(extraction.language, "");
+  assert.equal(extraction.schema, "");
+  assert.equal(extraction.tenant, "acme");
+  assert.equal(extraction.file, FILE);
+  assert.equal(extraction.key, "k2");
+  assert.equal(switchKind(ocr, "ocr", "k2"), ocr);
+  assert.equal(switchKind({ ...ocr, file: null, key: "" }, "extraction", "k2").key, "");
+});
+
+test("a different schema or parser gets a fresh key; the same one keeps it", () => {
+  const form = { ...FORM, kind: "extraction" as const, schema: "invoice@1" };
+  assert.equal(chooseSchema(form, "invoice@1", "k2"), form);
+  assert.equal(chooseSchema(form, "receipt@1", "k2").key, "k2");
+  assert.equal(chooseParser(FORM, FORM.parser, "k2"), FORM);
+  const next = chooseParser({ ...FORM, language: "vi" }, "paddle", "k2");
+  assert.deepEqual([next.key, next.language], ["k2", ""]);
+});
+
+test("an extraction submit carries the schema and key, and no parser", () => {
+  assert.deepEqual(submitIntent({ ...FORM, kind: "extraction", schema: "invoice@1" }), {
+    type: "submit-extraction",
+    tenantId: "acme",
+    schema: "invoice@1",
+    idempotencyKey: "k",
+  });
 });

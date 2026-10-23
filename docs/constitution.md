@@ -597,6 +597,43 @@ Migration note: no artifact is invalidated. A deployment that never serves a
 console is unaffected.
 
 Templates: no changes required.
+
+---
+AMENDMENT 1.13.0 → 2.0.0 (2026-10-23)
+Bump rationale: MAJOR — a principle's guarantee is removed. Principle IV no
+longer promises a base install free of provider SDKs, and a change that would
+have violated that clause is now compliant (ADR-0027).
+
+  - **docdoc is a service, not an installable library (ADR-0027).** Users reach
+    it through the HTTP API and the operations console; operators run the
+    commands migrate, worker, sweep, credential, console-user, erase and store
+    inside the container. The CLI commands parse, extract, inspect, explain and
+    eval, the library-usage examples, and the CI base-install job are removed.
+  - **Principle IV: the base-install clause is removed.** "The base install MUST
+    NOT force installation of any provider SDK or OCR engine" protected a
+    `pip install docdoc` user, and there is none. The adapter-isolation rule
+    stays unchanged: provider SDK types appear only inside adapter directories,
+    enforced by import-linter.
+  - **Principle X and MVP Scope Constraints reworded** from "the core library
+    MUST be usable/installable without infrastructure" to "the domain layers
+    MUST run without it". The layer contracts are architecture, not a library
+    promise, and they stay as they were.
+  - **Packaging paragraph rewritten** to describe the Docker image. The extras
+    stay, as the way the image composes what it installs. The kernel's
+    pydantic-only dependency is unchanged.
+  - **Development Compose admits one-shot setup services (v1.11.0 scope).**
+    A service that runs the docdoc image or the object store's image once and
+    exits is not a long-running service: `createbucket` and `migrate` (applies
+    the schema once, before api and the workers start). Recorded here, in the
+    same unreleased amendment, so 2.0.0 stands.
+
+Sections amended: Principle IV, Principle X, MVP Scope Constraints (Sanctioned
+stack, Packaging, Deferred technology). No decision moved; the open list stays empty.
+
+Migration note: no artifact is invalidated, and no route, run or stored value
+changes. A script that called the removed commands must use the HTTP API.
+
+Templates: no changes required.
 -->
 
 # docdoc Constitution
@@ -718,8 +755,6 @@ Rules:
   request may name a configured parser (ADR-0021). The request then fails rather than falling
   back.
 - Local/open-source components MUST remain a viable path; cloud providers are optional extras.
-- The base install MUST NOT force installation of any provider SDK or OCR engine. Provider
-  integrations ship as optional extras.
 
 Rationale: provider coupling is the fastest way to convert an open-source engine into an
 unmaintainable vendor wrapper.
@@ -895,8 +930,8 @@ Rules:
 - `Document` is the canonical root but MUST NOT become a god object. These concepts stay
   conceptually separate even when their MVP implementation is small: Document, Content, Layout,
   Provenance, Extraction, Validation, Annotations, Artifacts.
-- Persistence and transport are outer layers. The core library MUST be usable with no database,
-  no object store, and no running service.
+- Persistence and transport are outer layers. The domain layers (kernel through validation) MUST
+  NOT depend on a database, an object store, or a running service.
 
 Rationale: the execution model will change several times; the domain model must survive those
 changes untouched.
@@ -960,14 +995,14 @@ Rationale: the kernel invariants are the foundation every other guarantee rests 
 where persistence is genuinely required; one native PDF parser (PDFium via `pypdfium2`, text path, ADR-0025); one
 geometry-capable cloud document-intelligence parser (scanned/image/mixed path); one LLM adapter;
 `rapidfuzz` in the extraction layer for grounding. No standalone OCR engine in the MVP
-(ADR-0001). The core library MUST remain installable and usable without any of the optional
-infrastructure.
+(ADR-0001). The domain layers MUST run without any of the optional infrastructure.
 
-**Packaging.** `pip install docdoc` installs the deterministic layers — kernel, ingest, extraction,
-grounding, validation, and evaluation contracts — and no provider SDK. Provider integrations are
-optional extras (for example `docdoc[google]`, `docdoc[pdf]`). The base install's runtime
-dependencies are `pydantic` and `rapidfuzz`; the latter is sanctioned by the stack line above and by
-ADR-0005, and the **kernel** alone depends on `pydantic` only.
+**Packaging.** docdoc ships as a service: the Docker image in `packaging/docker`, reached through
+the HTTP API and the operations console, with a few operating commands run inside the container
+(ADR-0027). There is no installable-library promise. Provider integrations are optional extras of
+the Python package, and the extras are how the image composes what it installs. The **kernel**
+depends on `pydantic` only; `rapidfuzz` is sanctioned for the extraction layer by the stack line
+above and by ADR-0005.
 
 **Deferred technology.** The following are postponed, not architecturally rejected, and MUST NOT
 appear in the MVP without an approved amendment: Kafka, Temporal, Kubernetes, multi-region
@@ -975,6 +1010,8 @@ deployment, distributed DAG engines, vector databases, RAG infrastructure, workf
 semantic chunking, EditMap-style normalization, automatic model training, multi-tenant billing,
 and a full review UI. Development Compose contains only api, worker, postgres, and object storage;
 the worker may appear as one service per run kind it claims (`docdoc worker --kind`, v1.11.0).
+One-shot setup services that run the docdoc image or the object store's image and then exit
+(`createbucket`, `migrate`) are not services in this sense (v2.0.0).
 
 "Multi-tenant billing" above forbids **billing**, not tenant isolation. Scoping runs, blobs, and
 artifacts to a tenant so that one customer cannot read another's is permitted and, from Milestone 9,
@@ -1119,4 +1156,4 @@ insufficient. Unjustified violations are rejected regardless of the code's quali
 **Precedence for unresolved items.** Where an "Open Constitutional Decision" is unresolved,
 implementers MUST NOT resolve it silently in code. Raise it, decide it, record it.
 
-**Version**: 1.13.0 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-10-23
+**Version**: 2.0.0 | **Ratified**: 2026-08-14 | **Last Amended**: 2026-10-23

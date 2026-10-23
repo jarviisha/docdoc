@@ -38,7 +38,11 @@ AT = datetime(2026, 9, 9, 12, 0, tzinfo=UTC)
 #: object store's bucket and exits, so nothing is deployed, monitored, or able to fail
 #: silently — which is the whole of what FR-116's prohibition is about. It
 #: predates this milestone.
-_ONE_SHOT = {"createbucket"}
+#:
+#: `migrate` is the same kind of thing (ADR-0027): `docdoc migrate` run once by
+#: compose before the API and workers start, then it exits. It runs no loop and
+#: claims nothing, so it is not a process type either.
+_ONE_SHOT = {"createbucket", "migrate"}
 
 
 def _services() -> set[str]:

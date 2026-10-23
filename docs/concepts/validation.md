@@ -14,6 +14,9 @@ result.findings     # what is wrong, addressed to fields, with locations
 result.checks       # every obligation, including the ones that passed
 ```
 
+The block shows the internal call the worker makes for each run. docdoc's public surface is the
+HTTP API and the console, not these modules ([ADR-0027](../adr/0027-service-only-surface.md)).
+
 There is no `document` parameter. Every location a finding carries was computed
 by the grounding stage and is copied through, so the two stages cannot disagree
 about where a value sits.

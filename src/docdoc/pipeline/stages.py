@@ -99,7 +99,7 @@ STAGE_SPECS: dict[Stage, StageSpec] = {
 #:
 #: This is not a second definition of the folded set and must never become one.
 #: Each layer's own ``options_hash_for_*`` decides what is folded; this says what
-#: those inputs are *called*, so that ``docdoc explain`` can answer "what would
+#: those inputs are *called*, so that a reader of an identity can answer "what would
 #: have to change to move this identity?" — the question ADR-0003 accepted
 #: unreadable cache keys on the condition of being able to answer (FR-023).
 #: ``tests/unit/test_stage_identity.py`` asserts these names against the

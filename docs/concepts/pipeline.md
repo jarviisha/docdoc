@@ -142,8 +142,8 @@ observe.counters()   # {'executed': 4, 'reused': 0, 'failed': 0, 'skipped': 0}
 ```
 
 Two surfaces, because the questions differ. `PipelineResult.cost_summary()` answers *what did this
-run cost* and is what the command line prints; `observe.counters()` accumulates across a process and
-is what a corpus sweep reads (FR-047). Neither enters an identity, an artifact, or a verdict, and a
+run cost* (no caller in the service reads it since ADR-0027); `observe.counters()` accumulates
+across a process and is what a corpus sweep reads (FR-047). Neither enters an identity, an artifact, or a verdict, and a
 run with observability disabled produces the same result as one with it on.
 
 ## See also

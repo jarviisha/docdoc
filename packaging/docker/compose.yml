@@ -1,9 +1,9 @@
 # The four-process topology, runnable with no cloud credentials (FR-076).
 #
 #   docker compose -f packaging/docker/compose.yml up -d
-#   docker compose -f packaging/docker/compose.yml run --rm api docdoc migrate
 #
-# Two commands, which quickstart.md names; `make up` runs both.
+# One command: the one-shot `migrate` service applies the schema before the API
+# and workers start (ADR-0027). The README's quickstart walks the rest.
 #
 # Constitution v1.6.0 admits `worker` to this composition. The sentence used to
 # read "only api, postgres, and object storage", which excluded a process type
@@ -30,6 +30,7 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
       seaweedfs: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
     ports: ["8000:8000"]
     # **So a container can reach a service on the host**, which two of this
     # milestone's capabilities need in development: a webhook receiver and an
@@ -116,29 +117,38 @@ services:
       # pre-tenant content could be told, correctly, that it disagreed with
       # itself, and had no way to say otherwise from here.
       DOCDOC_DEFAULT_TENANT: ${DOCDOC_DEFAULT_TENANT:-}
+      # --- Operational tunables ------------------------------------------------
+      #
+      # Forwarded so they can be set in `.env`; empty means docdoc's own
+      # default, which every one of them has. The infrastructure settings above
+      # (DOCDOC_RUN_DATABASE_URL, DOCDOC_STORE_URL, DOCDOC_SCHEMA_PATHS,
+      # DOCDOC_ECHO_FIXTURES) are fixed instead: they name this file's own
+      # services and mounts, so changing one without changing those would point
+      # docdoc at something that is not there. DOCDOC_STORE_ROOT is not
+      # forwarded because DOCDOC_STORE_URL wins over it.
+      DOCDOC_RUN_LEASE_SECONDS: ${DOCDOC_RUN_LEASE_SECONDS:-}
+      DOCDOC_RUN_MAX_ATTEMPTS: ${DOCDOC_RUN_MAX_ATTEMPTS:-}
+      DOCDOC_MAX_REQUEST_BYTES: ${DOCDOC_MAX_REQUEST_BYTES:-}
+      DOCDOC_MAX_DOCUMENT_BYTES: ${DOCDOC_MAX_DOCUMENT_BYTES:-}
+      DOCDOC_MAX_PAGES: ${DOCDOC_MAX_PAGES:-}
+      DOCDOC_MATCH_VIEW_CACHE: ${DOCDOC_MATCH_VIEW_CACHE:-}
+      DOCDOC_CONSOLE_IDLE_SECONDS: ${DOCDOC_CONSOLE_IDLE_SECONDS:-}
       # --- The operations console ---------------------------------------------
       #
-      # **This image carries no built assets and never will**: they live in the
-      # separate `docdoc-ui` distribution, which the default extras deliberately
-      # omit. So `/console` answers `501` here unless the host's build is
-      # mounted, which is what the read-only volume below does.
+      # **The image carries the console's build** (ADR-0027, amending ADR-0020):
+      # the Dockerfile's `console` stage builds `ui/` with Node and copies the
+      # result to /opt/docdoc/console, so `/console` works with no Node on the
+      # host. Until ADR-0027 the image carried no assets and this file mounted
+      # the host's `ui/dist`, which made building the console by hand a step of
+      # the quickstart.
       #
-      # An absent build is the ordinary state of a fresh checkout — `ui/dist` is
-      # gitignored — and compose creates the mount point empty. An empty
+      # Overridable, like every other setting here, so that "this deployment
+      # does not serve the console" is a state a reader can produce, and so a
+      # contributor can point it at a mounted build of their own. An empty
       # directory is not a build: `docdoc.api.ui` requires the entry point, so
       # the route answers `501` naming what is missing rather than serving a
       # blank page.
-      #
-      #   (cd ui && npm ci && npm run build)
-      #
-      # There was a second surface and a second mount here — Milestone 8's
-      # grounding viewer, under `DOCDOC_UI_ROOT` — until ADR-0020 removed it.
-      #
-      # Overridable, like every other setting here, so that "this deployment does
-      # not serve the console" is a state a reader can produce without deleting
-      # the mounted directory — which leaves the bind mount pointing at a dead
-      # inode and the API serving what it already resolved (specs/011 T083).
-      DOCDOC_CONSOLE_ROOT: ${DOCDOC_CONSOLE_ROOT:-/clients/console}
+      DOCDOC_CONSOLE_ROOT: ${DOCDOC_CONSOLE_ROOT:-/opt/docdoc/console}
       # --- Milestone 10, and every one of them is unset on purpose -------------
       #
       # Each capability is off by default (FR-101): a Milestone 9 deployment that
@@ -183,10 +193,6 @@ services:
     volumes: &docdoc_mounts
       - ../../schemas:/schemas:ro
       - ../../tests/fixtures/echo:/fixtures:ro
-      # The console's build, read-only. See DOCDOC_CONSOLE_ROOT above for why it
-      # is mounted rather than built into the image, and what an absent build
-      # does (it answers 501; it does not serve a blank page).
-      - ../../ui/dist:/clients/console:ro
       # **Where an operator's own files go**: a key file, webhook signing
       # secrets, a routing policy. Read-only, gitignored, and empty until
       # somebody puts something in it — see `secrets/README.md`.
@@ -219,6 +225,7 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
       seaweedfs: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
     # `--health-port` is what makes the orchestrator's configuration one
     # configuration rather than two (FR-053, FR-054): the worker answers the same
     # `/healthz` and `/readyz`, with the same bodies, on the same port number the
@@ -243,6 +250,7 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
       seaweedfs: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
     command: ["docdoc", "worker", "--kind", "ocr", "--health-port", "8000"]
     extra_hosts: *docdoc_hosts
     environment: *docdoc_env
@@ -252,6 +260,22 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+
+  # One-shot: applies the run database's schema, then exits. The API and both
+  # workers wait for it to succeed, so a fresh `up` needs no separate
+  # `docdoc migrate` (ADR-0027's quickstart). It is still an explicit step, run
+  # once per `up` by one process rather than by every process on boot — which
+  # is the race `docdoc migrate` exists to avoid. Idempotent: on a migrated
+  # database it applies nothing and exits 0.
+  migrate:
+    build: *docdoc_build
+    depends_on:
+      postgres: {condition: service_healthy}
+    command: ["docdoc", "migrate"]
+    environment: *docdoc_env
+    # Not a server: the image's HEALTHCHECK probes a port this never opens.
+    healthcheck:
+      disable: true
 
   postgres:
     image: postgres:16-alpine

@@ -80,6 +80,16 @@ collector is the operator's (FR-023, SC-025).
 Run `uv run pytest` with neither variable set and the suite passes, reporting what it skipped. That
 is asserted rather than assumed — see SC-013 in `specs/009-asynchronous-runs/spec.md`.
 
+## Seeing a change working
+
+docdoc is a service ([ADR-0027](docs/adr/0027-service-only-surface.md)): there is no local command
+that parses or extracts a document. To watch a change end to end, run the stack and send it a
+document through the console or the HTTP API — either the
+[README quickstart](README.md#quickstart) (Docker Compose) or `make dev` (API, OCR worker and the
+console's dev server against a local Postgres). For a stage on its own, write a test that calls it;
+the internal modules (`docdoc.ingest`, `docdoc.extraction`, …) are free to change shape, and outside
+`src/` only the tests and `datasets/mvp/make_dataset.py` call them.
+
 ## Before you open a PR
 
 ```bash

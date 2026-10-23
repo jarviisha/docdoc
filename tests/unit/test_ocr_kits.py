@@ -138,4 +138,5 @@ def test_main_compose_has_no_model_service() -> None:
         "postgres",
         "seaweedfs",
         "createbucket",
+        "migrate",
     }
