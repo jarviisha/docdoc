@@ -1,13 +1,11 @@
-"""The ``docdoc`` command.
+"""The ``docdoc`` command: operating a deployment, nothing else.
 
-Built on :mod:`argparse`, so the base install acquires no dependency and the
-command belongs to everyone who typed ``pip install docdoc``. That is the point
-rather than an economy: the founding argument for having a CLI at all was that a
-developer should not need to deploy five services to try docdoc, and it would be
-a poor answer to make them find a second install line instead.
+docdoc is a service. Documents reach it through the HTTP API and the console;
+the command line is what an operator runs inside the container -- ``migrate``,
+``worker``, ``sweep``, ``credential``, ``console-user``, ``erase`` and
+``store``. Built on :mod:`argparse`, so it acquires no dependency.
 
-**What it must never contain:** extraction, grounding, or validation logic. It
-parses arguments, calls :mod:`docdoc.pipeline`, and formats a result. A
+**What it must never contain:** extraction, grounding, or validation logic. A
 behaviour reachable only through the command line is a bug.
 
 **What it must never import:** :mod:`docdoc.api`. The two are siblings with
@@ -15,16 +13,14 @@ different audiences, held apart by an ``independence`` contract rather than by
 convention -- sharing a renderer between them would be the first coupling, and
 the thing they genuinely share is the result model both already import.
 
-Two output rules make up most of the contract. With ``--json``, standard output
+One output rule makes up most of the contract. With ``--json``, standard output
 carries exactly one JSON document and nothing else; diagnostics go to standard
-error in both forms. And the exit code distinguishes "the document is invalid"
-from "docdoc could not run", because a script that confuses the two will treat a
-wrong invoice as a broken tool.
+error in both forms.
 
 **Every command returns; none of them prints.** A command hands back a
 :class:`~docdoc.cli.render.Rendering` and :func:`~docdoc.cli.render.emit` writes
 it, which is what makes "exactly one JSON document on stdout" structural rather
-than a rule four modules have to remember.
+than a rule every module has to remember.
 """
 
 from __future__ import annotations
@@ -43,11 +39,9 @@ if TYPE_CHECKING:
 
 __all__ = ["main"]
 
-#: The run completed and the document is valid.
+#: The command completed.
 EXIT_OK = 0
-#: The run completed and the document is **invalid** — a real result, not an error.
-EXIT_INVALID = 1
-#: The run could not complete: a typed docdoc error.
+#: The command could not complete: a typed docdoc error.
 EXIT_COULD_NOT_RUN = 2
 #: The invocation itself was wrong — bad arguments, unreadable file. The value is
 #: ``EX_USAGE`` from ``sysexits.h``, which is what shells and CI runners already
@@ -56,60 +50,13 @@ EXIT_BAD_INVOCATION = 64
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """The command set of ``contracts/cli.md`` §1, and nothing beyond it."""
+    """The operating commands, and nothing beyond them."""
     parser = argparse.ArgumentParser(
         prog="docdoc",
         description="Turn documents into structured, validated, traceable data.",
     )
     add_common_arguments(parser)
     subcommands = parser.add_subparsers(dest="command", metavar="COMMAND")
-
-    parse_command = subcommands.add_parser(
-        "parse", help="route, parse, and report what the parse produced"
-    )
-    parse_command.add_argument("file", metavar="FILE")
-    add_common_arguments(parse_command)
-
-    extract_command = subcommands.add_parser(
-        "extract", help="run the whole pipeline and report the result"
-    )
-    extract_command.add_argument("file", metavar="FILE")
-    extract_command.add_argument(
-        "--schema", required=True, metavar="NAME@V", help="schema identity, e.g. invoice@1"
-    )
-    add_common_arguments(extract_command)
-
-    # `inspect` takes a file *or* a stored identity, so neither can be
-    # unconditionally required — argparse cannot express "exactly one of these"
-    # for a positional and an option together, so `main` checks it and reports a
-    # usage error. FR-026 asks for a command that inspects "a result", and a
-    # result that only exists as a file to re-run is not one.
-    inspect_command = subcommands.add_parser(
-        "inspect", help="report where every value came from, from a file or a stored identity"
-    )
-    inspect_command.add_argument("file", metavar="FILE", nargs="?", default=None)
-    inspect_command.add_argument(
-        "--schema", metavar="NAME@V", help="schema identity, e.g. invoice@1 (with FILE)"
-    )
-    inspect_command.add_argument(
-        "--result",
-        metavar="PROCESSING_ID",
-        default=None,
-        help="read a completed run back from the store instead of running one",
-    )
-    add_common_arguments(inspect_command)
-
-    explain = subcommands.add_parser("explain", help="how an artifact identity was derived")
-    explain.add_argument("artifact_id", metavar="ARTIFACT_ID")
-    explain.add_argument(
-        "--chain", action="store_true", help="walk the derivation back to the source blob"
-    )
-    add_common_arguments(explain)
-
-    evaluate = subcommands.add_parser("eval", help="score a golden set")
-    evaluate.add_argument("manifest", metavar="MANIFEST")
-    evaluate.add_argument("--predictions", required=True, metavar="DIR")
-    add_common_arguments(evaluate)
 
     # "clear", not "inspect and clear". There is no inspect action and the
     # contract grants none: FR-019 allows two subsets and no query language, so a
@@ -142,7 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
     # On `migrate` and nowhere else. This is the command that *records* which
     # tenant owns content written before tenants existed, so it is the one
     # invocation where naming that tenant is an argument rather than a statement
-    # about the deployment. On `parse` or `extract` a flag would let one
+    # about the deployment. On any other command a flag would let one
     # invocation disagree with the processes around it about where content lives
     # — which is exactly what the recorded value exists to prevent.
     migrate.add_argument(
@@ -351,7 +298,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.print_help(sys.stderr)
         return EXIT_BAD_INVOCATION
 
-    usage = _usage_error(args)
+    usage = _limit_usage_error(args)
     if usage is not None:
         warn(usage)
         return EXIT_BAD_INVOCATION
@@ -369,43 +316,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     return emit(rendering, as_json=settings.as_json)
 
 
-def _usage_error(args: argparse.Namespace) -> str | None:
-    """The constraints argparse cannot express, checked in one place.
-
-    ``docdoc inspect`` takes a file *or* a stored identity, and argparse has no
-    way to require exactly one of a positional and an option. Rather than make
-    both optional and let a command discover the problem halfway through, the
-    check lives here beside the other invocation errors and earns the same
-    exit code.
-
-    The limit flags are here for a related reason. ``Limits`` rejects a
-    non-positive bound with a ``ValidationError``, which would surface as a
-    pydantic dump naming a field the user never typed; caught here it earns the
-    same ``64`` and a sentence naming the flag they did type.
-    """
-    limit_error = _limit_usage_error(args)
-    if limit_error is not None:
-        return limit_error
-
-    if args.command != "inspect":
-        return None
-
-    if args.result and args.file:
-        return "inspect takes either FILE or --result, not both"
-    if args.result:
-        return None
-    if not args.file:
-        return "inspect needs a FILE, or --result PROCESSING_ID to read a stored run"
-    if not args.schema:
-        return "inspect FILE needs --schema NAME@V"
-    return None
-
-
 def _limit_usage_error(args: argparse.Namespace) -> str | None:
     """A limit of zero or less is an invocation error, not a run failure.
 
     Checked for every command that carries the flags rather than only the ones
-    that consult them, because ``docdoc explain --max-pages 0`` is just as wrong
+    that consult them, because ``docdoc migrate --max-pages 0`` is just as wrong
     and telling the user so costs nothing.
 
     Exit ``64`` and one sentence naming the flag the operator typed. The
@@ -441,8 +356,7 @@ def _dispatch(args: argparse.Namespace) -> Any:
     Azure SDK — into ``docdoc store clear``, which needs none of them. The base
     install has to stay usable with no extras at all (FR-053, SC-013).
     """
-    from docdoc.cli.commands import eval as eval_command
-    from docdoc.cli.commands import explain, extract, inspect, migrate, parse, store, worker
+    from docdoc.cli.commands import migrate, store, worker
 
     if args.command == "migrate":
         return migrate.run
@@ -474,18 +388,9 @@ def _dispatch(args: argparse.Namespace) -> Any:
             raise ValueError("usage: docdoc console-user add|passwd|disable|list")
         return console_user.run
 
-    if args.command == "store":
-        if getattr(args, "action", None) != "clear":
-            raise ValueError("usage: docdoc store clear [--stage STAGE]")
-        return store.run
-
-    return {
-        "parse": parse.run,
-        "extract": extract.run,
-        "inspect": inspect.run,
-        "explain": explain.run,
-        "eval": eval_command.run,
-    }[args.command]
+    if getattr(args, "action", None) != "clear":
+        raise ValueError("usage: docdoc store clear [--stage STAGE]")
+    return store.run
 
 
 def _failure(error: Exception) -> Rendering:

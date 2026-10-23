@@ -50,6 +50,13 @@ them, so the guard-the-guard check moved to `runs/corrections.py`.
 confirm a value, which changes `Correction`. `grounding/`, `validation/`, and
 the identity derivations stay protected, because measuring extraction quality
 must not move a value, a verdict, a location, or an identity.
+
+**Re-pointed at the service-only surface
+(`docs/superpowers/specs/2026-10-23-service-only-surface-design.md`),
+2026-10-23.** The work removes the document-processing CLI commands, so the
+guard-the-guard check moved to `src/docdoc/cli/commands/parse.py`, which this
+work deletes. The protected set is unchanged: retiring a front end must not move
+a value, a verdict, a location, or an identity.
 """
 
 from __future__ import annotations
@@ -58,8 +65,7 @@ import subprocess
 
 import pytest
 
-#: The layers tenant quality evaluation must not touch. `evaluation/` and `runs/`
-#: are this work -- see the module docstring.
+#: The layers the service-only work must not touch -- see the module docstring.
 PROTECTED = (
     "src/docdoc/grounding/",
     "src/docdoc/validation/",
@@ -220,7 +226,7 @@ def test_the_diff_is_not_empty() -> None:
     changed = _changed()
 
     assert changed, "the diff against `main` is empty, so nothing above was checked"
-    assert "src/docdoc/runs/corrections.py" in changed, (
-        "this milestone's work is tenant quality evaluation (ADR-0026), and the diff "
+    assert "src/docdoc/cli/commands/parse.py" in changed, (
+        "this milestone's work is retiring the document-processing CLI, and the diff "
         "shows none of it. The comparison is against the wrong ref"
     )

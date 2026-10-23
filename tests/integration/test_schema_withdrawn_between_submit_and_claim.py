@@ -57,9 +57,8 @@ class WithdrawnRegistry:
     """A registry that has the schema at submission and not at claim.
 
     Modelled as a registry that refuses rather than as an empty one, because the
-    *shape* being tested is "resolve raised" — an empty registry raises a
-    different, friendlier error (`docdoc.cli.config.empty_registry_message`
-    exists for exactly that case) and would exercise a different path.
+    *shape* being tested is "resolve raised" — an empty registry is a different
+    case and would exercise a different path.
     """
 
     def __init__(self) -> None:

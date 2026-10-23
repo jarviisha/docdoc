@@ -428,6 +428,10 @@ CONFIG_DOCUMENTS = (
     "docs/superpowers/specs/2026-10-22-tenant-quality-evaluation-design.md",
     "docs/superpowers/plans/2026-10-22-tenant-quality-evaluation.md",
     "docs/adr/0026-tenant-quality-evaluation.md",
+    # The service-only design and plan name the `DOCDOC_*` settings compose sets
+    # and the worker reads.
+    "docs/superpowers/specs/2026-10-23-service-only-surface-design.md",
+    "docs/superpowers/plans/2026-10-23-service-only-surface.md",
 )
 
 #: Requires at least one character after the prefix, so the `DOCDOC_*` wildcard

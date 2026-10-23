@@ -1,11 +1,14 @@
-"""``docdoc explain`` — the tool ADR-0003 accepted unreadable cache keys for.
+"""Derivation records — what ADR-0003 accepted unreadable cache keys for.
 
 ADR-0003 conceded that cache keys "cannot be computed by hand or eyeballed in
-logs" on one explicit condition: that something would explain them. Without that,
+logs" on one explicit condition: that something would explain them. Every
+stored artifact carries a derivation record, read through
+``docdoc.artifacts.derivation`` with the folded-input names from
+``docdoc.pipeline.stages.folded_inputs_for``. Without that,
 the first cache-correctness incident is unarguable in both directions — nobody can
 show the reuse was right, and nobody can show it was wrong.
 
-The test that matters most is the leak one. An explanation is the single most
+The test that matters most is the leak one. A derivation is the single most
 likely thing to be pasted into a ticket, so it explains *identities* and never
 documents.
 """
@@ -15,15 +18,17 @@ from __future__ import annotations
 import itertools
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from docdoc.artifacts import FileArtifactStore
 from docdoc.artifacts.derivation import derivation_chain, derivation_of
-from docdoc.cli import main
+from docdoc.artifacts.errors import ArtifactError
 from docdoc.extraction import SchemaRegistry
 from docdoc.extraction.adapters.echo import EchoAdapter
 from docdoc.pipeline import run
+from docdoc.pipeline.stages import folded_inputs_for
 
 # SC-013: the offline suite must pass on a base install, which has no native PDF
 # reader. Every test in this module reaches a real parse through the `stored`
@@ -89,80 +94,64 @@ def test_the_chain_reaches_the_source_blob_in_four_hops(
         assert earlier.input_artifact_id == later.artifact_id
 
 
+def _explained_chain(store: FileArtifactStore, processing_id: str) -> list[dict[str, Any]]:
+    """Every link, with the folded-input names the store itself cannot know."""
+    links = []
+    for record in derivation_chain(store, processing_id):
+        link = record.model_dump(mode="json")
+        link["folded_inputs"] = list(record.folded_inputs or folded_inputs_for(record.stage))
+        links.append(link)
+    return links
+
+
 def test_an_explanation_carries_no_document_content(
-    stored: tuple[FileArtifactStore, str], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    stored: tuple[FileArtifactStore, str],
 ) -> None:
     """FR-025 and SC-007 — it explains identities, not documents.
 
-    Asserted over the whole rendered output rather than field by field, because
+    Asserted over the whole serialised chain rather than field by field, because
     the failure being guarded against is a field somebody adds later without
     thinking about where it ends up.
     """
-    _, processing_id = stored
+    store, processing_id = stored
+    chain = _explained_chain(store, processing_id)
+    rendered = json.dumps(chain)
 
-    code = main(["explain", processing_id, "--chain", "--store", str(tmp_path), "--json"])
-    assert code == 0
-
-    rendered = capsys.readouterr().out
-    payload = json.loads(rendered)
-
-    assert DISTINCTIVE not in rendered, "the document's text reached an explanation"
-    assert "Acme" not in rendered, "an extracted value reached an explanation"
-    assert "1240.00" not in rendered, "an extracted value reached an explanation"
+    assert DISTINCTIVE not in rendered, "the document's text reached a derivation"
+    assert "Acme" not in rendered, "an extracted value reached a derivation"
+    assert "1240.00" not in rendered, "an extracted value reached a derivation"
 
     # And the folded *names* are there, which is what makes it useful at all.
-    assert payload["derivation"]["folded_inputs"], "an explanation with no folded inputs"
-    assert "validation_options" in payload["derivation"]["folded_inputs"]
+    assert chain[0]["folded_inputs"], "a derivation with no folded inputs"
+    assert "validation_options" in chain[0]["folded_inputs"]
 
 
 def test_folded_input_names_are_names_and_never_values(
-    stored: tuple[FileArtifactStore, str], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    stored: tuple[FileArtifactStore, str],
 ) -> None:
     """ "prompt_hash" is a name; the prompt is a document."""
-    _, processing_id = stored
-    main(["explain", processing_id, "--chain", "--store", str(tmp_path), "--json"])
-    payload = json.loads(capsys.readouterr().out)
+    store, processing_id = stored
+    chain = _explained_chain(store, processing_id)
 
-    extract_link = next(link for link in payload["chain"] if link["stage"] == "extract")
+    extract_link = next(link for link in chain if link["stage"] == "extract")
     assert "prompt_hash" in extract_link["folded_inputs"]
     assert "model_id" in extract_link["folded_inputs"]
     for name in extract_link["folded_inputs"]:
         assert not name.startswith("sha256:"), f"{name} is a value, not a name"
 
 
-def test_an_identity_with_no_record_says_so_and_does_not_guess(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_an_identity_with_no_record_says_so_and_does_not_guess(tmp_path: Path) -> None:
     """FR-023 — a derivation is read from the record a write left behind.
 
-    A reconstruction would be a guess wearing the costume of a record, and the
-    whole value of this command is that it reports what happened.
+    A reconstruction would be a guess wearing the costume of a record.
     """
+    store = FileArtifactStore(tmp_path)
     absent = "sha256:" + "0" * 64
-    code = main(["explain", absent, "--store", str(tmp_path), "--json"])
-    assert code == 0
-
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["derivation"] is None
-    assert payload["reason"] == "not_in_store"
+    assert derivation_of(store, absent) is None
+    assert list(derivation_chain(store, absent)) == []
 
 
-def test_a_run_with_no_store_has_no_derivation_to_read(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """FR-017 and FR-023 together: no store, no record, and it says which."""
-    code = main(["explain", "sha256:" + "0" * 64, "--no-store", "--json"])
-    assert code == 0
-
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["derivation"] is None
-    assert payload["reason"] == "no_store"
-
-
-def test_a_malformed_identity_does_not_escape_the_store_root(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_a_malformed_identity_does_not_escape_the_store_root(tmp_path: Path) -> None:
     """An identity is a filename here, so a path separator would be a traversal."""
-    code = main(["explain", "../../etc/passwd", "--store", str(tmp_path), "--json"])
-    assert code in {0, 2}, "it must refuse, not read"
-    assert "root:" not in capsys.readouterr().out
+    with pytest.raises(ArtifactError):
+        derivation_of(FileArtifactStore(tmp_path), "../../etc/passwd")
