@@ -298,7 +298,7 @@ def test_the_ceiling_is_readable_through_no_route(client: TestClient) -> None:
     paths = client.app.openapi()["paths"]  # type: ignore[attr-defined]
 
     # `/v1/console/providers/priority` orders model adapters, not runs.
-    run_paths = [path for path in paths if not path.startswith("/v1/console/providers")]
+    run_paths = [path for path in paths if path != "/v1/console/providers/priority"]
     assert not [path for path in run_paths if "ceiling" in path or "priority" in path]
 
     body = _submit(client, _blob(client), {"priority": "urgent"}).json()

@@ -436,6 +436,19 @@ def _schema_detail(registry: Any, store: Any, identity: str) -> dict[str, Any]:
 #: Adapters that answer from fixtures: shown, ordered, never configured.
 _TEST_ONLY = frozenset({"echo"})
 _REDACTED = "••••"
+#: A provider body is a model name and a key; anything near this is not one.
+_PROVIDER_BODY_CAP = 16 * 1024
+_MODEL_MAX = 256
+
+
+async def _provider_json(request: Request) -> dict[str, Any]:
+    """A provider body as a mapping, read under `_PROVIDER_BODY_CAP`; nothing echoed."""
+    raw = await _read_capped(request, _PROVIDER_BODY_CAP)
+    try:
+        parsed = json.loads(raw) if raw else {}
+    except ValueError:
+        raise HTTPException(status_code=422, detail={"error": "invalid_json"}) from None
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _bad(error: str) -> JSONResponse:
@@ -469,7 +482,8 @@ def _providers_body(request: Request, tenant: str | None) -> dict[str, Any]:
     resolved = resolve(tenant, deployment.provider_store(), deployment.sealer())
     status = {c.id: c for c in registry_for(resolved).candidates()}
     return {
-        "scope": tenant or "default",
+        # `None` is the deployment default: "default" is a legal tenant id.
+        "scope": tenant,
         "secrets_configured": deployment.sealer() is not None,
         "priority": {"value": list(resolved.priority), "source": resolved.priority_source},
         "selected": selected_id(resolved),
@@ -1224,7 +1238,7 @@ def console_router() -> APIRouter:
         refused, store = _provider_scope(request, tenant)
         if refused:
             return refused
-        body = await _read_json(request)
+        body = await _provider_json(request)
         value = body.get("priority")
         if "priority" not in body or (
             value is not None
@@ -1257,7 +1271,7 @@ def console_router() -> APIRouter:
             return refused
         if adapter_id not in KNOWN_ADAPTERS or adapter_id in _TEST_ONLY:
             return JSONResponse(status_code=404, content={"error": "unknown_adapter"})
-        body = await _read_json(request)
+        body = await _provider_json(request)
         if "model" not in body:
             # Required, so a body naming only a key cannot clear the model by omission.
             return _bad("invalid_model")
@@ -1266,6 +1280,8 @@ def console_router() -> APIRouter:
             api_key = _optional_text(body, "api_key")
         except ValueError as exc:
             return _bad(f"invalid_{exc}")
+        if model is not None and len(model) > _MODEL_MAX:
+            return _bad("invalid_model")
         key: Any = KEEP_KEY if "api_key" not in body else None
         if api_key is not None:
             sealer = request.app.state.deployment.sealer()
@@ -1318,12 +1334,14 @@ def console_router() -> APIRouter:
             return refused
         if adapter_id not in KNOWN_ADAPTERS:
             return JSONResponse(status_code=404, content={"error": "unknown_adapter"})
-        body = await _read_json(request)
+        body = await _provider_json(request)
         try:
             model = _optional_text(body, "model")
             api_key = _optional_text(body, "api_key")
         except ValueError as exc:
             return _bad(f"invalid_{exc}")
+        if model is not None and len(model) > _MODEL_MAX:
+            return _bad("invalid_model")
 
         def probe() -> dict[str, Any]:
             from docdoc.extraction.adapter_registry import default_adapter_registry

@@ -80,7 +80,7 @@ def test_get_default_with_nothing_saved(signed_in) -> None:
     r = client.get(URL, headers=cookie)
     assert r.status_code == 200
     body = r.json()
-    assert body["scope"] == "default"
+    assert body["scope"] is None
     assert body["secrets_configured"] is False
     assert body["priority"] == {"value": ["gemini"], "source": "shipped"}
     gemini = _adapter(body, "gemini")
@@ -111,6 +111,8 @@ def test_put_model_validation(signed_in) -> None:
     client, cookie = signed_in
     assert client.put(f"{URL}/gemini", json={"model": "  "}, headers=cookie).status_code == 422
     assert client.put(f"{URL}/gemini", json={"api_key": None}, headers=cookie).status_code == 422
+    r = client.put(f"{URL}/gemini", json={"model": "m" * 257}, headers=cookie)
+    assert r.status_code == 422
     assert client.put(f"{URL}/echo", json={"model": None}, headers=cookie).status_code == 404
     assert client.put(f"{URL}/nope", json={"model": None}, headers=cookie).status_code == 404
     r = client.put(f"{URL}/gemini?tenant=Bad!", json={"model": None}, headers=cookie)
@@ -193,6 +195,36 @@ def test_probe_error_is_redacted(signed_in, monkeypatch: pytest.MonkeyPatch) -> 
     assert "••••" in r.json()["message"]
     assert KEY not in r.text
     assert seen == ["gemini-y"]
+
+
+def _probe_echoing_the_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    def probe(self: GeminiAdapter, timeout_s: float = 10.0) -> Availability:
+        return Availability(usable=False, reason=f"key {self._resolved_key()} rejected")
+
+    monkeypatch.setattr(GeminiAdapter, "probe", probe)
+
+
+def test_probe_redacts_a_saved_key(with_secrets, monkeypatch: pytest.MonkeyPatch) -> None:
+    client, cookie = with_secrets
+    client.put(f"{URL}/gemini", json={"model": None, "api_key": KEY}, headers=cookie)
+    _probe_echoing_the_key(monkeypatch)
+    r = client.post(f"{URL}/gemini/test", json={}, headers=cookie)
+    assert r.json() == {"ok": False, "message": "key •••• rejected"}
+
+
+def test_probe_redacts_the_env_key(signed_in, monkeypatch: pytest.MonkeyPatch) -> None:
+    client, cookie = signed_in
+    monkeypatch.setenv("GEMINI_API_KEY", KEY)
+    _probe_echoing_the_key(monkeypatch)
+    r = client.post(f"{URL}/gemini/test", json={}, headers=cookie)
+    assert r.json() == {"ok": False, "message": "key •••• rejected"}
+
+
+def test_an_oversized_body_is_refused_unread(signed_in) -> None:
+    client, cookie = signed_in
+    r = client.put(f"{URL}/gemini", json={"model": None, "api_key": KEY * 1000}, headers=cookie)
+    assert r.status_code == 413
+    assert KEY not in r.text
 
 
 def test_echo_test_answers_with_available(signed_in) -> None:
