@@ -52,7 +52,15 @@ __all__ = ["Correction", "promote"]
 
 
 class Correction(BaseModel):
-    """One reviewer's statement that a recorded value was wrong (EVA-29)."""
+    """One reviewer's check of a recorded value: it was wrong (EVA-29), or it was right.
+
+    A check is a correction that may also **confirm**. ``confirmed=True`` says the
+    predicted value is correct as it stands; it carries no ``corrected_value`` and
+    no ``corrected_absence``, because there is nothing to correct. A confirmation
+    is as much an answer as a correction -- scoring a tenant's own documents needs
+    the fields the pipeline got right as well as the ones it got wrong -- and it
+    becomes a label of the predicted value.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -90,14 +98,34 @@ class Correction(BaseModel):
     #: Whether this corrects *to an absence* rather than to a value.
     corrected_absence: bool = False
 
+    #: The predicted value is right. Mutually exclusive with ``corrected_value``
+    #: and ``corrected_absence``; ``reason`` may then be blank.
+    confirmed: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _default_confirmed_reason(cls, data: Any) -> Any:
+        # Before-mode because the model is frozen: a confirmation has nothing to
+        # explain, so a blank reason becomes a stated one rather than a refusal.
+        blank = isinstance(data, dict) and not str(data.get("reason") or "").strip()
+        if blank and data.get("confirmed"):
+            return {**data, "reason": "confirmed correct"}
+        return data
+
     @model_validator(mode="after")
     def _states_something(self) -> Correction:
-        if self.corrected_absence and self.corrected_value is not None:
+        if self.confirmed:
+            if self.corrected_value is not None or self.corrected_absence:
+                raise ValueError(
+                    f"correction for {self.field_path!r} confirms the predicted value "
+                    "but also states a corrected value or absence"
+                )
+        elif self.corrected_absence and self.corrected_value is not None:
             raise ValueError(
                 f"correction for {self.field_path!r} asserts the field is absent but "
                 f"also carries the value {self.corrected_value!r}"
             )
-        if not self.corrected_absence and self.corrected_value is None:
+        if not self.confirmed and not self.corrected_absence and self.corrected_value is None:
             raise ValueError(
                 f"correction for {self.field_path!r} states no corrected value; set "
                 "corrected_absence=True to assert the field is correctly absent"
@@ -118,7 +146,18 @@ class Correction(BaseModel):
         ``labeler`` and ``labeled_at`` carry the annotator and the timestamp, so
         a promoted label keeps the attribution -- and neither enters
         ``golden_set_id``, because neither can change a metric (EVA-6).
+
+        A confirmed check labels the predicted value itself.
         """
+        if self.confirmed:
+            return Label(
+                field_path=self.field_path,
+                expectation=Expectation.VALUE,
+                value=self.predicted_value,
+                location=self.location,
+                labeler=self.annotator,
+                labeled_at=self.timestamp,
+            )
         return Label(
             field_path=self.field_path,
             expectation=Expectation.ABSENT if self.corrected_absence else Expectation.VALUE,
