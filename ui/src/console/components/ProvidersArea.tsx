@@ -9,7 +9,7 @@
  * sent in a body and cleared on save or cancel; no answer carries it back.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { getRouteApi } from "@tanstack/react-router";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -62,12 +62,18 @@ export function ProvidersArea() {
   const [testing, setTesting] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [form, setForm] = useState(BLANK_FORM);
-  const [tested, setTested] = useState<{ ok: boolean; message: string } | null>(null);
+  // The last "Test connection" answer, for the adapter it tested.
+  const [tested, setTested] = useState<{ adapterId: string; ok: boolean; message: string } | null>(null);
   const [confirmingReset, setConfirmingReset] = useState(false);
 
   const listProblem = list.isError ? describe(list.error) : null;
   const tenantsProblem = tenants.isError ? describe(tenants.error) : null;
   const editRow = view?.rows.find((row) => row.id === editing) ?? null;
+  // An edited adapter gone from a refreshed answer: drop the form, typed key included.
+  const editGone = view !== null && editing !== null && editRow === null;
+  useEffect(() => {
+    if (editGone) closeForm();
+  }, [editGone]);
 
   const write = async (send: () => ReturnType<typeof act>) => {
     setWriteProblem(null);
@@ -102,26 +108,33 @@ export function ProvidersArea() {
     if (await write(() => act({ type: "set-provider", tenantId: tenant, adapterId: editing }, body))) closeForm();
   };
 
-  const test = async () => {
-    if (editing === null) return;
+  /** The form's values for the edited adapter; `{}` for one with nothing to edit (echo). */
+  const test = async (adapterId: string, body: { model?: string; api_key?: string }) => {
     setTested(null);
     setTesting(true);
-    const answer = await act(
-      { type: "test-provider", tenantId: tenant, adapterId: editing },
-      JSON.stringify(testBody(form)),
-    );
+    const answer = await act({ type: "test-provider", tenantId: tenant, adapterId }, JSON.stringify(body));
     setTesting(false);
-    setTested(
-      answer.ok
+    setTested({
+      adapterId,
+      ...(answer.ok
         ? (toTestResult(answer.body) ?? { ok: false, message: "the test answered in an unexpected shape" })
-        : { ok: false, message: describe(answer.failure) },
-    );
+        : { ok: false, message: describe(answer.failure) }),
+    });
   };
 
   const reset = async () => {
-    if (tenant !== null) await write(() => act({ type: "reset-providers", tenantId: tenant }));
+    // The open form holds the override's values: saving it would put the override back.
+    if (tenant !== null && (await write(() => act({ type: "reset-providers", tenantId: tenant })))) closeForm();
     setConfirmingReset(false);
   };
+
+  const testLine = (result: { adapterId: string; ok: boolean; message: string }) => (
+    <p className="flex items-center gap-2 text-xs">
+      <Badge variant={result.ok ? "success" : "error"}>{result.ok ? "ok" : "failed"}</Badge>
+      <code className="font-mono">{result.adapterId}</code>
+      {result.message}
+    </p>
+  );
 
   return (
     <div className="flex flex-col gap-3">
@@ -282,6 +295,7 @@ export function ProvidersArea() {
                           <Button
                             variant="outline"
                             size="sm"
+                            aria-label={`Add ${row.id} to priority`}
                             disabled={busy}
                             onClick={() => setPriority(withAdapter(view.priority, row.id))}
                           >
@@ -298,7 +312,17 @@ export function ProvidersArea() {
                           >
                             Edit
                           </Button>
-                        ) : null}
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            aria-label={`Test ${row.id}`}
+                            disabled={busy || testing}
+                            onClick={() => void test(row.id, {})}
+                          >
+                            Test
+                          </Button>
+                        )}
                       </span>
                     );
                   },
@@ -306,6 +330,9 @@ export function ProvidersArea() {
               ]}
             />
           </Card>
+          <div role="status" aria-live="polite" className="empty:-mb-3">
+            {tested === null || tested.adapterId === editing ? null : testLine(tested)}
+          </div>
           <p className="text-xs text-slate-500">
             Priority from {SOURCE_LABEL[view.prioritySource]}. Workers started with --adapter use this list too
             once one is saved.
@@ -332,34 +359,31 @@ export function ProvidersArea() {
                 spellCheck={false}
                 placeholder={keyPlaceholder(view, editRow)}
                 value={form.apiKey}
+                disabled={form.clearKey}
                 onChange={(apiKey) => setForm({ ...form, apiKey })}
               />
               {view.secretsConfigured ? null : <p className="text-xs text-amber-700">{SECRETS_NOTE}</p>}
+              {/* Removing drops a typed key too: it would not be sent. */}
               {keySaved(view, editRow) ? (
                 <label className="flex items-center gap-2 text-xs text-slate-600">
                   <input
                     type="checkbox"
                     aria-label="Remove saved key"
                     checked={form.clearKey}
-                    onChange={(event) => setForm({ ...form, clearKey: event.target.checked })}
+                    onChange={(event) => setForm({ ...form, apiKey: "", clearKey: event.target.checked })}
                   />
                   Remove saved key
                 </label>
               ) : null}
             </div>
             <div role="status" aria-live="polite" className="empty:-mb-3">
-              {tested === null ? null : (
-                <p className="flex items-center gap-2 text-xs">
-                  <Badge variant={tested.ok ? "success" : "error"}>{tested.ok ? "ok" : "failed"}</Badge>
-                  {tested.message}
-                </p>
-              )}
+              {tested === null || tested.adapterId !== editRow.id ? null : testLine(tested)}
             </div>
             <div className="flex gap-2">
               <Button disabled={!canSave(form, view.secretsConfigured, busy || testing)} onClick={() => void save()}>
                 {busy ? "Saving…" : "Save"}
               </Button>
-              <Button variant="outline" disabled={busy || testing} onClick={() => void test()}>
+              <Button variant="outline" disabled={busy || testing} onClick={() => void test(editRow.id, testBody(form))}>
                 {testing ? "Testing…" : "Test connection"}
               </Button>
               <Button variant="ghost" disabled={busy || testing} onClick={closeForm}>

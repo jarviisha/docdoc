@@ -171,3 +171,9 @@ test("toTestResult reads ok and message; junk is null", () => {
   assert.equal(toTestResult({ ok: "yes" }), null);
   assert.equal(toTestResult(null), null);
 });
+
+test("a checked Remove saved key wins over a typed key, in the body and in canSave", () => {
+  const form = { model: "", apiKey: "typed", clearKey: true };
+  assert.deepEqual(adapterUpdate(form), { model: null, api_key: null });
+  assert.equal(canSave(form, false, false), true);
+});
