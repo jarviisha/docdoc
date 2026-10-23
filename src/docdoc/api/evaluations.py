@@ -80,7 +80,16 @@ def routes() -> APIRouter:
         found = store.list(
             tenant_id=principal.tenant_id, schema_name=schema, limit=max(1, min(limit, 100))
         )
-        return {"evaluations": [_summary(e) for e in found]}
+        from docdoc.runs.evaluations import settled_safely
+        from docdoc.runs.identity import now
+
+        deployment = _deployment_of(request)
+        return {
+            "evaluations": [
+                _summary(e if e.finished else settled_safely(deployment, e, at=now()))
+                for e in found
+            ]
+        }
 
     @router.get("/evaluations/{evaluation_id}")
     async def read_evaluation(request: Request, evaluation_id: str, principal: Caller) -> Any:

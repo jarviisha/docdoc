@@ -148,6 +148,21 @@ def test_starting_and_reading_an_evaluation(client, deployment, blob) -> None:
     assert "per_field" not in listed["evaluations"][0]
 
 
+def test_a_finished_evaluation_shows_in_the_list_and_allows_a_new_start(
+    client, deployment, blob
+) -> None:
+    client.post("/v1/evaluations", params={"schema": "invoice"}, headers=A)
+    _drain(deployment)
+
+    (listed,) = client.get("/v1/evaluations", headers=A).json()["evaluations"]
+
+    assert listed["status"] == "finished"
+    assert "field_accuracy" in listed["metrics"]
+    assert (
+        client.post("/v1/evaluations", params={"schema": "invoice"}, headers=A).status_code == 202
+    )
+
+
 def test_another_tenants_evaluation_is_not_found(client, deployment, blob) -> None:
     eid = client.post("/v1/evaluations", params={"schema": "invoice"}, headers=A).json()[
         "evaluation_id"

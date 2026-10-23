@@ -11,6 +11,7 @@ Every read is tenant-scoped in the query, like `corrections`.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -276,7 +277,8 @@ def start(deployment: Any, *, tenant_id: str, schema_name: str, at: datetime) ->
     if not golden.documents:
         raise EvaluationUnavailable("no_answers")
     store: PostgresEvaluationStore = deployment.evaluations()
-    if store.unfinished(tenant_id=tenant_id, schema_name=schema_name) is not None:
+    pending = store.unfinished(tenant_id=tenant_id, schema_name=schema_name)
+    if pending is not None and not settled_safely(deployment, pending, at=at).finished:
         raise EvaluationUnavailable("evaluation_in_progress")
     # The tenant's limits, as `POST /v1/documents/{blob_id}/runs` applies them.
     # ponytail: one check for N runs; the limiter has no count to check against.
@@ -325,6 +327,19 @@ def start(deployment: Any, *, tenant_id: str, schema_name: str, at: datetime) ->
             queue.cancel(run.run_id, tenant_id, now=at)
         raise
     return evaluation
+
+
+def settled_safely(deployment: Any, evaluation: Evaluation, *, at: datetime) -> Evaluation:
+    """`settled`, except a failure leaves the evaluation as it was: unfinished."""
+    try:
+        return settled(deployment, evaluation, at=at)
+    except Exception as error:
+        # The class only: a message can quote document content.
+        logging.getLogger("docdoc.runs").warning(
+            "evaluation_settle_failed",
+            extra={"evaluation_id": str(evaluation.evaluation_id), "error": type(error).__name__},
+        )
+        return evaluation
 
 
 def settled(deployment: Any, evaluation: Evaluation, *, at: datetime) -> Evaluation:
