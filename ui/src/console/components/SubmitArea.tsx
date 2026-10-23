@@ -14,8 +14,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 
-import type { Intent } from "../model/client.ts";
-import { describe, type Failure } from "../model/failure.ts";
+import { describe } from "../model/failure.ts";
 import {
   AUTOMATIC,
   canSubmit,
@@ -35,11 +34,7 @@ import {
   type SubmitForm,
 } from "../model/submit.ts";
 import { FileField, SelectField } from "./fields.tsx";
-
-type Request = (
-  intent: Intent,
-  body?: BodyInit,
-) => Promise<{ ok: true; body: unknown } | { ok: false; failure: Failure }>;
+import type { Request } from "./RequestContext.tsx";
 
 interface Props {
   request: Request;

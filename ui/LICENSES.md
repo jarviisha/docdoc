@@ -21,6 +21,8 @@ Verified 2026-10-22 against the registry, not copied from documentation.
 | `tailwind-merge` | ^3.7.0 | MIT | yes |
 | `lucide-react` | ^1.61.0 | ISC | yes |
 | `tw-animate-css` | ^1.4.0 | MIT | yes |
+| `@tanstack/react-router` | ^1.170.46 | MIT | yes |
+| `@tanstack/react-query` | ^5.104.5 | MIT | yes |
 | `tailwindcss` (dev) | ^4.3.3 | MIT | yes |
 | `@tailwindcss/vite` (dev) | ^4.3.3 | MIT | yes |
 

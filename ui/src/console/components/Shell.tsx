@@ -1,5 +1,6 @@
 /**
- * The console's frame: who is signed in, the sign-in form, and the areas.
+ * The console's session gate: who is signed in, the sign-in form, and — once
+ * signed in — the router, whose root route draws the frame (`../routes.tsx`).
  *
  * **It decides nothing.** Whether there is a session is the server's answer to
  * `who-am-i` (ADR-0023 §1), held by `console/model/session.ts`; what a failure
@@ -8,15 +9,14 @@
  * keeps no clock, and learns a session has ended from the next `401`.
  */
 
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { RouterProvider } from "@tanstack/react-router";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 
 import { send, sendForBlob } from "../../transport.ts";
 import { requestFor, type Intent } from "../model/client.ts";
 import { describe, failureOf, failureOfThrown, type Failure } from "../model/failure.ts";
-import { areaOf, jumpTo, type Area, type Jump } from "../model/navigation.ts";
 import {
   afterSignOut,
   emptySession,
@@ -25,57 +25,9 @@ import {
   signedOut,
   type Session,
 } from "../model/session.ts";
+import { FrameContext, router } from "../routes.tsx";
 import { LoginForm } from "./LoginForm.tsx";
-import { RunArea } from "./RunArea.tsx";
-import { CredentialArea } from "./CredentialArea.tsx";
-import { EraseArea } from "./EraseArea.tsx";
-import { OverviewArea } from "./OverviewArea.tsx";
-import { SubmitArea } from "./SubmitArea.tsx";
-import { ParsersArea } from "./ParsersArea.tsx";
-import { TenantsArea } from "./TenantsArea.tsx";
-import { CallbacksArea } from "./CallbacksArea.tsx";
-import { QualityArea } from "./QualityArea.tsx";
-
-/** A sidebar group: real areas, and the ones still to come, which go nowhere yet. */
-type NavEntry = { name: Area; label: string; danger?: boolean } | { soon: string };
-
-const NAV: { heading: string | null; entries: NavEntry[] }[] = [
-  { heading: null, entries: [{ name: "overview", label: "Overview" }] },
-  {
-    heading: "Operate",
-    entries: [
-      { name: "runs", label: "Runs" },
-      { name: "submit", label: "Submit" },
-      { name: "quality", label: "Quality" },
-    ],
-  },
-  { heading: "Build", entries: [{ soon: "Schemas" }] },
-  {
-    heading: "Manage",
-    entries: [
-      { name: "tenants", label: "Tenants" },
-      { name: "credentials", label: "Credentials" },
-      { name: "callbacks", label: "Callbacks" },
-    ],
-  },
-  {
-    heading: "Settings",
-    entries: [
-      { name: "parsers", label: "Parsers" },
-      { soon: "Providers" },
-      { name: "erasure", label: "Erase…", danger: true },
-    ],
-  },
-];
-
-/** Each area's place in the sidebar, for the top bar's "Group / Area" trail. */
-const PLACES = Object.fromEntries(
-  NAV.flatMap((group) =>
-    group.entries.flatMap((entry) =>
-      "name" in entry ? [[entry.name, { group: group.heading, label: entry.label }]] : [],
-    ),
-  ),
-) as Record<Area, { group: string | null; label: string }>;
+import { RequestProvider } from "./RequestContext.tsx";
 
 const SESSION_ENDED = "Your session ended. Sign in again.";
 
@@ -116,20 +68,9 @@ export function Shell() {
   const [session, setSession] = useState<Session>(emptySession);
   const [notice, setNotice] = useState<string | null>(null);
   const [unavailable, setUnavailable] = useState<string | null>(null);
-  const [area, setArea] = useState<Area>("overview");
-  const [openRunId, setOpenRunId] = useState<string | null>(null);
-  // The tenant a jump from Tenants opened the area for; a sidebar visit has none.
-  const [presetTenant, setPresetTenant] = useState<string | null>(null);
-  // Bumped by every jump, so even a click on the area already open starts it afresh.
-  const [visit, setVisit] = useState(0);
-
-  // Bridge until the router lands: map a path-shaped Jump back to an area.
-  const jump = useCallback(({ to, search }: Jump) => {
-    setVisit((v) => v + 1);
-    setOpenRunId(null);
-    setPresetTenant(search.tenant || null);
-    setArea(areaOf(to) ?? "overview");
-  }, []);
+  // Dropped on every way a session ends, so the next account to sign in never
+  // sees the last one's lists, not even while its own load.
+  const queryClient = useQueryClient();
 
   // Ask once whether a session already exists: a reload keeps the cookie.
   useEffect(() => {
@@ -156,21 +97,23 @@ export function Shell() {
   const request = useCallback(async (intent: Intent, body?: BodyInit) => {
     const answer = await call(intent, body);
     if (!answer.ok && answer.failure.kind === "unauthenticated") {
+      queryClient.clear();
       setSession(signedOut);
       setNotice(SESSION_ENDED);
     }
     return answer;
-  }, []);
+  }, [queryClient]);
 
   /** `request` for a page image: the same session handling, bytes instead of JSON. */
   const requestImage = useCallback(async (intent: Intent) => {
     const answer = await callForImage(intent);
     if (!answer.ok && answer.failure.kind === "unauthenticated") {
+      queryClient.clear();
       setSession(signedOut);
       setNotice(SESSION_ENDED);
     }
     return answer;
-  }, []);
+  }, [queryClient]);
 
   /** What an area reports. A session ending was already handled above. */
   const handle = useCallback((failure: Failure) => {
@@ -180,10 +123,8 @@ export function Shell() {
   const signIn = useCallback(async (username: string, password: string) => {
     const answer = await call({ type: "sign-in" }, JSON.stringify({ username, password }));
     if (answer.ok) {
+      // The operator stays on the URL they were on, a run's own included.
       setNotice(null);
-      setArea("overview");
-      setOpenRunId(null);
-      setPresetTenant(null);
       setSession((s) => signedIn(s, usernameOf(answer.body)));
     } else {
       setNotice(describe(answer.failure));
@@ -193,9 +134,15 @@ export function Shell() {
   const signOut = useCallback(async () => {
     const answer = await call({ type: "sign-out" });
     const after = afterSignOut(session, answer.ok ? null : answer.failure);
+    if (!ready(after.session)) queryClient.clear();
     setNotice(after.notice);
     setSession(after.session);
-  }, [session]);
+  }, [session, queryClient]);
+
+  const frame = useMemo(
+    () => ({ username: session.username ?? "", notice, signOut: () => void signOut(), onFailure: handle }),
+    [session.username, notice, signOut, handle],
+  );
 
   if (!ready(session)) {
     return (
@@ -218,133 +165,11 @@ export function Shell() {
     );
   }
 
-  const navEntry = (entry: NavEntry) => {
-    if (!("name" in entry)) {
-      return (
-        <span
-          key={entry.soon}
-          aria-disabled="true"
-          className="flex items-center justify-between px-2 py-1 text-slate-400"
-        >
-          {entry.soon}
-          <span className="text-[10px] tracking-wider uppercase">soon</span>
-        </span>
-      );
-    }
-    const selected = area === entry.name;
-    return (
-      <button
-        key={entry.name}
-        type="button"
-        aria-current={selected ? "page" : undefined}
-        onClick={() => jump(jumpTo(entry.name, ""))}
-        className={cn(
-          "rounded-sm px-2 py-1 text-left text-slate-700 outline-none hover:bg-slate-200/60 focus-visible:ring-2 focus-visible:ring-ring/50",
-          selected && "bg-indigo-100 font-medium text-indigo-800 hover:bg-indigo-100",
-          entry.danger === true && !selected && "text-red-600",
-        )}
-      >
-        {entry.label}
-      </button>
-    );
-  };
-
   return (
-    <div className="flex h-screen">
-      <aside className="flex w-52 shrink-0 flex-col overflow-y-auto border-r bg-slate-50 px-2 py-3">
-        <p className="flex items-center gap-2 px-2 pb-2 font-semibold">
-          <span aria-hidden="true" className="size-3.5 rounded-[1px] bg-primary" />
-          docdoc console
-        </p>
-        <nav aria-label="Console" className="flex flex-col gap-0.5">
-          {NAV.map((group) => (
-            <Fragment key={group.heading ?? "top"}>
-              {group.heading === null ? null : (
-                <p className="px-2 pt-4 pb-1 text-[10px] font-medium tracking-widest text-slate-500 uppercase">
-                  {group.heading}
-                </p>
-              )}
-              {group.entries.map(navEntry)}
-            </Fragment>
-          ))}
-        </nav>
-      </aside>
-
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-10 shrink-0 items-center justify-between border-b px-4">
-          <span className="text-slate-500">
-            {PLACES[area].group === null ? null : `${PLACES[area].group} / `}
-            <span className="font-medium text-foreground">{PLACES[area].label}</span>
-          </span>
-          <div className="flex items-center gap-3">
-            <span className="text-slate-500">Signed in as {session.username}</span>
-            <Button variant="outline" size="sm" onClick={() => void signOut()}>
-              Sign out
-            </Button>
-          </div>
-        </header>
-
-        <main className="flex flex-1 flex-col gap-3 overflow-auto p-4">
-          {/* Empty, it would still take a gap: the negative margin gives it back. */}
-          <div role="status" aria-live="polite" className="empty:-mb-3">
-            {notice === null ? null : (
-              <Alert variant="warning">
-                <AlertTitle>{notice}</AlertTitle>
-              </Alert>
-            )}
-          </div>
-          <Fragment key={visit}>
-          {area === "overview" ? (
-            <OverviewArea
-              request={request}
-              onOpenRun={(runId) => {
-                setOpenRunId(runId);
-                setArea("runs");
-              }}
-            />
-          ) : null}
-          {area === "runs" ? (
-            <RunArea
-              request={request}
-              requestImage={requestImage}
-              onFailure={handle}
-              openRunId={openRunId}
-              onOpenRun={setOpenRunId}
-              presetTenant={presetTenant}
-              onSubmit={() => jump(jumpTo("submit", ""))}
-            />
-          ) : null}
-          {area === "submit" ? (
-            <SubmitArea
-              request={request}
-              onOpenRun={(runId) => {
-                setOpenRunId(runId);
-                setArea("runs");
-              }}
-            />
-          ) : null}
-          {area === "quality" ? (
-            <QualityArea
-              request={request}
-              presetTenant={presetTenant}
-              onOpenRun={(runId) => {
-                setOpenRunId(runId);
-                setArea("runs");
-              }}
-            />
-          ) : null}
-          {area === "parsers" ? <ParsersArea request={request} /> : null}
-          {area === "tenants" ? <TenantsArea request={request} onJump={jump} /> : null}
-          {area === "credentials" ? (
-            <CredentialArea request={request} onFailure={handle} presetTenant={presetTenant} />
-          ) : null}
-          {area === "callbacks" ? <CallbacksArea request={request} presetTenant={presetTenant} /> : null}
-          {area === "erasure" ? (
-            <EraseArea request={request} onFailure={handle} presetTenant={presetTenant} />
-          ) : null}
-          </Fragment>
-        </main>
-      </div>
-    </div>
+    <FrameContext value={frame}>
+      <RequestProvider request={request} requestImage={requestImage}>
+        <RouterProvider router={router} />
+      </RequestProvider>
+    </FrameContext>
   );
 }

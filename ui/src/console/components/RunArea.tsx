@@ -11,9 +11,10 @@
  */
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { Link } from "@tanstack/react-router";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 
 import { RUN_STATUSES, type Intent, type RunStatus } from "../model/client.ts";
@@ -30,7 +31,8 @@ import { DeliveryRecord } from "./DeliveryRecord.tsx";
 import { SelectField, TextField } from "./fields.tsx";
 import { LiveStatStrip } from "./StatStrip.tsx";
 import { Time } from "./Time.tsx";
-import { ResultViewer, type ImageRequest } from "./ResultViewer.tsx";
+import { ResultViewer } from "./ResultViewer.tsx";
+import type { ImageRequest, Request } from "./RequestContext.tsx";
 import { usePolling } from "./usePolling.ts";
 import {
   autoRefreshes,
@@ -69,23 +71,12 @@ import {
   type RunSummary,
 } from "../model/runs.ts";
 
-type Request = (
-  intent: Intent,
-  body?: BodyInit,
-) => Promise<{ ok: true; body: unknown } | { ok: false; failure: Failure }>;
-
 interface Props {
   request: Request;
-  /** `request` for a page image, so the session ending is still the shell's to act on. */
-  requestImage: ImageRequest;
   onFailure: (failure: Failure) => void;
-  /** The run whose detail is shown, held by the shell so the overview can open one. */
-  openRunId: string | null;
-  onOpenRun: (runId: string | null) => void;
-  /** The tenant a jump from Tenants opened this area for, applied as the filter on mount. */
+  onOpenRun: (runId: string) => void;
+  /** The tenant the URL opened this area for, applied as the filter on mount. */
   presetTenant: string | null;
-  /** Opens Submit: the list's own primary action. */
-  onSubmit: () => void;
 }
 
 /** The state's colour, and the word that must always be beside it. */
@@ -121,12 +112,9 @@ function listIntent(
 
 export function RunArea({
   request,
-  requestImage,
   onFailure,
-  openRunId,
   onOpenRun,
   presetTenant,
-  onSubmit,
 }: Props) {
   const [state, setState] = useState(() => forTenant(initialListing(), presetTenant ?? ""));
   // What is typed, apart from what is applied: the list reloads on Enter or
@@ -172,18 +160,7 @@ export function RunArea({
       setPollProblem(describe(answer.failure));
     }
   }, [request, state]);
-  usePolling(poll, autoRefreshes(state) && openRunId === null);
-
-  if (openRunId !== null) {
-    return (
-      <RunDetail
-        runId={openRunId}
-        request={request}
-        requestImage={requestImage}
-        onBack={() => onOpenRun(null)}
-      />
-    );
-  }
+  usePolling(poll, autoRefreshes(state));
 
   const rows = state.listing.state === "loaded" ? state.listing.page.runs : [];
 
@@ -229,7 +206,9 @@ export function RunArea({
           Refresh
         </Button>
         <div className="flex-1" />
-        <Button onClick={onSubmit}>Submit</Button>
+        <Link to="/submit" className={buttonVariants()}>
+          Submit
+        </Link>
       </div>
 
       {/* FR-045b: a list loading, and a list that failed, reach a screen reader
@@ -326,16 +305,14 @@ export function RunArea({
   );
 }
 
-function RunDetail({
+export function RunDetail({
   runId,
   request,
   requestImage,
-  onBack,
 }: {
   runId: string;
   request: Request;
   requestImage: ImageRequest;
-  onBack: () => void;
 }) {
   const [loading, setLoading] = useState(true);
   const [run, setRun] = useState<RunRecord | null>(null);
@@ -533,9 +510,10 @@ function RunDetail({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
-        <Button variant="ghost" onClick={onBack}>
+        {/* `exact`: the router would otherwise mark it the current page, since a run's path is under it. */}
+        <Link to="/runs" activeOptions={{ exact: true }} className={buttonVariants({ variant: "ghost" })}>
           ← Runs
-        </Button>
+        </Link>
         {run === null ? null : <Badge variant={TONE[run.status]}>{run.status}</Badge>}
       </div>
 

@@ -13,8 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card } from "@/components/ui/card";
 
-import type { Intent } from "../model/client.ts";
-import { describe, type Failure } from "../model/failure.ts";
+import { describe } from "../model/failure.ts";
 import { duration, shortId, when } from "../model/format.ts";
 import { toOverview, type Overview } from "../model/overview.ts";
 import { isNewer } from "../model/polling.ts";
@@ -25,11 +24,7 @@ import { SectionHeading } from "./SectionHeading.tsx";
 import { Time } from "./Time.tsx";
 import { StatStrip } from "./StatStrip.tsx";
 import { usePolling } from "./usePolling.ts";
-
-type Request = (
-  intent: Intent,
-  body?: BodyInit,
-) => Promise<{ ok: true; body: unknown } | { ok: false; failure: Failure }>;
+import type { Request } from "./RequestContext.tsx";
 
 interface Props {
   request: Request;

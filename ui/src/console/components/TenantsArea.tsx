@@ -7,27 +7,22 @@
  */
 
 import { useEffect, useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
-import type { Intent } from "../model/client.ts";
-import { describe, type Failure } from "../model/failure.ts";
-import { TENANT_JUMPS, jumpTo, type Jump } from "../model/navigation.ts";
+import { describe } from "../model/failure.ts";
+import { TENANT_JUMPS, jumpTo } from "../model/navigation.ts";
 import { toTenants } from "../model/submit.ts";
 import { DataTable } from "./DataTable.tsx";
-
-type Request = (
-  intent: Intent,
-  body?: BodyInit,
-) => Promise<{ ok: true; body: unknown } | { ok: false; failure: Failure }>;
+import type { Request } from "./RequestContext.tsx";
 
 interface Props {
   request: Request;
-  onJump: (jump: Jump) => void;
 }
 
-export function TenantsArea({ request, onJump }: Props) {
+export function TenantsArea({ request }: Props) {
   const [tenants, setTenants] = useState<string[] | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
 
@@ -83,9 +78,9 @@ export function TenantsArea({ request, onJump }: Props) {
                 cell: (tenant) => (
                   <div className="flex gap-2">
                     {TENANT_JUMPS.map(({ area, label }) => (
-                      <Button key={area} variant="outline" size="sm" onClick={() => onJump(jumpTo(area, tenant))}>
+                      <Link key={area} {...jumpTo(area, tenant)} className={buttonVariants({ variant: "outline", size: "sm" })}>
                         {label}
-                      </Button>
+                      </Link>
                     ))}
                   </div>
                 ),

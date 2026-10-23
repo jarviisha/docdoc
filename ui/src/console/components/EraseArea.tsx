@@ -18,7 +18,6 @@ import { useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 
-import type { Intent } from "../model/client.ts";
 import {
   armed,
   confirmationPrompt,
@@ -33,16 +32,12 @@ import {
 import type { Failure } from "../model/failure.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { TextField } from "./fields.tsx";
-
-type Request = (
-  intent: Intent,
-  body?: BodyInit,
-) => Promise<{ ok: true; body: unknown } | { ok: false; failure: Failure }>;
+import type { Request } from "./RequestContext.tsx";
 
 interface Props {
   request: Request;
   onFailure: (failure: Failure) => void;
-  /** The tenant a jump from Tenants opened this area for: prefilled, never confirmed for you. */
+  /** The tenant in the URL (a jump from Tenants, or a link): prefilled, never confirmed for you. */
   presetTenant: string | null;
 }
 

@@ -13,7 +13,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
-import type { Intent } from "../model/client.ts";
 import {
   DISCLOSURE_WARNING,
   SELF_REVOCATION_WARNING,
@@ -41,16 +40,12 @@ import { DataTable } from "./DataTable.tsx";
 import { TextField } from "./fields.tsx";
 import { SectionHeading } from "./SectionHeading.tsx";
 import { Time } from "./Time.tsx";
-
-type Request = (
-  intent: Intent,
-  body?: BodyInit,
-) => Promise<{ ok: true; body: unknown } | { ok: false; failure: Failure }>;
+import type { Request } from "./RequestContext.tsx";
 
 interface Props {
   request: Request;
   onFailure: (failure: Failure) => void;
-  /** The tenant a jump from Tenants opened this area for: preset, then shown. */
+  /** The tenant in the URL (a jump from Tenants, or a link): preset, then shown. */
   presetTenant: string | null;
 }
 

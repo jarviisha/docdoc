@@ -13,8 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
-import type { Intent } from "../model/client.ts";
-import { describe, type Failure } from "../model/failure.ts";
+import { describe } from "../model/failure.ts";
 import { shortId } from "../model/format.ts";
 import {
   historyRows,
@@ -34,11 +33,7 @@ import { DataTable } from "./DataTable.tsx";
 import { SelectField } from "./fields.tsx";
 import { SectionHeading } from "./SectionHeading.tsx";
 import { usePolling } from "./usePolling.ts";
-
-type Request = (
-  intent: Intent,
-  body?: BodyInit,
-) => Promise<{ ok: true; body: unknown } | { ok: false; failure: Failure }>;
+import type { Request } from "./RequestContext.tsx";
 
 interface Props {
   request: Request;
