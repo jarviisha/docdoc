@@ -9,7 +9,7 @@
  */
 
 import { useCallback } from "react";
-import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient, type Query } from "@tanstack/react-query";
 
 import type { Intent } from "../model/client.ts";
 import type { Failure } from "../model/failure.ts";
@@ -40,6 +40,15 @@ export function useIntent<T = unknown>(intent: Intent | null, options: IntentOpt
   const { request } = useRequest();
   // A stable default: a new `select` each render would re-run it each render.
   const { refetchInterval, select = identity as (body: unknown) => T, keepPrevious = false } = options;
+  const interval =
+    typeof refetchInterval === "function"
+      ? (query: Query<unknown, Failure>) =>
+          refetchInterval(query.state.data === undefined ? undefined : select(query.state.data), query.state.error)
+      : refetchInterval;
+  // A polled read refreshes as soon as its tab is shown again, as `usePolling` did;
+  // every other read is fetched on mount only (focus refetch is off in main.tsx).
+  const polls = (query: Query<unknown, Failure>) =>
+    (typeof interval === "function" ? interval(query) : interval) !== false;
   return useQuery<unknown, Failure, T>({
     queryKey: intent === null ? ["none"] : keyOf(intent),
     enabled: intent !== null,
@@ -50,18 +59,7 @@ export function useIntent<T = unknown>(intent: Intent | null, options: IntentOpt
     },
     select,
     ...(keepPrevious ? { placeholderData: keepPreviousData } : {}),
-    ...(refetchInterval === undefined
-      ? {}
-      : {
-          refetchInterval:
-            typeof refetchInterval === "function"
-              ? (query) =>
-                  refetchInterval(
-                    query.state.data === undefined ? undefined : select(query.state.data),
-                    query.state.error,
-                  )
-              : refetchInterval,
-        }),
+    ...(refetchInterval === undefined ? {} : { refetchInterval: interval, refetchOnWindowFocus: polls }),
   });
 }
 

@@ -24,7 +24,16 @@ import { Shell } from "./components/Shell.tsx";
  * retried behind the operator's back, and a hidden tab does not poll.
  */
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: false, refetchIntervalInBackground: false } },
+  // No refetch on focus or reconnect: a result is read once, and a later list
+  // page must not shift under the reader. Polled reads opt back in (`useIntent`).
+  defaultOptions: {
+    queries: {
+      retry: false,
+      refetchIntervalInBackground: false,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+    },
+  },
 });
 
 const container = document.getElementById("root");
