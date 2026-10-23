@@ -21,7 +21,7 @@ import { describe, type Failure } from "../model/failure.ts";
 import { toDelivery, type Delivery } from "../model/delivery.ts";
 import { duration, shortId, when } from "../model/format.ts";
 import { toResultPages, type ResultPage } from "../model/result.ts";
-import { checkBody, fieldPages, reportIdOf, toFieldRows, toSave, type Draft } from "../model/fields.ts";
+import { checkBody, fieldPages, reportIdOf, saveFailure, toFieldRows, toSave, type Draft } from "../model/fields.ts";
 import { FieldCheckTable } from "./FieldCheckTable.tsx";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { CopyableId } from "./CopyableId.tsx";
@@ -476,18 +476,18 @@ function RunDetail({
     if (rows === null) return;
     setSaving(true);
     const kept: Record<string, Draft> = {};
-    let failed: string | null = null;
+    const failed: { path: string; problem: string }[] = [];
     for (const row of toSave(rows, drafts)) {
       const draft = drafts[row.path]!;
       const body = checkBody(row, draft.verdict, draft, reportIdOf(result));
       const answer = await request({ type: "record-check", runId }, JSON.stringify(body));
       if (!answer.ok) {
         kept[row.path] = draft;
-        failed = describe(answer.failure);
+        failed.push({ path: row.path, problem: describe(answer.failure) });
       }
     }
     setDrafts(kept);
-    setSaveProblem(failed);
+    setSaveProblem(saveFailure(failed));
     setSaving(false);
     setCheckReads((n) => n + 1);
   };

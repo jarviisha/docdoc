@@ -110,11 +110,17 @@ export interface Draft {
   reason: string;
 }
 
-/** Why a mark cannot be saved yet, or `null`. The route refuses a "wrong" that names no answer. */
+/** Why a mark cannot be saved yet, or `null`. The route refuses a "wrong" that names no answer or no reason. */
 export function draftProblem(draft: Draft): string | null {
-  return draft.verdict === "wrong" && !draft.absent && draft.value.trim() === ""
-    ? "Type the right value, or mark it not in the document."
-    : null;
+  if (draft.verdict !== "wrong") return null;
+  if (!draft.absent && draft.value.trim() === "") return "Type the right value, or mark it not in the document.";
+  if (draft.reason.trim() === "") return "Add a reason.";
+  return null;
+}
+
+/** The save-failure message: each failed check's field, then why. `null` when none failed. */
+export function saveFailure(failed: { path: string; problem: string }[]): string | null {
+  return failed.length === 0 ? null : failed.map((f) => `${f.path}: ${f.problem}`).join(" ");
 }
 
 /** Whether a mark says something the newest saved check does not. */

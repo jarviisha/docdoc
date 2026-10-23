@@ -6,6 +6,7 @@ import {
   checkBody,
   checkText,
   draftProblem,
+  saveFailure,
   fieldPages,
   pagePosition,
   reportIdOf,
@@ -120,9 +121,28 @@ const wrong = (over: Partial<Draft> = {}): Draft => ({ verdict: "wrong", value: 
 test("a wrong mark with neither a value nor an absence says what is missing", () => {
   assert.equal(draftProblem(wrong()), "Type the right value, or mark it not in the document.");
   assert.equal(draftProblem(wrong({ value: "  " })), "Type the right value, or mark it not in the document.");
-  assert.equal(draftProblem(wrong({ value: "13" })), null);
-  assert.equal(draftProblem(wrong({ absent: true })), null);
+  assert.equal(draftProblem(wrong({ value: "13", reason: "typo" })), null);
+  assert.equal(draftProblem(wrong({ absent: true, reason: "not printed" })), null);
   assert.equal(draftProblem(correct), null);
+});
+
+test("a wrong mark with a blank reason asks for one; a correct one needs none", () => {
+  assert.equal(draftProblem(wrong({ value: "13" })), "Add a reason.");
+  assert.equal(draftProblem(wrong({ absent: true, reason: "  " })), "Add a reason.");
+  assert.equal(draftProblem(correct), null);
+  const rows = toFieldRows(RESULT, { corrections: [] });
+  assert.equal(canSave(rows, { note: wrong({ value: "x" }) }), false);
+});
+
+test("a failed save names the field of every check that failed", () => {
+  assert.equal(saveFailure([]), null);
+  assert.equal(
+    saveFailure([
+      { path: "total", problem: "The value is not valid here." },
+      { path: "line_items[0].quantity", problem: "Try again." },
+    ]),
+    "total: The value is not valid here. line_items[0].quantity: Try again.",
+  );
 });
 
 test("only marks that differ from the saved check are saved", () => {
@@ -140,7 +160,7 @@ test("save is armed by at least one change and no incomplete wrong mark", () => 
   assert.equal(canSave(rows, {}), false);
   assert.equal(canSave(rows, { total: correct }), true);
   assert.equal(canSave(rows, { total: correct, note: wrong() }), false);
-  assert.equal(canSave(rows, { total: correct, note: wrong({ value: "x" }) }), true);
+  assert.equal(canSave(rows, { total: correct, note: wrong({ value: "x", reason: "r" }) }), true);
 });
 
 test("the save label counts fields checked once saved", () => {
