@@ -90,17 +90,7 @@ def routes() -> APIRouter:
         # to make to anyone else.
         verdict = deployment.limiter.check(tenant_id=tenant, now=now())
         if not verdict.allowed:
-            return JSONResponse(
-                status_code=429,
-                headers={"Retry-After": str(verdict.retry_after_seconds)},
-                content={
-                    "error": "limit_exceeded",
-                    "limit": verdict.limit,
-                    "observed": verdict.observed,
-                    "allowed": verdict.permitted,
-                    "retry_after_seconds": verdict.retry_after_seconds,
-                },
-            )
+            return _limit_refusal(verdict)
 
         _, blobs = _stores_of(request, principal)
         assert blobs is not None
@@ -787,6 +777,21 @@ def _grounding_of(store: Any, validation: Any) -> Any:
         validation.provenance.grounding_artifact_id,
         model=GroundingResult,
         artifact_format_version=spec_for(Stage.GROUND).artifact_format_version,
+    )
+
+
+def _limit_refusal(verdict: Any) -> JSONResponse:
+    """The 429 for a tenant over its limits; shared by every route that queues runs."""
+    return JSONResponse(
+        status_code=429,
+        headers={"Retry-After": str(verdict.retry_after_seconds)},
+        content={
+            "error": "limit_exceeded",
+            "limit": verdict.limit,
+            "observed": verdict.observed,
+            "allowed": verdict.permitted,
+            "retry_after_seconds": verdict.retry_after_seconds,
+        },
     )
 
 

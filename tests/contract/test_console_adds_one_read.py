@@ -111,12 +111,20 @@ CONSOLE_ADDED = {
     ("/v1/console/tenants/{tenant_id}/callbacks/{callback_id}", "DELETE"),
 }
 
+#: Tenant quality evaluation: a tenant's answer counts, and evaluations of them.
+EVALUATIONS_ADDED = {
+    ("/v1/answers", "GET"),
+    ("/v1/evaluations", "POST"),
+    ("/v1/evaluations", "GET"),
+    ("/v1/evaluations/{evaluation_id}", "GET"),
+}
+
 #: Everything this interface has added over Milestone 10's own surface, as of
 #: this milestone. A route added without a decision shows up here: this is the
 #: list a later milestone edits, and editing it is the moment somebody decides
 #: on purpose that the surface grew (the same argument `ROUTES` in
 #: `test_http_ui_endpoints.py` makes for the full set).
-ADDED = MILESTONE_11_ADDED | OCR_GATEWAY_ADDED | ASYNC_OCR_ADDED | CONSOLE_ADDED
+ADDED = MILESTONE_11_ADDED | OCR_GATEWAY_ADDED | ASYNC_OCR_ADDED | CONSOLE_ADDED | EVALUATIONS_ADDED
 
 #: Words a session mechanism arrives as (FR-009). Since ADR-0023 §3 they may
 #: name a route only under `/v1/console/`.

@@ -54,6 +54,7 @@ from docdoc.api.deps import (
 )
 from docdoc.api.documents import jobs_routes
 from docdoc.api.documents import routes as document_routes
+from docdoc.api.evaluations import routes as evaluation_routes
 from docdoc.api.ocr import routes as ocr_routes
 from docdoc.api.runs import routes as run_routes
 from docdoc.api.settings import (
@@ -906,6 +907,7 @@ def _router() -> APIRouter:
     router.include_router(document_routes())
     router.include_router(ocr_routes())
     router.include_router(run_routes())
+    router.include_router(evaluation_routes())
     router.include_router(jobs_routes())
     router.include_router(admin_routes())
     return router
