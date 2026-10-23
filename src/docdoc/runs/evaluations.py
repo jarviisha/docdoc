@@ -27,7 +27,7 @@ from docdoc.evaluation import (
     schema_facts,
 )
 from docdoc.extraction.errors import SchemaError
-from docdoc.runs.answers import answer_set, prediction_for
+from docdoc.runs.answers import answer_set, field_types, prediction_for, typed_golden
 from docdoc.runs.errors import RunError
 
 if TYPE_CHECKING:
@@ -371,10 +371,18 @@ def settled(deployment: Any, evaluation: Evaluation, *, at: datetime) -> Evaluat
         return current
 
     artifacts, _ = deployment.stores_for(current.tenant_id)
+    try:
+        schema = deployment.registry().describe(current.schema_identity)
+    except SchemaError as error:
+        # Removed since the start: retrying cannot help, and an unfinished row
+        # would hold this tenant's schema for ever. The class only.
+        store.fail(current.evaluation_id, type(error).__name__, at=at)
+        return store.get(current.evaluation_id, tenant_id=current.tenant_id) or current
+    types = field_types(schema)
     predictions = PredictionSet(
         predictions={
             document_id: (
-                prediction_for(artifacts, run, document_id)
+                prediction_for(artifacts, run, document_id, types=types)
                 if run is not None
                 # Gone (expired or erased): the document was not processed.
                 else DocumentPrediction(
@@ -386,16 +394,15 @@ def settled(deployment: Any, evaluation: Evaluation, *, at: datetime) -> Evaluat
     )
     try:
         report = evaluate(
-            current.golden,
+            # Stored as JSON, so typed again, as the loader would type it.
+            typed_golden(current.golden, types),
             predictions,
             # Tenant documents are restricted; without this every one is skipped.
             options=EvaluationOptions(include_restricted=True),
-            facts=schema_facts([deployment.registry().describe(current.schema_identity)]),
+            facts=schema_facts([schema]),
         )
-    except (SchemaError, EvaluationError) as error:
-        # The schema version was removed or edited since the start, or the
-        # library refused the pair: retrying cannot help, and an unfinished row
-        # would hold this tenant's schema for ever. The class only.
+    except EvaluationError as error:
+        # The schema was edited since the start, or the library refused the pair.
         store.fail(current.evaluation_id, type(error).__name__, at=at)
     else:
         store.settle(current.evaluation_id, report, at=at)

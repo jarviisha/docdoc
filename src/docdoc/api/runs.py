@@ -599,6 +599,29 @@ async def record_check(
             content={"error": "invalid_correction", "detail": type(error).__name__},
         )
 
+    if correction.corrected_value is not None:
+        # Typed as the schema declares, as the dataset loader types a label:
+        # `comparators@1` gates on type, so "3" never equals an extracted 3.
+        from docdoc.evaluation.values import strip_indices
+        from docdoc.extraction.errors import SchemaError
+        from docdoc.runs.answers import field_types, typed
+
+        try:
+            declared = field_types(deployment.registry().describe(run.schema_identity)).get(
+                strip_indices(correction.field_path)
+            )
+        except SchemaError:
+            declared = None  # The version is gone; scoring types it, or fails, later.
+        try:
+            value = typed(correction.corrected_value, declared)
+        except ValueError:
+            # The path only: the value is what a reviewer typed from the document.
+            return JSONResponse(
+                status_code=422,
+                content={"error": "invalid_value", "detail": correction.field_path},
+            )
+        correction = correction.model_copy(update={"corrected_value": value})
+
     if correction.confirmed and correction.location is None:
         # A tick carries no location of its own: it is where the run read
         # the value from, which is what the run's grounding says.

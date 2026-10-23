@@ -6,6 +6,7 @@ store) and `docdoc.evaluation` does the scoring, unmodified.
 
 from __future__ import annotations
 
+import math
 import re
 from typing import TYPE_CHECKING, Any
 
@@ -20,22 +21,81 @@ from docdoc.evaluation import (
     Tier,
 )
 from docdoc.evaluation.identity import golden_set_id_for
+from docdoc.evaluation.values import carry, schema_facts, strip_indices
 from docdoc.runs.model import RunStatus
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from docdoc.runs.corrections import Answer
     from docdoc.runs.model import Run
 
-__all__ = ["answer_set", "prediction_for"]
+__all__ = ["answer_set", "field_types", "prediction_for", "typed", "typed_golden"]
 
 # The registry declares `line_items.amount`; a label names an entry, `line_items[1].amount`.
 _INDEX = re.compile(r"\[\d*\]")
 
 
+def field_types(schema: Any) -> Mapping[str, str]:
+    """Declared path -> type name for `schema` (a registry description), as the loader reads it."""
+    return schema_facts([schema]).types_for(schema.identity)
+
+
+def typed(value: Any, field_type: str | None) -> Any:
+    """`value` as the Python type `field_type` declares, as the dataset loader types it.
+
+    A check typed into the console arrives as a string, so a string is parsed
+    first for the three types JSON would carry unquoted; `carry` does the rest.
+
+    Raises:
+        ValueError: the declared type cannot carry it.
+    """
+    if isinstance(value, str) and field_type in ("number", "integer", "boolean"):
+        text = value.strip()
+        if field_type == "boolean":
+            if text.lower() not in ("true", "false"):
+                raise ValueError(f"not a boolean: {value!r}")
+            value = text.lower() == "true"
+        elif field_type == "integer":
+            value = int(text)
+        else:
+            value = float(text)
+            if not math.isfinite(value):
+                raise ValueError(f"not a finite number: {value!r}")
+    return carry(value, field_type)
+
+
+def _typed_or_raw(value: Any, field_type: str | None) -> Any:
+    """Typed, or as stored when the type cannot carry it (it then matches nothing)."""
+    try:
+        return typed(value, field_type)
+    except ValueError:
+        return value
+
+
+def typed_golden(golden: GoldenSet, types: Mapping[str, str]) -> GoldenSet:
+    """`golden` with every label value typed, which a JSON round trip undoes."""
+    return golden.model_copy(
+        update={
+            "labels": {
+                blob_id: tuple(
+                    label.model_copy(
+                        update={
+                            "value": _typed_or_raw(
+                                label.value, types.get(strip_indices(label.field_path))
+                            )
+                        }
+                    )
+                    for label in labels
+                )
+                for blob_id, labels in golden.labels.items()
+            }
+        }
+    )
+
+
 def answer_set(answers: Sequence[Answer], *, tenant_id: str, schema: Any) -> GoldenSet:
-    """The tenant's answers as a golden set over `schema`'s declared fields."""
+    """The tenant's answers as a golden set over `schema`'s declared fields, typed by it."""
     declared = {path for path, *_ in schema.fields}
     by_blob: dict[str, list[Any]] = {}
     for item in answers:
@@ -58,12 +118,21 @@ def answer_set(answers: Sequence[Answer], *, tenant_id: str, schema: Any) -> Gol
         )
         for blob_id, labels in by_blob.items()
     )
-    golden = GoldenSet(documents=documents, labels={b: tuple(ls) for b, ls in by_blob.items()})
+    golden = typed_golden(
+        GoldenSet(documents=documents, labels={b: tuple(ls) for b, ls in by_blob.items()}),
+        field_types(schema),
+    )
     return golden.model_copy(update={"golden_set_id": golden_set_id_for(golden)})
 
 
-def prediction_for(store: Any, run: Run, document_id: str) -> DocumentPrediction:
-    """What `run` predicted, from the tenant's artifact store, or how it failed."""
+def prediction_for(
+    store: Any, run: Run, document_id: str, *, types: Mapping[str, str] | None = None
+) -> DocumentPrediction:
+    """What `run` predicted, from the tenant's artifact store, or how it failed.
+
+    With `types`, the extracted values are typed as the prediction loader types
+    them; without, they are as stored (what a drill-down shows).
+    """
     if run.status is RunStatus.SUCCEEDED:
         try:
             loaded = _load(store, run.processing_id)
@@ -71,6 +140,10 @@ def prediction_for(store: Any, run: Run, document_id: str) -> DocumentPrediction
             # One corrupt artifact must not abort the whole evaluation.
             return _failed(document_id, Stage.VALIDATE, "artifact_unreadable")
         if loaded is not None:
+            extraction = loaded["extraction"]
+            if types is not None and extraction is not None:
+                values = _typed_values(extraction.values, types)
+                loaded["extraction"] = extraction.model_copy(update={"values": values})
             return DocumentPrediction(document_id=document_id, **loaded)
         return _failed(document_id, Stage.VALIDATE, "artifact_missing")
 
@@ -79,6 +152,18 @@ def prediction_for(store: Any, run: Run, document_id: str) -> DocumentPrediction
     except ValueError:
         stage = Stage.PARSE
     return _failed(document_id, stage, run.error_class or f"run_{run.status.value}")
+
+
+def _typed_values(node: Any, types: Mapping[str, str]) -> Any:
+    """The value tree with each `ExtractedValue`'s value typed by its declared path."""
+    if isinstance(node, dict):
+        return {name: _typed_values(child, types) for name, child in node.items()}
+    if isinstance(node, list | tuple):
+        return type(node)(_typed_values(child, types) for child in node)
+    if hasattr(node, "field_path") and hasattr(node, "model_copy"):
+        declared = types.get(strip_indices(node.field_path))
+        return node.model_copy(update={"value": _typed_or_raw(node.value, declared)})
+    return node
 
 
 def _failed(document_id: str, stage: Stage, reason: str) -> DocumentPrediction:

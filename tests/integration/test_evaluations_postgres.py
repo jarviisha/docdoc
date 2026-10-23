@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
@@ -111,7 +112,9 @@ def test_starting_submits_one_run_per_checked_document(deployment) -> None:
         assert run.blob_id == blob_id
         assert run.schema_identity == "invoice@2"
     stored = deployment.evaluations().get(evaluation.evaluation_id, tenant_id=TENANT)
-    assert stored == evaluation
+    # Typed in memory (a decimal is a `Decimal`), a string once stored as JSON.
+    assert stored.golden.model_dump_json() == evaluation.golden.model_dump_json()
+    assert stored == replace(evaluation, golden=stored.golden)
     assert deployment.evaluations().get(evaluation.evaluation_id, tenant_id="globex") is None
 
 

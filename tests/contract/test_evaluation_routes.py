@@ -212,6 +212,55 @@ def test_the_drill_down_shows_values_not_hashes(client, deployment, blob) -> Non
     assert "total" in body["per_field"]
 
 
+def _scored(client, deployment) -> dict:
+    """Start an evaluation, run it, and read it back."""
+    eid = client.post("/v1/evaluations", params={"schema": "invoice"}, headers=A).json()[
+        "evaluation_id"
+    ]
+    _drain(deployment)
+    return client.get(f"/v1/evaluations/{eid}", headers=A).json()
+
+
+def _quantity_check(blob: str, value) -> dict:
+    return {
+        "report_id": PID,
+        "document_id": blob,
+        "field_path": "line_items[0].quantity",
+        "annotator": "ana",
+        "timestamp": "2026-09-09T00:00:00Z",
+        "predicted_value": 5,
+        "corrected_value": value,
+        "reason": "counted",
+    }
+
+
+def test_a_numeric_correction_matches_a_numeric_extraction(client, deployment, blob) -> None:
+    (document,) = _scored(client, deployment)["documents"]
+
+    # The console posts what was typed: a string, for a `number` field.
+    posted = client.post(
+        f"/v1/runs/{document['run_id']}/corrections", json=_quantity_check(blob, "2"), headers=A
+    )
+    assert posted.status_code == 201
+
+    # The echo extraction reads 2 for this field.
+    (rescored,) = _scored(client, deployment)["documents"]
+    outcomes = {o["field_path"]: o for o in rescored["outcomes"]}
+    assert outcomes["line_items[0].quantity"]["kind"] == "correct"
+
+
+def test_an_unparseable_value_is_refused(client, deployment, blob) -> None:
+    (document,) = _scored(client, deployment)["documents"]
+
+    posted = client.post(
+        f"/v1/runs/{document['run_id']}/corrections", json=_quantity_check(blob, "two"), headers=A
+    )
+
+    assert posted.status_code == 422
+    assert posted.json() == {"error": "invalid_value", "detail": "line_items[0].quantity"}
+    assert "two" not in posted.text
+
+
 def test_a_rate_limited_start_is_429(deployment, blob, monkeypatch) -> None:
     from docdoc.api.app import _Deployment, build_app
 

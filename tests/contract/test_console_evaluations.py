@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 from tests.contract.test_evaluation_routes import (  # noqa: F401
-    TYPED,
     _drain,
     blob,
     deployment,
@@ -52,7 +51,7 @@ def test_an_operator_check_is_recorded_as_the_operator(operator, blob) -> None: 
             "field_path": "total",
             "annotator": "someone-else",
             "timestamp": "2026-09-09T00:00:00Z",
-            "corrected_value": TYPED,
+            "corrected_value": "1240.50",
             "predicted_value": "1240.00",
             "reason": "checked",
         },
@@ -84,7 +83,7 @@ def test_a_console_check_without_an_annotator_is_recorded_as_the_operator(
             "document_id": blob,
             "field_path": "total",
             "timestamp": "2026-09-09T00:00:00Z",
-            "corrected_value": TYPED,
+            "corrected_value": "1240.50",
             "predicted_value": "1240.00",
             "reason": "checked",
         },
