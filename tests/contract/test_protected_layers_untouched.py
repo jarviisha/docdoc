@@ -64,6 +64,13 @@ The work stores schemas in the run database and merges them into the registry,
 so the guard-the-guard check moved to `src/docdoc/runs/console_schemas.py`. The
 protected set is unchanged: where a schema is kept must not move a value, a
 verdict, a location, or an identity.
+
+**Re-pointed at console-configured providers (ADR-0030,
+`docs/superpowers/specs/2026-10-23-console-providers-design.md`), 2026-10-24.**
+The work resolves the model adapter per tenant from settings in the run
+database, so the guard-the-guard check moved to `src/docdoc/runs/providers.py`.
+The protected set is unchanged: which adapter and key answer must not move a
+value, a verdict, a location, or an identity.
 """
 
 from __future__ import annotations
@@ -233,7 +240,7 @@ def test_the_diff_is_not_empty() -> None:
     changed = _changed()
 
     assert changed, "the diff against `main` is empty, so nothing above was checked"
-    assert "src/docdoc/runs/console_schemas.py" in changed, (
-        "this milestone's work is console-authored schemas, and the diff shows none "
+    assert "src/docdoc/runs/providers.py" in changed, (
+        "this milestone's work is console-configured providers, and the diff shows none "
         "of it. The comparison is against the wrong ref"
     )

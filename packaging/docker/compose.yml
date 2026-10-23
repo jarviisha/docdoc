@@ -79,6 +79,9 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       DOCDOC_GEMINI_MODEL: ${DOCDOC_GEMINI_MODEL:-}
+      # Seals provider API keys saved in the console (Settings / Providers). Set it
+      # to a Fernet key on api and worker alike; unset, keys cannot be stored there.
+      DOCDOC_SECRETS_KEY: ${DOCDOC_SECRETS_KEY:-}
       DOCDOC_AZURE_DI_ENDPOINT: ${DOCDOC_AZURE_DI_ENDPOINT:-}
       DOCDOC_AZURE_DI_KEY: ${DOCDOC_AZURE_DI_KEY:-}
       # Google Cloud Vision reads a **file**, not a value, so the variable alone

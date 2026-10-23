@@ -344,6 +344,7 @@ CONFIG_DOCUMENTS = (
     *DOCUMENTS,
     "README.md",
     "CONTRIBUTING.md",
+    "docs/adr/0030-console-configured-providers.md",
     "specs/003-schema-driven-extraction/data-model.md",
     "specs/003-schema-driven-extraction/research.md",
     # Milestone 9's two. Both name settings — seven between them — and neither
