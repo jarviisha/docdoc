@@ -115,11 +115,6 @@ export function Shell() {
     return answer;
   }, [queryClient]);
 
-  /** What an area reports. A session ending was already handled above. */
-  const handle = useCallback((failure: Failure) => {
-    if (failure.kind !== "unauthenticated") setNotice(describe(failure));
-  }, []);
-
   const signIn = useCallback(async (username: string, password: string) => {
     const answer = await call({ type: "sign-in" }, JSON.stringify({ username, password }));
     if (answer.ok) {
@@ -140,8 +135,8 @@ export function Shell() {
   }, [session, queryClient]);
 
   const frame = useMemo(
-    () => ({ username: session.username ?? "", notice, signOut: () => void signOut(), onFailure: handle }),
-    [session.username, notice, signOut, handle],
+    () => ({ username: session.username ?? "", notice, signOut: () => void signOut() }),
+    [session.username, notice, signOut],
   );
 
   if (!ready(session)) {

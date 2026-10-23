@@ -45,7 +45,7 @@ export function useIntent<T = unknown>(intent: Intent | null, options: IntentOpt
       ? (query: Query<unknown, Failure>) =>
           refetchInterval(query.state.data === undefined ? undefined : select(query.state.data), query.state.error)
       : refetchInterval;
-  // A polled read refreshes as soon as its tab is shown again, as `usePolling` did;
+  // A polled read refreshes as soon as its tab is shown again,;
   // every other read is fetched on mount only (focus refetch is off in main.tsx).
   const polls = (query: Query<unknown, Failure>) =>
     (typeof interval === "function" ? interval(query) : interval) !== false;

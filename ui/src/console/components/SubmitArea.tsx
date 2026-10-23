@@ -9,7 +9,7 @@
  * so and leaves the form usable with whatever did load.
  */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -29,15 +29,13 @@ import {
   toSchemas,
   toParsers,
   toTenants,
-  type ParserOption,
   type SubmitKind,
   type SubmitForm,
 } from "../model/submit.ts";
 import { FileField, SelectField } from "./fields.tsx";
-import type { Request } from "./RequestContext.tsx";
+import { useAct, useIntent } from "./useIntent.ts";
 
 interface Props {
-  request: Request;
   onOpenRun: (runId: string) => void;
 }
 
@@ -53,11 +51,13 @@ const KINDS = [
   { value: "extraction", label: "Extraction" },
 ];
 
-export function SubmitArea({ request, onOpenRun }: Props) {
-  const [tenants, setTenants] = useState<string[]>([]);
-  const [parsers, setParsers] = useState<ParserOption[]>([]);
-  const [schemas, setSchemas] = useState<string[]>([]);
-  const [loadProblem, setLoadProblem] = useState<string | null>(null);
+export function SubmitArea({ onOpenRun }: Props) {
+  const act = useAct();
+  const tenants = useIntent({ type: "list-tenants" }, { select: toTenants });
+  const parsers = useIntent({ type: "list-parsers" }, { select: toParsers });
+  const schemas = useIntent({ type: "list-schemas" }, { select: toSchemas });
+  const failedLoad = tenants.error ?? parsers.error ?? schemas.error;
+  const loadProblem = failedLoad === null ? null : describe(failedLoad);
   const [problem, setProblem] = useState<string | null>(null);
   const [form, setForm] = useState<SubmitForm>({
     kind: "ocr",
@@ -70,33 +70,11 @@ export function SubmitArea({ request, onOpenRun }: Props) {
     sending: false,
   });
 
-  useEffect(() => {
-    let current = true;
-    void request({ type: "list-tenants" }).then((answer) => {
-      if (!current) return;
-      if (answer.ok) setTenants(toTenants(answer.body));
-      else setLoadProblem(describe(answer.failure));
-    });
-    void request({ type: "list-parsers" }).then((answer) => {
-      if (!current) return;
-      if (answer.ok) setParsers(toParsers(answer.body));
-      else setLoadProblem(describe(answer.failure));
-    });
-    void request({ type: "list-schemas" }).then((answer) => {
-      if (!current) return;
-      if (answer.ok) setSchemas(toSchemas(answer.body));
-      else setLoadProblem(describe(answer.failure));
-    });
-    return () => {
-      current = false;
-    };
-  }, [request]);
-
   const submit = () => {
     if (form.file === null) return;
     setProblem(null);
     setForm((f) => ({ ...f, sending: true }));
-    void request(submitIntent(form), form.file).then((answer) => {
+    void act(submitIntent(form), form.file).then((answer) => {
       setForm((f) => ({ ...f, sending: false }));
       if (!answer.ok) return setProblem(describe(answer.failure));
       const runId = submittedRunId(answer.body);
@@ -134,7 +112,7 @@ export function SubmitArea({ request, onOpenRun }: Props) {
         <SelectField
           label="Tenant"
           placeholder="Choose a tenant"
-          options={tenants}
+          options={tenants.data ?? []}
           value={form.tenant}
           onChange={(tenant) => setForm((f) => ({ ...f, tenant }))}
         />
@@ -143,7 +121,7 @@ export function SubmitArea({ request, onOpenRun }: Props) {
           <SelectField
             label="Schema"
             placeholder="Choose a schema"
-            options={schemas}
+            options={schemas.data ?? []}
             value={form.schema}
             onChange={(schema) => setForm((f) => chooseSchema(f, schema, newKey()))}
           />
@@ -151,7 +129,7 @@ export function SubmitArea({ request, onOpenRun }: Props) {
           <>
             <SelectField
               label="Parser"
-              options={parserChoices(parsers)}
+              options={parserChoices(parsers.data ?? [])}
               value={form.parser}
               onChange={(parser) =>
                 setForm((f) => chooseParser(f, parser, newKey()))
@@ -160,7 +138,7 @@ export function SubmitArea({ request, onOpenRun }: Props) {
 
             <SelectField
               label="Language"
-              options={languageChoices(parsers, form.parser)}
+              options={languageChoices(parsers.data ?? [], form.parser)}
               value={form.language}
               onChange={(language) => setForm((f) => ({ ...f, language }))}
             />

@@ -7,32 +7,21 @@
  * It never polls (`PARSERS_POLL`): a health reading probes every parser live.
  */
 
-import { useEffect, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
-import type { Intent } from "../model/client.ts";
-import { describe, type Failure } from "../model/failure.ts";
+import { describe } from "../model/failure.ts";
 import { joined } from "../model/format.ts";
 import {
   capabilityList,
   parsersRefreshLabel,
   parserStatus,
   toParsers,
-  type ParserOption,
 } from "../model/submit.ts";
 import { DataTable } from "./DataTable.tsx";
-
-type Request = (
-  intent: Intent,
-  body?: BodyInit,
-) => Promise<{ ok: true; body: unknown } | { ok: false; failure: Failure }>;
-
-interface Props {
-  request: Request;
-}
+import { useIntent } from "./useIntent.ts";
 
 /** The status's colour, and the word that is always beside it. */
 const TONE: Record<ReturnType<typeof parserStatus>, "success" | "error" | "warning" | "neutral"> = {
@@ -42,40 +31,20 @@ const TONE: Record<ReturnType<typeof parserStatus>, "success" | "error" | "warni
   unknown: "neutral",
 };
 
-export function ParsersArea({ request }: Props) {
-  const [parsers, setParsers] = useState<ParserOption[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [problem, setProblem] = useState<string | null>(null);
-
-  // Loading is what fetches: the first render and every Refresh set it.
-  useEffect(() => {
-    if (!loading) return;
-    let current = true;
-    void request({ type: "list-parsers" }).then((answer) => {
-      if (!current) return;
-      setLoading(false);
-      if (answer.ok) {
-        setParsers(toParsers(answer.body));
-        setProblem(null);
-      } else {
-        setProblem(describe(answer.failure));
-      }
-    });
-    return () => {
-      current = false;
-    };
-  }, [request, loading]);
+export function ParsersArea() {
+  const { data: parsers = [], error, isFetching, refetch } = useIntent({ type: "list-parsers" }, { select: toParsers });
+  const problem = error === null ? null : describe(error);
 
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
-        <Button variant="outline" size="sm" disabled={loading} onClick={() => setLoading(true)}>
+        <Button variant="outline" size="sm" disabled={isFetching} onClick={() => void refetch()}>
           {parsersRefreshLabel}
         </Button>
       </div>
 
       <div role="status" aria-live="polite">
-        {loading ? <p className="text-sm">Loading…</p> : null}
+        {isFetching ? <p className="text-sm">Loading…</p> : null}
         {problem === null ? null : (
           <Alert variant="destructive">
             <AlertTitle>The parsers could not be read</AlertTitle>

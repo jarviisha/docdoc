@@ -6,7 +6,6 @@
  * `console/model/navigation.ts`.
  */
 
-import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
@@ -16,30 +15,13 @@ import { describe } from "../model/failure.ts";
 import { TENANT_JUMPS, jumpTo } from "../model/navigation.ts";
 import { toTenants } from "../model/submit.ts";
 import { DataTable } from "./DataTable.tsx";
-import type { Request } from "./RequestContext.tsx";
+import { useIntent } from "./useIntent.ts";
 
-interface Props {
-  request: Request;
-}
-
-export function TenantsArea({ request }: Props) {
-  const [tenants, setTenants] = useState<string[] | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
-
-  useEffect(() => {
-    let current = true;
-    void request({ type: "list-tenants" }).then((answer) => {
-      if (!current) return;
-      if (answer.ok) setTenants(toTenants(answer.body));
-      else {
-        setTenants([]);
-        setProblem(describe(answer.failure));
-      }
-    });
-    return () => {
-      current = false;
-    };
-  }, [request]);
+export function TenantsArea() {
+  const { data, error } = useIntent({ type: "list-tenants" }, { select: toTenants });
+  const problem = error === null ? null : describe(error);
+  // A failed read shows as no tenants, with the failure beside it.
+  const tenants = data ?? (error === null ? null : []);
 
   return (
     <div className="flex flex-col gap-3">

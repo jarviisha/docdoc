@@ -26,7 +26,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-import type { Failure } from "./model/failure.ts";
 import { AREA_PATHS, areaOf, type Area } from "./model/navigation.ts";
 import { qualitySearch, runsSearch, tenantSearch } from "./model/search.ts";
 import { useRequest } from "./components/RequestContext.tsx";
@@ -45,8 +44,6 @@ interface Frame {
   username: string;
   notice: string | null;
   signOut: () => void;
-  /** What an area reports. A session ending was already handled by `request`. */
-  onFailure: (failure: Failure) => void;
 }
 
 export const FrameContext = createContext<Frame | null>(null);
@@ -213,7 +210,7 @@ const overviewRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
   component: function Overview() {
-    return <OverviewArea request={useRequest().request} onOpenRun={useOpenRun()} />;
+    return <OverviewArea onOpenRun={useOpenRun()} />;
   },
 });
 
@@ -242,7 +239,7 @@ const submitRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/submit",
   component: function Submit() {
-    return <SubmitArea request={useRequest().request} onOpenRun={useOpenRun()} />;
+    return <SubmitArea onOpenRun={useOpenRun()} />;
   },
 });
 
@@ -259,7 +256,7 @@ const tenantsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/tenants",
   component: function Tenants() {
-    return <TenantsArea request={useRequest().request} />;
+    return <TenantsArea />;
   },
 });
 
@@ -285,7 +282,7 @@ const parsersRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/parsers",
   component: function Parsers() {
-    return <ParsersArea request={useRequest().request} />;
+    return <ParsersArea />;
   },
 });
 
