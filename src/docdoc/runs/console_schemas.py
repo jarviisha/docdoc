@@ -116,11 +116,20 @@ class PostgresSchemaStore:
         return r is not None
 
 
-def merged_registry(files: SchemaRegistry, store: SchemaStore) -> SchemaRegistry:
-    """The file registry plus every valid console row; console wins a clash."""
+def merged_registry(
+    files: SchemaRegistry, store: SchemaStore, *, strict: bool = False
+) -> SchemaRegistry:
+    """The file registry plus every valid console row; console wins a clash.
+
+    When the database is unreachable the files alone are returned, unless
+    ``strict``: a worker must wait and retry rather than run a file's content
+    under an identity a console row shadows.
+    """
     try:
         rows = store.all()
     except RunStateUnavailableError as exc:
+        if strict:
+            raise
         _log.warning("console schemas unavailable, serving the files only: %s", exc)
         return files
     good = []

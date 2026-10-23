@@ -11,6 +11,7 @@ import {
   draftFrom,
   emptyDraft,
   groupByName,
+  hasChanges,
   isDirty,
   isNumberConstraint,
   moveField,
@@ -129,12 +130,22 @@ test("constraintsFor mirrors the server's domains", () => {
 test("changesBetween keys changes by dotted field path", () => {
   const edited = updateField(invoice, quantity, { type: "integer" });
   assert.deepEqual(changesBetween(invoice, edited), {
-    added: [], removed: [], changed: ["line_items.quantity"], promptChanged: false, rulesChanged: false,
+    added: [], removed: [], changed: ["line_items.quantity"], orderChanged: false, promptChanged: false, rulesChanged: false,
   });
   const grown = { ...addField(invoice, [6]), prompt: "q", rulesText: '[{"id":"r"}]' };
   const diff = changesBetween(invoice, removeField(grown, [0]));
   assert.deepEqual([diff.added, diff.removed], [["line_items."], ["invoice_number"]]);
   assert.deepEqual([diff.promptChanged, diff.rulesChanged], [true, true]);
+});
+
+test("hasChanges sees a reorder-only edit, which lists no path", () => {
+  assert.equal(hasChanges(changesBetween(invoice, invoice)), false);
+  const moved = moveField(invoice, [0], 1);
+  const diff = changesBetween(invoice, moved);
+  assert.deepEqual([diff.added, diff.removed, diff.changed], [[], [], []]);
+  assert.equal(diff.orderChanged, true);
+  assert.equal(hasChanges(diff), true);
+  assert.equal(hasChanges(changesBetween(invoice, { ...invoice, prompt: "x" })), true);
 });
 
 test("isDirty is false for an untouched draft and true after an edit", () => {

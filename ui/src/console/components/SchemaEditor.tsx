@@ -24,6 +24,7 @@ import {
   addField,
   CARDINALITIES,
   changesBetween,
+  hasChanges,
   constraintsFor,
   constraintText,
   documentOf,
@@ -215,16 +216,17 @@ function DraftForm({ start, base }: { start: SchemaDraft; base: string | null })
           />
         ) : null}
         {tab === "changes" ? (
-          dirty ? (
+          hasChanges(changes) ? (
             <div className="flex flex-col gap-2 text-sm">
               <PathList heading="Added" paths={changes.added} />
               <PathList heading="Removed" paths={changes.removed} />
               <PathList heading="Changed" paths={changes.changed} />
+              {changes.orderChanged ? <p>Field order changed.</p> : null}
               {changes.promptChanged ? <p>The prompt changed.</p> : null}
               {changes.rulesChanged ? <p>The rules changed.</p> : null}
             </div>
           ) : (
-            <p className="text-sm text-slate-600">No changes from {base} yet.</p>
+            <p className="text-sm text-slate-600">No field or prompt changes from {base}.</p>
           )
         ) : null}
       </div>

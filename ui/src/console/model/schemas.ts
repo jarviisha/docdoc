@@ -358,13 +358,22 @@ const rulesOf = (text: string): string => {
 export function changesBetween(base: SchemaDraft, draft: SchemaDraft) {
   const was = flatten(base.fields);
   const now = flatten(draft.fields);
+  const kept = (m: Map<string, string>, other: Map<string, string>) =>
+    [...m.keys()].filter((p) => other.has(p)).join("\n");
   return {
     added: [...now.keys()].filter((p) => !was.has(p)),
     removed: [...was.keys()].filter((p) => !now.has(p)),
     changed: [...now.keys()].filter((p) => was.has(p) && was.get(p) !== now.get(p)),
+    orderChanged: kept(was, now) !== kept(now, was),
     promptChanged: base.prompt !== draft.prompt,
     rulesChanged: rulesOf(base.rulesText) !== rulesOf(draft.rulesText),
   };
+}
+
+/** Whether `changesBetween` found anything to list (a reorder alone counts). */
+export function hasChanges(changes: ReturnType<typeof changesBetween>): boolean {
+  const { added, removed, changed, ...flags } = changes;
+  return added.length + removed.length + changed.length > 0 || Object.values(flags).some(Boolean);
 }
 
 export function isDirty(base: SchemaDraft, draft: SchemaDraft): boolean {

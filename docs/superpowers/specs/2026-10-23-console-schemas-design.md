@@ -53,7 +53,7 @@ modified, and runs that used it keep pointing at it.
    database rows. A save is refused if the identity exists in either source.
    **Our call on a later collision:** a file deployed after a console save can still claim the same
    identity, for example a new `invoice@3.json`. In that case the **console row wins**, because runs
-   may already reference it. The file is skipped and logged with the identity and path, and the
+   may already reference it. The file is skipped and logged by identity only, and the
    console list shows the collision as a warning on that identity. It must not fail the registry
    as a whole: one stray file cannot take down `/v1` extraction or the workers. The fix is to rename
    or remove the file.

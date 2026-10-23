@@ -9,10 +9,13 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+import pytest
+
 from docdoc.artifacts import BlobStore, FileArtifactStore
 from docdoc.extraction import SchemaRegistry
 from docdoc.extraction.adapters import EchoAdapter
 from docdoc.runs.console_schemas import ConsoleSchema, merged_registry
+from docdoc.runs.errors import RunStateUnavailableError
 from docdoc.runs.model import RunStatus
 from docdoc.runs.worker import Worker
 from tests.fixtures.run_queue import InMemoryRunQueue
@@ -82,3 +85,37 @@ def test_worker_reloads_registry_on_unknown_identity(tmp_path: Path) -> None:
 
     assert queue.get(run_id, "default").status is RunStatus.SUCCEEDED
     assert len(reloads) == 1
+
+
+def test_reload_during_a_database_outage_leaves_the_run_for_retry(tmp_path: Path) -> None:
+    files = SchemaRegistry.from_paths([Path("schemas")])
+
+    class Down:
+        def all(self) -> tuple[ConsoleSchema, ...]:
+            raise RunStateUnavailableError("down")
+
+    queue = InMemoryRunQueue()
+    blobs = BlobStore(tmp_path)
+    run_id = uuid4()
+    queue.submit(
+        _Spec(blobs.put(DOCUMENT)),  # type: ignore[arg-type]
+        run_id=run_id,
+        now=NOW,
+        expires_at=NOW + timedelta(hours=24),
+    )
+    run = queue.claim(worker_id="w", now=NOW, lease=timedelta(seconds=90), max_attempts=3)
+    worker = Worker(
+        queue=queue,
+        blobs=blobs,
+        store=FileArtifactStore(tmp_path),
+        registry=files,
+        adapter=EchoAdapter.from_fixtures(tmp_path),
+        worker_id="w",
+        reload_registry=lambda: merged_registry(files, Down(), strict=True),  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(RunStateUnavailableError):
+        worker._execute_with_heartbeat(run)
+
+    assert worker._registry is files
+    assert queue.get(run_id, "default").status is RunStatus.RUNNING

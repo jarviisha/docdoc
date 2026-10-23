@@ -171,8 +171,10 @@ def run(args: argparse.Namespace, settings: Settings) -> Rendering:
         store=settings.store(),
         registry=settings.registry(schemas),
         # A schema authored in the console after this worker started: re-read
-        # when a claimed run names one the registry lacks.
-        reload_registry=lambda: settings.registry(schemas),
+        # when a claimed run names one the registry lacks. Strict: an unreachable
+        # database raises, so the claim loop lets the lease lapse and retries
+        # instead of failing the run on a schema it could not see.
+        reload_registry=lambda: settings.registry(schemas, strict=True),
         adapter=settings.adapter(),
         worker_id=_worker_id(),
         lease=configured_lease(getattr(args, "lease_seconds", None)),
