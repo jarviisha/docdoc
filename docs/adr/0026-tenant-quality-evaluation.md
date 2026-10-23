@@ -87,6 +87,23 @@ document count before starting. It is refused with `409 no_answers` when there a
 evaluation_in_progress` while another for the same tenant and schema is unfinished, and `429` when
 the tenant's run limits are reached. A document whose run fails counts as failed in the report.
 
+An evaluation that cannot be scored at all (its schema version removed or edited between start and
+settle, or `evaluate` refusing the pair) is **failed**: it records the error class, never a message,
+once with its settle time, and stops holding its tenant and schema, so the next start is not refused.
+Its status reads `failed` and the console marks it "Could not be scored". A console start is logged
+with the operator, tenant, schema and outcome.
+
+### 7. Typed values, reasons, and provenance
+
+`comparators@1` gates on type, so a check typed as text could never match a typed extraction. A
+corrected value is typed with the run's schema when it is recorded (text parsed for number, integer
+and boolean, then the library's `carry`), and refused with `422 invalid_value` naming only the field
+path when the declared type cannot carry it. Before scoring, label values and extracted values are
+typed by the schema as the dataset loaders type them (`schema_facts` + `carry`); the library is not
+changed. A wrong check needs a reason, as the library's `Correction` requires; the console says so
+before saving. Each report summary carries a trimmed `provenance` (model and parser ids and
+versions, schema hashes, prompt hashes) so a report says which configuration produced it.
+
 ### 6. Amendment to ADR-0023 §4
 
 ADR-0023 §4 scoped the page-image route to OCR runs. Checking an extracted value needs the page it
@@ -96,10 +113,11 @@ stored and is not a new place a result is kept.
 
 ## Consequences
 
-- The constitution's console paragraph is widened to permit checking and showing evaluation reports,
-  and to say page images are served for succeeded extraction runs (v1.13.0).
-- A new `evaluations` table (migration `0012`) and answer columns (migration `0011`); both are purged by the tenant and
-  document erasure paths.
+- The constitution's console paragraph is widened to permit checking, starting an evaluation (a
+  paid action), and showing evaluation reports, and to say page images are served for succeeded
+  extraction runs (v1.13.0).
+- A new `evaluations` table (migration `0012`, with `failure` added by `0013`) and answer columns
+  (migration `0011`); both are purged by the tenant and document erasure paths.
 - The `docdoc eval` CLI and `datasets/mvp` are untouched; retiring them is a later project.
 
 ## Alternatives considered

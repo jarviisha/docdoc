@@ -578,10 +578,14 @@ becomes non-compliant.
   - **The console may serve page images for succeeded extraction runs, not only
     OCR runs (ADR-0026, amending ADR-0023 §4).** Checking an extracted value
     needs the page it was read from beside it.
-  - **The console may record a check and show evaluation reports (ADR-0026).**
-    An operator may mark an extracted field correct, or wrong with the right
-    value, which is a correction (Principle IX), and may read a tenant's
-    evaluation reports. Tenants do the same through Bearer routes. The five
+  - **The console may record a check, start an evaluation, and show evaluation
+    reports (ADR-0026).** An operator may mark an extracted field correct, or
+    wrong with the right value, which is a correction (Principle IX); may start
+    an evaluation of a tenant's checked documents, which re-runs them under the
+    current configuration and so may call paid providers on that tenant's
+    behalf (the start is confirmed first, counted against the tenant's limits,
+    and logged with the operator's name); and may read a tenant's evaluation
+    reports. Tenants do the same through Bearer routes. The five
     nouns of ADR-0019 §2 are unchanged: no assignment, queue, workload, review
     state, or disposition is added.
 
@@ -998,8 +1002,10 @@ inspect every tenant's runs rather than the one a pasted key resolves to, and re
 an OCR document, an extraction result, and the page images with boxes of an OCR run or a succeeded
 extraction run — all through a session-only route family under `/v1/console` that a tenant's Bearer
 key must never reach. From ADR-0026 it may also let the operator mark an extracted value *correct*
-or *wrong* (a correction, Principle IX) and show a tenant's evaluation reports: field accuracy and
-its siblings over the documents that tenant has checked. What stays
+or *wrong* (a correction, Principle IX), start an evaluation that re-runs a tenant's checked
+documents under the current configuration (a paid action, confirmed first, held to the tenant's
+limits, and logged with the operator's name), and show a tenant's evaluation reports: field accuracy
+and its siblings over the documents that tenant has checked. What stays
 deferred is every surface that serves the person who *checks documents*: reviewer assignment, review
 queues, workload, review states beyond the closed run status set, and any disposition beyond
 ADR-0017's two routing outcomes. Principle IX's own sentence — supporting corrections "MUST NOT turn

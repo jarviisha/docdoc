@@ -16,6 +16,11 @@ tenant's own and records the operator as who checked.
 A **correct** check keeps where the value was read from (page and box), so later runs can be
 measured for reading it from the same place. A **wrong** check stores no location.
 
+A **wrong** check needs a reason; the console will not save one without it. Its value is stored as
+the type the schema declares for that field, as a dataset's labels are: `"2"` typed for a `number`
+field is stored as the number 2, so it can match an extracted 2. A value the declared type cannot
+carry is refused with `422 invalid_value`, naming only the field path.
+
 ## Answers
 
 Each check is an answer. There is one answer per tenant, schema name, document and field path, and
@@ -30,7 +35,15 @@ per schema name: documents and fields.
 **current** configuration (newest registered schema version, current parser and model routing),
 scores the results against the answers, and stores a **report** recording that configuration. It
 answers `202` with the document count, and the report is scored when every run has finished. A
-document whose run fails counts as failed; it is not dropped. `GET /v1/evaluations` lists a
+document whose run fails counts as failed; it is not dropped. Answers and extracted values are typed
+by the schema before scoring, as the dataset loaders type them.
+
+Each evaluation has a `status`: `running`, `finished`, or `failed`. **Failed** means it could not be
+scored at all, because its schema version was removed or edited after it started; `failure` names
+the error class, and the next evaluation of that schema can start at once. A finished one carries a
+`provenance` block saying which configuration produced it: model and parser ids and versions,
+schema hashes and prompt hashes. The console's history shows the model and parser per re-run, and
+marks a failed one "Could not be scored". A console start is logged with the operator's name. `GET /v1/evaluations` lists a
 tenant's, and `GET /v1/evaluations/{id}` reads one with its per-field table and, per document, the
 expected and extracted values.
 
