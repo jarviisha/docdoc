@@ -25,7 +25,8 @@ adopted on 2026-10-24 in #41. Claude: use the house-style skill.
 
 - Squash merge only. PR title = commit title: `type(scope): summary`.
 - PR body is plain text: short paragraphs and `-` bullets, no `##` headings,
-  no emoji, no "Generated with" line. It becomes the squash commit body.
+  no emoji, no "Generated with" line. It becomes the squash commit body,
+  so it must describe all the work done in the PR.
 - Branches: `type/short-slug`.
 - Workflows: ci.yml, release.yml, deploy.yml.
 - Releases: tag vX.Y.Z, release title = tag, body = CHANGELOG section.
