@@ -21,7 +21,7 @@ Single-context: one `CONTEXT.md` at the repo root plus `docs/adr/`. See `docs/ag
 ## House style
 
 This repo follows jarviisha/house-style (https://github.com/jarviisha/house-style),
-adopted on 2026-10-24 in #N. Claude: use the house-style skill.
+adopted on 2026-10-24 in #41. Claude: use the house-style skill.
 
 - Squash merge only. PR title = commit title: `type(scope): summary`.
 - PR body is plain text: short paragraphs and `-` bullets, no `##` headings,
