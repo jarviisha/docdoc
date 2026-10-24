@@ -176,6 +176,9 @@ class _Deployment:
         #: The console accounts store (ADR-0023 §1). `None` builds one from the
         #: run-state database, see `console_accounts`.
         console: Any = None,
+        #: The saved provider settings (`ProviderStore`). `None` builds one from
+        #: the run-state database, see `provider_store`.
+        providers: Any = None,
         #: The two OCR caps (ADR-0022). `None` reads the environment, then the
         #: default -- both are on with no configuration.
         ocr_queue_per_tenant: int | None = None,
@@ -196,6 +199,11 @@ class _Deployment:
         self._evaluations: Any = None
         self._schemas = schemas
         self._console = console
+        self._providers = providers
+        from docdoc.runs.secrets import Sealer
+
+        #: Read once: a malformed `DOCDOC_SECRETS_KEY` fails at startup, not per request.
+        self._sealer = Sealer.from_env()
         #: The console's idle bound (ADR-0023 §1), read once like every other
         #: configuration value here rather than per gated request.
         from docdoc.runs.identity import configured_console_idle
@@ -357,6 +365,23 @@ class _Deployment:
         self._schemas = PostgresSchemaStore(execute=execute)
         return self._schemas
 
+    def provider_store(self) -> Any:
+        """The saved provider settings, or ``None`` with no database; built once."""
+        if self._providers is not None:
+            return self._providers
+        execute = getattr(self._runs, "_execute", None)
+        if execute is None:
+            return None
+
+        from docdoc.runs.provider_settings import PostgresProviderStore
+
+        self._providers = PostgresProviderStore(execute)
+        return self._providers
+
+    def sealer(self) -> Any:
+        """The `Sealer` for saved keys, or ``None`` when `DOCDOC_SECRETS_KEY` is unset."""
+        return self._sealer
+
     def console_accounts(self) -> Any:
         """The console accounts store, or ``None``, built once (ADR-0023 §1).
 
@@ -494,12 +519,13 @@ class _Deployment:
 
         return merged_registry(base, store)
 
-    def adapter(self) -> Any:
+    def adapter(self, tenant_id: str | None = None) -> Any:
+        """The tenant's model adapter; an injected one wins."""
         if self._adapter is not None:
             return self._adapter
-        from docdoc.extraction.adapter_registry import default_adapter
+        from docdoc.runs.providers import resolve_adapter
 
-        return default_adapter()
+        return resolve_adapter(tenant_id, self.provider_store(), self.sealer())
 
     def parser_registry(self) -> ParserRegistry:
         """The parsers ``POST /v1/ocr`` and ``GET /v1/parsers`` choose from.

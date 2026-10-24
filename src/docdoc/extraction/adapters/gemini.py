@@ -192,6 +192,35 @@ class GeminiAdapter:
             )
         return Availability(usable=True)
 
+    def probe(self, timeout_s: float = 10.0) -> Availability:
+        """Whether the key and the model answer right now, by fetching the model.
+
+        ``models.get`` is the cheapest call that proves both: a bad key and an
+        unknown model each fail it. Never raises; the provider's text is the reason.
+        """
+        availability = self.available()
+        if not availability.usable:
+            return availability
+        from google import genai
+        from google.genai import errors as genai_errors
+        from google.genai import types
+
+        try:
+            client = self._client or genai.Client(api_key=self._resolved_key())
+            client.models.get(
+                model=self._model,
+                config=types.GetModelConfig(
+                    http_options=types.HttpOptions(timeout=int(timeout_s * 1000))
+                ),
+            )
+        except Exception as exc:  # a probe reports, it never raises
+            if isinstance(exc, genai_errors.APIError):
+                reason = f"the provider answered {exc.code}: {exc.message or exc.status}"
+            else:
+                reason = str(exc) or type(exc).__name__
+            return Availability(usable=False, reason=reason)
+        return Availability(usable=True)
+
     def complete(self, request: ModelRequest, options: ExtractionOptions) -> ModelResponse:
         """One structured answer, or a typed docdoc error. Never a partial one."""
         from google.genai import errors as genai_errors

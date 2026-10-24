@@ -243,6 +243,7 @@ CONFIG_MODULES = {
     "docdoc.ingest.parsers.paddlex": ("ENDPOINTS_FILE_ENV",),
     "docdoc.cli.config": ("STORE_ROOT_ENV", "RUN_DATABASE_URL_ENV", "STORE_URL_ENV"),
     "docdoc.grounding.view": ("MATCH_VIEW_CACHE_ENV",),
+    "docdoc.runs.secrets": ("SECRETS_KEY_ENV",),
     # `settings`, not `app`: `app` imports FastAPI, and this check runs on a
     # base install that has no extras.
     #
@@ -343,6 +344,7 @@ CONFIG_DOCUMENTS = (
     *DOCUMENTS,
     "README.md",
     "CONTRIBUTING.md",
+    "docs/adr/0030-console-configured-providers.md",
     "specs/003-schema-driven-extraction/data-model.md",
     "specs/003-schema-driven-extraction/research.md",
     # Milestone 9's two. Both name settings — seven between them — and neither
@@ -443,6 +445,7 @@ CONFIG_DOCUMENTS = (
     "docs/superpowers/specs/2026-10-23-console-schemas-design.md",
     "docs/superpowers/specs/2026-10-23-console-providers-design.md",
     "docs/superpowers/plans/2026-10-23-console-schemas.md",
+    "docs/superpowers/plans/2026-10-23-console-providers.md",
 )
 
 #: Requires at least one character after the prefix, so the `DOCDOC_*` wildcard

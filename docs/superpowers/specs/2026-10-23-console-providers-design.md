@@ -111,3 +111,16 @@ environment variables today (`DOCDOC_MODEL_ADAPTERS`, `DOCDOC_GEMINI_MODEL`,
 - With nothing saved, behaviour is identical to today: same adapter, model and key, chosen from the
   environment.
 - Run the full suite with `make test` before reporting done (AGENTS.md).
+
+## `provider_priorities`
+
+One row per scope, primary key `tenant_id`; `''` is the deployment default, any other
+value a tenant. `priority` (text[]) is the saved adapter order. No row means inherit.
+`updated_at`, `updated_by`. Deleting the row is how an override is cleared.
+
+## `provider_settings`
+
+One row per scope and adapter, primary key `(tenant_id, adapter_id)`. `model` (null:
+inherit), `key_ciphertext` (bytea, sealed with `DOCDOC_SECRETS_KEY`; null: inherit),
+`key_last4` (the only part of a key ever shown), `updated_at`, `updated_by`. A row with
+neither model nor key is deleted rather than stored. Tenant erasure purges both tables.

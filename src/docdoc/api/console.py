@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated, Any
 
@@ -67,6 +68,9 @@ from docdoc.runs import identity
 from docdoc.runs.console_schemas import SchemaNameTaken, SchemaVersionTaken, create_version
 from docdoc.runs.model import Priority
 from docdoc.runs.principal import TENANT_PATTERN
+from docdoc.runs.provider_settings import DEFAULT_SCOPE, KEEP_KEY
+from docdoc.runs.providers import KNOWN_ADAPTERS, registry_for, resolve, selected_id
+from docdoc.runs.secrets import last4
 
 if TYPE_CHECKING:
     from datetime import timedelta
@@ -426,6 +430,89 @@ def _schema_detail(registry: Any, store: Any, identity: str) -> dict[str, Any]:
         "base": row.base if row else None,
         "created_at": _iso(row.created_at) if row else None,
         "created_by": row.created_by if row else None,
+    }
+
+
+#: Adapters that answer from fixtures: shown, ordered, never configured.
+_TEST_ONLY = frozenset({"echo"})
+_REDACTED = "••••"
+#: A provider body is a model name and a key; anything near this is not one.
+_PROVIDER_BODY_CAP = 16 * 1024
+_MODEL_MAX = 256
+
+
+async def _provider_json(request: Request) -> dict[str, Any]:
+    """A provider body as a mapping, read under `_PROVIDER_BODY_CAP`; nothing echoed."""
+    raw = await _read_capped(request, _PROVIDER_BODY_CAP)
+    try:
+        parsed = json.loads(raw) if raw else {}
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "invalid_json", "message": _BAD_MESSAGES["invalid_json"]},
+        ) from None
+    return parsed if isinstance(parsed, dict) else {}
+
+
+_BAD_MESSAGES = {
+    "invalid_json": "the request body is not valid JSON",
+    "invalid_tenant_id": "the tenant id is not valid",
+    "tenant_required": "choose a tenant; the deployment default cannot be reset",
+    "invalid_priority": "priority must be a non-empty list of distinct known adapters",
+    "invalid_model": "model must be non-blank text of at most 256 characters",
+    "invalid_api_key": "api_key must be non-blank text",
+}
+
+
+def _bad(error: str) -> JSONResponse:
+    """A 422 naming the field only: a provider body may carry a key, never echoed."""
+    message = _BAD_MESSAGES.get(error, "the request was not valid")
+    return JSONResponse(status_code=422, content={"error": error, "message": message})
+
+
+def _provider_scope(request: Request, tenant: str | None) -> tuple[JSONResponse | None, Any]:
+    """The provider store, or the refusal: a malformed tenant, or no database."""
+    if tenant is not None and not TENANT_PATTERN.match(tenant):
+        return _bad("invalid_tenant_id"), None
+    store = request.app.state.deployment.provider_store()
+    if store is None:
+        return _refusal(503, "ConsoleUnavailable", _CONSOLE_UNAVAILABLE), None
+    return None, store
+
+
+def _optional_text(body: dict[str, Any], name: str) -> str | None:
+    """A stripped string or ``None``; `ValueError` for blank text or another type."""
+    value = body.get(name)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(name)
+    return value.strip()
+
+
+def _providers_body(request: Request, tenant: str | None) -> dict[str, Any]:
+    """What `GET /v1/console/providers` answers for a scope. Never a key."""
+    deployment = request.app.state.deployment
+    resolved = resolve(tenant, deployment.provider_store(), deployment.sealer())
+    status = {c.id: c for c in registry_for(resolved).candidates()}
+    return {
+        # `None` is the deployment default: "default" is a legal tenant id.
+        "scope": tenant,
+        "secrets_configured": deployment.sealer() is not None,
+        "priority": {"value": list(resolved.priority), "source": resolved.priority_source},
+        "selected": selected_id(resolved),
+        "adapters": [
+            {
+                "id": a.id,
+                "test_only": a.id in _TEST_ONLY,
+                "model": {"value": a.model, "source": a.model_source},
+                "key": {"last4": a.key_last4, "source": a.key_source},
+                "status": {"usable": status[a.id].available, "reason": status[a.id].reason},
+                "updated_at": _iso(a.updated_at),
+                "updated_by": a.updated_by,
+            }
+            for a in resolved.adapters
+        ],
     }
 
 
@@ -1144,5 +1231,167 @@ def console_router() -> APIRouter:
         response = _erase(request, tenant_id=tenant_id, blob_id=blob_id)
         _log_erasure(operator, tenant_id=tenant_id, blob_id=blob_id, status=response.status_code)
         return response
+
+    # The provider routes: one scope per call, the deployment default without
+    # `tenant`. Bodies are read raw, as the callback routes read theirs, so a
+    # malformed field gets a field name back rather than a validation error
+    # echoing the input -- the API key included.
+
+    @router.get("/providers")
+    def read_providers(request: Request, operator: Operator, tenant: str | None = None) -> Any:
+        refused, _ = _provider_scope(request, tenant)
+        return refused or _providers_body(request, tenant)
+
+    @router.put("/providers/priority")
+    async def set_provider_priority(
+        request: Request, operator: Operator, tenant: str | None = None
+    ) -> Any:
+        """``{"priority": [ids] | null}``; null inherits, an empty list means nothing."""
+        from fastapi.concurrency import run_in_threadpool
+
+        refused, store = _provider_scope(request, tenant)
+        if refused:
+            return refused
+        body = await _provider_json(request)
+        value = body.get("priority")
+        if "priority" not in body or (
+            value is not None
+            and (
+                not isinstance(value, list)
+                or not value
+                or not all(isinstance(v, str) and v in KNOWN_ADAPTERS for v in value)
+                or len(set(value)) != len(value)
+            )
+        ):
+            return _bad("invalid_priority")
+        await run_in_threadpool(
+            store.set_priority,
+            tenant or DEFAULT_SCOPE,
+            None if value is None else tuple(value),
+            by=operator,
+            now=identity.now(),
+        )
+        return await run_in_threadpool(_providers_body, request, tenant)
+
+    @router.put("/providers/{adapter_id}")
+    async def set_provider(
+        request: Request, adapter_id: str, operator: Operator, tenant: str | None = None
+    ) -> Any:
+        """``{"model": str | null, "api_key"?: str | null}``: absent keeps the key."""
+        from fastapi.concurrency import run_in_threadpool
+
+        refused, store = _provider_scope(request, tenant)
+        if refused:
+            return refused
+        if adapter_id not in KNOWN_ADAPTERS or adapter_id in _TEST_ONLY:
+            return JSONResponse(status_code=404, content={"error": "unknown_adapter"})
+        body = await _provider_json(request)
+        if "model" not in body:
+            # Required, so a body naming only a key cannot clear the model by omission.
+            return _bad("invalid_model")
+        try:
+            model = _optional_text(body, "model")
+            api_key = _optional_text(body, "api_key")
+        except ValueError as exc:
+            return _bad(f"invalid_{exc}")
+        if model is not None and len(model) > _MODEL_MAX:
+            return _bad("invalid_model")
+        key: Any = KEEP_KEY if "api_key" not in body else None
+        if api_key is not None:
+            sealer = request.app.state.deployment.sealer()
+            if sealer is None:
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "error": "secrets_not_configured",
+                        "message": "set DOCDOC_SECRETS_KEY to store API keys",
+                    },
+                )
+            key = (sealer.seal(api_key), last4(api_key))
+        await run_in_threadpool(
+            store.set_adapter,
+            tenant or DEFAULT_SCOPE,
+            adapter_id,
+            model=model,
+            key=key,
+            by=operator,
+            now=identity.now(),
+        )
+        return await run_in_threadpool(_providers_body, request, tenant)
+
+    @router.delete("/providers")
+    def reset_providers(request: Request, operator: Operator, tenant: str | None = None) -> Any:
+        """Drop a tenant's overrides; the deployment default is never reset."""
+        refused, store = _provider_scope(request, tenant)
+        if refused:
+            return refused
+        if tenant is None:
+            return _bad("tenant_required")
+        store.reset(tenant)
+        return _providers_body(request, tenant)
+
+    @router.post("/providers/{adapter_id}/test")
+    async def test_provider(
+        request: Request, adapter_id: str, operator: Operator, tenant: str | None = None
+    ) -> Any:
+        """Probe one adapter with the scope's settings and the form's overlaid.
+
+        Nothing is stored, so a typed key is testable without `DOCDOC_SECRETS_KEY`.
+        The provider's text comes back with every occurrence of the key redacted.
+        """
+        from dataclasses import replace
+
+        from fastapi.concurrency import run_in_threadpool
+
+        refused, store = _provider_scope(request, tenant)
+        if refused:
+            return refused
+        if adapter_id not in KNOWN_ADAPTERS:
+            return JSONResponse(status_code=404, content={"error": "unknown_adapter"})
+        body = await _provider_json(request)
+        try:
+            model = _optional_text(body, "model")
+            api_key = _optional_text(body, "api_key")
+        except ValueError as exc:
+            return _bad(f"invalid_{exc}")
+        if model is not None and len(model) > _MODEL_MAX:
+            return _bad("invalid_model")
+
+        def probe() -> dict[str, Any]:
+            from docdoc.extraction.adapter_registry import default_adapter_registry
+
+            deployment = request.app.state.deployment
+            resolved = resolve(tenant, store, deployment.sealer())
+            config = next(a.config for a in resolved.adapters if a.id == adapter_id)
+            if model is not None:
+                config = replace(config, model=model)
+            if api_key is not None:
+                # A typed key replaces an unreadable saved one, too.
+                config = replace(config, api_key=api_key, unavailable=None)
+            candidate = next(
+                c
+                for c in default_adapter_registry(configure={adapter_id: config}).candidates()
+                if c.id == adapter_id
+            )
+            from docdoc.extraction.adapters.gemini import GeminiAdapter
+
+            if isinstance(candidate.adapter, GeminiAdapter):
+                result = candidate.adapter.probe()
+                ok, message = result.usable, result.reason
+            else:
+                ok, message = candidate.available, candidate.reason
+            message = message or ("connected" if ok else "unavailable")
+            # The key the adapter used: typed, else saved, else the environment's.
+            secret = (
+                api_key
+                or config.api_key
+                or os.environ.get("GEMINI_API_KEY")
+                or os.environ.get("GOOGLE_API_KEY")
+            )
+            if secret:
+                message = message.replace(secret, _REDACTED)
+            return {"ok": ok, "message": message}
+
+        return await run_in_threadpool(probe)
 
     return router

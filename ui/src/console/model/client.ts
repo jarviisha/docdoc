@@ -55,6 +55,12 @@ export type Intent =
   | { type: "list-schemas" }
   | { type: "schema-detail"; identity: string }
   | { type: "create-schema" }
+  /** `tenantId` null is the deployment default: no `tenant` query. */
+  | { type: "list-providers"; tenantId: string | null }
+  | { type: "set-provider-priority"; tenantId: string | null }
+  | { type: "set-provider"; tenantId: string | null; adapterId: string }
+  | { type: "reset-providers"; tenantId: string }
+  | { type: "test-provider"; tenantId: string | null; adapterId: string }
   | { type: "list-callbacks"; tenantId: string }
   | { type: "register-callback"; tenantId: string }
   | { type: "revoke-callback"; tenantId: string; callbackId: string }
@@ -96,6 +102,9 @@ const ALLOWED = [
   /^\/v1\/console\/parsers$/,
   /^\/v1\/console\/schemas$/,
   /^\/v1\/console\/schemas\/[^/]+$/,
+  /^\/v1\/console\/providers$/,
+  /^\/v1\/console\/providers\/[^/]+$/,
+  /^\/v1\/console\/providers\/[^/]+\/test$/,
   /^\/v1\/console\/tenants\/[^/]+\/extractions$/,
   /^\/v1\/console\/tenants\/[^/]+\/callbacks$/,
   /^\/v1\/console\/tenants\/[^/]+\/callbacks\/[^/]+$/,
@@ -271,6 +280,34 @@ export function requestFor(intent: Intent): RequestPlan {
     case "create-schema":
       return { method: "POST", path: "/v1/console/schemas", query: {}, hasBody: true };
 
+    case "list-providers":
+    case "set-provider-priority":
+    case "set-provider":
+    case "reset-providers":
+    case "test-provider": {
+      const adapter =
+        "adapterId" in intent ? `/${encodeURIComponent(intent.adapterId)}` : "";
+      const path =
+        intent.type === "set-provider-priority"
+          ? "/priority"
+          : intent.type === "test-provider"
+            ? `${adapter}/test`
+            : adapter;
+      return {
+        method:
+          intent.type === "list-providers"
+            ? "GET"
+            : intent.type === "reset-providers"
+              ? "DELETE"
+              : intent.type === "test-provider"
+                ? "POST"
+                : "PUT",
+        path: `/v1/console/providers${path}`,
+        query: intent.tenantId === null ? {} : { tenant: intent.tenantId },
+        hasBody: intent.type !== "list-providers" && intent.type !== "reset-providers",
+      };
+    }
+
     case "submit-extraction":
       return {
         method: "POST",
@@ -370,6 +407,12 @@ export function allIntents(): Intent[] {
     { type: "list-schemas" },
     { type: "schema-detail", identity: "invoice@2" },
     { type: "create-schema" },
+    { type: "list-providers", tenantId: null },
+    { type: "list-providers", tenantId: "acme" },
+    { type: "set-provider-priority", tenantId: null },
+    { type: "set-provider", tenantId: "acme", adapterId: "openai" },
+    { type: "reset-providers", tenantId: "acme" },
+    { type: "test-provider", tenantId: null, adapterId: "openai" },
     { type: "submit-extraction", tenantId: "t", schema: "s" },
   ];
 }

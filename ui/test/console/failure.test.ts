@@ -115,6 +115,15 @@ test("a string detail is preferred over a bare error code", () => {
   assert.equal(describe(failure), "the tenant still holds runs");
 });
 
+test("a detail object's message is shown", () => {
+  const failure = failureOf({
+    ok: false,
+    status: 422,
+    body: { detail: { error: "invalid_json", message: "the request body is not valid JSON" } },
+  });
+  assert.equal(describe(failure), "the request body is not valid JSON");
+});
+
 test("a FastAPI validation 422 reads as a sentence, not an array", () => {
   const failure = failureOf({
     ok: false,

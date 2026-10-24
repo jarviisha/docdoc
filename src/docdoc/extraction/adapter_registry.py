@@ -29,6 +29,7 @@ fixtures answers nothing at all.
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, NamedTuple
 
 # Imported at runtime, not under TYPE_CHECKING: `AdapterCandidate` is a NamedTuple
@@ -38,12 +39,13 @@ from docdoc.extraction.adapter import ModelAdapter
 from docdoc.extraction.errors import ModelProviderError
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
 __all__ = [
     "ADAPTERS_ENV",
     "ECHO_FIXTURES_ENV",
     "AdapterCandidate",
+    "AdapterConfig",
     "AdapterRegistry",
     "default_adapter",
     "default_adapter_registry",
@@ -83,6 +85,20 @@ def _configured_priority() -> tuple[str, ...]:
     raw = os.environ.get(ADAPTERS_ENV, "")
     configured = tuple(part.strip() for part in raw.split(",") if part.strip())
     return configured or DEFAULT_PRIORITY
+
+
+@dataclass(frozen=True)
+class AdapterConfig:
+    """What a caller resolved for one adapter, overriding its own env lookup.
+
+    ``None`` model or key leaves the adapter's env fallback in place. ``unavailable``
+    registers the adapter as unusable with that reason instead of constructing it.
+    """
+
+    model: str | None = None
+    #: Out of the repr, so logging a resolution can never log a key.
+    api_key: str | None = field(default=None, repr=False)
+    unavailable: str | None = None
 
 
 class AdapterCandidate(NamedTuple):
@@ -182,28 +198,39 @@ class AdapterRegistry:
         return adapter_id in self._entries
 
 
-def default_adapter_registry(priority: Sequence[str] | None = None) -> AdapterRegistry:
+def default_adapter_registry(
+    priority: Sequence[str] | None = None,
+    *,
+    configure: Mapping[str, AdapterConfig] | None = None,
+) -> AdapterRegistry:
     """The adapters this installation can use, with their reasons if it cannot.
 
     An adapter whose extra is not installed is registered as unavailable rather
-    than skipped, so the error a caller sees names what to install.
+    than skipped, so the error a caller sees names what to install. ``configure``
+    carries per-adapter settings resolved above this layer; echo takes only its
+    ``unavailable``, since its answers come from ``DOCDOC_ECHO_FIXTURES``.
     """
     registry = AdapterRegistry(priority)
+    configure = configure or {}
+    gemini = configure.get("gemini", AdapterConfig())
 
-    try:
-        from docdoc.extraction.adapters.gemini import GeminiAdapter
-    except ImportError:  # pragma: no cover - the module has no import-time SDK use
-        registry.register_unavailable(
-            "gemini", reason="extra not installed; install the `docdoc[google]` extra"
-        )
+    if gemini.unavailable:
+        registry.register_unavailable("gemini", reason=gemini.unavailable)
     else:
-        registry.register(GeminiAdapter())
+        try:
+            from docdoc.extraction.adapters.gemini import GeminiAdapter
+        except ImportError:  # pragma: no cover - the module has no import-time SDK use
+            registry.register_unavailable(
+                "gemini", reason="extra not installed; install the `docdoc[google]` extra"
+            )
+        else:
+            registry.register(GeminiAdapter(model=gemini.model, api_key=gemini.api_key))
 
-    _register_echo(registry)
+    _register_echo(registry, configure.get("echo"))
     return registry
 
 
-def _register_echo(registry: AdapterRegistry) -> None:
+def _register_echo(registry: AdapterRegistry, config: AdapterConfig | None = None) -> None:
     """Register the fixture adapter, which answers offline and costs nothing.
 
     It is in ``_NEVER_AUTO_SELECT``, so registering it cannot make it win a
@@ -218,6 +245,10 @@ def _register_echo(registry: AdapterRegistry) -> None:
     guessing one would be inventing an extraction.
     """
     from docdoc.extraction.adapters.echo import EchoAdapter
+
+    if config is not None and config.unavailable:
+        registry.register_unavailable("echo", reason=config.unavailable)
+        return
 
     fixtures = os.environ.get(ECHO_FIXTURES_ENV, "").strip()
     if not fixtures:

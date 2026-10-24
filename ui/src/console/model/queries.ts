@@ -36,6 +36,10 @@ export function invalidatedBy(intent: Intent): readonly (readonly [Intent["type"
       return [["run-checks"]];
     case "create-schema":
       return [["list-schemas"], ["schema-detail"]];
+    case "set-provider-priority":
+    case "set-provider":
+    case "reset-providers":
+      return [["list-providers"]];
     case "start-evaluation":
       return [["list-evaluations"]];
     case "erase-tenant":
@@ -47,6 +51,8 @@ export function invalidatedBy(intent: Intent): readonly (readonly [Intent["type"
     case "list-evaluations":
     case "list-parsers":
     case "list-runs":
+    case "list-providers":
+    case "test-provider":
     case "list-schemas":
     case "schema-detail":
     case "list-tenants":

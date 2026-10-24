@@ -38,6 +38,11 @@ test("quality is an area", () => {
   assert.deepEqual(jumpTo("quality", "acme"), { to: "/quality", search: { tenant: "acme" } });
 });
 
+test("providers is an area at /providers", () => {
+  assert.equal(AREA_PATHS.providers, "/providers");
+  assert.equal(areaOf("/console/providers"), "providers");
+});
+
 test("schemas is an area at /schemas", () => {
   assert.equal(AREA_PATHS.schemas, "/schemas");
   assert.equal(areaOf("/console/schemas"), "schemas");

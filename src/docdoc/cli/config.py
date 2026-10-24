@@ -32,11 +32,11 @@ a default location would be docdoc choosing where somebody's documents pile up
 (FR-017, FR-044). ``--no-store`` therefore names the behaviour you already have;
 ``--store`` is the opt-in.
 
-**Six settings are deliberately environment-only**, and the exclusions are
+**Seven settings are deliberately environment-only**, and the exclusions are
 listed here rather than left to be noticed, because FR-031 as first written read
 as though every variable gained a flag and two documents went on to say so. The
 amendment of 2026-08-25 narrows it to the settings that can change an
-invocation's outcome, and these six cannot:
+invocation's outcome, and these seven cannot:
 
 ``DOCDOC_MAX_REQUEST_BYTES``
     Caps an HTTP request body while it is being read. The command line reads no
@@ -66,6 +66,10 @@ invocation's outcome, and these six cannot:
     Says where the operations console's built assets are. The command line serves
     none, so the flag would name a directory nothing reads — the same shape of
     exclusion as ``DOCDOC_MAX_REQUEST_BYTES``.
+
+``DOCDOC_SECRETS_KEY``
+    The Fernet master key that seals provider API keys stored through the
+    console. A credential, so no flag; and unset it simply disables storing keys.
 
 ``DOCDOC_GCV_CREDENTIALS``
     Per-provider, and a credential. On most deployments it names a file rather
@@ -284,6 +288,10 @@ ENVIRONMENT_ONLY: dict[str, str] = {
         "process that authenticates must agree on it, so it belongs to the "
         "deployment rather than to an invocation -- and the command line "
         "authenticates nothing in any configuration (FR-069)"
+    ),
+    "DOCDOC_SECRETS_KEY": (
+        "the master key sealing provider keys stored by the console; a credential, "
+        "and argv is readable by any process on the host (FR-042)"
     ),
     _GCV_CREDENTIALS_ENV: (
         "a credential; argv is readable by any process on the host (FR-042). It "
@@ -509,8 +517,12 @@ class Settings:
 
         return merged_registry(files, console, strict=strict)
 
-    def adapter(self) -> Any:
-        """The model adapter configuration selects.
+    def adapter(self, tenant_id: str | None = None, store: Any = None, sealer: Any = None) -> Any:
+        """The model adapter configuration selects, for ``tenant_id`` when given.
+
+        With no ``store`` this is the environment alone: ``--adapter`` or
+        ``DOCDOC_MODEL_ADAPTERS``, then the shipped priority. With one, the
+        tenant's and the default's saved settings come first (`resolve_adapter`).
 
         Imported here rather than at module scope: reaching
         ``docdoc.extraction``'s adapter registry pulls provider SDKs into the
@@ -522,12 +534,13 @@ class Settings:
         through it. The flag and the variable are the same setting (FR-031), and
         the registry should have one place to look for it.
         """
-        from docdoc.extraction.adapter_registry import ECHO_FIXTURES_ENV, default_adapter
+        from docdoc.extraction.adapter_registry import ECHO_FIXTURES_ENV
+        from docdoc.runs.providers import resolve_adapter
 
         if self.echo_fixtures is not None:
             os.environ[ECHO_FIXTURES_ENV] = str(self.echo_fixtures)
 
-        return default_adapter(self.adapters or None)
+        return resolve_adapter(tenant_id, store, sealer, env_priority=self.adapters or None)
 
     def limits(self) -> Limits:
         """What this invocation is willing to accept (FR-039).

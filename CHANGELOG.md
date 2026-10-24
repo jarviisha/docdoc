@@ -9,6 +9,27 @@ API may change in any release. `document_id` derivation is versioned separately 
 
 ## [Unreleased]
 
+### Added — Providers in the console (ADR-0030)
+
+- Settings / Providers sets the adapter priority, the Gemini model and the API key, for the
+  deployment default and per tenant. A tenant overrides only what it names; the rest inherits.
+  Resolution is tenant, deployment default, environment, shipped default. With nothing saved,
+  behaviour is unchanged.
+- Settings live in the run database (`provider_priorities`, `provider_settings`, migration 0015).
+  New runs use a change at once, in the API and in running workers, with no restart; a run keeps
+  its adapter until it finishes. Tenant erasure removes the tenant's settings.
+- API keys are sealed with Fernet under the new `DOCDOC_SECRETS_KEY` (environment only) and are
+  write-only: only the last 4 characters are ever shown. Without the variable, storing a key
+  answers `409 secrets_not_configured`; a saved key that cannot be read makes the adapter
+  unavailable and never falls back to another key. `cryptography` joins the `postgres` extra.
+- New `GET /v1/console/providers`, `PUT /providers/priority`, `PUT /providers/{adapter}`,
+  `DELETE /providers` and `POST /providers/{adapter}/test` (test connection, key redacted).
+- A priority saved in the console wins over `--adapter` and `DOCDOC_MODEL_ADAPTERS`.
+- With a run database a worker starts even with no usable environment adapter, and fails each
+  extraction run with the unavailable reason, instead of refusing to start.
+- A worker that starts while Postgres is down now starts with an empty schema registry and
+  reloads strictly, instead of running file schemas a console row shadows.
+
 ### Added — Schemas in the console (ADR-0029)
 
 - Build / Schemas lists every registered schema (file or console), shows one read-only, and lets an

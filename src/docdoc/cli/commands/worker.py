@@ -158,6 +158,14 @@ def run(args: argparse.Namespace, settings: Settings) -> Rendering:
 
     schemas = PostgresSchemaStore(execute=queue._execute)
 
+    from docdoc.runs.provider_settings import PostgresProviderStore
+    from docdoc.runs.secrets import Sealer
+
+    providers = PostgresProviderStore(queue._execute)
+    # Once, here: a malformed `DOCDOC_SECRETS_KEY` stops the worker before it
+    # claims anything rather than failing every run it claims.
+    sealer = Sealer.from_env()
+
     worker = Worker(
         # `connect_timeout` matters more here than on the API, which already sets
         # it. A black-holed database — a security group change, a failover that
@@ -169,13 +177,16 @@ def run(args: argparse.Namespace, settings: Settings) -> Rendering:
         queue=queue,
         blobs=settings.blobs(),
         store=settings.store(),
-        registry=settings.registry(schemas),
+        registry=_first_registry(settings, schemas),
         # A schema authored in the console after this worker started: re-read
         # when a claimed run names one the registry lacks. Strict: an unreachable
         # database raises, so the claim loop lets the lease lapse and retries
         # instead of failing the run on a schema it could not see.
         reload_registry=lambda: settings.registry(schemas, strict=True),
-        adapter=settings.adapter(),
+        # Resolved per extraction run from the tenant's saved settings, so a
+        # worker starts with no `GEMINI_API_KEY` when the console holds the keys.
+        adapter=None,
+        adapter_for=lambda tenant_id: settings.adapter(tenant_id, providers, sealer),
         worker_id=_worker_id(),
         lease=configured_lease(getattr(args, "lease_seconds", None)),
         max_attempts=configured_max_attempts(getattr(args, "max_attempts", None)),
@@ -205,6 +216,23 @@ def run(args: argparse.Namespace, settings: Settings) -> Rendering:
     worker.run_forever()
 
     return Rendering(code=0, data={"worker": "stopped"}, lines=["stopped"])
+
+
+def _first_registry(settings: Any, schemas: Any) -> Any:
+    """The registry a worker starts with.
+
+    Strict, so a database that is down cannot yield a files-only registry that
+    would run a file whose identity a console row shadows. On an outage start
+    empty: the first claimed run misses and takes the strict reload, which
+    leaves the run for retry until the database answers.
+    """
+    from docdoc.extraction import SchemaRegistry
+    from docdoc.runs.errors import RunStateUnavailableError
+
+    try:
+        return settings.registry(schemas, strict=True)
+    except RunStateUnavailableError:
+        return SchemaRegistry()
 
 
 def _kind(value: str | None) -> RunKind | None:
