@@ -25,6 +25,8 @@ API may change in any release. `document_id` derivation is versioned separately 
 - New `GET /v1/console/providers`, `PUT /providers/priority`, `PUT /providers/{adapter}`,
   `DELETE /providers` and `POST /providers/{adapter}/test` (test connection, key redacted).
 - A priority saved in the console wins over `--adapter` and `DOCDOC_MODEL_ADAPTERS`.
+- With a run database a worker starts even with no usable environment adapter, and fails each
+  extraction run with the unavailable reason, instead of refusing to start.
 - A worker that starts while Postgres is down now starts with an empty schema registry and
   reloads strictly, instead of running file schemas a console row shadows.
 

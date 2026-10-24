@@ -447,13 +447,27 @@ async def _provider_json(request: Request) -> dict[str, Any]:
     try:
         parsed = json.loads(raw) if raw else {}
     except ValueError:
-        raise HTTPException(status_code=422, detail={"error": "invalid_json"}) from None
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "invalid_json", "message": _BAD_MESSAGES["invalid_json"]},
+        ) from None
     return parsed if isinstance(parsed, dict) else {}
+
+
+_BAD_MESSAGES = {
+    "invalid_json": "the request body is not valid JSON",
+    "invalid_tenant_id": "the tenant id is not valid",
+    "tenant_required": "choose a tenant; the deployment default cannot be reset",
+    "invalid_priority": "priority must be a non-empty list of distinct known adapters",
+    "invalid_model": "model must be non-blank text of at most 256 characters",
+    "invalid_api_key": "api_key must be non-blank text",
+}
 
 
 def _bad(error: str) -> JSONResponse:
     """A 422 naming the field only: a provider body may carry a key, never echoed."""
-    return JSONResponse(status_code=422, content={"error": error})
+    message = _BAD_MESSAGES.get(error, "the request was not valid")
+    return JSONResponse(status_code=422, content={"error": error, "message": message})
 
 
 def _provider_scope(request: Request, tenant: str | None) -> tuple[JSONResponse | None, Any]:

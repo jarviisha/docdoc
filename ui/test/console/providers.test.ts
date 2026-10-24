@@ -3,8 +3,10 @@ import { test } from "node:test";
 
 import {
   adapterUpdate,
+  canInheritPriority,
   canSave,
   editable,
+  inheritPriorityBody,
   isOverride,
   keyDisplay,
   keyPlaceholder,
@@ -176,4 +178,16 @@ test("a checked Remove saved key wins over a typed key, in the body and in canSa
   const form = { model: "", apiKey: "typed", clearKey: true };
   assert.deepEqual(adapterUpdate(form), { model: null, api_key: null });
   assert.equal(canSave(form, false, false), true);
+});
+
+test("inheriting the order is offered only where a priority is saved in this scope", () => {
+  const v = toProvidersView(body)!;
+  const at = (scope: string | null, source: string) =>
+    ({ ...v, scope, prioritySource: source }) as typeof v;
+  assert.equal(canInheritPriority(at("acme", "tenant")), true);
+  assert.equal(canInheritPriority(at("acme", "default")), false);
+  assert.equal(canInheritPriority(at(null, "default")), true);
+  assert.equal(canInheritPriority(at(null, "env")), false);
+  assert.equal(canInheritPriority(at(null, "tenant")), false);
+  assert.equal(inheritPriorityBody(), '{"priority":null}');
 });

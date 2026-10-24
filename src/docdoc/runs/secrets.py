@@ -12,10 +12,10 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
-from cryptography.fernet import Fernet, InvalidToken
-
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+    from cryptography.fernet import Fernet
 
 SECRETS_KEY_ENV = "DOCDOC_SECRETS_KEY"
 
@@ -35,6 +35,15 @@ class Sealer:
         raw = environ.get(SECRETS_KEY_ENV, "").strip()
         if not raw:
             return None
+        # Lazy: `cryptography` ships only in the postgres extra, and an install
+        # without it must still import the API when no master key is set.
+        try:
+            from cryptography.fernet import Fernet
+        except ImportError:
+            raise ValueError(
+                f"{SECRETS_KEY_ENV} is set but the cryptography package is missing; "
+                "install the postgres extra (pip install 'docdoc[postgres]')"
+            ) from None
         try:
             return cls(Fernet(raw.encode()))
         except ValueError:
@@ -52,6 +61,8 @@ class Sealer:
         A memoryview is what psycopg hands back for ``bytea``. A wrong type, a bad
         token and non-UTF-8 plaintext are all "unreadable" to a caller.
         """
+        from cryptography.fernet import InvalidToken
+
         try:
             return self._fernet.decrypt(bytes(token)).decode()
         except (InvalidToken, TypeError, UnicodeDecodeError):

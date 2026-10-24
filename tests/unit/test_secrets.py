@@ -67,3 +67,32 @@ def test_unseal_of_non_utf8_plaintext_is_unreadable() -> None:
     with pytest.raises(SecretUnreadable) as caught:
         Sealer(fernet).unseal(fernet.encrypt(b"\xff\xfe"))
     assert caught.value.__cause__ is None
+
+
+def test_api_imports_and_resolves_without_cryptography() -> None:
+    """`cryptography` is a postgres-extra dependency; no run database must still work."""
+    import subprocess
+    import sys
+    import textwrap
+
+    code = textwrap.dedent(
+        """
+        import sys
+        sys.modules["cryptography"] = None
+        sys.modules["cryptography.fernet"] = None
+        import docdoc.api.app  # noqa: F401
+        from docdoc.runs.providers import resolve
+        from docdoc.runs.secrets import Sealer
+
+        resolve(None, None, None)
+        assert Sealer.from_env({}) is None
+        try:
+            Sealer.from_env({"DOCDOC_SECRETS_KEY": "x"})
+        except ValueError as exc:
+            assert "postgres" in str(exc)
+        else:
+            raise SystemExit("expected a clear error")
+        """
+    )
+    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr

@@ -76,6 +76,9 @@ function messageOf(body: unknown): string {
     // A sentence beats a bare code: `{"error": "tenant_has_runs", "detail": "…"}`.
     const detail = (body as { detail?: unknown }).detail;
     if (typeof detail === "string") return detail;
+    // `HTTPException(detail={"error": "invalid_json", "message": "…"})`.
+    const detailMessage = (detail as { message?: unknown } | null | undefined)?.message;
+    if (typeof detailMessage === "string") return detailMessage;
     // Same reasoning for a top-level `message`, as `system_overloaded` carries
     // one beside a bare `error` code: `{"error": "system_overloaded", "message": "…"}`.
     const topMessage = (body as { message?: unknown }).message;

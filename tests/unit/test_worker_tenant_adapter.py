@@ -12,10 +12,13 @@ import pytest
 
 from docdoc.artifacts import BlobStore, FileArtifactStore
 from docdoc.extraction import SchemaRegistry
+from docdoc.extraction.adapter import Availability
 from docdoc.extraction.adapters import EchoAdapter
+from docdoc.extraction.adapters.gemini import GeminiAdapter
 from docdoc.runs.errors import RunStateUnavailableError
 from docdoc.runs.model import RunStatus
 from docdoc.runs.providers import resolve_adapter
+from docdoc.runs.secrets import SECRETS_KEY_ENV, Sealer
 from docdoc.runs.worker import Worker
 from tests.fixtures.provider_store import InMemoryProviderStore
 from tests.fixtures.run_queue import InMemoryRunQueue
@@ -89,6 +92,55 @@ def test_run_uses_its_tenants_adapter(tmp_path: Path) -> None:
         assert queue.get(run.run_id, tenant).status is RunStatus.SUCCEEDED
 
     assert calls == ["model-acme", "model-globex"]
+
+
+def test_each_tenants_run_uses_only_its_own_saved_gemini_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from cryptography.fernet import Fernet
+
+    for name in (
+        "DOCDOC_MODEL_ADAPTERS",
+        "DOCDOC_GEMINI_MODEL",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    sealer = Sealer.from_env({SECRETS_KEY_ENV: Fernet.generate_key().decode()})
+    assert sealer is not None
+    providers = InMemoryProviderStore()
+    for scope, model, key in (
+        ("", "model-default", "key-default-0001"),
+        ("acme", "model-acme", "key-acme-0002"),
+        ("globex", "model-globex", "key-globex-0003"),
+    ):
+        providers.set_adapter(
+            scope, "gemini", model=model, key=(sealer.seal(key), key[-4:]), by="alice", now=NOW
+        )
+    seen: list[tuple[str, str | None]] = []
+    echo = EchoAdapter.from_fixtures(FIXTURES)
+
+    def complete(self: GeminiAdapter, *args: Any, **kwargs: Any) -> Any:
+        seen.append((self.model_id, self._api_key))
+        return echo.complete(*args, **kwargs)
+
+    monkeypatch.setattr(GeminiAdapter, "complete", complete)
+    monkeypatch.setattr(GeminiAdapter, "available", lambda self: Availability(usable=True))
+    queue = InMemoryRunQueue()
+    blobs = BlobStore(tmp_path)
+    worker = _worker(queue, tmp_path, lambda tenant: resolve_adapter(tenant, providers, sealer))
+
+    # "initech" saved nothing, so it takes the deployment default's.
+    for tenant in ("acme", "globex", "initech"):
+        run = _claimed(queue, blobs, tenant)
+        worker._execute_with_heartbeat(run)
+        assert queue.get(run.run_id, tenant).status is RunStatus.SUCCEEDED
+
+    assert seen == [
+        ("model-acme", "key-acme-0002"),
+        ("model-globex", "key-globex-0003"),
+        ("model-default", "key-default-0001"),
+    ]
 
 
 def test_unusable_tenant_adapter_fails_the_run_with_reason(

@@ -185,3 +185,10 @@ export function toTestResult(body: unknown): { ok: boolean; message: string } | 
   if (!isObj(body) || typeof body.ok !== "boolean" || typeof body.message !== "string") return null;
   return { ok: body.ok, message: body.message };
 }
+
+/** A scope's own saved priority can be dropped to inherit again; the env and built-in ones are not saved. */
+export const canInheritPriority = (view: ProvidersView): boolean =>
+  view.prioritySource === (view.scope === null ? "default" : "tenant");
+
+/** `null` clears the scope's saved priority. */
+export const inheritPriorityBody = (): string => JSON.stringify({ priority: null });

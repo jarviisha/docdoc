@@ -25,6 +25,8 @@ import {
   keyDisplay,
   keyPlaceholder,
   keySaved,
+  canInheritPriority,
+  inheritPriorityBody,
   movePriority,
   savedModel,
   SECRETS_NOTE,
@@ -87,6 +89,11 @@ export function ProvidersArea() {
   const setPriority = (priority: string[]) =>
     void write(() =>
       act({ type: "set-provider-priority", tenantId: tenant }, JSON.stringify({ priority })),
+    );
+
+  const inheritPriority = () =>
+    void write(() =>
+      act({ type: "set-provider-priority", tenantId: tenant }, inheritPriorityBody()),
     );
 
   const closeForm = () => {
@@ -337,6 +344,13 @@ export function ProvidersArea() {
             Priority from {SOURCE_LABEL[view.prioritySource]}. Workers started with --adapter use this list too
             once one is saved.
           </p>
+          {canInheritPriority(view) ? (
+            <div>
+              <Button variant="outline" size="sm" disabled={busy} onClick={inheritPriority}>
+                Use inherited order
+              </Button>
+            </div>
+          ) : null}
         </>
       ) : null}
 

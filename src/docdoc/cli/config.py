@@ -36,7 +36,7 @@ a default location would be docdoc choosing where somebody's documents pile up
 listed here rather than left to be noticed, because FR-031 as first written read
 as though every variable gained a flag and two documents went on to say so. The
 amendment of 2026-08-25 narrows it to the settings that can change an
-invocation's outcome, and these six cannot:
+invocation's outcome, and these seven cannot:
 
 ``DOCDOC_MAX_REQUEST_BYTES``
     Caps an HTTP request body while it is being read. The command line reads no

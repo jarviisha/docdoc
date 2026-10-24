@@ -87,5 +87,7 @@ database answers.
 - With nothing saved, the adapter, model and key are those the environment always gave.
 - Losing or changing `DOCDOC_SECRETS_KEY` makes every saved key unreadable (adapters unavailable)
   until the keys are entered again.
+- With a run database a worker starts without a usable environment adapter and fails each
+  extraction run with the unavailable reason, instead of refusing to start.
 - Every extraction run reads up to two scopes from the run database at its start.
 - Any signed-in operator can edit, as with schemas; there are no roles.

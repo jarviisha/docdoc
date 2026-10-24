@@ -155,12 +155,31 @@ def test_a_bad_body_never_echoes_the_key(with_secrets) -> None:
     assert KEY not in r.text
 
 
+def test_every_provider_refusal_carries_a_message(signed_in) -> None:
+    client, cookie = signed_in
+    bad_json = client.put(f"{URL}/priority", content=b"{nope", headers=cookie)
+    bad_tenant = client.put(f"{URL}/gemini?tenant=a%20b", json={"model": "m"}, headers=cookie)
+    no_model = client.put(f"{URL}/gemini", json={}, headers=cookie)
+    for r, error in (
+        (bad_json, "invalid_json"),
+        (bad_tenant, "invalid_tenant_id"),
+        (no_model, "invalid_model"),
+    ):
+        assert r.status_code == 422
+        body = r.json()
+        body = body.get("detail", body)
+        assert body["error"] == error
+        assert body["message"]
+
+
 def test_priority_rejects_unknown_and_empty(signed_in) -> None:
     client, cookie = signed_in
     assert client.put(f"{URL}/priority", json={}, headers=cookie).status_code == 422
     for value in (["nope"], [], ["gemini", "gemini"], "gemini", [["gemini"]]):
         r = client.put(f"{URL}/priority", json={"priority": value}, headers=cookie)
         assert r.status_code == 422, value
+        assert r.json()["error"] == "invalid_priority"
+        assert r.json()["message"]
     r = client.put(f"{URL}/priority?tenant=acme", json={"priority": ["echo"]}, headers=cookie)
     assert r.status_code == 200
     assert r.json()["priority"] == {"value": ["echo"], "source": "tenant"}
@@ -172,7 +191,10 @@ def test_priority_rejects_unknown_and_empty(signed_in) -> None:
 def test_reset_tenant_and_reset_default_is_422(signed_in) -> None:
     client, cookie = signed_in
     client.put(f"{URL}/gemini?tenant=acme", json={"model": "gemini-x"}, headers=cookie)
-    assert client.delete(URL, headers=cookie).status_code == 422
+    refused = client.delete(URL, headers=cookie)
+    assert refused.status_code == 422
+    assert refused.json()["error"] == "tenant_required"
+    assert refused.json()["message"]
     r = client.delete(f"{URL}?tenant=acme", headers=cookie)
     assert r.status_code == 200
     assert _adapter(r.json(), "gemini")["model"]["source"] == "shipped"
